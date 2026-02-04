@@ -1,36 +1,41 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
-# dependencies
-/node_modules
-/.pnp
-.pnp.js
+# nanosof-ai-frontend .gitignore
+/nanosof-ai-frontend/node_modules
+/nanosof-ai-frontend/.pnp
+/nanosof-ai-frontend.pnp.js
 
 # testing
-/coverage
+/nanosof-ai-frontend/coverage
 
 # next.js
-/.next/
-/out/
+/nanosof-ai-frontend/.next/
+/nanosof-ai-frontend/out/
 
 # production
-/build
+/nanosof-ai-frontend/build
 
 # misc
-.DS_Store
-*.pem
+/nanosof-ai-frontend/.DS_Store
+/nanosof-ai-frontend/*.pem
 
 # debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
+/nanosof-ai-frontend/npm-debug.log*
+/nanosof-ai-frontend/yarn-debug.log*
+/nanosof-ai-frontend/yarn-error.log*
 
 # local env files
-.env*.local
-.env
+/nanosof-ai-frontend/.env*.local
+/nanosof-ai-frontend/.env
 
 # vercel
-.vercel
+/nanosof-ai-frontend/.vercel
 
 # typescript
-*.tsbuildinfo
-next-env.d.ts
+/nanosof-ai-frontend/*.tsbuildinfo
+/nanosof-ai-frontend/next-env.d.ts
+
+# nanosof-ai-backend .gitignore
+
+/nanosof-ai-backend/.env
+/nanosof-ai-backend/venv/*
+/nanosof-ai-backend/venv
+/nanosof-ai-backend/files
