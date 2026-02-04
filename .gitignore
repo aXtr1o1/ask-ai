@@ -1,41 +1,44 @@
 # nanosof-ai-frontend .gitignore
-/nanosof-ai-frontend/node_modules
-/nanosof-ai-frontend/.pnp
-/nanosof-ai-frontend.pnp.js
+nanosoft-ai-frontend/node_modules
+nanosoft-ai-frontend/.pnp
+nanosoft-ai-frontend.pnp.js
 
 # testing
-/nanosof-ai-frontend/coverage
+nanosoft-ai-frontend/coverage
 
 # next.js
-/nanosof-ai-frontend/.next/
-/nanosof-ai-frontend/out/
+nanosoft-ai-frontend/.next/
+nanosoft-ai-frontend/out/
 
 # production
-/nanosof-ai-frontend/build
+nanosoft-ai-frontend/build
 
 # misc
-/nanosof-ai-frontend/.DS_Store
-/nanosof-ai-frontend/*.pem
+nanosoft-ai-frontend/.DS_Store
+nanosoft-ai-frontend/*.pem
 
 # debug
 /nanosof-ai-frontend/npm-debug.log*
-/nanosof-ai-frontend/yarn-debug.log*
-/nanosof-ai-frontend/yarn-error.log*
+nanosoft-ai-frontend/yarn-debug.log*
+nanosoft-ai-frontend/yarn-error.log*
 
 # local env files
-/nanosof-ai-frontend/.env*.local
-/nanosof-ai-frontend/.env
+nanosoft-ai-frontend/.env*.local
+nanosoft-ai-frontend/.env
 
 # vercel
-/nanosof-ai-frontend/.vercel
+nanosoft-ai-frontend/.vercel
 
 # typescript
-/nanosof-ai-frontend/*.tsbuildinfo
-/nanosof-ai-frontend/next-env.d.ts
+nanosoft-ai-frontend/*.tsbuildinfo
+nanosoft-ai-frontend/next-env.d.ts
 
 # nanosof-ai-backend .gitignore
 
-/nanosof-ai-backend/.env
-/nanosof-ai-backend/venv/*
-/nanosof-ai-backend/venv
-/nanosof-ai-backend/files
+nanosoft-ai-backend/.env
+nanosoft-ai-backend/.venv/*
+nanosoft-ai-backend/.venv
+nanosoft-ai-backend/files
+nanosoft-ai-backend/tests/__pycache__/*
+nanosoft-ai-backend/__pycache__/*
+nanosoft-ai-backend/app/__pycache__/*
