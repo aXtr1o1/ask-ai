@@ -1,4 +1,7 @@
-@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 
 /* ─── 1. RESET & BASE (Forces Dark Mode) ─── */
 :root {
@@ -368,8 +371,8 @@ body {
 }
 
 .message-bubble.ai {
-  background: rgba(18,30,20,0.7);
-  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(59, 130, 246, 0.15);
+  border: 1px solid rgba(59, 130, 246, 0.3);
   color: #dfe8df;
   padding: 12px 16px;
   border-radius: 16px 16px 16px 4px;

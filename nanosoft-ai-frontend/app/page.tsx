@@ -19,29 +19,43 @@ interface FolderItem {
   name: string;
 }
 
-// ─── Helper: Extract Text from Backend Response ──────────────────────────────
+// ─── 1. Fixed Helper: Extract Text from Backend Response ─────────────────────
 function extractText(raw: any, depth = 0): string {
+  // Stop if too deep or null
   if (depth > 10 || raw == null) return "";
+
+  // Handle Strings (and stringified JSON)
   if (typeof raw === "string") {
     const trimmed = raw.trim();
-    if ((trimmed.startsWith("{") || trimmed.startsWith("[")) && !trimmed.includes(" ")) {
+    // Check if it looks like JSON
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
       try {
         return extractText(JSON.parse(trimmed), depth + 1);
       } catch {
-        return raw;
+        return raw; // If parse fails, treat as normal text
       }
     }
     return raw;
   }
+
+  // Handle Arrays
   if (Array.isArray(raw)) {
-    return raw.map(item => extractText(item, depth + 1)).join("");
+    return raw
+      .map((item) => extractText(item, depth + 1))
+      .filter((text) => text.trim() !== "")
+      .join(" ");
   }
+
+  // Handle Objects - Check for specific keys from your Python backend
   if (typeof raw === "object") {
+    if (raw.response) return extractText(raw.response, depth + 1); // Matches: return {"response": ...}
     if (raw.content) return extractText(raw.content, depth + 1);
     if (raw.text) return extractText(raw.text, depth + 1);
     if (raw.reply) return extractText(raw.reply, depth + 1);
+    // If no specific key is found, return nothing (avoid printing raw JSON)
     return "";
   }
+
   return String(raw);
 }
 
@@ -190,9 +204,12 @@ export default function Home() {
     }
   };
 
+  // ─── 2. Fixed sendMessage Function ─────────────────────────────────────────
   const sendMessage = async () => {
     if (!input.trim() || isLoading) return;
     const userText = input.trim();
+    
+    // Add User Message
     setMessages((prev) => [...prev, { role: "user", text: userText }]);
     setInput("");
     setIsLoading(true);
@@ -201,7 +218,7 @@ export default function Home() {
       const response = await fetch("http://127.0.0.1:8001/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: userText, session_id: sessionId }),
+        body: JSON.stringify({ query: userText }), // Correct Key: "query"
       });
 
       if (!response.ok) throw new Error(`Server error: ${response.status}`);
@@ -210,6 +227,7 @@ export default function Home() {
       const decoder = new TextDecoder();
       if (!reader) throw new Error("No response body");
 
+      // Add Placeholder for AI Response
       setIsLoading(false);
       isTypingRef.current = false;
       setMessages((prev) => [...prev, { role: "ai", text: "" }]);
@@ -234,15 +252,20 @@ export default function Home() {
             
             if (textPart) {
               accumulatedText += textPart;
+              // Update the LAST message (which is the AI placeholder)
               setMessages((prev) => {
                 const updated = [...prev];
-                updated[updated.length - 1] = { role: "ai", text: accumulatedText };
+                const lastIndex = updated.length - 1;
+                if (updated[lastIndex].role === "ai") {
+                    updated[lastIndex] = { role: "ai", text: accumulatedText };
+                }
                 return updated;
               });
-              await new Promise(resolve => setTimeout(resolve, 15));
+              // Tiny delay to reduce render thrashing (optional)
+              await new Promise(resolve => setTimeout(resolve, 10));
             }
           } catch (e) {
-            // Ignore partial/invalid chunks
+            // Ignore partial/invalid chunks or non-JSON strings (common in streams)
           }
         }
       }
