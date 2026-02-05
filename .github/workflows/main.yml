@@ -28,6 +28,12 @@ jobs:
         run: |
           cd nanosoft-ai-backend
           python -m pytest
+
+      - name: Setup Node.js for Frontend
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
       - name: Frontend- Install dependencies
         run: |
           cd nanosoft-ai-frontend
@@ -35,4 +41,4 @@ jobs:
       - name: Frontend - Run unit tests
         run: |
           cd nanosoft-ai-frontend
-          npm test -- --watch=false
+          npm test -- --watchAll=false
