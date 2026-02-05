@@ -38,7 +38,13 @@ nanosoft-ai-frontend/next-env.d.ts
 nanosoft-ai-backend/.env
 nanosoft-ai-backend/.venv/*
 nanosoft-ai-backend/.venv
+nanosoft-ai-backend/venv/*
+nanosoft-ai-backend/venv
 nanosoft-ai-backend/files
 nanosoft-ai-backend/tests/__pycache__/*
 nanosoft-ai-backend/__pycache__/*
 nanosoft-ai-backend/app/__pycache__/*
+
+
+nanosoft-ai-backend/app/venv
+nanosoft-ai-backend/app/.env
