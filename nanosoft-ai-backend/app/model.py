@@ -37,7 +37,7 @@ app.add_middleware(
 # ✅ Bind Tools to Gemini Model
 # =====================================================
 model_with_tools = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash",
+    model="gemini-flash-latest",
     google_api_key=api_key
 ).bind_tools([ASSETS, COMPLAINTS, WORK_ORDERS])
 
@@ -151,3 +151,6 @@ async def chat_endpoint(request: ChatRequest):
 
     # 6. Send Full Output to HTML
     return {"response": final_response_text}
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("model:app", host="127.0.0.1", port=8001, reload=True)
