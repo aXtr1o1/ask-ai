@@ -1,0 +1,38 @@
+name: CI/CD Unit Testing
+
+on: 
+  push:
+    branches:
+      - Testing
+  pull_request:
+    branches:
+      - Testing
+  
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Python for Backend
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Backend - Install Dependencies
+        run: |
+          cd nanosoft-ai-backend
+          python -m pip install -r requirements.txt
+          pip show pytest || pip install pytest
+      - name: Backend - Unit Tests
+        run: |
+          cd nanosoft-ai-backend
+          python -m pytest
+      - name: Frontend- Install dependencies
+        run: |
+          cd nanosoft-ai-frontend
+          npm install
+      - name: Frontend - Run unit tests
+        run: |
+          cd nanosoft-ai-frontend
+          npm test -- --watch=false
