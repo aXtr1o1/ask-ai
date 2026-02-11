@@ -1,158 +1,145 @@
-## Nanosoft AI Backend
+# Nanosoft AI Backend 
 
-This folder contains the backend service for the Nanosoft AI project. It is structured as a typical FastAPI-style application, with clear separation between configuration, API routing, business logic, data models, and utilities.
+This directory contains the backend code for the Nanosoft AI project (backend branch).
 
-The root backend layout:
+The backend handles SLA-driven logic, API processing, and AI integration, ensuring that responses are generated based on real backend data instead of assumptions.
 
-- **`app/`**: Main application code (FastAPI app, routes, schemas, services, utilities).
-- **`files/`**: Storage area for uploaded files, exports, or other filesystem artifacts used by the backend.
-- **`requirements.txt`**: Python dependencies for running the backend.
-- **`README.md`**: This documentation file for the backend.
 
----
+## 📁 Folder Structure
 
-## `app/` – Application Package
-
-Top-level application package for the backend.
-
-- **Purpose**: Contains everything required to run the FastAPI app: entrypoint, API routers, configuration, core utilities, schemas, and services.
-- **Typical content**: `__init__.py` (optional), FastAPI app instance, routing setup, domain logic, and helpers.
-
-### `app/main.py`
-
-- **Purpose**: Entry point of the backend service.
-- **What should be here**:
-  - Creation of the FastAPI application instance (`FastAPI()`).
-  - Inclusion of API routers (for example from `app.api.v1.api`).
-  - Startup and shutdown event handlers (DB connection, clients, background workers, etc.).
-  - Basic middleware (CORS, logging, error handling) if not centralized elsewhere.
-- **Example responsibilities**:
-  - `app = FastAPI(title="Nanosoft AI Backend")`
-  - `app.include_router(api_router, prefix="/api/v1")`
-
-### `app/config.py`
-
-- **Purpose**: Central place for configuration and environment settings.
-- **What should be here**:
-  - Settings class (usually using `pydantic` `BaseSettings`) for environment variables:
-    - App name, environment, debug flag.
-    - Database URLs.
-    - External API keys (OpenAI, vector DB, etc.).
-    - Security-related settings (JWT secret, token expiry).
-  - Logic to load `.env` or OS environment variables.
-- **How it is used**:
-  - Imported by other modules (`core`, `services`, `main`) to access `settings` instead of hardcoding values.
-
-### `app/api/` – API Layer
-
-Holds versioned API routing logic.
-
-- **Purpose**: Define HTTP endpoints and group them by versions and domains.
-- **Structure**:
-  - `api/v1/` – version 1 of the public API.
-    - `api.py` – central router for v1.
-    - `routes/` – submodules with domain-specific routers (e.g. `chat.py`, `auth.py`).
-
-#### `app/api/v1/api.py`
-
-- **Purpose**: Aggregate and expose all version 1 routes.
-- **What should be here**:
-  - `APIRouter` instance for v1.
-  - Imports and inclusion of routers from `app.api.v1.routes`.
-  - Optional common dependencies for all v1 endpoints (auth, rate limiting, etc.).
-- **Typical pattern**:
-  - `api_router = APIRouter()`
-  - `api_router.include_router(chat_router, prefix="/chat", tags=["chat"])`
-
-#### `app/api/v1/routes/`
-
-- **Purpose**: Domain-specific route modules.
-- **What should be here**:
-  - One file per feature/domain, for example:
-    - `chat.py` – endpoints for chat/completions.
-    - `files.py` – endpoints for file upload/download.
-    - `auth.py` – login, logout, token refresh.
-  - Each file defines an `APIRouter` with endpoint functions using FastAPI decorators (`@router.get`, `@router.post`, etc.).
-- **Responsibilities of route modules**:
-  - Parse and validate requests using `app.schemas`.
-  - Call business logic from `app.services`.
-  - Return responses or raise HTTP exceptions.
-
-### `app/core/`
-
-- **Purpose**: Cross-cutting application concerns and core infrastructure.
-- **What should be here**:
-  - Security/auth utilities (JWT helpers, password hashing).
-  - Database/session setup (SQLAlchemy, ORM, or other persistence).
-  - Global exception handlers and logging setup.
-  - Application-wide middleware definitions if not in `main.py`.
-- **Typical modules**:
-  - `security.py`, `db.py`, `logging.py`, `config_loader.py`.
-
-### `app/schemas/`
-
-- **Purpose**: Pydantic models (request/response schemas and shared DTOs).
-- **What should be here**:
-  - Request models (e.g., `ChatRequest`, `LoginRequest`).
-  - Response models (e.g., `ChatResponse`, `UserOut`).
-  - Shared models reused across multiple routes.
-- **How they are used**:
-  - Imported by route handlers for request body and response models.
-  - Used by services to enforce type safety and clear boundaries.
-
-### `app/services/`
-
-- **Purpose**: Business logic and integrations, isolated from HTTP layer.
-- **What should be here**:
-  - Core domain services:
-    - Chat/completions/orchestration logic.
-    - File processing or document ingestion.
-    - User management, authentication logic (if not solely in `core`).
-  - Integrations with external systems:
-    - AI model providers (OpenAI, Azure, etc.).
-    - Vector databases / search engines.
-    - Email/SMS or other third-party APIs.
-- **Responsibilities**:
-  - Implement actual “work” of the backend.
-  - Be independent of FastAPI specifics (no `Request`, `Response` types if possible).
-
-### `app/utils/`
-
-- **Purpose**: Small, reusable helper functions that don’t belong to a single domain.
-- **What should be here**:
-  - Utility functions for:
-    - String manipulation, parsing, formatting.
-    - Common error handling patterns.
-    - Date/time utilities, ID generation, etc.
-- **Guideline**:
-  - Avoid putting core business logic here; keep it in `services`.
+```
+ask-ai/
+└── nanosoft-ai-backend/
+    ├── app/
+    │   ├── api/
+    │   ├── __init__.py
+    │   ├── config.py
+    │   ├── main.py          # Core Backend API (Port 8000)
+    │   ├── model.py         # AI Chat API (Port 8001)
+    │   ├── schemas.py
+    │   ├── system_prompt.py
+    │   └── tools.py
+    │
+    ├── tests/
+    ├── requirements.txt
+    └── README.md
+```
 
 ---
 
-## `files/` – File Storage
+## 🧩 app/main.py – Core Backend API
 
-- **Purpose**: Local file storage used by the backend.
-- **What should be here**:
-  - Uploaded files (e.g., documents, datasets).
-  - Temporary exports or generated artifacts.
-  - Any persistent or cache-like files that the backend manages locally.
-- **Notes**:
-  - Consider adding `.gitignore` rules if you don’t want actual data files committed.
-  - Keep large or sensitive files out of version control.
+### Purpose
+
+Acts as the **primary backend service** responsible for database workflows and SLA tracking.
+
+### Database & Workflow
+
+This backend uses **PostgreSQL** and is structured around three core tables:
+
+- **Assets**  
+  Stores complete equipment details including identification, location, status, priority, and operational configuration.
+
+- **Complaints**  
+  Stores records of reported equipment issues or breakdowns raised against an asset.
+
+- **Work Orders**  
+  Stores planned or scheduled maintenance tasks generated for assets based on defined rules or schedules.
+
+
+### Flow
+
+1. User actions are validated at the API layer
+2. Data is processed using **PostgreSQL stored procedures**
+3. Backend exposes clean REST APIs (e.g., `/assets`, `/complaint`, `/work-orders`)
+4. Frontend consumes these APIs using a base URL
+
+**One-line summary:**  
+Implements the FastAPI backend for managing assets, complaints, work orders, and SLA-compliant facility workflows.
 
 ---
 
-## `requirements.txt`
+## 🤖 app/model.py – AI Chat API (FastAPI + LangChain + Gemini)
 
-- **Purpose**: Define Python dependencies required to run the backend.
-- **What should be here**:
-  - FastAPI and ASGI server (e.g., `fastapi`, `uvicorn`).
-  - Pydantic and other validation libraries.
-  - Database/ORM libraries if used.
-  - AI/ML/LLM clients (e.g., `openai`, `httpx`, vector DB clients).
-  - Any additional utilities (logging, config, testing).
+### Purpose
 
-Example installation command:
+Implements the **AI Assistant**.
+
+### Responsibilities
+
+- Connects frontend chat UI with Gemini LLM via LangChain
+- Understands natural language queries
+- Dynamically decides when to invoke backend tools
+- Fetches real-time data for Assets, Complaints, and Work Orders
+- Maintains chat memory during a session
+
+**One-line summary:**  
+FastAPI-based AI chat engine integrating Gemini with LangChain tools to deliver accurate, data-driven responses.
+
+---
+
+## 📐 app/schemas.py – Tool Input Schemas
+
+### Purpose
+
+Defines **Pydantic schemas** used by LangChain for tool invocation.
+
+- Converts natural language inputs into structured data
+- Ensures validation and consistency
+- Prevents malformed inputs from reaching backend services
+
+**One-line summary:**  
+Defines validated Pydantic schemas that allow LangChain to safely invoke backend tools.
+
+---
+
+## 🧠 app/system_prompt.py – System Prompt
+
+### Purpose
+
+Defines the **system-level behavior** of the AI assistant.
+
+- Controls response style
+- Determines when tools should be invoked
+- Aligns AI decisions with operational and SLA rules
+
+**One-line summary:**  
+Controls AI behavior and tool-usage logic based on user intent.
+
+---
+
+## 🔧 app/tools.py – LangChain Tools
+
+### Purpose
+
+Defines LangChain tools that act as a bridge between the LLM and backend APIs.
+
+- Fetches real backend data
+- Prevents hallucinations
+- Enables reliable, structured responses
+
+**One-line summary:**  
+LangChain tools connecting the AI assistant to Assets, Complaints, and Work Orders APIs.
+
+---
+
+## 📦 files / tests
+
+- `tests/` contains backend test cases
+
+---
+
+## 📜 requirements.txt
+
+Main dependencies include:
+
+- FastAPI, Uvicorn
+- Pydantic v2
+- Supabase / PostgreSQL support
+- LangChain + Gemini
+- Pytest
+
+Install dependencies:
 
 ```bash
 pip install -r requirements.txt
@@ -160,27 +147,44 @@ pip install -r requirements.txt
 
 ---
 
-## Running the Backend (Suggested Flow)
+## ▶️ Running the Backend (Backend Branch)
 
-Once the files are implemented:
+### Step 1: Navigate to App Folder
 
-1. **Create and activate a virtual environment** (recommended).
-2. **Install dependencies**:
+```bash
+cd ask-ai/nanosoft-ai-backend/app
+```
 
-   ```bash
-   pip install -r requirements.txt
-   ```
+### Step 2: Install Dependencies
 
-3. **Run the FastAPI app with Uvicorn** (assuming `app/main.py` defines `app`):
+```bash
+pip install -r ../requirements.txt
+```
 
-   ```bash
-   uvicorn app.main:app --reload
-   ```
+### Step 3: Run Services
 
-4. **Open the interactive API docs**:
-   - Swagger UI: `http://localhost:8000/docs`
-   - ReDoc: `http://localhost:8000/redoc`
+#### Core Backend API (Port 8000)
 
-This README describes the intended structure and purpose of each folder/file so you can gradually implement the Nanosoft AI backend in a clean, maintainable way.
+```bash
+uvicorn main:app --reload --port 8000
+```
 
+#### AI Chat API (Port 8001)
+
+```bash
+uvicorn model:app --reload --port 8001
+```
+
+---
+
+## 📘 API Documentation
+
+- Core Backend API: http://localhost:8000/docs
+- AI Chat API: http://localhost:8001/docs
+
+---
+
+## ✅ Summary
+
+This backend branch delivers an **SLA-compliant facility management platform** powered by FastAPI, PostgreSQL, and an AI assistant. The architecture cleanly separates business workflows from AI orchestration, ensuring scalability, reliability, and maintainability.
 
