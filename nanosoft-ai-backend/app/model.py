@@ -13,6 +13,13 @@ from dotenv import load_dotenv
 
 import asyncio
 
+from redis_connection import redis_client
+import uuid
+from datetime import datetime
+
+import json
+
+
 
 load_dotenv()
 api_key = os.getenv("api_key")
@@ -64,7 +71,7 @@ class ChatRequest(BaseModel):
 
 
 # =====================================================
-# ✅ Chat Endpoint
+# ✅ Safe Chunk Extractor (Fixes Empty List Error)
 # =====================================================
 def extract_chunk_text(chunk):
     content = chunk.content
@@ -88,36 +95,113 @@ def extract_chunk_text(chunk):
 
     return str(content)
 
-@app.post("/chat")
 
+#connection_checking 
+if redis_client:
+    print("connection sucessfull")
+
+# =====================================================
+# 🔧 CONFIG
+# =====================================================
+USER_NAME = "ram"
+TTL_SECONDS = 86400
+MAX_HISTORY = 10
+
+# =====================================================
+# 🆔 SESSION MEMORY (IN-RUNTIME)
+# =====================================================
+sessions = {}  
+# sessions[session_id] = {
+#   "lc_memory": [],
+#   "redis_memory": []
+# }
+
+# =====================================================
+# 📩 REQUEST SCHEMA
+# =====================================================
+class ChatRequest(BaseModel):
+    query: str
+    session_id: str | None = None
+    end_session: bool = False   # frontend sends true when chat ends
+
+# =====================================================
+# 🆔 CREATE SESSION
+# =====================================================
+def create_new_session():
+    return str(uuid.uuid4())
+
+# =====================================================
+# 🔍 FETCH SESSION FROM REDIS (ONCE)
+# =====================================================
+def fetch_session_outputs(user, session_id, limit=MAX_HISTORY):
+    key = f"user:{user}:session:{session_id}"
+    data = redis_client.get(key)
+
+    lc_memory = []
+    redis_memory = []
+
+    if data:
+        records = json.loads(data)
+        for item in records[-limit:]:
+            lc_memory.append(HumanMessage(content=item["query"]))
+            lc_memory.append(AIMessage(content=item["result"]))
+            redis_memory.append(item)
+
+    return lc_memory, redis_memory
+
+# =====================================================
+# 💾 SAVE SESSION TO REDIS (ONCE)
+# =====================================================
+def save_session_to_redis(user, session_id, redis_memory):
+    key = f"user:{user}:session:{session_id}"
+    redis_client.set(key, json.dumps(redis_memory))
+    redis_client.expire(key, TTL_SECONDS)
+    print(f"💾 Session saved: {key}")
+
+
+# =====================================================
+# 🚀 CHAT ENDPOINT
+# =====================================================
+@app.post("/chat")
 async def chat_endpoint(request: ChatRequest):
 
     user_query = request.query
 
-    # 1. Build Messages with Memory
+    # -------------------------------------------------
+    # 1️⃣ SESSION INIT
+    # -------------------------------------------------
+    session_id = request.session_id or create_new_session()
+
+    if session_id not in sessions:
+        lc_memory, redis_memory = fetch_session_outputs(
+            USER_NAME, session_id, MAX_HISTORY
+        )
+        sessions[session_id] = {
+            "lc_memory": lc_memory,
+            "redis_memory": redis_memory
+        }
+
+    lc_memory = sessions[session_id]["lc_memory"]
+    redis_memory = sessions[session_id]["redis_memory"]
+
+    # -------------------------------------------------
+    # 2️⃣ BUILD MESSAGES
+    # -------------------------------------------------
     messages = [system_prompt]
-
-    for item in chat_history[-10:]:
-        messages.append(HumanMessage(content=item["user"]))
-        messages.append(AIMessage(content=item["assistant"]))
-
+    messages.extend(lc_memory)
     messages.append(HumanMessage(content=user_query))
 
-    # 2. Tool Detection
+    # -------------------------------------------------
+    # 3️⃣ TOOL DETECTION
+    # -------------------------------------------------
     ai_msg = model_with_tools.invoke(messages)
 
-    # 3. Tool Execution
     if ai_msg.tool_calls:
-
         messages.append(ai_msg)
 
         for tool_call in ai_msg.tool_calls:
-
-            tool_name = tool_call["name"]
-            tool_args = tool_call["args"]
-
-            tool_fn = tool_map[tool_name]
-            tool_result = tool_fn.invoke(tool_args)
+            tool_fn = tool_map[tool_call["name"]]
+            tool_result = tool_fn.invoke(tool_call["args"])
 
             messages.append(
                 ToolMessage(
@@ -126,31 +210,43 @@ async def chat_endpoint(request: ChatRequest):
                 )
             )
 
-    # 4. STREAM IN TERMINAL (Correct)
-    print("\n🤖 Assistant: ", end="", flush=True)
-
+    # -------------------------------------------------
+    # 4️⃣ STREAM RESPONSE
+    # -------------------------------------------------
     final_response_text = ""
 
     async for chunk in model_with_tools.astream(messages):
-
         text = extract_chunk_text(chunk)
+        if text:
+            final_response_text += text
 
-        if not text:
-            continue
+    # -------------------------------------------------
+    # 5️⃣ UPDATE MEMORY (IN RAM)
+    # -------------------------------------------------
+    lc_memory.append(HumanMessage(content=user_query))
+    lc_memory.append(AIMessage(content=final_response_text))
 
-        print(text, end="", flush=True)
-        final_response_text += text
-
-    print("\n")
-
-    # 5. Save History
-    chat_history.append({
-        "user": user_query,
-        "assistant": final_response_text
+    redis_memory.append({
+        "query": user_query,
+        "result": final_response_text,
+        "timestamp": datetime.utcnow().isoformat()
     })
 
-    # 6. Send Full Output to HTML
-    return {"response": final_response_text}
+    # -------------------------------------------------
+    # 6️⃣ END SESSION → SAVE TO REDIS
+    # -------------------------------------------------
+    if request.end_session:
+        save_session_to_redis(USER_NAME, session_id, redis_memory)
+        sessions.pop(session_id, None)
+
+    return {
+        "session_id": session_id,
+        "response": final_response_text
+    }
+
+# =====================================================
+# ▶ RUN
+# =====================================================
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("model:app", host="127.0.0.1", port=8001, reload=True)
