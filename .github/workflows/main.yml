@@ -73,6 +73,7 @@ jobs:
             . .venv/bin/activate
             pip install -q -r requirements.txt
             sudo systemctl restart nanosoft-backend || true
+            sudo systemctl restart nanosoft-model || true
 
 
 
