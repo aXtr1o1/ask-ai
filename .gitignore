@@ -48,3 +48,16 @@ nanosoft-ai-backend/app/__pycache__/*
 
 nanosoft-ai-backend/app/venv
 nanosoft-ai-backend/app/.env
+
+nanosoft-ai-backend/app/api/__pycache__/*
+nanosoft-ai-backend/app/api/database/__pycache__/*
+nanosoft-ai-backend/app/api/models/__pycache__/*
+nanosoft-ai-backend/app/api/routes/__pycache__/*
+nanosoft-ai-backend/app/api/routes/__pycache__/*
+
+nanosoft-ai-backend/app/config/__pycache__/*
+nanosoft-ai-backend/app/models/__pycache__/*
+nanosoft-ai-backend/app/prompts/__pycache__/*
+nanosoft-ai-backend/app/services/__pycache__/*
+nanosoft-ai-backend/app/tools/__pycache__/*
+
