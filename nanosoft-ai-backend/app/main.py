@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from supabase import create_client, Client
 from typing import Optional
+from layer1 import DynamicVault, fetch_from_api
 from datetime import date
 import uvicorn
 import os
