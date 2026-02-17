@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface Message {
@@ -160,12 +161,16 @@ const IconMic = ({ isActive }: { isActive: boolean }) => <svg width="18" height=
 
 // ─── Main Component ──────────────────────────────────────────────────────────
 export default function Home() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const userIdFromUrl = searchParams.get("userId");
+
   const [input, setInput] = useState<string>("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const isTypingRef = useRef<boolean>(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const [sessionId, setSessionId] = useState<string>(() => generateSessionId());
   const [searchVal, setSearchVal] = useState("");
@@ -175,6 +180,28 @@ export default function Home() {
 
   const [isRecording, setIsRecording] = useState<boolean>(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const [loggedInUser, setLoggedInUser] = useState<string | null>(null);
+
+  // Very basic client-side auth guard
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    // If login redirected with ?userId=..., persist it and clean the URL
+    if (userIdFromUrl) {
+      localStorage.setItem("loggedInUser", userIdFromUrl);
+      setLoggedInUser(userIdFromUrl);
+      router.replace("/");
+      return;
+    }
+
+    const loggedIn = localStorage.getItem("loggedInUser");
+    if (!loggedIn) {
+      router.replace("/login");
+      return;
+    }
+
+    setLoggedInUser(loggedIn);
+  }, [router, userIdFromUrl]);
 
   const handleNewChat = () => {
     setMessages([]);       
@@ -184,7 +211,22 @@ export default function Home() {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length, isLoading]); 
+  }, [messages.length, isLoading]);
+
+  // Auto-resize the input textarea up to a max height
+  const adjustTextareaHeight = () => {
+    const el = inputRef.current;
+    if (!el) return;
+    const maxHeight = 160; // px, roughly several lines
+    el.style.height = "0px";
+    const newHeight = Math.min(el.scrollHeight, maxHeight);
+    el.style.height = `${newHeight}px`;
+    el.style.overflowY = el.scrollHeight > maxHeight ? "auto" : "hidden";
+  };
+
+  useEffect(() => {
+    adjustTextareaHeight();
+  }, [input]);
 
   const toggleRecording = async () => {
     if (isRecording) {
@@ -218,7 +260,11 @@ export default function Home() {
       const response = await fetch("http://127.0.0.1:8001/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: userText }), // Correct Key: "query"
+        body: JSON.stringify({
+          query: userText,          // main user message
+          userId: loggedInUser,     // current logged-in user
+          sessionId: sessionId,     // current session identifier
+        }),
       });
 
       if (!response.ok) throw new Error(`Server error: ${response.status}`);
@@ -283,8 +329,12 @@ export default function Home() {
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") sendMessage();
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Enter sends, Shift+Enter makes a new line
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
   };
 
   const isLanding = messages.length === 0;
@@ -301,7 +351,7 @@ export default function Home() {
             <div className="brand-box">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="white"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
             </div>
-            <span style={{ fontSize: "14px", fontWeight: 600, color: "#fff" }}>NANOSOFT ASK AI</span>
+            <span style={{ fontSize: "14px", fontWeight: 600, color: "#1f2933" }}>NANOSOFT ASK AI</span>
           </div>
         </div>
 
@@ -332,7 +382,7 @@ export default function Home() {
               onClick={() => { setActiveChatId(c.id); setChatName(c.title); setMessages([]); }} 
             >
               <div style={{ display: "flex", alignItems: "flex-start", gap: "7px", minWidth: 0, flex: 1 }}>
-                <div style={{ color: "#3b82f6", marginTop: "1px", flexShrink: 0 }}><IconChat /></div>
+                <div style={{ color: "#4a8f3a", marginTop: "1px", flexShrink: 0 }}><IconChat /></div>
                 <div style={{ minWidth: 0 }}>
                   <div className="title" style={{ fontSize: "13px", fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.title}</div>
                   <div className="preview" style={{ fontSize: "11px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.preview}</div>
@@ -355,8 +405,10 @@ export default function Home() {
         {/* Header */}
         <div className="chat-header">
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <span style={{ fontSize: "15px", fontWeight: 600, color: "#fff" }}>{chatName || "Gemini"}</span>
+            <span style={{ fontSize: "15px", fontWeight: 600, color: "#1f2933" }}>{chatName || "Gemini"}</span>
             <span className="model-badge">Flash latest</span>
+            <span className="model-badge">User {loggedInUser ?? "—"}</span>
+            <span className="model-badge" title={sessionId}>Session {sessionId}</span>
           </div>
         </div>
 
@@ -365,20 +417,19 @@ export default function Home() {
           {isLanding && (
             <div className="landing-container">
               <div className="landing-card">
-                <div style={{ marginBottom: "16px", display: "flex", justifyContent: "center" }}><IconBot /></div>
-                <h1 style={{ fontSize: "24px", fontWeight: 700, color: "#fff", marginBottom: "10px" }}>How can I help you today?</h1>
-                <p style={{ fontSize: "12px", color: "#6a7a6a", lineHeight: 1.6, maxWidth: "380px", margin: "0 auto 28px" }}>Start a conversation to search assets, manage complaints, or check work orders.</p>
+                <h1 style={{ fontSize: "24px", fontWeight: 700, color: "#1f2933", marginBottom: "10px" }}>How can I help you today?</h1>
+                <p style={{ fontSize: "12px", color: "#3f5f3a", lineHeight: 1.6, maxWidth: "380px", margin: "0 auto 28px" }}>Start a conversation to search assets, manage complaints, or check work orders.</p>
                 
-                <div className="feature-grid">
+                {/* <div className="feature-grid">
                   {[{ title: "Search Assets", desc: "Find equipment details." }, { title: "Work Orders", desc: "Check schedules." }, { title: "Complaints", desc: "Track issues." }].map((card, i) => (
                     <div key={i} className="feature-card">
-                      <div style={{ fontSize: "12px", fontWeight: 600, color: "#e0e8e0", marginBottom: "5px" }}>{card.title}</div>
-                      <div style={{ fontSize: "10px", color: "#5a6a5a" }}>{card.desc}</div>
+                      <div style={{ fontSize: "12px", fontWeight: 600, color: "#3f5f3a", marginBottom: "5px" }}>{card.title}</div>
+                      <div style={{ fontSize: "10px", color: "#4b5f45" }}>{card.desc}</div>
                     </div>
                   ))}
-                </div>
+                </div> */}
 
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", flexWrap: "wrap" }}>
+                {/* <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", flexWrap: "wrap" }}>
                   {CATEGORIES.map((cat) => (
                     <button 
                       key={cat} 
@@ -388,7 +439,7 @@ export default function Home() {
                       {cat}
                     </button>
                   ))}
-                </div>
+                </div> */}
               </div>
             </div>
           )}
@@ -428,7 +479,7 @@ export default function Home() {
                     <IconBot />
                   </div>
                   <div className="loading-dots-box">
-                    {[0, 1, 2].map((i) => <span key={i} style={{ display: "inline-block", width: "7px", height: "7px", borderRadius: "50%", background: "#3b82f6", animation: `bounce 1.2s ease-in-out ${i * 0.2}s infinite` }} />)}
+                    {[0, 1, 2].map((i) => <span key={i} style={{ display: "inline-block", width: "7px", height: "7px", borderRadius: "50%", background: "#4a8f3a", animation: `bounce 1.2s ease-in-out ${i * 0.2}s infinite` }} />)}
                   </div>
                 </div>
               )}
@@ -440,12 +491,21 @@ export default function Home() {
         {/* Input Area */}
         <div className="input-footer">
           <div className="input-wrapper">
-            <div className="model-selector">
-              <div style={{ width: "14px", height: "14px", borderRadius: "4px", background: "linear-gradient(135deg,#3b82f6,#16a34a)", display: "flex", alignItems: "center", justifyContent: "center" }}><svg width="8" height="8" viewBox="0 0 24 24" fill="white"><path d="M12 2L2 7l10 5 10-5-10-5z" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round" /></svg></div>
-              <span style={{ fontSize: "11px", color: "#4a71de", fontWeight: 600 }}>Bot</span>
-            </div>
-            
-            <input type="text" ref={inputRef} className="main-input" value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown} disabled={isLoading} placeholder="Type your prompt here..." />
+            {/* <div className="model-selector">
+              <div style={{ width: "14px", height: "14px", borderRadius: "4px", background: "linear-gradient(135deg,#B0DB9C,#6fb24f)", display: "flex", alignItems: "center", justifyContent: "center" }}><svg width="8" height="8" viewBox="0 0 24 24" fill="white"><path d="M12 2L2 7l10 5 10-5-10-5z" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round" /></svg></div>
+              <span style={{ fontSize: "11px", color: "#3f5f3a", fontWeight: 600 }}>Bot</span>
+            </div> */}
+
+            <textarea
+              ref={inputRef}
+              className="main-input"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              disabled={isLoading}
+              placeholder="Type your prompt here..."
+              rows={1}
+            />
             
             <div className="icon-btn"><IconAttach /></div>
             
