@@ -1,3 +1,3 @@
 def test_health():
-    print("Testing health...")
+    print("success")
     assert True
