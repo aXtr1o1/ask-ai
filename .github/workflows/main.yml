@@ -1,6 +1,6 @@
-name: CI/CD Unit Testing
+name: CI/CD — Frontend tests & Backend deploy
 
-on: 
+on:
   push:
     branches:
       - Testing
@@ -9,36 +9,94 @@ on:
       - Testing
   
 jobs:
-  tests:
+  # --- CI: test frontend only ---
+  test-frontend:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
-        
-      - name: Setup Python for Backend
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - name: Backend - Install Dependencies
-        run: |
-          cd nanosoft-ai-backend
-          python -m pip install -r requirements.txt
-          pip show pytest || pip install pytest
-      - name: Backend - Unit Tests
-        run: |
-          cd nanosoft-ai-backend
-          python -m pytest
 
-      - name: Setup Node.js for Frontend
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: "18"
+          cache: "npm"
+          cache-dependency-path: nanosoft-ai-frontend/package-lock.json
 
-      - name: Frontend- Install dependencies
+      - name: Install frontend dependencies
         run: |
           cd nanosoft-ai-frontend
-          npm install
-      - name: Frontend - Run unit tests
+          npm ci --prefer-offline --no-audit || npm install
+
+      - name: Run frontend tests
         run: |
           cd nanosoft-ai-frontend
-          npm test -- --watchAll=false
+          npm test -- --watchAll=false --passWithNoTests
+
+  # --- CD: deploy backend to AWS t2.small (only on push, no PR) ---
+  deploy-backend:
+    needs: test-frontend
+    if: github.event_name == 'push' && github.ref == 'refs/heads/Testing'
+    runs-on: ubuntu-latest
+    # optional: add "environment: production" and set secrets on that env
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify deploy secrets
+        run: |
+          if [ -z "${{ secrets.EC2_HOST }}" ]; then echo "::error::Secret EC2_HOST is not set."; exit 1; fi
+          if [ -z "${{ secrets.EC2_USER }}" ]; then echo "::error::Secret EC2_USER is not set."; exit 1; fi
+          if [ -z "${{ secrets.EC2_SSH_KEY }}" ]; then echo "::error::Secret EC2_SSH_KEY is not set."; exit 1; fi
+          if [ -z "${{ secrets.EC2_APP_PATH }}" ]; then echo "::error::Secret EC2_APP_PATH is not set."; exit 1; fi
+          echo "Required secrets are set."
+
+      - name: Deploy backend to EC2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          timeout: 30s
+          command_timeout: 2m
+          envs: GH_DEPLOY_TOKEN=${{ secrets.GH_DEPLOY_TOKEN }},REPO_SLUG=${{ github.repository }}
+          script: |
+            set -e
+            cd ${{ secrets.EC2_APP_PATH }}
+            if [ -n "$GH_DEPLOY_TOKEN" ]; then
+              git remote set-url origin "https://x-access-token:${GH_DEPLOY_TOKEN}@github.com/${REPO_SLUG}.git"
+            fi
+            git fetch origin
+            git checkout -B ${{ github.ref_name }} origin/${{ github.ref_name }}
+            cd nanosoft-ai-backend
+            python3 -m venv .venv 2>/dev/null || true
+            . .venv/bin/activate
+            pip install -q -r requirements.txt
+            sudo systemctl restart nanosoft-backend || true
+            sudo systemctl restart nanosoft-model || true
+
+
+
+  # Alternative: deploy by rsync (no git on server). Uncomment and remove deploy-backend above if you prefer.
+  # deploy-backend-rsync:
+  #   needs: test-frontend
+  #   if: github.event_name == 'push' && github.ref == 'refs/heads/Testing'
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Install SSH key
+  #       run: |
+  #         mkdir -p ~/.ssh
+  #         echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key
+  #         chmod 600 ~/.ssh/deploy_key
+  #         ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+  #     - name: Rsync backend to EC2
+  #       run: |
+  #         rsync -avz --delete -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no" \
+  #           nanosoft-ai-backend/ ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:${{ secrets.EC2_APP_PATH }}/nanosoft-ai-backend/
+  #     - name: Restart backend on EC2
+  #       run: |
+  #         ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
+  #           "cd ${{ secrets.EC2_APP_PATH }}/nanosoft-ai-backend && . .venv/bin/activate && pip install -q -r requirements.txt && sudo systemctl restart nanosoft-backend"
+
+

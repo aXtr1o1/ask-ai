@@ -1,16 +1,21 @@
-#Here is the list of tools
-from schemas import AssetsInput,ComplaintsInput,WorkOrdersInput
+"""
+LangChain Tools for Facility Management
+Defines tools for querying assets, complaints, and work orders
+"""
 from langchain.tools import tool
 import requests
 import json
+
+from app.models.schemas import AssetsInput, ComplaintsInput, WorkOrdersInput
+from app.config import settings
 
 
 # =====================================================
 # ✅ TOOL 1: ASSETS
 # =====================================================
 
-
-@tool(description="""
+@tool(
+    description="""
 Use this tool when the user asks about ASSETS (Master Equipment List).
 
 Assets represent physical equipment installed in the facility.
@@ -27,8 +32,11 @@ Call this tool for queries like:
 - List assets
 - Asset information lookup
 - Equipment location or status
-""",args_schema=AssetsInput)
-def ASSETS(division=None,
+""",
+    args_schema=AssetsInput
+)
+def ASSETS(
+    division=None,
     discipline=None,
     location=None,
     make=None,
@@ -41,12 +49,13 @@ def ASSETS(division=None,
     year_from=None,
     year_to=None,
     output_type="LIST",
-    limit=20) -> str:
-    print("\n==============================")
+    limit=20
+) -> str:
+    """Query assets from the database"""
+    print("\n" + "="*30)
     print("🔧 ASSETS TOOL TRIGGERED")
-    print("==============================")
-
-    # ✅ Payload to API
+    print("="*30)
+    
     payload = {
         "division": division,
         "discipline": discipline,
@@ -63,31 +72,27 @@ def ASSETS(division=None,
         "output_type": output_type,
         "limit": limit
     }
+    
+    # Remove None values
     clean_payload = {k: v for k, v in payload.items() if v is not None}
-    print("\n📤 Clean Payload Sent to Endpoint (No None Values):")
-    print(clean_payload)
-
-    FASTAPI_URL = "http://127.0.0.1:8000/get-assets"
-
+    print("\n📤 Payload:", clean_payload)
+    
+    url = f"{settings.DATABASE_API_URL}/get-assets"
+    
     try:
-        # ✅ Call FastAPI Endpoint
-        response = requests.post(FASTAPI_URL, json=clean_payload)
-
-        print("\n✅ Raw Response Status Code:", response.status_code)
-
+        response = requests.post(url, json=clean_payload)
+        print(f"✅ Status: {response.status_code}")
+        
         if response.status_code != 200:
             return f"❌ API Error: {response.text}"
-
-        # ✅ JSON Output
+        
         data = response.json()
-
-        print("\n📥 Parsed JSON Response (Endpoint → Tool):")
-        print(json.dumps(data, indent=4))
-
+        print(f"📥 Response: {json.dumps(data, indent=2)}")
+        
         return json.dumps(data)
-
+        
     except Exception as e:
-        print("❌ Endpoint Call Failed:", str(e))
+        print(f"❌ Error: {e}")
         return f"Error calling endpoint: {str(e)}"
 
 
@@ -95,7 +100,8 @@ def ASSETS(division=None,
 # ✅ TOOL 2: COMPLAINTS
 # =====================================================
 
-@tool(description="""
+@tool(
+    description="""
 Use this tool when the user asks about COMPLAINTS (Reactive / Breakdown Maintenance).
 
 Complaints represent breakdown issues reported against an asset.
@@ -114,7 +120,9 @@ Call this tool for queries like:
 - Complaint status tracking
 - Breakdown job history
 - SLA complaint monitoring
-""",args_schema=ComplaintsInput)
+""",
+    args_schema=ComplaintsInput
+)
 def COMPLAINTS(
     status=None,
     priority=None,
@@ -126,11 +134,11 @@ def COMPLAINTS(
     output_type="LIST",
     limit=20
 ) -> str:
-
-    print("\n==============================")
+    """Query complaints from the database"""
+    print("\n" + "="*30)
     print("🚨 COMPLAINTS TOOL TRIGGERED")
-    print("==============================")
-
+    print("="*30)
+    
     payload = {
         "status": status,
         "priority": priority,
@@ -142,39 +150,35 @@ def COMPLAINTS(
         "output_type": output_type,
         "limit": limit
     }
-
-    # Remove None values
+    
     clean_payload = {k: v for k, v in payload.items() if v is not None}
-
-    print("\n📤 Clean Payload Sent to Complaints Endpoint:")
-    print(clean_payload)
-
-    FASTAPI_URL = "http://127.0.0.1:8000/get-complaints"
-
+    print("\n📤 Payload:", clean_payload)
+    
+    url = f"{settings.DATABASE_API_URL}/get-complaints"
+    
     try:
-        response = requests.post(FASTAPI_URL, json=clean_payload)
-
-        print("\n✅ Raw Response Status Code:", response.status_code)
-
+        response = requests.post(url, json=clean_payload)
+        print(f"✅ Status: {response.status_code}")
+        
         if response.status_code != 200:
             return f"❌ API Error: {response.text}"
-
+        
         data = response.json()
-
-        print("\n📥 Parsed JSON Response (Endpoint → Tool):")
-        print(json.dumps(data, indent=4))
-
+        print(f"📥 Response: {json.dumps(data, indent=2)}")
+        
         return json.dumps(data)
-
+        
     except Exception as e:
-        print("❌ Endpoint Call Failed:", str(e))
+        print(f"❌ Error: {e}")
         return f"Error calling complaints endpoint: {str(e)}"
 
 
 # =====================================================
 # ✅ TOOL 3: WORK ORDERS
 # =====================================================
-@tool(description="""
+
+@tool(
+    description="""
 Use this tool when the user asks about WORK ORDERS (Scheduled Preventive Maintenance - PPM).
 
 Work Orders represent planned maintenance tasks assigned to assets.
@@ -193,7 +197,9 @@ Call this tool for queries like:
 - Preventive maintenance schedules
 - PPM job completion tracking
 - Technician assigned work orders
-""",args_schema= WorkOrdersInput)
+""",
+    args_schema=WorkOrdersInput
+)
 def WORK_ORDERS(
     status=None,
     frequency=None,
@@ -203,11 +209,11 @@ def WORK_ORDERS(
     output_type="LIST",
     limit=20
 ) -> str:
-
-    print("\n==============================")
+    """Query work orders from the database"""
+    print("\n" + "="*30)
     print("📅 WORK ORDERS TOOL TRIGGERED")
-    print("==============================")
-
+    print("="*30)
+    
     payload = {
         "status": status,
         "frequency": frequency,
@@ -217,31 +223,24 @@ def WORK_ORDERS(
         "output_type": output_type,
         "limit": limit
     }
-
-    # Remove None values
+    
     clean_payload = {k: v for k, v in payload.items() if v is not None}
-
-    print("\n📤 Clean Payload Sent to WorkOrders Endpoint:")
-    print(clean_payload)
-
-    FASTAPI_URL = "http://127.0.0.1:8000/get-workorders"
-
+    print("\n📤 Payload:", clean_payload)
+    
+    url = f"{settings.DATABASE_API_URL}/get-workorders"
+    
     try:
-        response = requests.post(FASTAPI_URL, json=clean_payload)
-
-        print("\n✅ Raw Response Status Code:", response.status_code)
-
+        response = requests.post(url, json=clean_payload)
+        print(f"✅ Status: {response.status_code}")
+        
         if response.status_code != 200:
             return f"❌ API Error: {response.text}"
-
+        
         data = response.json()
-
-        print("\n📥 Parsed JSON Response (Endpoint → Tool):")
-        print(json.dumps(data, indent=4))
-
+        print(f"📥 Response: {json.dumps(data, indent=2)}")
+        
         return json.dumps(data)
-
+        
     except Exception as e:
-        print("❌ Endpoint Call Failed:", str(e))
+        print(f"❌ Error: {e}")
         return f"Error calling workorders endpoint: {str(e)}"
-
