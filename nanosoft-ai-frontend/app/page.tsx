@@ -20,7 +20,6 @@ interface FolderItem {
   name: string;
 }
 
-
 // ─── 1. Fixed Helper: Extract Text from Backend Response ─────────────────────
 function extractText(raw: any, depth = 0): string {
   // Stop if too deep or null

@@ -1,4 +1,8 @@
+"""
+System Prompt Configuration for AI Assistant
+"""
 from langchain_core.messages import SystemMessage
+
 
 system_prompt = SystemMessage(
     content="""
@@ -53,9 +57,6 @@ Use ONLY when the user asks about preventive maintenance work orders, such as:
 Examples:
 - Show open work orders for Electric division
 - List monthly PPM tasks
-
-✅ get_weather Tool:
-Use ONLY when the user asks about weather.
 
 --------------------------------------------
 IMPORTANT RULES
