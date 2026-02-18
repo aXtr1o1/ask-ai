@@ -1,4 +1,4 @@
-[
+
 [Unit]
 Description=Nanosoft AI Frontend (Next.js)
 After=network.target

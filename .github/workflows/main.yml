@@ -68,8 +68,9 @@ jobs:
             git fetch origin
             git checkout -B ${{ github.ref_name }} origin/${{ github.ref_name }}
             cd nanosoft-ai-frontend
-            npm ci --omit=dev --prefer-offline --no-audit || npm install --omit=dev
+            npm ci --prefer-offline --no-audit || npm install
             npm run build
+            npm prune --omit=dev || true
             sudo systemctl restart nanosoft-frontend || true
 
   # --- CD: deploy backend to AWS t2.small (only on push, no PR) ---
