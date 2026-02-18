@@ -91,7 +91,7 @@ body {
   width: 26px;
   height: 26px;
   border-radius: 6px;
-  background: linear-gradient(135deg, #6fb24f, #4a8f3a);
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -226,12 +226,15 @@ body {
 .chat-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   padding: 12px 20px;
   flex-shrink: 0;
-  border-bottom: 1px solid rgba(176, 219, 156, 0.8);
-  background: rgba(255, 255, 255, 0.8);
-  backdrop-filter: blur(6px);
+}
+
+.chat-header-transparent {
+  background: transparent;
+  border: none;
+  border-bottom: none;
 }
 
 .model-badge {
@@ -241,6 +244,29 @@ body {
   padding: 2px 8px;
   border-radius: 12px;
   border: 1px solid rgba(111, 178, 79, 0.65);
+}
+
+.logout-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent-primary);
+  border: none;
+  border-radius: 8px;
+  padding: 8px 14px;
+  cursor: pointer;
+  transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+.logout-btn:hover {
+  background: #3b7a2f;
+}
+
+.logout-btn:active {
+  opacity: 0.9;
 }
 
 .chat-scroll-area {

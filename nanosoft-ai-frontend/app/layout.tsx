@@ -19,6 +19,9 @@ const sometypeMono = localFont({
 export const metadata: Metadata = {
   title: "Nanosoft Ask AI",  // Changes the browser tab name
   description: "Internal AI Assistant powered by Gemini",
+  icons: {
+    icon: "/icon.png",
+  },
 };
 
 export default function RootLayout({
