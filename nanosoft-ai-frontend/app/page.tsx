@@ -2,10 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-<<<<<<< HEAD
 import Image from "next/image";
-=======
->>>>>>> 42e52d900986d16b12807769ceba88de078fdb03
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface Message {
@@ -201,14 +198,9 @@ export default function Home() {
   const [isRecording, setIsRecording] = useState<boolean>(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const [loggedInUser, setLoggedInUser] = useState<string | null>(null);
-<<<<<<< HEAD
   const [authChecked, setAuthChecked] = useState<boolean>(false);
 
   // Client-side auth guard: redirect to login if not authenticated; don't render app until checked
-=======
-
-  // Very basic client-side auth guard
->>>>>>> 42e52d900986d16b12807769ceba88de078fdb03
   useEffect(() => {
     if (typeof window === "undefined") return;
 
@@ -216,10 +208,7 @@ export default function Home() {
     if (userIdFromUrl) {
       localStorage.setItem("loggedInUser", userIdFromUrl);
       setLoggedInUser(userIdFromUrl);
-<<<<<<< HEAD
       setAuthChecked(true);
-=======
->>>>>>> 42e52d900986d16b12807769ceba88de078fdb03
       router.replace("/");
       return;
     }
@@ -231,10 +220,7 @@ export default function Home() {
     }
 
     setLoggedInUser(loggedIn);
-<<<<<<< HEAD
     setAuthChecked(true);
-=======
->>>>>>> 42e52d900986d16b12807769ceba88de078fdb03
   }, [router, userIdFromUrl]);
 
   const handleNewChat = () => {
@@ -310,16 +296,8 @@ export default function Home() {
       const response = await fetch("http://127.0.0.1:8001/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-<<<<<<< HEAD
         body: JSON.stringify(payload),
         
-=======
-        body: JSON.stringify({
-          query: userText,          // main user message
-          userId: loggedInUser,     // current logged-in user
-          sessionId: sessionId,     // current session identifier
-        }),
->>>>>>> 42e52d900986d16b12807769ceba88de078fdb03
       });
 
       if (!response.ok) throw new Error(`Server error: ${response.status}`);
@@ -444,7 +422,6 @@ export default function Home() {
             <div key={f.id} className="sidebar-item">
               <div className="content">
                 <IconFolder />
-<<<<<<< HEAD
                 <span
                   style={{
                     whiteSpace: "nowrap",
@@ -454,27 +431,6 @@ export default function Home() {
                 >
                   {f.name}
                 </span>
-=======
-                <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{f.name}</span>
-              </div>
-              <div className="dots-btn"><IconDots /></div>
-            </div>
-          ))}
-          
-          <div className="section-title mt">Chats</div>
-          {CHATS.map((c) => (
-            <div 
-              key={c.id} 
-              className={`sidebar-item ${activeChatId === c.id ? 'active' : ''}`}
-              onClick={() => { setActiveChatId(c.id); setChatName(c.title); setMessages([]); }} 
-            >
-              <div style={{ display: "flex", alignItems: "flex-start", gap: "7px", minWidth: 0, flex: 1 }}>
-                <div style={{ color: "#4a8f3a", marginTop: "1px", flexShrink: 0 }}><IconChat /></div>
-                <div style={{ minWidth: 0 }}>
-                  <div className="title" style={{ fontSize: "13px", fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.title}</div>
-                  <div className="preview" style={{ fontSize: "11px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.preview}</div>
-                </div>
->>>>>>> 42e52d900986d16b12807769ceba88de078fdb03
               </div>
             </div>
           ))}
@@ -489,7 +445,6 @@ export default function Home() {
 
       {/* Main Content */}
       <div className="main-content">
-<<<<<<< HEAD
         <header className="chat-header chat-header-transparent">
           <button
             type="button"
@@ -505,18 +460,6 @@ export default function Home() {
             Logout
           </button>
         </header>
-=======
-        
-        {/* Header */}
-        <div className="chat-header">
-          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <span style={{ fontSize: "15px", fontWeight: 600, color: "#1f2933" }}>{chatName || "Gemini"}</span>
-            <span className="model-badge">Flash latest</span>
-            <span className="model-badge">User {loggedInUser ?? "—"}</span>
-            <span className="model-badge" title={sessionId}>Session {sessionId}</span>
-          </div>
-        </div>
->>>>>>> 42e52d900986d16b12807769ceba88de078fdb03
 
         {/* Chat Area */}
         <div className="chat-scroll-area">
@@ -622,15 +565,9 @@ export default function Home() {
               rows={1}
             />
             
-<<<<<<< HEAD
             {/* <div className="icon-btn"><IconAttach /></div>
              */}
             {/* <div className={`mic-btn ${isRecording ? "recording" : ""}`} onClick={toggleRecording}>
-=======
-            <div className="icon-btn"><IconAttach /></div>
-            
-            <div className={`mic-btn ${isRecording ? "recording" : ""}`} onClick={toggleRecording}>
->>>>>>> 42e52d900986d16b12807769ceba88de078fdb03
               <IconMic isActive={isRecording} />
               {isRecording && <span style={{ position: "absolute", top: "-2px", right: "-2px", width: "8px", height: "8px", background: "#ef4444", borderRadius: "50%", border: "1.5px solid rgba(18,30,20,0.85)", animation: "blink 1s ease-in-out infinite" }} />}
             </div> */}
