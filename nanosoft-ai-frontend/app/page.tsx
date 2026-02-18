@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import Image from "next/image";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface Message {
@@ -109,7 +110,19 @@ function renderMarkdown(text: string, showCursor: boolean = false): string {
   return html;
 }
 
-function generateSessionId() {
+function generateSessionId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  // Fallback: UUID v4 using getRandomValues (supported in Node and browsers)
+  const bytes = new Uint8Array(16);
+  if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+    crypto.getRandomValues(bytes);
+    bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+    bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+    const hex = [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
   return "session_" + Math.random().toString(36).substr(2, 9);
 }
 
@@ -129,11 +142,11 @@ const FOLDERS: FolderItem[] = [
   { id: "f4", name: "Clients chats" },
 ];
 
-const CHATS: ChatItem[] = [
-  { id: "c1", title: "Plan a 3-day trip", preview: "It's a plan to the northern lights in Norway..." },
-  { id: "c2", title: "Ideas for a customer loyalty program", preview: "Here are some ideas for a customer loyalty..." },
-  { id: "c3", title: "Help me write", preview: "Here are some gift ideas for your upcoming..." },
-];
+// const CHATS: ChatItem[] = [
+//   { id: "c1", title: "Plan a 3-day trip", preview: "It's a plan to the northern lights in Norway..." },
+//   { id: "c2", title: "Ideas for a customer loyalty program", preview: "Here are some ideas for a customer loyalty..." },
+//   { id: "c3", title: "Help me write", preview: "Here are some gift ideas for your upcoming..." },
+// ];
 
 const CATEGORIES = ["Text", "Image", "Video", "Music", "Analytics"];
 
@@ -172,7 +185,11 @@ export default function Home() {
   const isTypingRef = useRef<boolean>(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  const [sessionId, setSessionId] = useState<string>(() => generateSessionId());
+  const [sessionId, setSessionId] = useState<string>(() => {
+    const id = generateSessionId();
+    console.log("[Session] created:", id);
+    return id;
+  });
   const [searchVal, setSearchVal] = useState("");
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [chatName, setChatName] = useState("");
@@ -181,8 +198,9 @@ export default function Home() {
   const [isRecording, setIsRecording] = useState<boolean>(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const [loggedInUser, setLoggedInUser] = useState<string | null>(null);
+  const [authChecked, setAuthChecked] = useState<boolean>(false);
 
-  // Very basic client-side auth guard
+  // Client-side auth guard: redirect to login if not authenticated; don't render app until checked
   useEffect(() => {
     if (typeof window === "undefined") return;
 
@@ -190,6 +208,7 @@ export default function Home() {
     if (userIdFromUrl) {
       localStorage.setItem("loggedInUser", userIdFromUrl);
       setLoggedInUser(userIdFromUrl);
+      setAuthChecked(true);
       router.replace("/");
       return;
     }
@@ -201,12 +220,22 @@ export default function Home() {
     }
 
     setLoggedInUser(loggedIn);
+    setAuthChecked(true);
   }, [router, userIdFromUrl]);
 
   const handleNewChat = () => {
+    const newSessionId = generateSessionId();
+    console.log("[Session] created:", newSessionId);
     setMessages([]);       
     setChatName("New Chat"); 
-    setSessionId(generateSessionId()); 
+    setSessionId(newSessionId); 
+  };
+
+  const handleLogout = () => {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("loggedInUser");
+    }
+    router.replace("/login");
   };
 
   useEffect(() => {
@@ -255,16 +284,20 @@ export default function Home() {
     setMessages((prev) => [...prev, { role: "user", text: userText }]);
     setInput("");
     setIsLoading(true);
+    const payload = {
+      query: userText,
+      userId: loggedInUser,
+      sessionId: sessionId,
+    };
+    console.log("[Chat] Request to backend:", payload);
+
 
     try {
       const response = await fetch("http://127.0.0.1:8001/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          query: userText,          // main user message
-          userId: loggedInUser,     // current logged-in user
-          sessionId: sessionId,     // current session identifier
-        }),
+        body: JSON.stringify(payload),
+        
       });
 
       if (!response.ok) throw new Error(`Server error: ${response.status}`);
@@ -339,6 +372,21 @@ export default function Home() {
 
   const isLanding = messages.length === 0;
 
+  // Don't render main app until we've checked auth; prevents showing main page before redirect to login
+  if (!authChecked) {
+    return (
+      <div style={{
+        minHeight: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "radial-gradient(circle at top, #ECFAE5 0, #DDF6D2 35%, #CAE8BD 75%)",
+      }}>
+        <div style={{ fontSize: 14, color: "#4b5f45" }}>Checking authentication...</div>
+      </div>
+    );
+  }
+
   return (
     <div className="app-container">
       {/* Background Gradient */}
@@ -349,7 +397,13 @@ export default function Home() {
         <div className="sidebar-header">
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
             <div className="brand-box">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="white"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              <Image
+                src="/icon.png"
+                alt="Nanosoft Ask AI"
+                width={20}
+                height={20}
+                style={{ borderRadius: 6 }}
+              />
             </div>
             <span style={{ fontSize: "14px", fontWeight: 600, color: "#1f2933" }}>NANOSOFT ASK AI</span>
           </div>
@@ -368,25 +422,15 @@ export default function Home() {
             <div key={f.id} className="sidebar-item">
               <div className="content">
                 <IconFolder />
-                <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{f.name}</span>
-              </div>
-              <div className="dots-btn"><IconDots /></div>
-            </div>
-          ))}
-          
-          <div className="section-title mt">Chats</div>
-          {CHATS.map((c) => (
-            <div 
-              key={c.id} 
-              className={`sidebar-item ${activeChatId === c.id ? 'active' : ''}`}
-              onClick={() => { setActiveChatId(c.id); setChatName(c.title); setMessages([]); }} 
-            >
-              <div style={{ display: "flex", alignItems: "flex-start", gap: "7px", minWidth: 0, flex: 1 }}>
-                <div style={{ color: "#4a8f3a", marginTop: "1px", flexShrink: 0 }}><IconChat /></div>
-                <div style={{ minWidth: 0 }}>
-                  <div className="title" style={{ fontSize: "13px", fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.title}</div>
-                  <div className="preview" style={{ fontSize: "11px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.preview}</div>
-                </div>
+                <span
+                  style={{
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  {f.name}
+                </span>
               </div>
             </div>
           ))}
@@ -401,21 +445,35 @@ export default function Home() {
 
       {/* Main Content */}
       <div className="main-content">
-        
-        {/* Header */}
-        <div className="chat-header">
-          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <span style={{ fontSize: "15px", fontWeight: 600, color: "#1f2933" }}>{chatName || "Gemini"}</span>
-            <span className="model-badge">Flash latest</span>
-            <span className="model-badge">User {loggedInUser ?? "—"}</span>
-            <span className="model-badge" title={sessionId}>Session {sessionId}</span>
-          </div>
-        </div>
+        <header className="chat-header chat-header-transparent">
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="logout-btn"
+            title="Sign out"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+              <polyline points="16 17 21 12 16 7" />
+              <line x1="21" y1="12" x2="9" y2="12" />
+            </svg>
+            Logout
+          </button>
+        </header>
 
         {/* Chat Area */}
         <div className="chat-scroll-area">
           {isLanding && (
             <div className="landing-container">
+              <div style={{ marginBottom: "24px", opacity: 0.5 }}>
+                <Image
+                  src="/nanosoft_logo.png"
+                  alt=""
+                  width={560}
+                  height={200}
+                  style={{ width: "auto", height: "auto", maxWidth: "min(600px, 90vw)", maxHeight: "200px", objectFit: "contain" }}
+                />
+              </div>
               <div className="landing-card">
                 <h1 style={{ fontSize: "24px", fontWeight: 700, color: "#1f2933", marginBottom: "10px" }}>How can I help you today?</h1>
                 <p style={{ fontSize: "12px", color: "#3f5f3a", lineHeight: 1.6, maxWidth: "380px", margin: "0 auto 28px" }}>Start a conversation to search assets, manage complaints, or check work orders.</p>
@@ -507,12 +565,12 @@ export default function Home() {
               rows={1}
             />
             
-            <div className="icon-btn"><IconAttach /></div>
-            
-            <div className={`mic-btn ${isRecording ? "recording" : ""}`} onClick={toggleRecording}>
+            {/* <div className="icon-btn"><IconAttach /></div>
+             */}
+            {/* <div className={`mic-btn ${isRecording ? "recording" : ""}`} onClick={toggleRecording}>
               <IconMic isActive={isRecording} />
               {isRecording && <span style={{ position: "absolute", top: "-2px", right: "-2px", width: "8px", height: "8px", background: "#ef4444", borderRadius: "50%", border: "1.5px solid rgba(18,30,20,0.85)", animation: "blink 1s ease-in-out infinite" }} />}
-            </div>
+            </div> */}
             
             <button className="send-btn" onClick={sendMessage} disabled={isLoading || !input.trim()}>
               <IconSend />

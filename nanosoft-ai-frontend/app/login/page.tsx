@@ -2,6 +2,7 @@
 
 import { useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 
 const VALID_USERS = ["101", "102"];
 const VALID_PASSWORD = "password";
@@ -68,33 +69,25 @@ export default function LoginPage() {
           }}
         >
           <div
-            style={{
-              width: 32,
-              height: 32,
-              borderRadius: 10,
-              background:
-                "linear-gradient(135deg, #B0DB9C, #6fb24f, #CAE8BD)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              boxShadow: "0 10px 25px rgba(34,197,94,0.45)",
-            }}
+            // style={{
+            //   width: 32,
+            //   height: 32,
+            //   borderRadius: 10,
+            //   // background:
+            //   //   "linear-gradient(135deg, #B0DB9C, #6fb24f, #CAE8BD)",
+            //   display: "flex",
+            //   alignItems: "center",
+            //   justifyContent: "center",
+            //   boxShadow: "0 10px 25px rgba(34,197,94,0.45)",
+            // }}
           >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <path
-                d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"
-                stroke="white"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
+            <Image
+              src="/icon.png"
+              alt="Nanosoft Ask AI"
+              width={20}
+              height={20}
+              style={{ borderRadius: 6 }}
+            />
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
             <span
@@ -228,9 +221,9 @@ export default function LoginPage() {
               textAlign: "center",
             }}
           >
-            Demo users: <span style={{ color: "#e5e7eb" }}>101</span> or{" "}
-            <span style={{ color: "#e5e7eb" }}>102</span> with password{" "}
-            <span style={{ color: "#e5e7eb" }}>password</span>.
+            Demo users: <span style={{ color: "#000000" }}>101</span> or{" "}
+            <span style={{ color: "#000000" }}>102</span> with password{" "}
+            <span style={{ color: "#000000" }}>password</span>.
           </p>
         </form>
       </div>
