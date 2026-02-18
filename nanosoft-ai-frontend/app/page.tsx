@@ -79,18 +79,18 @@ function renderMarkdown(text: string, showCursor: boolean = false): string {
     if (bulletMatch) {
       if (inOrderedList) { html += "</ol>"; inOrderedList = false; }
       if (!inList) { html += '<ul style="margin:10px 0 10px 20px;padding:0;list-style:disc;">'; inList = true; }
-      html += `<li style="margin:5px 0;line-height:1.6;color:#dfe8df;">${applyInline(bulletMatch[1])}</li>`;
+      html += `<li style="margin:5px 0;line-height:1.6;color:#000000;">${applyInline(bulletMatch[1])}</li>`;
     } else if (orderedMatch) {
       if (inList) { html += "</ul>"; inList = false; }
       if (!inOrderedList) { html += '<ol style="margin:10px 0 10px 20px;padding:0;list-style:decimal;">'; inOrderedList = true; }
-      html += `<li style="margin:5px 0;line-height:1.6;color:#dfe8df;">${applyInline(orderedMatch[2])}</li>`;
+      html += `<li style="margin:5px 0;line-height:1.6;color:#000000;">${applyInline(orderedMatch[2])}</li>`;
     } else {
       if (inList) { html += "</ul>"; inList = false; }
       if (inOrderedList) { html += "</ol>"; inOrderedList = false; }
       if (line.trim() === "") {
         html += '<div style="height:10px;"></div>';
       } else {
-        html += `<div style="line-height:1.7;margin:2px 0;color:#dfe8df;">${applyInline(line)}</div>`;
+        html += `<div style="line-height:1.7;margin:2px 0;color:#000000;">${applyInline(line)}</div>`;
       }
     }
   }
@@ -128,9 +128,9 @@ function generateSessionId(): string {
 
 function applyInline(text: string): string {
   text = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  text = text.replace(/`([^`]+)`/g, '<code style="background:rgba(255,255,255,0.1);padding:2px 6px;border-radius:4px;font-family:monospace;font-size:13px;color:#a8e6cf;">$1</code>');
-  text = text.replace(/\*\*(.+?)\*\*/g, '<strong style="color:#fff;font-weight:600;">$1</strong>');
-  text = text.replace(/\*(.+?)\*/g, '<em style="color:#b0d4b8;font-style:italic;">$1</em>');
+  text = text.replace(/`([^`]+)`/g, '<code style="background:rgba(0,0,0,0.04);padding:2px 6px;border-radius:4px;font-family:monospace;font-size:13px;color:#000000;">$1</code>');
+  text = text.replace(/\*\*(.+?)\*\*/g, '<strong style="color:#000000;font-weight:600;">$1</strong>');
+  text = text.replace(/\*(.+?)\*/g, '<em style="color:#111827;font-style:italic;">$1</em>');
   return text;
 }
 
