@@ -1,11 +1,10 @@
 """
 Facility Management AI Chatbot — Main App
 """
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from langchain_core.messages import HumanMessage, AIMessage
 import logging
-import json
 
 from app.models.schemas import ChatRequest
 from app.config import settings
@@ -37,16 +36,19 @@ chatbot_app.add_middleware(
 )
 
 # =====================================================
+# Valid Users
+# =====================================================
+VALID_USER_IDS = {"101", "102"}
+
+# =====================================================
 # In-Memory Store
 #
 # Structure:
 # {
 #   "101": {
 #     "lc_memory": [HumanMessage, AIMessage, ...],
-#     "history": [
-#       {"query": "...", "assistant": "..."},
-#       ...
-#     ]
+#     "history": [...],
+#     "session_id": "abc-123"
 #   }
 # }
 # =====================================================
@@ -61,6 +63,8 @@ def print_memory(user_id: str):
     print("=" * 50)
     user_data = memory_store.get(user_id, {})
     history = user_data.get("history", [])
+    session_id = user_data.get("session_id", "N/A")
+    print(f"  Session ID : {session_id}")
     if not history:
         print("  (empty)")
     else:
@@ -77,32 +81,49 @@ def print_memory(user_id: str):
 @chatbot_app.post("/chat")
 async def chat_endpoint(request: ChatRequest):
     user_query = request.query
-    user_id = "101"  # Fixed for now — will come from frontend later
+    user_id = request.userId
+    session_id = request.sessionId
+    
+    print(f"{user_id}---------{user_query}-------{session_id}")
 
-    # 1️⃣ Initialize user in memory if first time
+    # 1️⃣ Validate user ID
+    if user_id not in VALID_USER_IDS:
+        logger.warning(f"🚫 Invalid user_id attempted: '{user_id}'")
+        raise HTTPException(
+            status_code=403,
+            detail=f"Invalid user ID '{user_id}'. Access denied."
+        )
+
+    logger.info(f"✅ Valid user: {user_id} | Session: {session_id}")
+
+    # 2️⃣ Initialize user in memory if first time
     if user_id not in memory_store:
         memory_store[user_id] = {
             "lc_memory": [],
-            "history": []
+            "history": [],
+            "session_id": session_id
         }
         logger.info(f"🆕 Memory initialized for user_id: {user_id}")
+    else:
+        # Update session_id if a new session started
+        memory_store[user_id]["session_id"] = session_id
 
     lc_memory = memory_store[user_id]["lc_memory"]
     history = memory_store[user_id]["history"]
 
-    # 2️⃣ Build message context: system prompt + history as LangChain messages
+    # 3️⃣ Build message context: system prompt + history as LangChain messages
     messages = [system_prompt] + lc_memory
     messages.append(HumanMessage(content=user_query))
 
-    # 3️⃣ Process with LangChain
+    # 4️⃣ Process with LangChain — pass real user_id so tools use it
     try:
-        final_response_text, _ = await langchain_service.process_query(messages)
+        final_response_text, _ = await langchain_service.process_query(messages, user_id=user_id)
         logger.info(f"✅ Response generated for user_id: {user_id}")
     except Exception as e:
         logger.error(f"❌ LangChain error: {e}", exc_info=True)
         final_response_text = "Sorry, something went wrong while processing your request."
 
-    # 4️⃣ Update in-memory (keep last MAX_HISTORY interactions)
+    # 5️⃣ Update in-memory (keep last MAX_HISTORY interactions)
     lc_memory.append(HumanMessage(content=user_query))
     lc_memory.append(AIMessage(content=final_response_text))
     history.append({"query": user_query, "assistant": final_response_text})
@@ -111,12 +132,13 @@ async def chat_endpoint(request: ChatRequest):
         memory_store[user_id]["history"] = history[-MAX_HISTORY:]
         memory_store[user_id]["lc_memory"] = lc_memory[-(MAX_HISTORY * 2):]
 
-    # 5️⃣ Print in-memory after every request
+    # 6️⃣ Print in-memory after every request
     print_memory(user_id)
 
-    # 6️⃣ Return response
+    # 7️⃣ Return response
     return {
         "user_id": user_id,
+        "session_id": session_id,
         "response": final_response_text
     }
 

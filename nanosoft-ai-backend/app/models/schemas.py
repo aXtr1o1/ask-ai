@@ -99,3 +99,5 @@ class BDMInput(BaseModel):
 class ChatRequest(BaseModel):
     """Request schema for chat endpoint"""
     query: str
+    userId: str
+    sessionId: str

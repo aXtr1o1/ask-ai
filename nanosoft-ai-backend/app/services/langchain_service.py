@@ -44,9 +44,9 @@ class LangChainService:
             return content
         return str(content)
 
-    async def process_query(self, messages: list) -> tuple[str, list]:
+    async def process_query(self, messages: list, user_id: str = None) -> tuple[str, list]:
         try:
-            logger.info("💬 Processing query")
+            logger.info(f"💬 Processing query for user_id: {user_id}")
             ai_msg = self.model.invoke(messages)
 
             if ai_msg.tool_calls:
@@ -55,6 +55,10 @@ class LangChainService:
 
                 for tool_call in ai_msg.tool_calls:
                     tool_fn = self.tool_map[tool_call["name"]]
+
+                    # ✅ Inject real user_id into every tool call's args
+                    tool_call["args"]["user_id"] = user_id
+
                     tool_result = tool_fn.invoke(tool_call["args"])
                     messages.append(
                         ToolMessage(
@@ -62,7 +66,7 @@ class LangChainService:
                             tool_call_id=tool_call["id"]
                         )
                     )
-                    logger.info(f"✅ Tool '{tool_call['name']}' executed")
+                    logger.info(f"✅ Tool '{tool_call['name']}' executed for user_id: {user_id}")
 
             final_response_text = ""
             async for chunk in self.model.astream(messages):
@@ -76,6 +80,5 @@ class LangChainService:
         except Exception as e:
             logger.error(f"❌ Query processing error: {e}", exc_info=True)
             raise
-
 
 langchain_service = LangChainService()

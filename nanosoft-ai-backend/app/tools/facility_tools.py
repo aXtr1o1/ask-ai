@@ -16,8 +16,6 @@ ch.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(me
 if not logger.handlers:
     logger.addHandler(ch)
 
-DEFAULT_USER_ID = "101"
-
 
 # =====================================================
 # ✅ TOOL 1: ASSETS
@@ -44,7 +42,7 @@ Example queries:
     args_schema=AssetsInput
 )
 def ASSETS(
-    user_id=DEFAULT_USER_ID,
+    user_id=None,
     status=None, condition=None, priority=None, asset_type=None,
     division=None, discipline=None, locality=None, building=None, floor=None,
     owner=None, make=None, model=None, service_area=None, trade_group=None,
@@ -52,10 +50,10 @@ def ASSETS(
     barcode=None, keyword=None, date_from=None, date_to=None,
     limit=20, offset=0
 ) -> str:
-    logger.info("📦 ASSETS TOOL TRIGGERED")
+    logger.info(f"📦 ASSETS TOOL TRIGGERED for user_id: {user_id}")
 
     payload = {
-        "user_id": user_id or DEFAULT_USER_ID,
+        "user_id": user_id,
         "status": status, "condition": condition, "priority": priority,
         "asset_type": asset_type, "division": division, "discipline": discipline,
         "locality": locality, "building": building, "floor": floor,
@@ -74,16 +72,16 @@ def ASSETS(
     try:
         response = requests.post(f"{settings.DATABASE_API_URL}/get-assets", json=clean_payload)
         logger.info(f"✅ API Status: {response.status_code}")
-        
+
         if response.status_code != 200:
             logger.error(f"❌ API Error Response: {response.text}")
             return f"❌ API Error: {response.text}"
-        
+
         response_json = response.json()
         logger.debug("📥 API Response JSON:")
         logger.debug(json.dumps(response_json, indent=2))
 
-        return json.dumps(response.json())
+        return json.dumps(response_json)
     except Exception as e:
         logger.error(f"❌ Assets tool error: {e}", exc_info=True)
         return f"Error calling assets endpoint: {str(e)}"
@@ -114,17 +112,17 @@ Example queries:
     args_schema=PPMInput
 )
 def PPM(
-    user_id=DEFAULT_USER_ID,
+    user_id=None,
     status=None, stage=None, frequency=None,
     division=None, discipline=None, locality=None, building=None, floor=None,
     contract=None, tech=None, keyword=None,
     date_from=None, date_to=None, comp_from=None, comp_to=None,
     sla_min=None, sla_max=None, limit=20, offset=0
 ) -> str:
-    logger.info("🛠️ PPM TOOL TRIGGERED")
+    logger.info(f"🛠️ PPM TOOL TRIGGERED for user_id: {user_id}")
 
     payload = {
-        "user_id": user_id or DEFAULT_USER_ID,
+        "user_id": user_id,
         "status": status, "stage": stage, "frequency": frequency,
         "division": division, "discipline": discipline,
         "locality": locality, "building": building, "floor": floor,
@@ -141,16 +139,16 @@ def PPM(
     try:
         response = requests.post(f"{settings.DATABASE_API_URL}/get-ppm", json=clean_payload)
         logger.info(f"✅ API Status: {response.status_code}")
-        
+
         if response.status_code != 200:
             logger.error(f"❌ API Error Response: {response.text}")
             return f"❌ API Error: {response.text}"
-        
+
         response_json = response.json()
         logger.debug("📥 API Response JSON:")
         logger.debug(json.dumps(response_json, indent=2))
 
-        return json.dumps(response.json())
+        return json.dumps(response_json)
     except Exception as e:
         logger.error(f"❌ PPM tool error: {e}", exc_info=True)
         return f"Error calling PPM endpoint: {str(e)}"
@@ -182,7 +180,7 @@ Example queries:
     args_schema=BDMInput
 )
 def BDM(
-    user_id=DEFAULT_USER_ID,
+    user_id=None,
     status=None, priority=None, stage=None,
     complaint_type=None, complaint_mode=None, complaint_nature=None,
     wo_type=None, service_type=None,
@@ -192,10 +190,10 @@ def BDM(
     completed_from=None, completed_to=None,
     limit=20, offset=0
 ) -> str:
-    logger.info("🔧 BDM TOOL TRIGGERED")
+    logger.info(f"🔧 BDM TOOL TRIGGERED for user_id: {user_id}")
 
     payload = {
-        "user_id": user_id or DEFAULT_USER_ID,
+        "user_id": user_id,
         "status": status, "priority": priority, "stage": stage,
         "complaint_type": complaint_type, "complaint_mode": complaint_mode,
         "complaint_nature": complaint_nature, "wo_type": wo_type,
@@ -214,15 +212,16 @@ def BDM(
     try:
         response = requests.post(f"{settings.DATABASE_API_URL}/get-bdm", json=clean_payload)
         logger.info(f"✅ API Status: {response.status_code}")
+
         if response.status_code != 200:
             logger.error(f"❌ API Error Response: {response.text}")
             return f"❌ API Error: {response.text}"
-        
+
         response_json = response.json()
         logger.debug("📥 API Response JSON:")
         logger.debug(json.dumps(response_json, indent=2))
-        
-        return json.dumps(response.json())
+
+        return json.dumps(response_json)
     except Exception as e:
         logger.error(f"❌ BDM tool error: {e}", exc_info=True)
         return f"Error calling BDM endpoint: {str(e)}"
