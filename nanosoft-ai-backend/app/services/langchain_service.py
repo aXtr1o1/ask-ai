@@ -1,90 +1,84 @@
 """
-LangChain Service Module
-Handles AI model initialization and message streaming
+LangChain Service — AI model with tool support
 """
+import logging
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 
 from app.config import settings
-from app.tools.facility_tools import ASSETS, COMPLAINTS, WORK_ORDERS
+from app.tools.facility_tools import ASSETS, PPM, BDM
+
+logger = logging.getLogger("langchain_service")
+logger.setLevel(logging.INFO)
+ch = logging.StreamHandler()
+ch.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+if not logger.handlers:
+    logger.addHandler(ch)
 
 
 class LangChainService:
-    """Manages LangChain model and tool interactions"""
-    
     def __init__(self):
-        """Initialize Gemini model with tools"""
-        self.model = ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash",
-            google_api_key=settings.GOOGLE_API_KEY
-        ).bind_tools([ASSETS, COMPLAINTS, WORK_ORDERS])
-        
-        self.tool_map = {
-            "ASSETS": ASSETS,
-            "COMPLAINTS": COMPLAINTS,
-            "WORK_ORDERS": WORK_ORDERS,
-        }
-    
+        try:
+            self.model = ChatGoogleGenerativeAI(
+                model="gemini-2.5-flash-lite",
+                google_api_key=settings.GOOGLE_API_KEY
+            ).bind_tools([ASSETS, PPM, BDM])
+
+            self.tool_map = {
+                "ASSETS": ASSETS,
+                "PPM": PPM,
+                "BDM": BDM,
+            }
+            logger.info("🚀 LangChainService initialized with ASSETS, PPM, BDM tools")
+        except Exception as e:
+            logger.error(f"❌ LangChainService init failed: {e}", exc_info=True)
+            raise
+
     def extract_chunk_text(self, chunk) -> str:
-        """
-        Safely extract text from streaming chunk
-        Handles empty chunks and various content formats
-        """
         content = chunk.content
-        
-        # Case 1: Empty chunk
         if not content:
             return ""
-        
-        # Case 2: Gemini list format
         if isinstance(content, list):
-            if len(content) == 0:
-                return ""
-            return content[0].get("text", "")
-        
-        # Case 3: Normal string
+            return content[0].get("text", "") if content else ""
         if isinstance(content, str):
             return content
-        
         return str(content)
-    
-    async def process_query(self, messages: list) -> tuple[str, list]:
-        """
-        Process user query with tool calling support
-        
-        Args:
-            messages: List of LangChain messages including system prompt and history
-            
-        Returns:
-            Tuple of (final_response_text, updated_messages)
-        """
-        # Initial AI response (may contain tool calls)
-        ai_msg = self.model.invoke(messages)
-        
-        # Handle tool calls if present
-        if ai_msg.tool_calls:
-            messages.append(ai_msg)
-            
-            for tool_call in ai_msg.tool_calls:
-                tool_fn = self.tool_map[tool_call["name"]]
-                tool_result = tool_fn.invoke(tool_call["args"])
-                
-                messages.append(
-                    ToolMessage(
-                        content=str(tool_result),
-                        tool_call_id=tool_call["id"]
+
+    async def process_query(self, messages: list, user_id: str = None) -> tuple[str, list]:
+        try:
+            logger.info(f"💬 Processing query for user_id: {user_id}")
+            ai_msg = self.model.invoke(messages)
+
+            if ai_msg.tool_calls:
+                logger.info(f"🛠 Tool calls: {[tc['name'] for tc in ai_msg.tool_calls]}")
+                messages.append(ai_msg)
+
+                for tool_call in ai_msg.tool_calls:
+                    tool_fn = self.tool_map[tool_call["name"]]
+
+                    # ✅ Inject real user_id into every tool call's args
+                    tool_call["args"]["user_id"] = user_id
+
+                    tool_result = tool_fn.invoke(tool_call["args"])
+                    messages.append(
+                        ToolMessage(
+                            content=str(tool_result),
+                            tool_call_id=tool_call["id"]
+                        )
                     )
-                )
-        
-        # Stream final response
-        final_response_text = ""
-        async for chunk in self.model.astream(messages):
-            text = self.extract_chunk_text(chunk)
-            if text:
-                final_response_text += text
-        
-        return final_response_text, messages
+                    logger.info(f"✅ Tool '{tool_call['name']}' executed for user_id: {user_id}")
 
+            final_response_text = ""
+            async for chunk in self.model.astream(messages):
+                text = self.extract_chunk_text(chunk)
+                if text:
+                    final_response_text += text
 
-# Global LangChain service instance
+            logger.info("✅ Query processed successfully")
+            return final_response_text, messages
+
+        except Exception as e:
+            logger.error(f"❌ Query processing error: {e}", exc_info=True)
+            raise
+
 langchain_service = LangChainService()
