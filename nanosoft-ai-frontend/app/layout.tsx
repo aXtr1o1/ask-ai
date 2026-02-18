@@ -1,21 +1,27 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+const sometypeMono = localFont({
+  variable: "--font-sometype-mono",
+  display: "swap",
+  src: [
+    { path: "../fonts/SometypeMono-Regular.ttf", weight: "400", style: "normal" },
+    { path: "../fonts/SometypeMono-Medium.ttf", weight: "500", style: "normal" },
+    { path: "../fonts/SometypeMono-SemiBold.ttf", weight: "600", style: "normal" },
+    { path: "../fonts/SometypeMono-Italic.ttf", weight: "400", style: "italic" },
+    { path: "../fonts/SometypeMono-MediumItalic.ttf", weight: "500", style: "italic" },
+    { path: "../fonts/SometypeMono-BoldItalic.ttf", weight: "700", style: "italic" },
+  ],
 });
 
 // 👇 UPDATE THIS SECTION
 export const metadata: Metadata = {
   title: "Nanosoft Ask AI",  // Changes the browser tab name
   description: "Internal AI Assistant powered by Gemini",
+  icons: {
+    icon: "/icon.png",
+  },
 };
 
 export default function RootLayout({
@@ -26,7 +32,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${sometypeMono.variable} antialiased`}
       >
         {children}
       </body>

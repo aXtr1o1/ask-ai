@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import Image from "next/image";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface Message {
@@ -108,7 +110,19 @@ function renderMarkdown(text: string, showCursor: boolean = false): string {
   return html;
 }
 
-function generateSessionId() {
+function generateSessionId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  // Fallback: UUID v4 using getRandomValues (supported in Node and browsers)
+  const bytes = new Uint8Array(16);
+  if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+    crypto.getRandomValues(bytes);
+    bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+    bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+    const hex = [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
   return "session_" + Math.random().toString(36).substr(2, 9);
 }
 
@@ -128,11 +142,16 @@ const FOLDERS: FolderItem[] = [
   { id: "f4", name: "Clients chats" },
 ];
 
-const CHATS: ChatItem[] = [
-  { id: "c1", title: "Plan a 3-day trip", preview: "It's a plan to the northern lights in Norway..." },
-  { id: "c2", title: "Ideas for a customer loyalty program", preview: "Here are some ideas for a customer loyalty..." },
-  { id: "c3", title: "Help me write", preview: "Here are some gift ideas for your upcoming..." },
-];
+// const CHATS: ChatItem[] = [
+//   { id: "c1", title: "Plan a 3-day trip", preview: "It's a plan to the northern lights in Norway..." },
+//   { id: "c2", title: "Ideas for a customer loyalty program", preview: "Here are some ideas for a customer loyalty..." },
+//   { id: "c3", title: "Help me write", preview: "Here are some gift ideas for your upcoming..." },
+// ];
+// const CHATS: ChatItem[] = [
+//   { id: "c1", title: "Plan a 3-day trip", preview: "It's a plan to the northern lights in Norway..." },
+//   { id: "c2", title: "Ideas for a customer loyalty program", preview: "Here are some ideas for a customer loyalty..." },
+//   { id: "c3", title: "Help me write", preview: "Here are some gift ideas for your upcoming..." },
+// ];
 
 const CATEGORIES = ["Text", "Image", "Video", "Music", "Analytics"];
 
@@ -160,14 +179,22 @@ const IconMic = ({ isActive }: { isActive: boolean }) => <svg width="18" height=
 
 // ─── Main Component ──────────────────────────────────────────────────────────
 export default function Home() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const userIdFromUrl = searchParams.get("userId");
+
   const [input, setInput] = useState<string>("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const isTypingRef = useRef<boolean>(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  const [sessionId, setSessionId] = useState<string>(() => generateSessionId());
+  const [sessionId, setSessionId] = useState<string>(() => {
+    const id = generateSessionId();
+    console.log("[Session] created:", id);
+    return id;
+  });
   const [searchVal, setSearchVal] = useState("");
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [chatName, setChatName] = useState("");
@@ -175,16 +202,65 @@ export default function Home() {
 
   const [isRecording, setIsRecording] = useState<boolean>(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const [loggedInUser, setLoggedInUser] = useState<string | null>(null);
+  const [authChecked, setAuthChecked] = useState<boolean>(false);
+
+  // Client-side auth guard: redirect to login if not authenticated; don't render app until checked
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    // If login redirected with ?userId=..., persist it and clean the URL
+    if (userIdFromUrl) {
+      localStorage.setItem("loggedInUser", userIdFromUrl);
+      setLoggedInUser(userIdFromUrl);
+      setAuthChecked(true);
+      router.replace("/");
+      return;
+    }
+
+    const loggedIn = localStorage.getItem("loggedInUser");
+    if (!loggedIn) {
+      router.replace("/login");
+      return;
+    }
+
+    setLoggedInUser(loggedIn);
+    setAuthChecked(true);
+  }, [router, userIdFromUrl]);
 
   const handleNewChat = () => {
+    const newSessionId = generateSessionId();
+    console.log("[Session] created:", newSessionId);
     setMessages([]);       
     setChatName("New Chat"); 
-    setSessionId(generateSessionId()); 
+    setSessionId(newSessionId); 
+  };
+
+  const handleLogout = () => {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("loggedInUser");
+    }
+    router.replace("/login");
   };
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length, isLoading]); 
+  }, [messages.length, isLoading]);
+
+  // Auto-resize the input textarea up to a max height
+  const adjustTextareaHeight = () => {
+    const el = inputRef.current;
+    if (!el) return;
+    const maxHeight = 160; // px, roughly several lines
+    el.style.height = "0px";
+    const newHeight = Math.min(el.scrollHeight, maxHeight);
+    el.style.height = `${newHeight}px`;
+    el.style.overflowY = el.scrollHeight > maxHeight ? "auto" : "hidden";
+  };
+
+  useEffect(() => {
+    adjustTextareaHeight();
+  }, [input]);
 
   const toggleRecording = async () => {
     if (isRecording) {
@@ -213,12 +289,20 @@ export default function Home() {
     setMessages((prev) => [...prev, { role: "user", text: userText }]);
     setInput("");
     setIsLoading(true);
+    const payload = {
+      query: userText,
+      userId: loggedInUser,
+      sessionId: sessionId,
+    };
+    console.log("[Chat] Request to backend:", payload);
+
 
     try {
       const response = await fetch("http://127.0.0.1:8001/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: userText }), // Correct Key: "query"
+        body: JSON.stringify(payload),
+        
       });
 
       if (!response.ok) throw new Error(`Server error: ${response.status}`);
@@ -283,11 +367,30 @@ export default function Home() {
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") sendMessage();
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Enter sends, Shift+Enter makes a new line
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
   };
 
   const isLanding = messages.length === 0;
+
+  // Don't render main app until we've checked auth; prevents showing main page before redirect to login
+  if (!authChecked) {
+    return (
+      <div style={{
+        minHeight: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "radial-gradient(circle at top, #ECFAE5 0, #DDF6D2 35%, #CAE8BD 75%)",
+      }}>
+        <div style={{ fontSize: 14, color: "#4b5f45" }}>Checking authentication...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="app-container">
@@ -299,9 +402,15 @@ export default function Home() {
         <div className="sidebar-header">
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
             <div className="brand-box">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="white"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              <Image
+                src="/icon.png"
+                alt="Nanosoft Ask AI"
+                width={20}
+                height={20}
+                style={{ borderRadius: 6 }}
+              />
             </div>
-            <span style={{ fontSize: "14px", fontWeight: 600, color: "#fff" }}>NANOSOFT ASK AI</span>
+            <span style={{ fontSize: "14px", fontWeight: 600, color: "#1f2933" }}>NANOSOFT ASK AI</span>
           </div>
         </div>
 
@@ -318,25 +427,15 @@ export default function Home() {
             <div key={f.id} className="sidebar-item">
               <div className="content">
                 <IconFolder />
-                <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{f.name}</span>
-              </div>
-              <div className="dots-btn"><IconDots /></div>
-            </div>
-          ))}
-          
-          <div className="section-title mt">Chats</div>
-          {CHATS.map((c) => (
-            <div 
-              key={c.id} 
-              className={`sidebar-item ${activeChatId === c.id ? 'active' : ''}`}
-              onClick={() => { setActiveChatId(c.id); setChatName(c.title); setMessages([]); }} 
-            >
-              <div style={{ display: "flex", alignItems: "flex-start", gap: "7px", minWidth: 0, flex: 1 }}>
-                <div style={{ color: "#3b82f6", marginTop: "1px", flexShrink: 0 }}><IconChat /></div>
-                <div style={{ minWidth: 0 }}>
-                  <div className="title" style={{ fontSize: "13px", fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.title}</div>
-                  <div className="preview" style={{ fontSize: "11px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.preview}</div>
-                </div>
+                <span
+                  style={{
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  {f.name}
+                </span>
               </div>
             </div>
           ))}
@@ -351,34 +450,49 @@ export default function Home() {
 
       {/* Main Content */}
       <div className="main-content">
-        
-        {/* Header */}
-        <div className="chat-header">
-          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <span style={{ fontSize: "15px", fontWeight: 600, color: "#fff" }}>{chatName || "Gemini"}</span>
-            <span className="model-badge">Flash latest</span>
-          </div>
-        </div>
+        <header className="chat-header chat-header-transparent">
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="logout-btn"
+            title="Sign out"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+              <polyline points="16 17 21 12 16 7" />
+              <line x1="21" y1="12" x2="9" y2="12" />
+            </svg>
+            Logout
+          </button>
+        </header>
 
         {/* Chat Area */}
         <div className="chat-scroll-area">
           {isLanding && (
             <div className="landing-container">
+              <div style={{ marginBottom: "24px", opacity: 0.5 }}>
+                <Image
+                  src="/nanosoft_logo.png"
+                  alt=""
+                  width={560}
+                  height={200}
+                  style={{ width: "auto", height: "auto", maxWidth: "min(600px, 90vw)", maxHeight: "200px", objectFit: "contain" }}
+                />
+              </div>
               <div className="landing-card">
-                <div style={{ marginBottom: "16px", display: "flex", justifyContent: "center" }}><IconBot /></div>
-                <h1 style={{ fontSize: "24px", fontWeight: 700, color: "#fff", marginBottom: "10px" }}>How can I help you today?</h1>
-                <p style={{ fontSize: "12px", color: "#6a7a6a", lineHeight: 1.6, maxWidth: "380px", margin: "0 auto 28px" }}>Start a conversation to search assets, manage complaints, or check work orders.</p>
+                <h1 style={{ fontSize: "24px", fontWeight: 700, color: "#1f2933", marginBottom: "10px" }}>How can I help you today?</h1>
+                <p style={{ fontSize: "12px", color: "#3f5f3a", lineHeight: 1.6, maxWidth: "380px", margin: "0 auto 28px" }}>Start a conversation to search assets, manage complaints, or check work orders.</p>
                 
-                <div className="feature-grid">
+                {/* <div className="feature-grid">
                   {[{ title: "Search Assets", desc: "Find equipment details." }, { title: "Work Orders", desc: "Check schedules." }, { title: "Complaints", desc: "Track issues." }].map((card, i) => (
                     <div key={i} className="feature-card">
-                      <div style={{ fontSize: "12px", fontWeight: 600, color: "#e0e8e0", marginBottom: "5px" }}>{card.title}</div>
-                      <div style={{ fontSize: "10px", color: "#5a6a5a" }}>{card.desc}</div>
+                      <div style={{ fontSize: "12px", fontWeight: 600, color: "#3f5f3a", marginBottom: "5px" }}>{card.title}</div>
+                      <div style={{ fontSize: "10px", color: "#4b5f45" }}>{card.desc}</div>
                     </div>
                   ))}
-                </div>
+                </div> */}
 
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", flexWrap: "wrap" }}>
+                {/* <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", flexWrap: "wrap" }}>
                   {CATEGORIES.map((cat) => (
                     <button 
                       key={cat} 
@@ -388,7 +502,7 @@ export default function Home() {
                       {cat}
                     </button>
                   ))}
-                </div>
+                </div> */}
               </div>
             </div>
           )}
@@ -428,7 +542,7 @@ export default function Home() {
                     <IconBot />
                   </div>
                   <div className="loading-dots-box">
-                    {[0, 1, 2].map((i) => <span key={i} style={{ display: "inline-block", width: "7px", height: "7px", borderRadius: "50%", background: "#3b82f6", animation: `bounce 1.2s ease-in-out ${i * 0.2}s infinite` }} />)}
+                    {[0, 1, 2].map((i) => <span key={i} style={{ display: "inline-block", width: "7px", height: "7px", borderRadius: "50%", background: "#4a8f3a", animation: `bounce 1.2s ease-in-out ${i * 0.2}s infinite` }} />)}
                   </div>
                 </div>
               )}
@@ -440,19 +554,27 @@ export default function Home() {
         {/* Input Area */}
         <div className="input-footer">
           <div className="input-wrapper">
-            <div className="model-selector">
-              <div style={{ width: "14px", height: "14px", borderRadius: "4px", background: "linear-gradient(135deg,#3b82f6,#16a34a)", display: "flex", alignItems: "center", justifyContent: "center" }}><svg width="8" height="8" viewBox="0 0 24 24" fill="white"><path d="M12 2L2 7l10 5 10-5-10-5z" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round" /></svg></div>
-              <span style={{ fontSize: "11px", color: "#4a71de", fontWeight: 600 }}>Bot</span>
-            </div>
+            {/* <div className="model-selector">
+              <div style={{ width: "14px", height: "14px", borderRadius: "4px", background: "linear-gradient(135deg,#B0DB9C,#6fb24f)", display: "flex", alignItems: "center", justifyContent: "center" }}><svg width="8" height="8" viewBox="0 0 24 24" fill="white"><path d="M12 2L2 7l10 5 10-5-10-5z" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round" /></svg></div>
+              <span style={{ fontSize: "11px", color: "#3f5f3a", fontWeight: 600 }}>Bot</span>
+            </div> */}
+
+            <textarea
+              ref={inputRef}
+              className="main-input"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              disabled={isLoading}
+              placeholder="Type your prompt here..."
+              rows={1}
+            />
             
-            <input type="text" ref={inputRef} className="main-input" value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown} disabled={isLoading} placeholder="Type your prompt here..." />
-            
-            <div className="icon-btn"><IconAttach /></div>
-            
-            <div className={`mic-btn ${isRecording ? "recording" : ""}`} onClick={toggleRecording}>
+            {/* <div className="icon-btn"><IconAttach /></div> */}
+            {/* <div className={`mic-btn ${isRecording ? "recording" : ""}`} onClick={toggleRecording}>
               <IconMic isActive={isRecording} />
               {isRecording && <span style={{ position: "absolute", top: "-2px", right: "-2px", width: "8px", height: "8px", background: "#ef4444", borderRadius: "50%", border: "1.5px solid rgba(18,30,20,0.85)", animation: "blink 1s ease-in-out infinite" }} />}
-            </div>
+            </div> */}
             
             <button className="send-btn" onClick={sendMessage} disabled={isLoading || !input.trim()}>
               <IconSend />
