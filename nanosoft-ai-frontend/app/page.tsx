@@ -147,6 +147,11 @@ const FOLDERS: FolderItem[] = [
 //   { id: "c2", title: "Ideas for a customer loyalty program", preview: "Here are some ideas for a customer loyalty..." },
 //   { id: "c3", title: "Help me write", preview: "Here are some gift ideas for your upcoming..." },
 // ];
+// const CHATS: ChatItem[] = [
+//   { id: "c1", title: "Plan a 3-day trip", preview: "It's a plan to the northern lights in Norway..." },
+//   { id: "c2", title: "Ideas for a customer loyalty program", preview: "Here are some ideas for a customer loyalty..." },
+//   { id: "c3", title: "Help me write", preview: "Here are some gift ideas for your upcoming..." },
+// ];
 
 const CATEGORIES = ["Text", "Image", "Video", "Music", "Analytics"];
 
@@ -565,8 +570,7 @@ export default function Home() {
               rows={1}
             />
             
-            {/* <div className="icon-btn"><IconAttach /></div>
-             */}
+            {/* <div className="icon-btn"><IconAttach /></div> */}
             {/* <div className={`mic-btn ${isRecording ? "recording" : ""}`} onClick={toggleRecording}>
               <IconMic isActive={isRecording} />
               {isRecording && <span style={{ position: "absolute", top: "-2px", right: "-2px", width: "8px", height: "8px", background: "#ef4444", borderRadius: "50%", border: "1.5px solid rgba(18,30,20,0.85)", animation: "blink 1s ease-in-out infinite" }} />}
