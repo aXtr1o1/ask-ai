@@ -21,7 +21,6 @@ REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", "")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 SESSION_TTL_SECONDS = int(os.getenv("SESSION_TTL_SECONDS", 86400))
 MAX_HISTORY = int(os.getenv("MAX_HISTORY", 10))
-DEFAULT_USER = os.getenv("DEFAULT_USER", "ram")
 DATABASE_API_URL = os.getenv("DATABASE_API_URL", "http://127.0.0.1:8000")
 # # Optional debug
 # if __name__ == "__main__":

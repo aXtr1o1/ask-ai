@@ -1,23 +1,16 @@
 from __future__ import annotations
 from typing import Any, Optional
 from pydantic import BaseModel, Field
+from typing import Optional
 
-# ─────────────────────────────────────────────────────────────────────────────
-# SHARED RESPONSE
-# ─────────────────────────────────────────────────────────────────────────────
 
-class StandardResponse(BaseModel):
-    p_list: list[dict[str, Any]] = Field(default_factory=list)
-    p_count: int = 0
-
-# ─────────────────────────────────────────────────────────────────────────────
-# ASSET REQUEST
-# ─────────────────────────────────────────────────────────────────────────────
+# ==========================================
+# ✅ REQUEST MODELS
+# ==========================================
 
 class AssetRequest(BaseModel):
-    user_id: int
-    
-    # Text Filters
+    """Request schema for assets endpoint"""
+    user_id: str
     status: Optional[str] = None
     condition: Optional[str] = None
     priority: Optional[str] = None
@@ -32,34 +25,46 @@ class AssetRequest(BaseModel):
     model: Optional[str] = None
     service_area: Optional[str] = None
     trade_group: Optional[str] = None
-
-    # Boolean Flags
     on_hold: Optional[bool] = None
     is_snagged: Optional[bool] = None
     is_scraped: Optional[bool] = None
     enable_ppm: Optional[bool] = None
     enable_bdm: Optional[bool] = None
-
-    # Search
-    barcode: Optional[str] = None  # Added to match new SQL
+    barcode: Optional[str] = None
     keyword: Optional[str] = None
-
-    # Date Range
     date_from: Optional[str] = None
     date_to: Optional[str] = None
+    limit: int = Field(default=20, ge=1, le=500)
+    offset: int = Field(default=0, ge=0)
 
-    # Pagination
-    limit: int = Field(20, ge=1, le=1000)
-    offset: int = Field(0, ge=0)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# BDM REQUEST
-# ─────────────────────────────────────────────────────────────────────────────
+class PPMRequest(BaseModel):
+    """Request schema for PPM (work orders) endpoint"""
+    user_id: str
+    status: Optional[str] = None
+    stage: Optional[str] = None
+    frequency: Optional[str] = None
+    division: Optional[str] = None
+    discipline: Optional[str] = None
+    locality: Optional[str] = None
+    building: Optional[str] = None
+    floor: Optional[str] = None
+    contract: Optional[str] = None
+    tech: Optional[str] = None
+    keyword: Optional[str] = None
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+    comp_from: Optional[str] = None
+    comp_to: Optional[str] = None
+    sla_min: Optional[int] = None
+    sla_max: Optional[int] = None
+    limit: int = Field(default=20, ge=1, le=500)
+    offset: int = Field(default=0, ge=0)
+
 
 class BDMRequest(BaseModel):
-    user_id: int
-
-    # Text Filters
+    """Request schema for BDM (complaints) endpoint"""
+    user_id: str
     status: Optional[str] = None
     priority: Optional[str] = None
     stage: Optional[str] = None
@@ -77,52 +82,10 @@ class BDMRequest(BaseModel):
     analysis_tech: Optional[str] = None
     execution_tech: Optional[str] = None
     complainer: Optional[str] = None
-
-    # Search
     keyword: Optional[str] = None
-
-    # Date Ranges
     date_from: Optional[str] = None
     date_to: Optional[str] = None
     completed_from: Optional[str] = None
     completed_to: Optional[str] = None
-
-    # Pagination
-    limit: int = Field(20, ge=1, le=1000)
-    offset: int = Field(0, ge=0)
-
-# ─────────────────────────────────────────────────────────────────────────────
-# PPM REQUEST
-# ─────────────────────────────────────────────────────────────────────────────
-
-class PPMRequest(BaseModel):
-    user_id: int
-
-    # Text Filters
-    status: Optional[str] = None
-    stage: Optional[str] = None
-    frequency: Optional[str] = None
-    division: Optional[str] = None
-    discipline: Optional[str] = None
-    locality: Optional[str] = None
-    building: Optional[str] = None
-    floor: Optional[str] = None
-    contract: Optional[str] = None
-    tech: Optional[str] = None
-
-    # Search
-    keyword: Optional[str] = None
-
-    # Date Ranges
-    date_from: Optional[str] = None
-    date_to: Optional[str] = None
-    comp_from: Optional[str] = None
-    comp_to: Optional[str] = None
-
-    # SLA Duration
-    sla_min: Optional[int] = Field(None, ge=0)
-    sla_max: Optional[int] = Field(None, ge=0)
-
-    # Pagination
-    limit: int = Field(20, ge=1, le=1000)
-    offset: int = Field(0, ge=0)
+    limit: int = Field(default=20, ge=1, le=500)
+    offset: int = Field(default=0, ge=0)
