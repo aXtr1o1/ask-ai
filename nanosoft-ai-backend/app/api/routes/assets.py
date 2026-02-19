@@ -24,7 +24,7 @@ def format_response(data):
     return {"p_list": safe, "p_count": len(safe)}
 
 
-@router.post("/get-assets", response_model=StandardResponse, tags=["Assets"])
+@router.post("/get-assets")
 def get_assets(req: AssetRequest):
     logger.info(f"📦 Assets | user_id={req.user_id} | limit={req.limit} offset={req.offset}")
     try:

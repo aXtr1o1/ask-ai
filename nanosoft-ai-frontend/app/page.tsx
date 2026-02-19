@@ -8,14 +8,7 @@ import Image from "next/image";
 interface Message {
   role: "user" | "ai" | "error";
   text: string;
-  // ✨ NEW: Optional array to hold file information in a message
-  files?: { name: string; type: string }[];
-}
-
-interface ChatItem {
-  id: string;
-  title: string;
-  preview: string;
+  streaming?: boolean;
 }
 
 interface FolderItem {
@@ -23,145 +16,223 @@ interface FolderItem {
   name: string;
 }
 
-// ─── 1. Helper Code: Extract Text from Backend Response ─────────────────────
+// ─── Helper: Extract Text from Backend Response ───────────────────────────────
 function extractText(raw: any, depth = 0): string {
   if (depth > 10 || raw == null) return "";
   if (typeof raw === "string") {
     const trimmed = raw.trim();
     if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-      try {
-        return extractText(JSON.parse(trimmed), depth + 1);
-      } catch {
-        return raw;
-      }
+      try { return extractText(JSON.parse(trimmed), depth + 1); } catch { return raw; }
     }
     return raw;
   }
   if (Array.isArray(raw)) {
-    return raw
-      .map((item) => extractText(item, depth + 1))
-      .filter((text) => text.trim() !== "")
-      .join(" ");
+    return raw.map((item) => extractText(item, depth + 1)).filter((t) => t.trim() !== "").join(" ");
   }
   if (typeof raw === "object") {
     if (raw.response) return extractText(raw.response, depth + 1);
-    if (raw.content) return extractText(raw.content, depth + 1);
-    if (raw.text) return extractText(raw.text, depth + 1);
-    if (raw.reply) return extractText(raw.reply, depth + 1);
+    if (raw.content)  return extractText(raw.content,  depth + 1);
+    if (raw.text)     return extractText(raw.text,     depth + 1);
+    if (raw.reply)    return extractText(raw.reply,    depth + 1);
     return "";
   }
   return String(raw);
 }
 
-// ─── Helper: Render Markdown to HTML (With Table Support) ───────────────────
-function renderMarkdown(text: string, showCursor: boolean = false): string {
+// ─── Escape HTML ─────────────────────────────────────────────────────────────
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// ─── Inline markdown (bold, italic, code) ────────────────────────────────────
+function applyInline(text: string): string {
+  text = escapeHtml(text);
+  text = text.replace(/`([^`]+)`/g, '<code style="background:rgba(0,0,0,0.06);padding:2px 6px;border-radius:4px;font-family:monospace;font-size:12px;">$1</code>');
+  text = text.replace(/\*\*(.+?)\*\*/g, '<strong style="font-weight:600;">$1</strong>');
+  text = text.replace(/\*(.+?)\*/g,     '<em style="font-style:italic;">$1</em>');
+  return text;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CORE: Parse one bullet line into key-value pairs
+//
+// Works by finding every "Key:" position in the string, then slicing
+// the text between consecutive key positions to get each value.
+// This correctly handles values that contain commas, e.g.:
+//   "Location: Building 1 - Residential High Rise, Floor 16"
+// ─────────────────────────────────────────────────────────────────────────────
+function parseBulletToKV(rawLine: string): Record<string, string> | null {
+  // Strip leading bullet / number markers
+  const line = rawLine.replace(/^[\s]*(?:[-*•]|\d+[.)]) ?/, "").trim();
+  if (!line) return null;
+
+  // Find every occurrence of "SomeKey: " preceded by start-of-string or ", "
+  // Key = 1–4 words made of letters and spaces (no digits)
+  const KEY_RE = /(?:^|(?:,\s+))([A-Za-z][A-Za-z ]{0,25}?):\s*/g;
+
+  const hits: { key: string; valStart: number; matchStart: number }[] = [];
+  let m: RegExpExecArray | null;
+
+  while ((m = KEY_RE.exec(line)) !== null) {
+    const key = m[1].trim();
+    if (!key || /\d/.test(key)) continue;          // reject keys with digits
+    hits.push({ key, valStart: m.index + m[0].length, matchStart: m.index });
+  }
+
+  if (hits.length < 2) return null;                // need at least 2 KV pairs
+
+  const result: Record<string, string> = {};
+  for (let i = 0; i < hits.length; i++) {
+    const { key, valStart } = hits[i];
+    const valEnd = i + 1 < hits.length ? hits[i + 1].matchStart : line.length;
+    const value  = line.slice(valStart, valEnd).replace(/,\s*$/, "").trim();
+    result[key]  = value || "—";
+  }
+
+  return Object.keys(result).length >= 2 ? result : null;
+}
+
+// ─── Detect whether a bullet block should become a table ─────────────────────
+function isBulletTable(lines: string[]): boolean {
+  if (lines.length < 1) return false;
+  const parsed = lines.map(parseBulletToKV);
+  const valid  = parsed.filter(Boolean).length;
+  return valid >= Math.max(1, Math.ceil(lines.length * 0.5));
+}
+
+// ─── Render a status value as a coloured badge ───────────────────────────────
+function renderStatusBadge(value: string): string {
+  const v   = value.toLowerCase();
+  const cls = v === "online"  ? "status-online"
+            : v === "offline" ? "status-offline"
+            : "status-neutral";
+  return `<span class="status-badge ${cls}">${escapeHtml(value)}</span>`;
+}
+
+// ─── Convert detected KV bullet lines → HTML table ───────────────────────────
+function bulletLinesToTable(lines: string[]): string {
+  const rows = lines.map(parseBulletToKV).filter(Boolean) as Record<string, string>[];
+  if (rows.length === 0) return "";
+
+  // Gather all column keys in order of first appearance
+  const cols: string[] = [];
+  rows.forEach(row => {
+    Object.keys(row).forEach(k => { if (!cols.includes(k)) cols.push(k); });
+  });
+
+  const thead = `<thead><tr>${cols.map(k => `<th>${escapeHtml(k)}</th>`).join("")}</tr></thead>`;
+
+  const tbody = "<tbody>" + rows.map(row =>
+    "<tr>" + cols.map(col => {
+      const val = row[col] ?? "—";
+      // Auto-detect Status column for badge rendering
+      const cell = col.toLowerCase() === "status" ? renderStatusBadge(val) : escapeHtml(val);
+      return `<td>${cell}</td>`;
+    }).join("") + "</tr>"
+  ).join("") + "</tbody>";
+
+  return `<div class="table-wrapper"><table class="ai-table">${thead}${tbody}</table></div>`;
+}
+
+// ─── Render pipe-style markdown table (| col | col |) ────────────────────────
+function renderPipeTable(tableLines: string[]): string {
+  const rows = tableLines.map(line =>
+    line.split("|").map(c => c.trim()).filter((_, i, a) => i > 0 && i < a.length - 1)
+  );
+  if (rows.length < 2) return tableLines.map(applyInline).join("<br/>");
+
+  const thead = `<thead><tr>${rows[0].map(h => `<th>${applyInline(h)}</th>`).join("")}</tr></thead>`;
+  const tbody = "<tbody>" + rows.slice(2).map(row =>
+    `<tr>${row.map(cell => `<td>${applyInline(cell)}</td>`).join("")}</tr>`
+  ).join("") + "</tbody>";
+
+  return `<div class="table-wrapper"><table class="ai-table">${thead}${tbody}</table></div>`;
+}
+
+// ─── Master markdown renderer ─────────────────────────────────────────────────
+function renderMarkdown(text: string): string {
   if (!text) return "";
 
   const lines = text.split("\n");
-  let html = "";
-  let inList = false;
+  let   html  = "";
+
   let inOrderedList = false;
-  let inTable = false;
+  let pipeBuffer:   string[] = [];
+  let bulletBuffer: string[] = [];
 
-  for (let i = 0; i < lines.length; i++) {
-    let line = lines[i].trim();
+  const flushPipe = () => {
+    if (pipeBuffer.length) { html += renderPipeTable(pipeBuffer); pipeBuffer = []; }
+  };
 
-    // ─── Table Logic ───
-    if (line.startsWith("|") && line.endsWith("|")) {
-      if (!inTable) {
-        html += '<div style="overflow-x:auto; margin: 15px 0; border-radius: 8px; border: 1px solid rgba(59, 130, 246, 0.2); box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">';
-        html += '<table style="width:100%; border-collapse: collapse; font-size: 13px; background: rgba(15, 23, 42, 0.6);">';
-        inTable = true;
-      }
-      if (line.match(/^\|[\s-:|]+\|$/)) { continue; }
+  const flushBullets = () => {
+    if (!bulletBuffer.length) return;
+    html += isBulletTable(bulletBuffer)
+      ? bulletLinesToTable(bulletBuffer)
+      : '<ul style="margin:10px 0 10px 20px;padding:0;list-style:disc;">'
+        + bulletBuffer.map(bl => {
+            const t = bl.replace(/^[\s]*(?:[-*•]|\d+[.)]) ?/, "").trim();
+            return `<li style="margin:5px 0;line-height:1.6;">${applyInline(t)}</li>`;
+          }).join("")
+        + "</ul>";
+    bulletBuffer = [];
+  };
 
-      const cells = line.split("|").filter((cell, index, arr) => index > 0 && index < arr.length - 1);
-      const nextLine = lines[i + 1]?.trim();
-      const isHeader = !html.includes("<thead>") && nextLine && nextLine.match(/^\|[\s-:|]+\|$/);
+  for (const rawLine of lines) {
+    const line = rawLine.replace(/\s+$/, "");
 
-      if (isHeader) {
-        html += '<thead><tr style="background: rgba(30, 41, 59, 0.8); border-bottom: 2px solid #3b82f6;">';
-        cells.forEach(cell => {
-          html += `<th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #fff; border-right: 1px solid rgba(255,255,255,0.05);">${applyInline(cell.trim())}</th>`;
-        });
-        html += "</tr></thead><tbody>";
-      } else {
-        html += '<tr style="border-bottom: 1px solid rgba(255,255,255,0.05); transition: background 0.2s;">';
-        cells.forEach(cell => {
-          html += `<td style="padding: 10px 16px; color: #cbd5e1; border-right: 1px solid rgba(255,255,255,0.05);">${applyInline(cell.trim())}</td>`;
-        });
-        html += "</tr>";
-      }
+    // ── Pipe table row ──────────────────────────────────────────────────
+    if (/^\|.+\|$/.test(line.trim())) {
+      flushBullets();
+      if (inOrderedList) { html += "</ol>"; inOrderedList = false; }
+      pipeBuffer.push(line.trim());
       continue;
-    } else {
-      if (inTable) { html += "</tbody></table></div>"; inTable = false; }
+    }
+    flushPipe();
+
+    // ── Bullet point ────────────────────────────────────────────────────
+    if (/^[\s]*(?:[-*•]) /.test(line)) {
+      if (inOrderedList) { html += "</ol>"; inOrderedList = false; }
+      bulletBuffer.push(line);
+      continue;
     }
 
-    // ─── List/Text Logic ───
-    const bulletMatch = line.match(/^[\s]*(?:\*\s+|-\s+|•\s+)(.*)/);
-    const orderedMatch = line.match(/^[\s]*(\d+)[.)]\s+(.*)/);
-
-    if (bulletMatch) {
-      if (inOrderedList) { html += "</ol>"; inOrderedList = false; }
-      if (!inList) { html += '<ul style="margin:10px 0 10px 20px;padding:0;list-style:disc;">'; inList = true; }
-      html += `<li style="margin:5px 0;line-height:1.6;color:#000000;">${applyInline(bulletMatch[1])}</li>`;
-    } else if (orderedMatch) {
-      if (inList) { html += "</ul>"; inList = false; }
+    // ── Ordered list ────────────────────────────────────────────────────
+    const ordM = line.match(/^[\s]*(\d+)[.)]\s+(.*)/);
+    if (ordM) {
+      flushBullets();
       if (!inOrderedList) { html += '<ol style="margin:10px 0 10px 20px;padding:0;list-style:decimal;">'; inOrderedList = true; }
-      html += `<li style="margin:5px 0;line-height:1.6;color:#000000;">${applyInline(orderedMatch[2])}</li>`;
-    } else {
-      if (inList) { html += "</ul>"; inList = false; }
-      if (inOrderedList) { html += "</ol>"; inOrderedList = false; }
-      if (line.trim() === "") {
-        html += '<div style="height:10px;"></div>';
-      } else {
-        html += `<div style="line-height:1.7;margin:2px 0;color:#000000;">${applyInline(line)}</div>`;
-      }
+      html += `<li style="margin:5px 0;line-height:1.6;">${applyInline(ordM[2])}</li>`;
+      continue;
     }
-  }
-  
-  if (inTable) html += "</tbody></table></div>";
-  if (inList) html += "</ul>";
-  if (inOrderedList) html += "</ol>";
 
-  if (showCursor) {
-    const cursorHtml = '<span style="display:inline-block;width:7px;height:16px;margin-left:4px;background:#3b82f6;border-radius:2px;vertical-align:middle;animation:blink 1s step-end infinite;"></span>';
-    const lastClose = html.lastIndexOf("</");
-    if (lastClose !== -1) {
-      html = html.substring(0, lastClose) + cursorHtml + html.substring(lastClose);
-    } else {
-      html += cursorHtml;
-    }
+    // ── Regular line / blank ────────────────────────────────────────────
+    flushBullets();
+    if (inOrderedList) { html += "</ol>"; inOrderedList = false; }
+    html += line.trim() === ""
+      ? '<div style="height:8px;"></div>'
+      : `<div style="line-height:1.7;margin:2px 0;">${applyInline(line)}</div>`;
   }
+
+  flushBullets();
+  flushPipe();
+  if (inOrderedList) html += "</ol>";
 
   return html;
 }
 
+// ─── Session ID ──────────────────────────────────────────────────────────────
 function generateSessionId(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function")
     return crypto.randomUUID();
-  }
-  // Fallback: UUID v4 using getRandomValues (supported in Node and browsers)
-  const bytes = new Uint8Array(16);
-  if (typeof crypto !== "undefined" && crypto.getRandomValues) {
-    crypto.getRandomValues(bytes);
-    bytes[6] = (bytes[6]! & 0x0f) | 0x40;
-    bytes[8] = (bytes[8]! & 0x3f) | 0x80;
-    const hex = [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
-    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-  }
-  return "session_" + Math.random().toString(36).substr(2, 9);
+  const b = new Uint8Array(16);
+  crypto.getRandomValues(b);
+  b[6] = (b[6]! & 0x0f) | 0x40;
+  b[8] = (b[8]! & 0x3f) | 0x80;
+  const h = [...b].map(x => x.toString(16).padStart(2,"0")).join("");
+  return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;
 }
 
-function applyInline(text: string): string {
-  text = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  text = text.replace(/`([^`]+)`/g, '<code style="background:rgba(0,0,0,0.04);padding:2px 6px;border-radius:4px;font-family:monospace;font-size:13px;color:#000000;">$1</code>');
-  text = text.replace(/\*\*(.+?)\*\*/g, '<strong style="color:#000000;font-weight:600;">$1</strong>');
-  text = text.replace(/\*(.+?)\*/g, '<em style="color:#111827;font-style:italic;">$1</em>');
-  return text;
-}
-
-// ─── Static Data ─────────────────────────────────────────────────────────────
+// ─── Static sidebar data ──────────────────────────────────────────────────────
 const FOLDERS: FolderItem[] = [
   { id: "f1", name: "Work chats" },
   { id: "f2", name: "Life chats" },
@@ -169,68 +240,91 @@ const FOLDERS: FolderItem[] = [
   { id: "f4", name: "Clients chats" },
 ];
 
-// const CHATS: ChatItem[] = [
-//   { id: "c1", title: "Plan a 3-day trip", preview: "It's a plan to the northern lights in Norway..." },
-//   { id: "c2", title: "Ideas for a customer loyalty program", preview: "Here are some ideas for a customer loyalty..." },
-//   { id: "c3", title: "Help me write", preview: "Here are some gift ideas for your upcoming..." },
-// ];
-// const CHATS: ChatItem[] = [
-//   { id: "c1", title: "Plan a 3-day trip", preview: "It's a plan to the northern lights in Norway..." },
-//   { id: "c2", title: "Ideas for a customer loyalty program", preview: "Here are some ideas for a customer loyalty..." },
-//   { id: "c3", title: "Help me write", preview: "Here are some gift ideas for your upcoming..." },
-// ];
+// ─── Icons ────────────────────────────────────────────────────────────────────
+const IconFolder = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+  </svg>
+);
+const IconPlus = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+    <path d="M12 5v14M5 12h14" />
+  </svg>
+);
+const IconSearch = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+  </svg>
+);
+const IconSend = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="white" stroke="none">
+    <path d="M22 2L11 13" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+    <path d="M22 2L15 22L11 13L2 9L22 2Z" fill="white"/>
+  </svg>
+);
+const IconHamburger = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+    <line x1="3" y1="6"  x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+  </svg>
+);
+const IconLogout = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+    <polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+  </svg>
+);
+const IconUser = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+  </svg>
+);
+const IconAI = () => (
+  <svg width="22" height="22" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="aiGrad" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+        <stop offset="0%" stopColor="#6fb24f"/><stop offset="100%" stopColor="#2d6b22"/>
+      </linearGradient>
+    </defs>
+    <path d="M16 2 L18 12 L28 16 L18 20 L16 30 L14 20 L4 16 L14 12 Z" fill="url(#aiGrad)" opacity="0.9"/>
+    <circle cx="16" cy="16" r="3" fill="white" opacity="0.95"/>
+  </svg>
+);
 
-const CATEGORIES = ["Text", "Image", "Video", "Audio", "Analytics"];
-
-// ─── Icons ───────────────────────────────────────────────────────────────────
-const IconFolder = () => <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" /></svg>;
-const IconChat = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>;
-const IconPlus = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>;
-const IconSearch = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" /></svg>;
-const IconDots = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="12" cy="19" r="1.5" /></svg>;
-const IconBot = () => (<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 8V4H8" /><rect width="16" height="12" x="4" y="8" rx="2" /><path d="M2 14h2" /><path d="M20 14h2" /><path d="M15 13v2" /><path d="M9 13v2" /></svg>);
-const IconAttach = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a4.5 4.5 0 01-6.36-6.36l9.19-9.19a3 3 0 014.24 4.24l-9.2 9.19a1.5 1.5 0 01-2.12-2.12l8.49-8.48" /></svg>;
-const IconSend = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="white" stroke="none"><path d="M22 2L11 13" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" /><path d="M22 2L15 22L11 13L2 9L22 2Z" fill="white" /></svg>;
-const IconMic = ({ isActive }: { isActive: boolean }) => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={isActive ? "#3b82f6" : "currentColor"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" fill={isActive ? "#3b82f6" : "none"} /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="23" /><line x1="8" y1="23" x2="16" y2="23" /></svg>;
-// ✨ NEW: Close Icon for file preview
-const IconClose = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>;
-
-// ─── Main Component ──────────────────────────────────────────────────────────
+// ─── Main Component ───────────────────────────────────────────────────────────
 export default function Home() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
+  const router        = useRouter();
+  const searchParams  = useSearchParams();
   const userIdFromUrl = searchParams.get("userId");
 
-  const [input, setInput] = useState<string>("");
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  // ✨ NEW: State to hold selected files
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-
-  const messagesEndRef = useRef<HTMLDivElement | null>(null);
-  const isTypingRef = useRef<boolean>(false);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-
-  const [sessionId, setSessionId] = useState<string>(() => {
-    const id = generateSessionId();
-    console.log("[Session] created:", id);
-    return id;
-  });
-  const [searchVal, setSearchVal] = useState("");
-  const [activeChatId, setActiveChatId] = useState<string | null>(null);
-  const [chatName, setChatName] = useState("");
-  const [activeCategory, setActiveCategory] = useState<string | null>(null);
-
-  const [isRecording, setIsRecording] = useState<boolean>(false);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const [input,        setInput]        = useState<string>("");
+  const [messages,     setMessages]     = useState<Message[]>([]);
+  const [isLoading,    setIsLoading]    = useState<boolean>(false);
+  const [sessionId,    setSessionId]    = useState<string>(() => generateSessionId());
+  const [searchVal,    setSearchVal]    = useState("");
+  const [chatName,     setChatName]     = useState("");
+  const [isRecording,  setIsRecording]  = useState<boolean>(false);
   const [loggedInUser, setLoggedInUser] = useState<string | null>(null);
-  const [authChecked, setAuthChecked] = useState<boolean>(false);
+  const [authChecked,  setAuthChecked]  = useState<boolean>(false);
+  const [menuOpen,     setMenuOpen]     = useState(false);
 
-  // Client-side auth guard: redirect to login if not authenticated; don't render app until checked
+  const messagesEndRef   = useRef<HTMLDivElement | null>(null);
+  const isTypingRef      = useRef<boolean>(false);
+  const inputRef         = useRef<HTMLTextAreaElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const menuRef          = useRef<HTMLDivElement>(null);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  // Auth guard
   useEffect(() => {
     if (typeof window === "undefined") return;
-
-    // If login redirected with ?userId=..., persist it and clean the URL
     if (userIdFromUrl) {
       localStorage.setItem("loggedInUser", userIdFromUrl);
       setLoggedInUser(userIdFromUrl);
@@ -238,254 +332,138 @@ export default function Home() {
       router.replace("/");
       return;
     }
-
-    const loggedIn = localStorage.getItem("loggedInUser");
-    if (!loggedIn) {
-      router.replace("/login");
-      return;
-    }
-
-    setLoggedInUser(loggedIn);
+    const stored = localStorage.getItem("loggedInUser");
+    if (!stored) { router.replace("/login"); return; }
+    setLoggedInUser(stored);
     setAuthChecked(true);
   }, [router, userIdFromUrl]);
 
-  const handleNewChat = () => {
-    const newSessionId = generateSessionId();
-    console.log("[Session] created:", newSessionId);
-    setMessages([]);       
-    setChatName("New Chat"); 
-<<<<<<< HEAD
-    setSessionId(generateSessionId()); 
-    setSelectedFiles([]); // Clear files
-=======
-    setSessionId(newSessionId); 
-  };
-
-  const handleLogout = () => {
-    if (typeof window !== "undefined") {
-      localStorage.removeItem("loggedInUser");
-    }
-    router.replace("/login");
->>>>>>> 8e523f1f0401a1f08038677fe414e21bd1e46c03
-  };
-
+  // Scroll to bottom when messages update
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length, isLoading]);
 
-  // Auto-resize the input textarea up to a max height
+  // Auto-resize textarea
   const adjustTextareaHeight = () => {
     const el = inputRef.current;
     if (!el) return;
-    const maxHeight = 160; // px, roughly several lines
     el.style.height = "0px";
-    const newHeight = Math.min(el.scrollHeight, maxHeight);
-    el.style.height = `${newHeight}px`;
-    el.style.overflowY = el.scrollHeight > maxHeight ? "auto" : "hidden";
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+    el.style.overflowY = el.scrollHeight > 160 ? "auto" : "hidden";
+  };
+  useEffect(() => { adjustTextareaHeight(); }, [input]);
+
+  const handleNewChat = () => {
+    setMessages([]);
+    setChatName("New Chat");
+    setSessionId(generateSessionId());
   };
 
-  useEffect(() => {
-    adjustTextareaHeight();
-  }, [input]);
-
-  // ─── File Handling Functions ───────────────────────────────────────────────
-  const handleAttachClick = () => {
-    fileInputRef.current?.click();
+  const handleLogout = () => {
+    localStorage.removeItem("loggedInUser");
+    router.replace("/login");
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      const newFiles = Array.from(e.target.files);
-      setSelectedFiles((prev) => [...prev, ...newFiles]);
-    }
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  };
-
-  const removeFile = (indexToRemove: number) => {
-    setSelectedFiles((prev) => prev.filter((_, index) => index !== indexToRemove));
-  };
-
-  // ─── OPTIMIZED: Audio Recording Logic ───
   const toggleRecording = async () => {
     if (isRecording) {
-      // STOP RECORDING
-      // This triggers the 'onstop' event defined below
       mediaRecorderRef.current?.stop();
       setIsRecording(false);
     } else {
-      // START RECORDING
       try {
-        // ⚡ Optimization 1: Request low-bandwidth audio (Mono, 16kHz)
-        // This makes the file 50-80% smaller without any processing delay.
-        const stream = await navigator.mediaDevices.getUserMedia({ 
-          audio: { 
-            channelCount: 1,      // Mono
-            sampleRate: 16000,    // 16kHz
-            echoCancellation: true 
-          } 
-        });
-
-        // ⚡ Optimization 2: Use efficient WebM format
-        const options = { mimeType: "audio/webm;codecs=opus" }; 
-        const mediaRecorder = new MediaRecorder(stream, options);
-        const chunks: Blob[] = [];
-
-        // Collect audio data as it comes in
-        mediaRecorder.ondataavailable = (e) => {
-          if (e.data.size > 0) chunks.push(e.data);
-        };
-        
-        // When stopped, package the file and add to preview
-        mediaRecorder.onstop = () => {
-          const audioBlob = new Blob(chunks, { type: "audio/webm" });
-          
-          // Create a File object (looks just like an uploaded file)
-          const audioFile = new File([audioBlob], `voice_note_${Date.now()}.webm`, { type: "audio/webm" });
-          
-          // Add to the list so the user sees it in the "File Preview" area
-          setSelectedFiles((prev) => [...prev, audioFile]);
-          
-          // Stop all audio tracks to release the microphone hardware
-          stream.getTracks().forEach(track => track.stop());
-        };
-
-        mediaRecorder.start();
-        mediaRecorderRef.current = mediaRecorder;
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const rec = new MediaRecorder(stream);
+        rec.start();
+        mediaRecorderRef.current = rec;
         setIsRecording(true);
-
-      } catch (error: any) {
-        // ⚡ BETTER ERROR HANDLING
-        console.error("Microphone Error:", error);
-        
-        if (error.name === "NotFoundError" || error.name === "DevicesNotFoundError") {
-          alert("No microphone found! Please connect a microphone and try again.");
-        } else if (error.name === "NotAllowedError" || error.name === "PermissionDeniedError") {
-          alert("Permission denied. Please allow microphone access in your browser settings.");
-        } else {
-          alert("Error accessing microphone: " + error.message);
-        }
-        
-        setIsRecording(false);
+      } catch {
+        alert("Please allow microphone access.");
       }
     }
   };
 
-  // ─── Updated sendMessage Function ─────────────────────────────────────────
-  // Accepts optional textOverride for the clickable cards
-  const sendMessage = async (textOverride?: string) => {
-    const textToSend = typeof textOverride === "string" ? textOverride : input;
-    
-    // ✨ NEW: Allow send if there are files even if text is empty
-    const hasFiles = selectedFiles.length > 0;
-    if ((!textToSend.trim() && !hasFiles) || isLoading) return;
-    
-    // ✨ NEW: Prepare file metadata for chat history display
-    const fileDataForMsg = selectedFiles.map(f => ({ name: f.name, type: f.type }));
+  // ── Send message & stream response ──────────────────────────────────────────
+  const sendMessage = async () => {
+    if (!input.trim() || isLoading) return;
+    const userText = input.trim();
 
-    // Add User Message
-    setMessages((prev) => [...prev, { role: "user", text: textToSend, files: fileDataForMsg }]);
-    
-    if (!textOverride) setInput("");
-    setSelectedFiles([]); // Clear selection after sending
+    setMessages(prev => [...prev, { role: "user", text: userText }]);
+    setInput("");
     setIsLoading(true);
-    const payload = {
-      query: userText,
-      userId: loggedInUser,
-      sessionId: sessionId,
-    };
-    console.log("[Chat] Request to backend:", payload);
-
 
     try {
-      // Note: We are still sending JSON for now. 
-      // Backend update for FormData will come in the next phase.
       const response = await fetch("http://127.0.0.1:8001/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-        
+        body: JSON.stringify({ query: userText, userId: loggedInUser, sessionId }),
       });
 
       if (!response.ok) throw new Error(`Server error: ${response.status}`);
 
-      const reader = response.body?.getReader();
+      const reader  = response.body?.getReader();
       const decoder = new TextDecoder();
       if (!reader) throw new Error("No response body");
 
+      // Add AI placeholder with streaming: true — renders as plain text during stream
       setIsLoading(false);
-      isTypingRef.current = false; // Show cursor
-      setMessages((prev) => [...prev, { role: "ai", text: "" }]);
+      setMessages(prev => [...prev, { role: "ai" as const, text: "", streaming: true }]);
 
-      let accumulatedText = "";
+      let accumulated = "";
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
         const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split("\n").filter(line => line.trim() !== "");
-
-        for (const line of lines) {
+        for (const line of chunk.split("\n").filter(l => l.trim())) {
           try {
-            let jsonStr = line;
-            if (line.startsWith("data: ")) {
-              jsonStr = line.slice(6);
-            }
-
+            const jsonStr  = line.startsWith("data: ") ? line.slice(6) : line;
             const textPart = extractText(JSON.parse(jsonStr));
-            
             if (textPart) {
-              accumulatedText += textPart;
-              setMessages((prev) => {
+              accumulated += textPart;
+              // Keep streaming:true → renders as plain pre-wrap text
+              setMessages(prev => {
                 const updated = [...prev];
-                const lastIndex = updated.length - 1;
-                if (updated[lastIndex].role === "ai") {
-                    updated[lastIndex] = { role: "ai", text: accumulatedText };
+                const last    = updated.length - 1;
+                if (updated[last]?.role === "ai") {
+                  updated[last] = { role: "ai", text: accumulated, streaming: true };
                 }
                 return updated;
               });
-              await new Promise(resolve => setTimeout(resolve, 10));
+              await new Promise(r => setTimeout(r, 10));
             }
-          } catch (e) {
-            // Ignore partial/invalid chunks
-          }
+          } catch { /* partial chunk */ }
         }
       }
 
-      isTypingRef.current = false;
-    } catch (error) {
-      console.error("Chat Error:", error);
-      setMessages((prev) => [...prev, { role: "error", text: "❌ Connection failed. Check backend." }]);
+      // ✅ Stream done — flip streaming:false → triggers renderMarkdown → table appears
+      setMessages(prev => {
+        const updated = [...prev];
+        const last    = updated.length - 1;
+        if (updated[last]?.role === "ai") {
+          updated[last] = { role: "ai", text: accumulated, streaming: false };
+        }
+        return updated;
+      });
+
+    } catch (err) {
+      console.error("Chat Error:", err);
+      setMessages(prev => [...prev, { role: "error", text: "❌ Connection failed. Check backend." }]);
       setIsLoading(false);
-      isTypingRef.current = false;
     } finally {
-      setTimeout(() => {
-        inputRef.current?.focus();
-      }, 50);
+      setTimeout(() => inputRef.current?.focus(), 50);
     }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    // Enter sends, Shift+Enter makes a new line
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
-    }
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   };
 
   const isLanding = messages.length === 0;
 
-  // Don't render main app until we've checked auth; prevents showing main page before redirect to login
   if (!authChecked) {
     return (
-      <div style={{
-        minHeight: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: "radial-gradient(circle at top, #ECFAE5 0, #DDF6D2 35%, #CAE8BD 75%)",
-      }}>
-        <div style={{ fontSize: 14, color: "#4b5f45" }}>Checking authentication...</div>
+      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "radial-gradient(circle at top, #ECFAE5 0, #DDF6D2 35%, #CAE8BD 75%)" }}>
+        <span style={{ fontSize: 14, color: "#4b5f45" }}>Checking authentication…</span>
       </div>
     );
   }
@@ -494,171 +472,117 @@ export default function Home() {
     <div className="app-container">
       <div className="bg-gradient" />
 
-      {/* Sidebar */}
+      {/* ── Sidebar ──────────────────────────────────────────────────────── */}
       <aside className="sidebar">
         <div className="sidebar-header">
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <div className="brand-box">
-              <Image
-                src="/icon.png"
-                alt="Nanosoft Ask AI"
-                width={20}
-                height={20}
-                style={{ borderRadius: 6 }}
-              />
+              <Image src="/icon.png" alt="Nanosoft Ask AI" width={20} height={20} style={{ borderRadius: 6 }} />
             </div>
-            <span style={{ fontSize: "14px", fontWeight: 600, color: "#1f2933" }}>NANOSOFT ASK AI</span>
+            <span style={{ fontSize: 14, fontWeight: 600, color: "#1f2933" }}>NANOSOFT ASK AI</span>
           </div>
         </div>
 
         <div className="search-container">
           <div className="search-input-box">
             <IconSearch />
-            <input type="text" placeholder="Search" value={searchVal} onChange={(e) => setSearchVal(e.target.value)} />
+            <input type="text" placeholder="Search" value={searchVal} onChange={e => setSearchVal(e.target.value)} />
           </div>
         </div>
 
         <div className="sidebar-scroll">
           <div className="section-title">Folders</div>
-          {FOLDERS.map((f) => (
+          {FOLDERS.map(f => (
             <div key={f.id} className="sidebar-item">
               <div className="content">
                 <IconFolder />
-<<<<<<< HEAD
                 <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{f.name}</span>
-              </div>
-              <div className="dots-btn"><IconDots /></div>
-            </div>
-          ))}
-          
-          <div className="section-title mt">Chats</div>
-          {CHATS.map((c) => (
-            <div 
-              key={c.id} 
-              className={`sidebar-item ${activeChatId === c.id ? 'active' : ''}`}
-              onClick={() => { setActiveChatId(c.id); setChatName(c.title); setMessages([]); setSelectedFiles([]); }} 
-            >
-              <div style={{ display: "flex", alignItems: "flex-start", gap: "7px", minWidth: 0, flex: 1 }}>
-                <div style={{ color: "#4a8f3a", marginTop: "1px", flexShrink: 0 }}><IconChat /></div>
-                <div style={{ minWidth: 0 }}>
-                  <div className="title" style={{ fontSize: "13px", fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.title}</div>
-                  <div className="preview" style={{ fontSize: "11px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.preview}</div>
-                </div>
-=======
-                <span
-                  style={{
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                  }}
-                >
-                  {f.name}
-                </span>
->>>>>>> 8e523f1f0401a1f08038677fe414e21bd1e46c03
               </div>
             </div>
           ))}
         </div>
-        
+
         <div className="new-chat-container">
-          <button className="new-chat-btn" onClick={handleNewChat}>
-            New chat &nbsp;<IconPlus />
-          </button>
+          <button className="new-chat-btn" onClick={handleNewChat}>New chat &nbsp;<IconPlus /></button>
         </div>
       </aside>
 
-      {/* Main Content */}
+      {/* ── Main Content ─────────────────────────────────────────────────── */}
       <div className="main-content">
+
+        {/* Header */}
         <header className="chat-header chat-header-transparent">
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="logout-btn"
-            title="Sign out"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-              <polyline points="16 17 21 12 16 7" />
-              <line x1="21" y1="12" x2="9" y2="12" />
-            </svg>
-            Logout
-          </button>
-        </header>
+          <div className="hamburger-wrapper" ref={menuRef}>
+            <button className="hamburger-btn" onClick={() => setMenuOpen(p => !p)} title="Menu" aria-label="Open menu">
+              <IconHamburger />
+            </button>
 
-        {/* Chat Area */}
-        <div className="chat-scroll-area">
-          {isLanding && (
-            <div className="landing-container">
-              <div style={{ marginBottom: "24px", opacity: 0.5 }}>
-                <Image
-                  src="/nanosoft_logo.png"
-                  alt=""
-                  width={560}
-                  height={200}
-                  style={{ width: "auto", height: "auto", maxWidth: "min(600px, 90vw)", maxHeight: "200px", objectFit: "contain" }}
-                />
-              </div>
-              <div className="landing-card">
-                <h1 style={{ fontSize: "24px", fontWeight: 700, color: "#1f2933", marginBottom: "10px" }}>How can I help you today?</h1>
-                <p style={{ fontSize: "12px", color: "#3f5f3a", lineHeight: 1.6, maxWidth: "380px", margin: "0 auto 28px" }}>Start a conversation to search assets, manage complaints, or check work orders.</p>
-                
-                {/* <div className="feature-grid">
-                  {[{ title: "Search Assets", desc: "Find equipment details." }, { title: "Work Orders", desc: "Check schedules." }, { title: "Complaints", desc: "Track issues." }].map((card, i) => (
-                    <div key={i} className="feature-card">
-                      <div style={{ fontSize: "12px", fontWeight: 600, color: "#3f5f3a", marginBottom: "5px" }}>{card.title}</div>
-                      <div style={{ fontSize: "10px", color: "#4b5f45" }}>{card.desc}</div>
-                    </div>
-                  ))}
-                </div> */}
-
-                {/* <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", flexWrap: "wrap" }}>
-                  {CATEGORIES.map((cat) => (
-                    <button 
-                      key={cat} 
-                      className={`cat-pill ${activeCategory === cat ? 'active' : ''}`}
-                      onClick={() => setActiveCategory(activeCategory === cat ? null : cat)}
-                    >
-                      {cat}
-                    </button>
-                  ))}
-                </div> */}
+            <div className={`profile-dropdown ${menuOpen ? "open" : ""}`}>
+              <div className="profile-dropdown-inner">
+                <div className="profile-dropdown-item profile-user-row">
+                  <div className="profile-avatar">
+                    {loggedInUser ? loggedInUser.charAt(0).toUpperCase() : "U"}
+                  </div>
+                  <div className="profile-user-info">
+                    <span className="profile-label">Logged in as</span>
+                    <span className="profile-userid">{loggedInUser}</span>
+                  </div>
+                </div>
+                <div className="profile-divider" />
+                <button className="profile-dropdown-item profile-action-btn"><IconUser /><span>Profile</span></button>
+                <button className="profile-dropdown-item profile-action-btn profile-logout" onClick={handleLogout}>
+                  <IconLogout /><span>Logout</span>
+                </button>
               </div>
             </div>
-          )}
+          </div>
+        </header>
 
-          {!isLanding && (
+        {/* Landing */}
+        {isLanding && (
+          <div className="landing-container">
+            <div style={{ marginBottom: 24, opacity: 0.5 }}>
+              <Image src="/nanosoft_logo.png" alt="" width={560} height={200}
+                style={{ width: "auto", height: "auto", maxWidth: "min(600px,90vw)", maxHeight: 200, objectFit: "contain" }} />
+            </div>
+            <div className="landing-card">
+              <h1 style={{ fontSize: 24, fontWeight: 700, color: "#1f2933", marginBottom: 10 }}>How can I help you today?</h1>
+              <p style={{ fontSize: 12, color: "#3f5f3a", lineHeight: 1.6, maxWidth: 380, margin: "0 auto 28px" }}>
+                Start a conversation to search assets, manage complaints, or check work orders.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Chat area */}
+        {!isLanding && (
+          <div className="chat-scroll-area">
             <div className="messages-container">
-              {messages.map((msg, index) => {
-                const isUser = msg.role === "user";
-                const isError = msg.role === "error";
-                const isLastAi = msg.role === "ai" && index === messages.length - 1;
-                const showCursor = isLastAi && isTypingRef.current;
+              {messages.map((msg, idx) => {
+                const isUser      = msg.role === "user";
+                const isError     = msg.role === "error";
+                const isStreaming = msg.streaming === true;
 
                 return (
-                  <div key={index} className={`message-row ${msg.role}`}>
-                    {!isUser && !isError && (
-                      <div className="avatar-box">
-                        <IconBot />
-                      </div>
-                    )}
+                  <div key={idx} className={`message-row ${msg.role}`}>
+                    {!isUser && !isError && <div className="avatar-box"><IconAI /></div>}
 
                     <div className={`message-bubble ${msg.role}`}>
-                      {/* ✨ NEW: Display attached files tags */}
-                      {msg.files && msg.files.length > 0 && (
-                        <div style={{ marginBottom: "8px", display: "flex", flexWrap: "wrap", gap: "4px" }}>
-                          {msg.files.map((f, fIdx) => (
-                            <div key={fIdx} style={{ fontSize: "11px", background: "rgba(255,255,255,0.1)", padding: "4px 8px", borderRadius: "4px", display: "flex", alignItems: "center", gap: "4px" }}>
-                              <IconAttach /> <span>{f.name}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      
-                      {(isUser || isError) ? (
+                      {isUser || isError ? (
+                        // User / error — plain text
                         <>{msg.text}</>
+
+                      ) : isStreaming ? (
+                        // ── STREAMING: plain pre-wrap + blinking cursor ──────
+                        <div className="ai-bubble streaming-text">
+                          {msg.text}
+                          <span className="stream-cursor" />
+                        </div>
+
                       ) : (
+                        // ── COMPLETE: full markdown with auto-table ───────────
                         <div className="ai-bubble">
-                          <div dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.text, showCursor) }} />
+                          <div dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.text) }} />
                         </div>
                       )}
                     </div>
@@ -668,51 +592,42 @@ export default function Home() {
 
               {isLoading && (
                 <div className="loading-indicator">
-                  <div className="avatar-box">
-                    <IconBot />
-                  </div>
+                  <div className="avatar-box"><IconAI /></div>
                   <div className="loading-dots-box">
-                    {[0, 1, 2].map((i) => <span key={i} style={{ display: "inline-block", width: "7px", height: "7px", borderRadius: "50%", background: "#4a8f3a", animation: `bounce 1.2s ease-in-out ${i * 0.2}s infinite` }} />)}
+                    {[0,1,2].map(i => (
+                      <span key={i} style={{
+                        display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: "#4a8f3a",
+                        animation: `bounce 1.2s ease-in-out ${i*0.2}s infinite`,
+                      }} />
+                    ))}
                   </div>
                 </div>
               )}
               <div ref={messagesEndRef} />
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
-        {/* Input Area */}
+        {/* Input footer */}
         <div className="input-footer">
           <div className="input-wrapper">
-            {/* <div className="model-selector">
-              <div style={{ width: "14px", height: "14px", borderRadius: "4px", background: "linear-gradient(135deg,#B0DB9C,#6fb24f)", display: "flex", alignItems: "center", justifyContent: "center" }}><svg width="8" height="8" viewBox="0 0 24 24" fill="white"><path d="M12 2L2 7l10 5 10-5-10-5z" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round" /></svg></div>
-              <span style={{ fontSize: "11px", color: "#3f5f3a", fontWeight: 600 }}>Bot</span>
-            </div> */}
-
             <textarea
               ref={inputRef}
               className="main-input"
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={e => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               disabled={isLoading}
-              placeholder="Type your prompt here..."
+              placeholder="Type your prompt here…"
               rows={1}
             />
-            
-            {/* <div className="icon-btn"><IconAttach /></div> */}
-            {/* <div className={`mic-btn ${isRecording ? "recording" : ""}`} onClick={toggleRecording}>
-              <IconMic isActive={isRecording} />
-              {isRecording && <span style={{ position: "absolute", top: "-2px", right: "-2px", width: "8px", height: "8px", background: "#ef4444", borderRadius: "50%", border: "1.5px solid rgba(18,30,20,0.85)", animation: "blink 1s ease-in-out infinite" }} />}
-            </div> */}
-            
             <button className="send-btn" onClick={sendMessage} disabled={isLoading || !input.trim()}>
               <IconSend />
             </button>
           </div>
-
           <p className="footer-disclaimer">AI can make mistakes. Consider checking important information.</p>
         </div>
+
       </div>
     </div>
   );
