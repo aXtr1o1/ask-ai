@@ -298,7 +298,7 @@ export default function Home() {
 
 
     try {
-      const response = await fetch("http://127.0.0.1:8001/chat", {
+      const response = await fetch("http://3.110.127.187:8001/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
