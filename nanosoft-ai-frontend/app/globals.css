@@ -343,11 +343,7 @@ body {
   width: 28px;
   height: 28px;
   border-radius: 8px;
-<<<<<<< HEAD
-  background: black;
-=======
   background: linear-gradient(135deg, #CAE8BD, #B0DB9C);
->>>>>>> 42e52d900986d16b12807769ceba88de078fdb03
   display: flex;
   align-items: center;
   justify-content: center;

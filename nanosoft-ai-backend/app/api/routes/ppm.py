@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException
-from app.api.models.schemas import AssetRequest, StandardResponse
+from app.api.models.schemas import PPMRequest, StandardResponse
 from app.api.database.supabase_client import get_supabase_client
 
 router = APIRouter()
@@ -13,50 +13,43 @@ def format_response(raw) -> dict:
     safe = raw if isinstance(raw, list) else []
     return {"p_list": safe, "p_count": len(safe)}
 
-@router.post("/get-assets", response_model=StandardResponse, tags=["Assets"])
-def get_assets(req: AssetRequest):
-    print(f"📦 GetAsset | user_id={req.user_id} | limit={req.limit} offset={req.offset}")
+@router.post("/get-ppm", response_model=StandardResponse, tags=["PPM"])
+def get_ppm(req: PPMRequest):
+    print(f"🛠️ GetPPM | user_id={req.user_id} | status={req.status} | limit={req.limit}")
 
     try:
         client = get_supabase_client()
 
-        # Call the Stored Procedure
         response = client.rpc(
-            "sp_asset_query",
+            "sp_ppm_query",
             {
                 # Scope
                 "p_user_id": req.user_id,
 
                 # Text Filters
                 "p_status": req.status,
-                "p_condition": req.condition,
-                "p_priority": req.priority,
-                "p_asset_type": req.asset_type,
+                "p_stage": req.stage,
+                "p_frequency": req.frequency,
                 "p_division": req.division,
                 "p_discipline": req.discipline,
                 "p_locality": req.locality,
                 "p_building": req.building,
                 "p_floor": req.floor,
-                "p_owner": req.owner,
-                "p_make": req.make,
-                "p_model": req.model,
-                "p_service_area": req.service_area,
-                "p_trade_group": req.trade_group,
+                "p_contract": req.contract,
+                "p_tech": req.tech,
 
-                # Boolean Flags
-                "p_on_hold": req.on_hold,
-                "p_is_snagged": req.is_snagged,
-                "p_is_scraped": req.is_scraped,
-                "p_enable_ppm": req.enable_ppm,
-                "p_enable_bdm": req.enable_bdm,
-
-                # Search (Including new Barcode logic)
-                "p_barcode": req.barcode,
+                # Search
                 "p_keyword": req.keyword,
 
-                # Date Range
+                # Date Ranges
                 "p_date_from": req.date_from,
                 "p_date_to": req.date_to,
+                "p_comp_from": req.comp_from,
+                "p_comp_to": req.comp_to,
+
+                # SLA
+                "p_sla_min": req.sla_min,
+                "p_sla_max": req.sla_max,
 
                 # Pagination
                 "p_limit": req.limit,
@@ -68,5 +61,5 @@ def get_assets(req: AssetRequest):
         return result
 
     except Exception as exc:
-        print(f"❌ GetAsset Error: {exc}")
+        print(f"❌ GetPPM Error: {exc}")
         raise HTTPException(status_code=500, detail=str(exc))

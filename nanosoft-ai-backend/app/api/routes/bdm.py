@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException
-from app.api.models.schemas import AssetRequest, StandardResponse
+from app.api.models.schemas import BDMRequest, StandardResponse
 from app.api.database.supabase_client import get_supabase_client
 
 router = APIRouter()
@@ -13,50 +13,46 @@ def format_response(raw) -> dict:
     safe = raw if isinstance(raw, list) else []
     return {"p_list": safe, "p_count": len(safe)}
 
-@router.post("/get-assets", response_model=StandardResponse, tags=["Assets"])
-def get_assets(req: AssetRequest):
-    print(f"📦 GetAsset | user_id={req.user_id} | limit={req.limit} offset={req.offset}")
+@router.post("/get-bdm", response_model=StandardResponse, tags=["BDM"])
+def get_bdm(req: BDMRequest):
+    print(f"🔧 GetBDM | user_id={req.user_id} | status={req.status} | limit={req.limit}")
 
     try:
         client = get_supabase_client()
 
-        # Call the Stored Procedure
         response = client.rpc(
-            "sp_asset_query",
+            "sp_bdm_query",
             {
                 # Scope
                 "p_user_id": req.user_id,
 
                 # Text Filters
                 "p_status": req.status,
-                "p_condition": req.condition,
                 "p_priority": req.priority,
-                "p_asset_type": req.asset_type,
+                "p_stage": req.stage,
+                "p_complaint_type": req.complaint_type,
+                "p_complaint_mode": req.complaint_mode,
+                "p_complaint_nature": req.complaint_nature,
+                "p_wo_type": req.wo_type,
+                "p_service_type": req.service_type,
                 "p_division": req.division,
                 "p_discipline": req.discipline,
                 "p_locality": req.locality,
                 "p_building": req.building,
                 "p_floor": req.floor,
-                "p_owner": req.owner,
-                "p_make": req.make,
-                "p_model": req.model,
-                "p_service_area": req.service_area,
-                "p_trade_group": req.trade_group,
+                "p_contract": req.contract,
+                "p_analysis_tech": req.analysis_tech,
+                "p_execution_tech": req.execution_tech,
+                "p_complainer": req.complainer,
 
-                # Boolean Flags
-                "p_on_hold": req.on_hold,
-                "p_is_snagged": req.is_snagged,
-                "p_is_scraped": req.is_scraped,
-                "p_enable_ppm": req.enable_ppm,
-                "p_enable_bdm": req.enable_bdm,
-
-                # Search (Including new Barcode logic)
-                "p_barcode": req.barcode,
+                # Search
                 "p_keyword": req.keyword,
 
-                # Date Range
+                # Date Ranges
                 "p_date_from": req.date_from,
                 "p_date_to": req.date_to,
+                "p_completed_from": req.completed_from,
+                "p_completed_to": req.completed_to,
 
                 # Pagination
                 "p_limit": req.limit,
@@ -68,5 +64,5 @@ def get_assets(req: AssetRequest):
         return result
 
     except Exception as exc:
-        print(f"❌ GetAsset Error: {exc}")
+        print(f"❌ GetBDM Error: {exc}")
         raise HTTPException(status_code=500, detail=str(exc))
