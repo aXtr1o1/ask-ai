@@ -290,8 +290,8 @@ const IconAI = () => (
   </svg>
 );
 
-// ─── Main Component ───────────────────────────────────────────────────────────
-export default function Home() {
+// ─── Main Component (with useSearchParams wrapped in Suspense) ────────────────
+function HomeContent() {
   const router        = useRouter();
   const searchParams  = useSearchParams();
   const userIdFromUrl = searchParams.get("userId");
@@ -630,5 +630,18 @@ export default function Home() {
 
       </div>
     </div>
+  );
+}
+
+// ─── Main Export with Suspense Boundary ────────────────────────────────────────
+export default function Home() {
+  return (
+    <Suspense fallback={
+      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "radial-gradient(circle at top, #ECFAE5 0, #DDF6D2 35%, #CAE8BD 75%)" }}>
+        <span style={{ fontSize: 14, color: "#4b5f45" }}>Loading…</span>
+      </div>
+    }>
+      <HomeContent />
+    </Suspense>
   );
 }
