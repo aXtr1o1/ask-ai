@@ -83,7 +83,6 @@ async def chat_endpoint(request: ChatRequest):
     user_query = request.query
     user_id = request.userId
     session_id = request.sessionId
-
     print(f"{user_id}---------{user_query}-------{session_id}")
 
     # 1️⃣ Validate user ID
