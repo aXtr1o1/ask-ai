@@ -61,8 +61,12 @@ def ASSETS(
     division=None, discipline=None, locality=None, building=None, floor=None,
     owner=None, make=None, model=None, service_area=None, trade_group=None,
     on_hold=None, is_snagged=None, is_scraped=None, enable_ppm=None, enable_bdm=None,
-    barcode=None, keyword=None, date_from=None, date_to=None
+    barcode=None, keyword=None, date_from=None, date_to=None,
+    limit=20, offset=0
 ) -> str:
+    # user_id is always injected from the frontend request; never use model-provided value
+    if not user_id:
+        return "Error: user_id is required. It is set from the authenticated request."
     logger.info(f"📦 ASSETS TOOL TRIGGERED for user_id: {user_id}")
 
     payload = {
@@ -148,8 +152,11 @@ def PPM(
     division=None, discipline=None, locality=None, building=None, floor=None,
     contract=None, tech=None, keyword=None,
     date_from=None, date_to=None, comp_from=None, comp_to=None,
-    sla_min=None, sla_max=None
+    sla_min=None, sla_max=None,
+    limit=20, offset=0
 ) -> str:
+    if not user_id:
+        return "Error: user_id is required. It is set from the authenticated request."
     logger.info(f"🛠️ PPM TOOL TRIGGERED for user_id: {user_id}")
 
     payload = {
@@ -239,8 +246,11 @@ def BDM(
     division=None, discipline=None, locality=None, building=None, floor=None,
     contract=None, analysis_tech=None, execution_tech=None, complainer=None,
     keyword=None, date_from=None, date_to=None,
-    completed_from=None, completed_to=None
+    completed_from=None, completed_to=None,
+    limit=20, offset=0
 ) -> str:
+    if not user_id:
+        return "Error: user_id is required. It is set from the authenticated request."
     logger.info(f"🔧 BDM TOOL TRIGGERED for user_id: {user_id}")
 
     payload = {
