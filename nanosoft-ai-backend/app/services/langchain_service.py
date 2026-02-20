@@ -46,6 +46,9 @@ class LangChainService:
 
     async def process_query(self, messages: list, user_id: str = None) -> tuple[str, list]:
         try:
+            # user_id is always from the frontend request; use it for all tool calls
+            if not user_id:
+                raise ValueError("user_id is required (from frontend request)")
             logger.info(f"💬 Processing query for user_id: {user_id}")
             ai_msg = self.model.invoke(messages)
 
@@ -55,9 +58,16 @@ class LangChainService:
 
                 for tool_call in ai_msg.tool_calls:
                     tool_fn = self.tool_map[tool_call["name"]]
+                    if tool_call.get("args") is None:
+                        tool_call["args"] = {}
+                    args_before = dict(tool_call["args"])
 
-                    # ✅ Inject real user_id into every tool call's args
+                    # Always use the request user_id (constant from frontend)
                     tool_call["args"]["user_id"] = user_id
+                    args_after = dict(tool_call["args"])
+
+                    logger.info(f"🔑 DEBUG Tool '{tool_call['name']}': args before inject={args_before!r}")
+                    logger.info(f"🔑 DEBUG Tool '{tool_call['name']}': args after inject user_id={user_id!r} -> {args_after!r}")
 
                     tool_result = tool_fn.invoke(tool_call["args"])
                     messages.append(
@@ -67,6 +77,8 @@ class LangChainService:
                         )
                     )
                     logger.info(f"✅ Tool '{tool_call['name']}' executed for user_id: {user_id}")
+            else:
+                logger.info(f"🔑 DEBUG: No tool calls this turn (model replied without calling a tool)")
 
             final_response_text = ""
             async for chunk in self.model.astream(messages):
