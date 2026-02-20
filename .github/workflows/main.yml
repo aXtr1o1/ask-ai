@@ -66,6 +66,7 @@ jobs:
               git remote set-url origin "https://x-access-token:${GH_DEPLOY_TOKEN}@github.com/${REPO_SLUG}.git"
             fi
             git fetch origin
+            git reset --hard
             git checkout -B ${{ github.ref_name }} origin/${{ github.ref_name }}
             cd nanosoft-ai-frontend
             npm ci --prefer-offline --no-audit || npm install
@@ -105,6 +106,7 @@ jobs:
               git remote set-url origin "https://x-access-token:${GH_DEPLOY_TOKEN}@github.com/${REPO_SLUG}.git"
             fi
             git fetch origin
+            git reset --hard
             git checkout -B ${{ github.ref_name }} origin/${{ github.ref_name }}
             cd nanosoft-ai-backend
             python3 -m venv .venv 2>/dev/null || true
