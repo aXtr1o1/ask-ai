@@ -9,7 +9,7 @@ import logging
 from app.models.schemas import ChatRequest
 from app.config import settings
 from app.services.langchain_service import langchain_service
-from app.prompts.system_prompt import system_prompt
+from app.prompts.system_prompt import get_system_prompt
 
 logger = logging.getLogger("chatbot_app")
 logger.setLevel(logging.INFO)
@@ -81,7 +81,7 @@ def print_memory(session_id: str):
 @chatbot_app.post("/chat")
 async def chat_endpoint(request: ChatRequest):
     user_query = request.query
-    user_id = request.userId
+    user_id = request.userId  # constant from frontend; used for all processing and tool calls
     session_id = request.sessionId
     print(f"{user_id}---------{user_query}-------{session_id}")
 
@@ -107,11 +107,11 @@ async def chat_endpoint(request: ChatRequest):
     lc_memory = memory_store[session_id]["lc_memory"]
     history = memory_store[session_id]["history"]
 
-    # 3️⃣ Build message context: system prompt + history as LangChain messages
-    messages = [system_prompt] + lc_memory
+    # 3️⃣ Build message context: system prompt includes authenticated user_id so model never asks for it
+    messages = [get_system_prompt(user_id)] + lc_memory
     messages.append(HumanMessage(content=user_query))
 
-    # 4️⃣ Process with LangChain — pass real user_id so tools use it
+    # 4️⃣ Process with LangChain — same user_id used for all tool calls
     try:
         final_response_text, _ = await langchain_service.process_query(messages, user_id=user_id)
         logger.info(f"✅ Response generated for session_id: {session_id}")

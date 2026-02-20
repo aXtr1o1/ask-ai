@@ -10,8 +10,8 @@ from typing import Optional
 # ==========================================
 
 class AssetsInput(BaseModel):
-    """Schema for ASSETS tool"""
-    user_id: str = Field(default="101", description="User ID")
+    """Schema for ASSETS tool. user_id is set by the system from the authenticated request; do not ask the user."""
+    user_id: Optional[str] = Field(default=None, description="Set by system from authenticated user; never ask the user for this.")
     status: Optional[str] = Field(default=None, description="Asset status")
     condition: Optional[str] = Field(default=None, description="Asset condition")
     priority: Optional[str] = Field(default=None, description="Asset priority level")
@@ -40,8 +40,8 @@ class AssetsInput(BaseModel):
 
 
 class PPMInput(BaseModel):
-    """Schema for PPM tool (Planned Preventive Maintenance)"""
-    user_id: str = Field(default="101", description="User ID")
+    """Schema for PPM tool (Planned Preventive Maintenance). user_id is set by the system; do not ask the user."""
+    user_id: Optional[str] = Field(default=None, description="Set by system from authenticated user; never ask the user for this.")
     status: Optional[str] = Field(default=None, description="PPM status")
     stage: Optional[str] = Field(default=None, description="PPM stage name")
     frequency: Optional[str] = Field(default=None, description="Frequency (Monthly/Weekly/etc.)")
@@ -64,8 +64,8 @@ class PPMInput(BaseModel):
 
 
 class BDMInput(BaseModel):
-    """Schema for BDM tool (Breakdown Maintenance / Complaints)"""
-    user_id: str = Field(default="101", description="User ID")
+    """Schema for BDM tool (Breakdown Maintenance / Complaints). user_id is set by the system; do not ask the user."""
+    user_id: Optional[str] = Field(default=None, description="Set by system from authenticated user; never ask the user for this.")
     status: Optional[str] = Field(default=None, description="Work order status")
     priority: Optional[str] = Field(default=None, description="Priority name")
     stage: Optional[str] = Field(default=None, description="Stage name")
