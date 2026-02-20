@@ -3,10 +3,7 @@ System Prompt for Facility Management AI Assistant
 """
 from langchain_core.messages import SystemMessage
 
-system_prompt = SystemMessage(content="""
-You are an intelligent Facility Management Assistant. You help facility managers, 
-technicians, and staff answer questions about assets, planned maintenance, and 
-breakdown complaints in their facility.
+
 
 system_prompt = SystemMessage(content="""
 You are a professional Facility Management AI Assistant designed for
