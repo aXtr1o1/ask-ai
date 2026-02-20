@@ -23,23 +23,37 @@ if not logger.handlers:
 
 @tool(
     description="""
-Use this tool when the user asks about ASSETS (physical equipment/master equipment list).
+        Use this tool when the user asks about ASSETS (physical or master equipment records).
 
-Covers:
-- Asset tag, name, make, model, serial number
-- Location: locality, building, floor, service area
-- Division, discipline, trade group
-- Status, condition, priority
-- Boolean flags: on hold, snagged, scraped, PPM enabled, BDM enabled
-- Barcode lookup, keyword search, date range
+        This tool retrieves asset details used as the foundation for SLA tracking, 
+        maintenance planning, and compliance evaluation.
 
-Example queries:
-- List active assets in HVAC division
-- Show assets on Floor 2
-- Find asset by barcode
-- Assets with PPM enabled
-""",
-    args_schema=AssetsInput
+        It supports advanced filtering to identify assets by:
+        - Ownership and user isolation (user_id)
+        - Operational state (status, condition, priority)
+        - Asset classification (asset_type, division, discipline, trade_group)
+        - Physical location hierarchy (locality, building, floor, service_area)
+        - Manufacturer details (make, model)
+        - Maintenance configuration flags:
+        - on_hold (temporarily inactive assets)
+        - is_snagged (assets with issues)
+        - is_scraped (decommissioned assets)
+        - enable_ppm (Preventive Maintenance enabled)
+        - enable_bdm (Breakdown Maintenance enabled)
+        - Asset identification (barcode, keyword search)
+        - Asset creation or update date range
+        - Pagination support (limit, offset)
+
+        This tool is commonly used to:
+        - List active or inactive assets
+        - Identify assets eligible for PPM or BDM
+        - Filter assets for SLA compliance analysis
+        - Perform asset-level searches before fetching PPM or BDM records
+
+        Always use this tool when the query is about equipment, asset metadata, 
+        or asset-level maintenance eligibility.
+        """,
+        args_schema=AssetsInput
 )
 def ASSETS(
     user_id=None,
@@ -47,8 +61,7 @@ def ASSETS(
     division=None, discipline=None, locality=None, building=None, floor=None,
     owner=None, make=None, model=None, service_area=None, trade_group=None,
     on_hold=None, is_snagged=None, is_scraped=None, enable_ppm=None, enable_bdm=None,
-    barcode=None, keyword=None, date_from=None, date_to=None,
-    limit=20, offset=0
+    barcode=None, keyword=None, date_from=None, date_to=None
 ) -> str:
     logger.info(f"📦 ASSETS TOOL TRIGGERED for user_id: {user_id}")
 
@@ -63,10 +76,15 @@ def ASSETS(
         "enable_ppm": enable_ppm, "enable_bdm": enable_bdm,
         "barcode": barcode, "keyword": keyword,
         "date_from": date_from, "date_to": date_to,
-        "limit": limit, "offset": offset
+        "limit": 20,   
+        "offset": 0,   
     }
 
     clean_payload = {k: v for k, v in payload.items() if v is not None}
+
+    print("********************** clean payload *************")
+    print(clean_payload)
+
     logger.debug(f"📤 Payload: {clean_payload}")
 
     try:
@@ -78,8 +96,9 @@ def ASSETS(
             return f"❌ API Error: {response.text}"
 
         response_json = response.json()
-        logger.debug("📥 API Response JSON:")
-        logger.debug(json.dumps(response_json, indent=2))
+
+        print("*************response from the db********")
+        print(json.dumps(response_json, indent=2))
 
         return json.dumps(response_json)
     except Exception as e:
@@ -93,23 +112,35 @@ def ASSETS(
 
 @tool(
     description="""
-Use this tool when the user asks about PPM (Planned Preventive Maintenance) work orders.
+        Use this tool when the user asks about PPM (Planned / Preventive Maintenance) records.
 
-Covers:
-- Work order status, stage, frequency (Monthly/Weekly/etc.)
-- Division, discipline, locality, building, floor
-- Contract, assigned technician
-- Scheduled date range, completion date range
-- SLA duration filters
-- Keyword search
+        This tool retrieves scheduled maintenance jobs and their SLA performance,
+        helping to evaluate preventive maintenance compliance.
 
-Example queries:
-- Show open PPM work orders
-- Monthly PPM tasks for technician Ravi
-- PPM jobs due this month
-- Completed work orders in Electric division
-""",
-    args_schema=PPMInput
+        It supports filtering by:
+        - User isolation (user_id)
+        - PPM execution status and workflow stage
+        - Maintenance frequency (daily, weekly, monthly, etc.)
+        - Organizational structure (division, discipline)
+        - Location hierarchy (locality, building, floor)
+        - Contract association
+        - Assigned technician
+        - Keyword-based search
+        - Planned or actual maintenance date ranges
+        - Completion date ranges
+        - SLA duration filters (sla_min, sla_max in minutes)
+        - Pagination (limit, offset)
+
+        This tool is primarily used to:
+        - Monitor PPM completion against SLA timelines
+        - Identify delayed or overdue preventive maintenance
+        - Analyze technician or contract-based SLA performance
+        - Generate compliance reports for audits and dashboards
+
+        Always use this tool when the query is about scheduled maintenance,
+        preventive tasks, or SLA compliance related to PPM.
+        """,
+            args_schema=PPMInput
 )
 def PPM(
     user_id=None,
@@ -117,7 +148,7 @@ def PPM(
     division=None, discipline=None, locality=None, building=None, floor=None,
     contract=None, tech=None, keyword=None,
     date_from=None, date_to=None, comp_from=None, comp_to=None,
-    sla_min=None, sla_max=None, limit=20, offset=0
+    sla_min=None, sla_max=None
 ) -> str:
     logger.info(f"🛠️ PPM TOOL TRIGGERED for user_id: {user_id}")
 
@@ -130,10 +161,15 @@ def PPM(
         "date_from": date_from, "date_to": date_to,
         "comp_from": comp_from, "comp_to": comp_to,
         "sla_min": sla_min, "sla_max": sla_max,
-        "limit": limit, "offset": offset
+        "limit": 20,   # ← hardcoded — LLM cannot change this
+        "offset": 0,   # ← hardcoded — LLM cannot change this
     }
 
     clean_payload = {k: v for k, v in payload.items() if v is not None}
+
+    print("********************** clean payload *************")
+    print(clean_payload)
+
     logger.debug(f"📤 Payload: {clean_payload}")
 
     try:
@@ -160,24 +196,40 @@ def PPM(
 
 @tool(
     description="""
-Use this tool when the user asks about BDM (Breakdown Maintenance) complaints.
+        Use this tool when the user asks about BDM (Breakdown Maintenance) complaints 
+        or reactive maintenance work orders.
 
-Covers:
-- Complaint status, priority, stage
-- Complaint type, mode, nature
-- Work order type, service type
-- Division, discipline, locality, building, floor
-- Contract, analysis technician, execution technician, complainer
-- Complaint date range, completion date range
-- Keyword search
+        This tool retrieves breakdown complaints and work orders used to track
+        response time, resolution time, and SLA violations.
 
-Example queries:
-- Show open breakdown complaints
-- Complaints raised by John in Building A
-- High priority BDM jobs pending
-- Breakdown jobs completed this week
-""",
-    args_schema=BDMInput
+        It supports filtering by:
+        - User isolation (user_id)
+        - Complaint lifecycle (status, stage, priority)
+        - Complaint classification:
+        - complaint_type
+        - complaint_mode
+        - complaint_nature
+        - Work order and service classification (wo_type, service_type)
+        - Organizational structure (division, discipline)
+        - Location hierarchy (locality, building, floor)
+        - Contract mapping
+        - Assigned technicians (analysis_tech, execution_tech)
+        - Complaint raised by (complainer)
+        - Keyword search
+        - Complaint raised date range
+        - Complaint completion date range
+        - Pagination support (limit, offset)
+
+        This tool is mainly used to:
+        - Track breakdown response and resolution SLAs
+        - Identify overdue or escalated complaints
+        - Analyze SLA violations by priority or technician
+        - Support operational dashboards and real-time alerts
+
+        Always use this tool when the query is about breakdown complaints,
+        reactive maintenance, or SLA compliance related to failures.
+        """,
+            args_schema=BDMInput
 )
 def BDM(
     user_id=None,
@@ -187,8 +239,7 @@ def BDM(
     division=None, discipline=None, locality=None, building=None, floor=None,
     contract=None, analysis_tech=None, execution_tech=None, complainer=None,
     keyword=None, date_from=None, date_to=None,
-    completed_from=None, completed_to=None,
-    limit=20, offset=0
+    completed_from=None, completed_to=None
 ) -> str:
     logger.info(f"🔧 BDM TOOL TRIGGERED for user_id: {user_id}")
 
@@ -203,7 +254,8 @@ def BDM(
         "execution_tech": execution_tech, "complainer": complainer,
         "keyword": keyword, "date_from": date_from, "date_to": date_to,
         "completed_from": completed_from, "completed_to": completed_to,
-        "limit": limit, "offset": offset
+        "limit": 20,  
+        "offset": 0,  
     }
 
     clean_payload = {k: v for k, v in payload.items() if v is not None}

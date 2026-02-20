@@ -45,10 +45,10 @@ VALID_USER_IDS = {"101", "102"}
 #
 # Structure:
 # {
-#   "101": {
+#   "session-abc-123": {
 #     "lc_memory": [HumanMessage, AIMessage, ...],
 #     "history": [...],
-#     "session_id": "abc-123"
+#     "user_id": "101"
 #   }
 # }
 # =====================================================
@@ -56,15 +56,15 @@ MAX_HISTORY = 10
 memory_store = {}
 
 
-def print_memory(user_id: str):
-    """Print current in-memory history for the user"""
+def print_memory(session_id: str):
+    """Print current in-memory history for the session"""
     print("\n" + "=" * 50)
-    print(f"🧠 IN-MEMORY STORE — user_id: {user_id}")
+    print(f"🧠 IN-MEMORY STORE — session_id: {session_id}")
     print("=" * 50)
-    user_data = memory_store.get(user_id, {})
-    history = user_data.get("history", [])
-    session_id = user_data.get("session_id", "N/A")
-    print(f"  Session ID : {session_id}")
+    session_data = memory_store.get(session_id, {})
+    history = session_data.get("history", [])
+    user_id = session_data.get("user_id", "N/A")
+    print(f"  User ID : {user_id}")
     if not history:
         print("  (empty)")
     else:
@@ -83,7 +83,6 @@ async def chat_endpoint(request: ChatRequest):
     user_query = request.query
     user_id = request.userId
     session_id = request.sessionId
-    
     print(f"{user_id}---------{user_query}-------{session_id}")
 
     # 1️⃣ Validate user ID
@@ -96,20 +95,17 @@ async def chat_endpoint(request: ChatRequest):
 
     logger.info(f"✅ Valid user: {user_id} | Session: {session_id}")
 
-    # 2️⃣ Initialize user in memory if first time
-    if user_id not in memory_store:
-        memory_store[user_id] = {
+    # 2️⃣ Initialize session in memory if first time
+    if session_id not in memory_store:
+        memory_store[session_id] = {
             "lc_memory": [],
             "history": [],
-            "session_id": session_id
+            "user_id": user_id
         }
-        logger.info(f"🆕 Memory initialized for user_id: {user_id}")
-    else:
-        # Update session_id if a new session started
-        memory_store[user_id]["session_id"] = session_id
+        logger.info(f"🆕 Memory initialized for session_id: {session_id}")
 
-    lc_memory = memory_store[user_id]["lc_memory"]
-    history = memory_store[user_id]["history"]
+    lc_memory = memory_store[session_id]["lc_memory"]
+    history = memory_store[session_id]["history"]
 
     # 3️⃣ Build message context: system prompt + history as LangChain messages
     messages = [system_prompt] + lc_memory
@@ -118,22 +114,22 @@ async def chat_endpoint(request: ChatRequest):
     # 4️⃣ Process with LangChain — pass real user_id so tools use it
     try:
         final_response_text, _ = await langchain_service.process_query(messages, user_id=user_id)
-        logger.info(f"✅ Response generated for user_id: {user_id}")
+        logger.info(f"✅ Response generated for session_id: {session_id}")
     except Exception as e:
         logger.error(f"❌ LangChain error: {e}", exc_info=True)
         final_response_text = "Sorry, something went wrong while processing your request."
 
-    # 5️⃣ Update in-memory (keep last MAX_HISTORY interactions)
+    # 5️⃣ Update in-memory (keep last MAX_HISTORY interactions per session)
     lc_memory.append(HumanMessage(content=user_query))
     lc_memory.append(AIMessage(content=final_response_text))
     history.append({"query": user_query, "assistant": final_response_text})
 
     if len(history) > MAX_HISTORY:
-        memory_store[user_id]["history"] = history[-MAX_HISTORY:]
-        memory_store[user_id]["lc_memory"] = lc_memory[-(MAX_HISTORY * 2):]
+        memory_store[session_id]["history"] = history[-MAX_HISTORY:]
+        memory_store[session_id]["lc_memory"] = lc_memory[-(MAX_HISTORY * 2):]
 
     # 6️⃣ Print in-memory after every request
-    print_memory(user_id)
+    print_memory(session_id)
 
     # 7️⃣ Return response
     return {
