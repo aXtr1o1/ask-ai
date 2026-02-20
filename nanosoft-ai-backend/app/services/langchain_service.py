@@ -46,42 +46,48 @@ class LangChainService:
 
     async def process_query(self, messages: list, user_id: str = None) -> tuple[str, list]:
         try:
+            # user_id is always from the frontend request; use it for all tool calls
             if not user_id:
-                raise ValueError("user_id is required")
-
+                raise ValueError("user_id is required (from frontend request)")
             logger.info(f"💬 Processing query for user_id: {user_id}")
-
-            # STEP 1 — First model call
             ai_msg = self.model.invoke(messages)
 
-            # STEP 2 — If tool call exists
             if ai_msg.tool_calls:
                 logger.info(f"🛠 Tool calls: {[tc['name'] for tc in ai_msg.tool_calls]}")
+                messages.append(ai_msg)
 
                 for tool_call in ai_msg.tool_calls:
                     tool_fn = self.tool_map[tool_call["name"]]
+                    if tool_call.get("args") is None:
+                        tool_call["args"] = {}
+                    args_before = dict(tool_call["args"])
 
-                    args = tool_call.get("args", {})
-                    args["user_id"] = user_id
+                    # Always use the request user_id (constant from frontend)
+                    tool_call["args"]["user_id"] = user_id
+                    args_after = dict(tool_call["args"])
 
-                    tool_result = tool_fn.invoke(args)
+                    logger.info(f"🔑 DEBUG Tool '{tool_call['name']}': args before inject={args_before!r}")
+                    logger.info(f"🔑 DEBUG Tool '{tool_call['name']}': args after inject user_id={user_id!r} -> {args_after!r}")
 
+                    tool_result = tool_fn.invoke(tool_call["args"])
                     messages.append(
                         ToolMessage(
                             content=str(tool_result),
                             tool_call_id=tool_call["id"]
                         )
                     )
-
-                # STEP 3 — Call model again to generate final answer
-                final_ai_msg = self.model.invoke(messages)
-
-                logger.info("✅ Final response generated after tool execution")
-                return final_ai_msg.content, messages
-
+                    logger.info(f"✅ Tool '{tool_call['name']}' executed for user_id: {user_id}")
             else:
-                logger.info("✅ No tool call — direct response")
-                return ai_msg.content, messages
+                logger.info(f"🔑 DEBUG: No tool calls this turn (model replied without calling a tool)")
+
+            final_response_text = ""
+            async for chunk in self.model.astream(messages):
+                text = self.extract_chunk_text(chunk)
+                if text:
+                    final_response_text += text
+
+            logger.info("✅ Query processed successfully")
+            return final_response_text, messages
 
         except Exception as e:
             logger.error(f"❌ Query processing error: {e}", exc_info=True)
