@@ -70,7 +70,7 @@ function buildTable(rows: Record<string, string>[], cols?: string[]): string {
   if (!rows.length) return "";
 
  // ✅ Step 1: Filter technical and requested columns (Case-insensitive)
-  const hiddenKeys = ["id", "user_id", "created_at", "owner"]; 
+  const hiddenKeys = ["id", "user_id", "created_at", "owner","ID", "User_ID"]; 
   
   const allCols: string[] = cols ?? (() => {
     const seen: string[] = [];
