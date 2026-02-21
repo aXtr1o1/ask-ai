@@ -14,6 +14,7 @@ class AssetRequest(BaseModel):
     status: Optional[str] = None
     condition: Optional[str] = None
     priority: Optional[str] = None
+    asset_tag_no: Optional[str] = None
     asset_type: Optional[str] = None
     division: Optional[str] = None
     discipline: Optional[str] = None
@@ -34,7 +35,7 @@ class AssetRequest(BaseModel):
     keyword: Optional[str] = None
     date_from: Optional[str] = None
     date_to: Optional[str] = None
-    limit: int = Field(default=20, ge=1, le=500)
+    limit: int = None
     offset: int = Field(default=0, ge=0)
 
 
@@ -58,7 +59,7 @@ class PPMRequest(BaseModel):
     comp_to: Optional[str] = None
     sla_min: Optional[int] = None
     sla_max: Optional[int] = None
-    limit: int = Field(default=20, ge=1, le=500)
+    limit: int = None
     offset: int = Field(default=0, ge=0)
 
 
@@ -87,5 +88,5 @@ class BDMRequest(BaseModel):
     date_to: Optional[str] = None
     completed_from: Optional[str] = None
     completed_to: Optional[str] = None
-    limit: int = Field(default=20, ge=1, le=500)
+    limit: int = None
     offset: int = Field(default=0, ge=0)

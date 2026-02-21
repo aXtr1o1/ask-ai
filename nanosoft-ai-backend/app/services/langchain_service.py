@@ -8,6 +8,8 @@ from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 from app.config import settings
 from app.tools.facility_tools import ASSETS, PPM, BDM
 
+import json
+
 logger = logging.getLogger("langchain_service")
 logger.setLevel(logging.INFO)
 ch = logging.StreamHandler()
@@ -34,7 +36,7 @@ class LangChainService:
             logger.error(f"❌ LangChainService init failed: {e}", exc_info=True)
             raise
 
-    def extract_chunk_text(self, chunk) -> str:
+    def extract_chunk_text(self, chunk) -> str: # later purpose for the streaming purpose
         content = chunk.content
         if not content:
             return ""
@@ -51,43 +53,63 @@ class LangChainService:
                 raise ValueError("user_id is required (from frontend request)")
             logger.info(f"💬 Processing query for user_id: {user_id}")
             ai_msg = self.model.invoke(messages)
+            logger.info("🤖 First model call | tool_calls=%s", bool(ai_msg.tool_calls))
+            
 
             if ai_msg.tool_calls:
                 logger.info(f"🛠 Tool calls: {[tc['name'] for tc in ai_msg.tool_calls]}")
-                messages.append(ai_msg)
-
+                
+                messages.append(ai_msg) 
+                
                 for tool_call in ai_msg.tool_calls:
+                    tool_name = tool_call["name"]
                     tool_fn = self.tool_map[tool_call["name"]]
                     if tool_call.get("args") is None:
                         tool_call["args"] = {}
                     args_before = dict(tool_call["args"])
 
-                    # Always use the request user_id (constant from frontend)
-                    tool_call["args"]["user_id"] = user_id
-                    args_after = dict(tool_call["args"])
+                    args = tool_call.get("args", {})
+                    args["user_id"] = user_id
+                    logger.info("📡 DB HIT | tool=%s | user_id=%s", tool_name, user_id)
+                    
+                    tool_result = tool_fn.invoke(args)
+                    # ✅ HANDLE EMPTY DB RESPONSE (CORE FIX)
+                    if isinstance(tool_result, dict):
+                        if tool_result.get("p_count", 0) == 0:
+                            logger.info("⚠️ Empty DB result detected")
 
-                    logger.info(f"🔑 DEBUG Tool '{tool_call['name']}': args before inject={args_before!r}")
-                    logger.info(f"🔑 DEBUG Tool '{tool_call['name']}': args after inject user_id={user_id!r} -> {args_after!r}")
+                            return (
+                                "No results found for the given query.",
+                                messages
+                            )
 
                     tool_result = tool_fn.invoke(tool_call["args"])
                     messages.append(
                         ToolMessage(
-                            content=str(tool_result),
+                            content=json.dumps({ "status": "success", "data": tool_result }),
+                            
                             tool_call_id=tool_call["id"]
                         )
                     )
-                    logger.info(f"✅ Tool '{tool_call['name']}' executed for user_id: {user_id}")
+
+                # STEP 3 — Call model again to generate final answer
+                final_ai_msg = self.model.invoke(messages)
+                final_content = final_ai_msg.content
+                 # ✅ FINAL SAFETY NET (NO EMPTY STRING EVER)
+                if not final_content or str(final_content).strip() == "":
+                    final_content = "No results found for the given query."
+
+                logger.info("✅ Final response generated after tool execution")
+                return final_content, messages
+
+    
+
             else:
-                logger.info(f"🔑 DEBUG: No tool calls this turn (model replied without calling a tool)")
-
-            final_response_text = ""
-            async for chunk in self.model.astream(messages):
-                text = self.extract_chunk_text(chunk)
-                if text:
-                    final_response_text += text
-
-            logger.info("✅ Query processed successfully")
-            return final_response_text, messages
+                content = ai_msg.content
+                if not content or str(content).strip() == "":
+                    content = "No results found for the given query."
+                logger.info("✅ No tool call — direct response")
+                return content, messages
 
         except Exception as e:
             logger.error(f"❌ Query processing error: {e}", exc_info=True)
