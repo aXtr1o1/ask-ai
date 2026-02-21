@@ -48,17 +48,14 @@ class LangChainService:
 
     async def process_query(self, messages: list, user_id: str = None) -> tuple[str, list]:
         try:
+            # user_id is always from the frontend request; use it for all tool calls
             if not user_id:
-                raise ValueError("user_id is required")
-
+                raise ValueError("user_id is required (from frontend request)")
             logger.info(f"💬 Processing query for user_id: {user_id}")
-
-            # STEP 1 — First model call
             ai_msg = self.model.invoke(messages)
             logger.info("🤖 First model call | tool_calls=%s", bool(ai_msg.tool_calls))
             
 
-            # STEP 2 — If tool call exists
             if ai_msg.tool_calls:
                 logger.info(f"🛠 Tool calls: {[tc['name'] for tc in ai_msg.tool_calls]}")
                 
@@ -67,6 +64,9 @@ class LangChainService:
                 for tool_call in ai_msg.tool_calls:
                     tool_name = tool_call["name"]
                     tool_fn = self.tool_map[tool_call["name"]]
+                    if tool_call.get("args") is None:
+                        tool_call["args"] = {}
+                    args_before = dict(tool_call["args"])
 
                     args = tool_call.get("args", {})
                     args["user_id"] = user_id
@@ -83,6 +83,7 @@ class LangChainService:
                                 messages
                             )
 
+                    tool_result = tool_fn.invoke(tool_call["args"])
                     messages.append(
                         ToolMessage(
                             content=json.dumps({ "status": "success", "data": tool_result }),

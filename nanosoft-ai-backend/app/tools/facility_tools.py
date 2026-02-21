@@ -57,7 +57,7 @@ if not logger.handlers:
 )
 def ASSETS(
     user_id=None,
-    status=None, condition=None, priority=None, asset_type=None,
+    status=None, condition=None, priority=None, asset_type=None,asset_tag_no=None,
     division=None, discipline=None, locality=None, building=None, floor=None,
     owner=None, make=None, model=None, service_area=None, trade_group=None,
     on_hold=None, is_snagged=None, is_scraped=None, enable_ppm=None, enable_bdm=None,

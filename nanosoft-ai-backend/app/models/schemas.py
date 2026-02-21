@@ -13,6 +13,7 @@ class AssetsInput(BaseModel):
     """Schema for ASSETS tool. user_id is set by the system from the authenticated request; do not ask the user."""
     user_id: Optional[str] = Field(default=None, description="Set by system from authenticated user; never ask the user for this.")
     status: Optional[str] = Field(default=None, description="Asset status")
+    asset_tag_no: Optional[str] = Field(default=None, description="Unique asset tag number")
     condition: Optional[str] = Field(default=None, description="Asset condition")
     priority: Optional[str] = Field(default=None, description="Asset priority level")
     asset_type: Optional[str] = Field(default=None, description="Asset type name")

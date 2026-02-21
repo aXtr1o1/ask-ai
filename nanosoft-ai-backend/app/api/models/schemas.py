@@ -14,6 +14,7 @@ class AssetRequest(BaseModel):
     status: Optional[str] = None
     condition: Optional[str] = None
     priority: Optional[str] = None
+    asset_tag_no: Optional[str] = None
     asset_type: Optional[str] = None
     division: Optional[str] = None
     discipline: Optional[str] = None
