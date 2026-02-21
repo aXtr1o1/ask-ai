@@ -1,103 +1,104 @@
-"""
-Pydantic Schemas for LangChain Tools and API Requests
-"""
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from typing import Optional
 
-
 # ==========================================
-# ✅ LANGCHAIN TOOL INPUT SCHEMAS
-# ==========================================
-
-class AssetsInput(BaseModel):
-    """Schema for ASSETS tool. user_id is set by the system from the authenticated request; do not ask the user."""
-    user_id: Optional[str] = Field(default=None, description="Set by system from authenticated user; never ask the user for this.")
-    status: Optional[str] = Field(default=None, description="Asset status")
-    condition: Optional[str] = Field(default=None, description="Asset condition")
-    priority: Optional[str] = Field(default=None, description="Asset priority level")
-    asset_type: Optional[str] = Field(default=None, description="Asset type name")
-    division: Optional[str] = Field(default=None, description="Division name")
-    discipline: Optional[str] = Field(default=None, description="Discipline name")
-    locality: Optional[str] = Field(default=None, description="Locality name")
-    building: Optional[str] = Field(default=None, description="Building name")
-    floor: Optional[str] = Field(default=None, description="Floor name")
-    owner: Optional[str] = Field(default=None, description="Asset owner")
-    make: Optional[str] = Field(default=None, description="Equipment make")
-    model: Optional[str] = Field(default=None, description="Equipment model")
-    service_area: Optional[str] = Field(default=None, description="Service area name")
-    trade_group: Optional[str] = Field(default=None, description="Trade group name")
-    on_hold: Optional[bool] = Field(default=None, description="Is asset on hold")
-    is_snagged: Optional[bool] = Field(default=None, description="Is asset snagged")
-    is_scraped: Optional[bool] = Field(default=None, description="Is asset scraped")
-    enable_ppm: Optional[bool] = Field(default=None, description="PPM enabled")
-    enable_bdm: Optional[bool] = Field(default=None, description="BDM enabled")
-    barcode: Optional[str] = Field(default=None, description="Asset barcode")
-    keyword: Optional[str] = Field(default=None, description="Free text search keyword")
-    date_from: Optional[str] = Field(default=None, description="Date from YYYY-MM-DD")
-    date_to: Optional[str] = Field(default=None, description="Date to YYYY-MM-DD")
-    limit: int = Field(default=20, description="Max number of results")
-    offset: int = Field(default=0, description="Pagination offset")
-
-
-class PPMInput(BaseModel):
-    """Schema for PPM tool (Planned Preventive Maintenance). user_id is set by the system; do not ask the user."""
-    user_id: Optional[str] = Field(default=None, description="Set by system from authenticated user; never ask the user for this.")
-    status: Optional[str] = Field(default=None, description="PPM status")
-    stage: Optional[str] = Field(default=None, description="PPM stage name")
-    frequency: Optional[str] = Field(default=None, description="Frequency (Monthly/Weekly/etc.)")
-    division: Optional[str] = Field(default=None, description="Division name")
-    discipline: Optional[str] = Field(default=None, description="Discipline name")
-    locality: Optional[str] = Field(default=None, description="Locality name")
-    building: Optional[str] = Field(default=None, description="Building name")
-    floor: Optional[str] = Field(default=None, description="Floor name")
-    contract: Optional[str] = Field(default=None, description="Contract name")
-    tech: Optional[str] = Field(default=None, description="Technician name")
-    keyword: Optional[str] = Field(default=None, description="Free text search keyword")
-    date_from: Optional[str] = Field(default=None, description="Work order date from YYYY-MM-DD")
-    date_to: Optional[str] = Field(default=None, description="Work order date to YYYY-MM-DD")
-    comp_from: Optional[str] = Field(default=None, description="Completion date from YYYY-MM-DD")
-    comp_to: Optional[str] = Field(default=None, description="Completion date to YYYY-MM-DD")
-    sla_min: Optional[int] = Field(default=None, description="SLA duration minimum")
-    sla_max: Optional[int] = Field(default=None, description="SLA duration maximum")
-    limit: int = Field(default=20, description="Max number of results")
-    offset: int = Field(default=0, description="Pagination offset")
-
-
-class BDMInput(BaseModel):
-    """Schema for BDM tool (Breakdown Maintenance / Complaints). user_id is set by the system; do not ask the user."""
-    user_id: Optional[str] = Field(default=None, description="Set by system from authenticated user; never ask the user for this.")
-    status: Optional[str] = Field(default=None, description="Work order status")
-    priority: Optional[str] = Field(default=None, description="Priority name")
-    stage: Optional[str] = Field(default=None, description="Stage name")
-    complaint_type: Optional[str] = Field(default=None, description="Complaint type")
-    complaint_mode: Optional[str] = Field(default=None, description="Complaint mode")
-    complaint_nature: Optional[str] = Field(default=None, description="Complaint nature")
-    wo_type: Optional[str] = Field(default=None, description="Work order type")
-    service_type: Optional[str] = Field(default=None, description="Service type")
-    division: Optional[str] = Field(default=None, description="Division name")
-    discipline: Optional[str] = Field(default=None, description="Discipline name")
-    locality: Optional[str] = Field(default=None, description="Locality name")
-    building: Optional[str] = Field(default=None, description="Building name")
-    floor: Optional[str] = Field(default=None, description="Floor name")
-    contract: Optional[str] = Field(default=None, description="Contract name")
-    analysis_tech: Optional[str] = Field(default=None, description="Analysis technician name")
-    execution_tech: Optional[str] = Field(default=None, description="Execution technician name")
-    complainer: Optional[str] = Field(default=None, description="Complainer name")
-    keyword: Optional[str] = Field(default=None, description="Free text search keyword")
-    date_from: Optional[str] = Field(default=None, description="Complaint date from YYYY-MM-DD")
-    date_to: Optional[str] = Field(default=None, description="Complaint date to YYYY-MM-DD")
-    completed_from: Optional[str] = Field(default=None, description="Completed date from YYYY-MM-DD")
-    completed_to: Optional[str] = Field(default=None, description="Completed date to YYYY-MM-DD")
-    limit: int = Field(default=20, description="Max number of results")
-    offset: int = Field(default=0, description="Pagination offset")
-
-
-# ==========================================
-# ✅ API REQUEST SCHEMA
+# ✅ REQUEST MODELS
 # ==========================================
 
-class ChatRequest(BaseModel):
-    """Request schema for chat endpoint"""
-    query: str
-    userId: str
-    sessionId: str
+class AssetRequest(BaseModel):
+    """Request schema for assets endpoint"""
+    user_id: int
+    query_type: Optional[str] = "main"
+    table_name: Optional[str] = "asset"
+    asset_tag_no: Optional[str] = None
+    status: Optional[str] = None
+    condition: Optional[str] = None
+    priority: Optional[str] = None
+    asset_type: Optional[str] = None
+    division: Optional[str] = None
+    discipline: Optional[str] = None
+    locality: Optional[str] = None
+    building: Optional[str] = None
+    floor: Optional[str] = None
+    owner: Optional[str] = None
+    make: Optional[str] = None
+    model: Optional[str] = None
+    service_area: Optional[str] = None
+    trade_group: Optional[str] = None
+    on_hold: Optional[bool] = None
+    is_snagged: Optional[bool] = None
+    is_scraped: Optional[bool] = None
+    enable_ppm: Optional[bool] = None
+    enable_bdm: Optional[bool] = None
+    barcode: Optional[str] = None
+    keyword: Optional[str] = None
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+    limit: Optional[int] = None
+    offset: Optional[int] = 0
+    checktype: Optional[str] = None
+    groupby: Optional[str] = None
+
+
+class PPMRequest(BaseModel):
+    """Request schema for PPM (work orders) endpoint"""
+    user_id: int
+    query_type: Optional[str] = "main"
+    table_name: Optional[str] = "ppm"
+    work_order: Optional[str] = None
+    status: Optional[str] = None
+    stage: Optional[str] = None
+    frequency: Optional[str] = None
+    division: Optional[str] = None
+    discipline: Optional[str] = None
+    locality: Optional[str] = None
+    building: Optional[str] = None
+    floor: Optional[str] = None
+    contract: Optional[str] = None
+    tech: Optional[str] = None
+    keyword: Optional[str] = None
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+    comp_from: Optional[str] = None
+    comp_to: Optional[str] = None
+    sla_min: Optional[int] = None
+    sla_max: Optional[int] = None
+    limit: Optional[int] = None
+    offset: Optional[int] = 0
+    checktype: Optional[str] = "OVERDUE"
+    groupby: Optional[str] = "FrequencyName"
+
+
+class BDMRequest(BaseModel):
+    """Request schema for BDM (complaints) endpoint"""
+    user_id: int
+    query_type: Optional[str] = "main"
+    table_name: Optional[str] = "bdm"
+    complaint_no: Optional[str] = None
+    status: Optional[str] = None
+    priority: Optional[str] = None
+    stage: Optional[str] = None
+    complaint_type: Optional[str] = None
+    complaint_mode: Optional[str] = None
+    complaint_nature: Optional[str] = None
+    wo_type: Optional[str] = None
+    service_type: Optional[str] = None
+    division: Optional[str] = None
+    discipline: Optional[str] = None
+    locality: Optional[str] = None
+    building: Optional[str] = None
+    floor: Optional[str] = None
+    contract: Optional[str] = None
+    analysis_tech: Optional[str] = None
+    execution_tech: Optional[str] = None
+    complainer: Optional[str] = None
+    keyword: Optional[str] = None
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+    completed_from: Optional[str] = None
+    completed_to: Optional[str] = None
+    limit: Optional[int] = None
+    offset: Optional[int] = 0
+    slatype: Optional[str] = "FULL"
+    checktype: Optional[str] = "SLA_BREACHED"
+    groupby: Optional[str] = "WoStatus"

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, Suspense } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 
@@ -402,8 +402,8 @@ const IconAI = () => (
   </svg>
 );
 
-// ─── Main Component (with useSearchParams wrapped in Suspense) ────────────────
-function HomeContent() {
+// ─── Main Component ───────────────────────────────────────────────────────────
+export default function Home() {
   const router        = useRouter();
   const searchParams  = useSearchParams();
   const userIdFromUrl = searchParams.get("userId");
@@ -490,12 +490,15 @@ function HomeContent() {
     setInput("");
     setIsLoading(true);
 
-    try {
-      const res = await fetch("http://127.0.0.1:8001/chat", {
+      const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+
+try {
+      const res = await fetch(`${baseUrl}/chat`, {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
         body:    JSON.stringify({ query: userText, userId: loggedInUser, sessionId }),
       });
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
 
       const reader  = res.body?.getReader();
@@ -508,28 +511,45 @@ function HomeContent() {
 
       let accumulated = "";
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+     while (true) {
+  const { done, value } = await reader.read();
+  if (done) break;
 
-        const chunk = decoder.decode(value, { stream: true });
-        for (const raw of chunk.split("\n").filter(l => l.trim())) {
-          try {
-            const json = raw.startsWith("data: ") ? raw.slice(6) : raw;
-            const part = extractText(JSON.parse(json));
-            if (part) {
-              accumulated += part;
-              setMessages(prev => {
-                const u = [...prev];
-                const l = u.length - 1;
-                if (u[l]?.role === "ai") u[l] = { role: "ai", text: accumulated, streaming: true };
-                return u;
-              });
-              await new Promise(r => setTimeout(r, 10));
-            }
-          } catch { /* partial chunk */ }
-        }
+  const chunk = decoder.decode(value, { stream: true });
+  
+  // The .filter(l => l.trim()) is the key fix for the empty bubble bug
+  for (const raw of chunk.split("\n").filter(l => l.trim())) {
+    try {
+      // Handle "data: " prefix common in SSE streams
+      const jsonStr = raw.startsWith("data: ") ? raw.slice(6) : raw;
+      const parsed = JSON.parse(jsonStr);
+      const part = extractText(parsed);
+
+      if (part) {
+        accumulated += part;
+        setMessages(prev => {
+          const u = [...prev];
+          const l = u.length - 1;
+
+          // Update the existing AI bubble instead of creating a new empty one
+          if (u[l]?.role === "ai") {
+            u[l] = { role: "ai", text: accumulated, streaming: true };
+          } else {
+            // This handles the very first real chunk received
+            u.push({ role: "ai", text: accumulated, streaming: true });
+          }
+          return u;
+        });
+
+        // Small delay for smooth typing effect
+        await new Promise(r => setTimeout(r, 10));
       }
+    } catch (e) {
+      // Silently catch partial chunks to prevent the loop from crashing
+      console.warn("Partial chunk received:", raw);
+    }
+  }
+}
 
       // ✅ Stream done: flip streaming:false → formatOutput() runs → table shown
       setMessages(prev => {
@@ -543,6 +563,9 @@ function HomeContent() {
       console.error("Chat Error:", err);
       setMessages(prev => [...prev, { role: "error", text: "❌ Connection failed. Check backend." }]);
       setIsLoading(false);
+      setIsLoading(false);
+       return "Try again";
+
     } finally {
       setTimeout(() => inputRef.current?.focus(), 50);
     }
@@ -734,18 +757,5 @@ function HomeContent() {
 
       </div>
     </div>
-  );
-}
-
-// ─── Main Export with Suspense Boundary ────────────────────────────────────────
-export default function Home() {
-  return (
-    <Suspense fallback={
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "radial-gradient(circle at top, #ECFAE5 0, #DDF6D2 35%, #CAE8BD 75%)" }}>
-        <span style={{ fontSize: 14, color: "#4b5f45" }}>Loading…</span>
-      </div>
-    }>
-      <HomeContent />
-    </Suspense>
   );
 }

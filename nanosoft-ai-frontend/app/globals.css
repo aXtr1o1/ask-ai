@@ -35,7 +35,7 @@ html, body {
 }
 
 /* ─── 2. SCROLLBARS ─── */
-::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar { width: 2px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #2a3a2a; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #3a5a3a; }

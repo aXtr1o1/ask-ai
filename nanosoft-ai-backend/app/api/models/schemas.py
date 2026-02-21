@@ -1,8 +1,5 @@
-from __future__ import annotations
-from typing import Any, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from typing import Optional
-
 
 # ==========================================
 # ✅ REQUEST MODELS
@@ -10,7 +7,10 @@ from typing import Optional
 
 class AssetRequest(BaseModel):
     """Request schema for assets endpoint"""
-    user_id: str
+    user_id: int
+    query_type: Optional[str] = "main"
+    table_name: Optional[str] = "asset"
+    asset_tag_no: Optional[str] = None
     status: Optional[str] = None
     condition: Optional[str] = None
     priority: Optional[str] = None
@@ -34,13 +34,18 @@ class AssetRequest(BaseModel):
     keyword: Optional[str] = None
     date_from: Optional[str] = None
     date_to: Optional[str] = None
-    limit: int = Field(default=20, ge=1, le=500)
-    offset: int = Field(default=0, ge=0)
+    limit: Optional[int] = None
+    offset: Optional[int] = 0
+    checktype: Optional[str] = None
+    groupby: Optional[str] = None
 
 
 class PPMRequest(BaseModel):
     """Request schema for PPM (work orders) endpoint"""
-    user_id: str
+    user_id: int
+    query_type: Optional[str] = "main"
+    table_name: Optional[str] = "ppm"
+    work_order: Optional[str] = None
     status: Optional[str] = None
     stage: Optional[str] = None
     frequency: Optional[str] = None
@@ -58,13 +63,18 @@ class PPMRequest(BaseModel):
     comp_to: Optional[str] = None
     sla_min: Optional[int] = None
     sla_max: Optional[int] = None
-    limit: int = Field(default=20, ge=1, le=500)
-    offset: int = Field(default=0, ge=0)
+    limit: Optional[int] = None
+    offset: Optional[int] = 0
+    checktype: Optional[str] = "OVERDUE"
+    groupby: Optional[str] = "FrequencyName"
 
 
 class BDMRequest(BaseModel):
     """Request schema for BDM (complaints) endpoint"""
-    user_id: str
+    user_id: int
+    query_type: Optional[str] = "main"
+    table_name: Optional[str] = "bdm"
+    complaint_no: Optional[str] = None
     status: Optional[str] = None
     priority: Optional[str] = None
     stage: Optional[str] = None
@@ -87,5 +97,8 @@ class BDMRequest(BaseModel):
     date_to: Optional[str] = None
     completed_from: Optional[str] = None
     completed_to: Optional[str] = None
-    limit: int = Field(default=20, ge=1, le=500)
-    offset: int = Field(default=0, ge=0)
+    limit: Optional[int] = None
+    offset: Optional[int] = 0
+    slatype: Optional[str] = "FULL"
+    checktype: Optional[str] = "SLA_BREACHED"
+    groupby: Optional[str] = "WoStatus"
