@@ -84,6 +84,7 @@ async def chat_endpoint(request: ChatRequest):
     user_id = request.userId  # constant from frontend; used for all processing and tool calls
     session_id = request.sessionId
     print(f"{user_id}---------{user_query}-------{session_id}")
+    
 
     # 1️⃣ Validate user ID
     if user_id not in VALID_USER_IDS:
@@ -137,6 +138,9 @@ async def chat_endpoint(request: ChatRequest):
         "session_id": session_id,
         "response": final_response_text
     }
+@chatbot_app.get("/health", tags=["Health"])
+def health():
+    return {"status": "ok"}
 
 
 # =====================================================

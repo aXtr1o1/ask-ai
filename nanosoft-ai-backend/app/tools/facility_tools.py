@@ -71,7 +71,7 @@ def ASSETS(
 
     payload = {
         "user_id": user_id,
-        "status": status, "condition": condition, "priority": priority,
+        "status": status, "condition": condition, "priority": priority,"asset_tag_no": asset_tag_no,
         "asset_type": asset_type, "division": division, "discipline": discipline,
         "locality": locality, "building": building, "floor": floor,
         "owner": owner, "make": make, "model": model,
