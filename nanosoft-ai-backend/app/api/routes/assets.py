@@ -18,17 +18,49 @@ if not logger.handlers:
 
 
 def format_response(data):
+    
+    logger.info("you can view the length of the p_list  and p_count value so that you can cross verify it")
     if isinstance(data, dict):
+        p_list = data.get("p_list", [])
+        p_count = data.get("p_count", 0)
+        
+        logger.info(
+            "📊 format_response | p_list_length=%s | p_count=%s",
+            len(p_list),
+            p_count
+        )
         return {"p_list": data.get("p_list", []), "p_count": data.get("p_count", 0)}
-    safe = data if isinstance(data, list) else []
-    return {"p_list": safe, "p_count": len(safe)}
+    
+    safe_list = data if isinstance(data, list) else []
 
+    logger.info(
+        "📊 format_response | p_list_length=%s | p_count=%s",
+        len(safe_list),
+        len(safe_list)
+    )
+
+    return {
+        "p_list": safe_list,
+        "p_count": len(safe_list)
+    }
+    
 
 @router.post("/get-assets")
 def get_assets(req: AssetRequest):
-    logger.info(f"📦 Assets | user_id={req.user_id} | limit={req.limit} offset={req.offset}")
+    
+    logger.info(
+        "📦 assets endpoints called | user_id=%s | limit=%s | offset=%s",
+        req.user_id, req.limit, req.offset
+    )
+    logger.debug(
+        "📥 Incoming Assets request payload: %s",
+        req.model_dump()
+    )
     try:
         client = get_supabase_client()
+        
+        logger.info("🚀 Calling sp_asset_query RPC")
+        
         response = client.rpc("sp_asset_query", {
             "p_user_id": req.user_id,
             "p_status": req.status,
@@ -56,7 +88,21 @@ def get_assets(req: AssetRequest):
             "p_limit": req.limit,
             "p_offset": req.offset,
         }).execute()
-        return format_response(response.data)
+        
+        formatted = format_response(response.data)
+        
+        logger.info(
+            "✅ Assets response ready | count=%s",
+            formatted["p_count"]
+        )
+        
+        logger.debug(
+            "📤 Assets final response: %s",
+            formatted
+        )
+        
+        return formatted
+    
     except Exception as e:
-        logger.error(f"❌ Assets Error: {e}", exc_info=True)
+        logger.error(f"❌Assets route failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

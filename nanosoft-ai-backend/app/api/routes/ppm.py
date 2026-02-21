@@ -18,17 +18,51 @@ if not logger.handlers:
 
 
 def format_response(data):
+    
+    logger.info("you can view the length of the p_list  and p_count value so that you can cross verify it")
     if isinstance(data, dict):
+        p_list = data.get("p_list", [])
+        p_count = data.get("p_count", 0)
+        
+        logger.info(
+            "📊 format_response | p_list_length=%s | p_count=%s",
+            len(p_list),
+            p_count
+        )
         return {"p_list": data.get("p_list", []), "p_count": data.get("p_count", 0)}
-    safe = data if isinstance(data, list) else []
-    return {"p_list": safe, "p_count": len(safe)}
+    
+    safe_list = data if isinstance(data, list) else []
+
+    logger.info(
+        "📊 format_response | p_list_length=%s | p_count=%s",
+        len(safe_list),
+        len(safe_list)
+    )
+
+    return {
+        "p_list": safe_list,
+        "p_count": len(safe_list)
+    }
 
 
 @router.post("/get-ppm")
 def get_ppm(req: PPMRequest):
-    logger.info(f"🛠️ PPM | user_id={req.user_id} | status={req.status} | limit={req.limit}")
+    
+    logger.info(
+        "🛠️ ppm endpoint called | user_id=%s | status=%s | limit=%s",
+        req.user_id, req.status, req.limit
+    )
+    
+    logger.debug(
+        "📥 Incoming PPM request payload: %s",
+        req.model_dump()
+    )
+    
     try:
         client = get_supabase_client()
+        
+        logger.info("🚀 Calling sp_ppm_query RPC")
+        
         response = client.rpc("sp_ppm_query", {
             "p_user_id": req.user_id,
             "p_status": req.status,
@@ -51,7 +85,23 @@ def get_ppm(req: PPMRequest):
             "p_limit": req.limit,
             "p_offset": req.offset,
         }).execute()
-        return format_response(response.data)
+        
+        formatted = format_response(response.data)
+        
+        logger.info(
+            "✅ PPM response ready | count=%s",
+            formatted["p_count"]
+        )
+        
+        logger.debug(
+            "📤 PPM final response: %s",
+            formatted
+        )
+
+        return formatted
+    
+    
     except Exception as e:
-        logger.error(f"❌ PPM Error: {e}", exc_info=True)
+        logger.error(f"❌ PPM route  faild: {e}", exc_info=True)
+        
         raise HTTPException(status_code=500, detail=str(e))

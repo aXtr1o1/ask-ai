@@ -8,6 +8,8 @@ from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 from app.config import settings
 from app.tools.facility_tools import ASSETS, PPM, BDM
 
+import json
+
 logger = logging.getLogger("langchain_service")
 logger.setLevel(logging.INFO)
 ch = logging.StreamHandler()
@@ -34,7 +36,7 @@ class LangChainService:
             logger.error(f"❌ LangChainService init failed: {e}", exc_info=True)
             raise
 
-    def extract_chunk_text(self, chunk) -> str:
+    def extract_chunk_text(self, chunk) -> str: # later purpose for the streaming purpose
         content = chunk.content
         if not content:
             return ""
@@ -53,35 +55,60 @@ class LangChainService:
 
             # STEP 1 — First model call
             ai_msg = self.model.invoke(messages)
+            logger.info("🤖 First model call | tool_calls=%s", bool(ai_msg.tool_calls))
+            
 
             # STEP 2 — If tool call exists
             if ai_msg.tool_calls:
                 logger.info(f"🛠 Tool calls: {[tc['name'] for tc in ai_msg.tool_calls]}")
-
+                
+                messages.append(ai_msg) 
+                
                 for tool_call in ai_msg.tool_calls:
+                    tool_name = tool_call["name"]
                     tool_fn = self.tool_map[tool_call["name"]]
 
                     args = tool_call.get("args", {})
                     args["user_id"] = user_id
-
+                    logger.info("📡 DB HIT | tool=%s | user_id=%s", tool_name, user_id)
+                    
                     tool_result = tool_fn.invoke(args)
+                    # ✅ HANDLE EMPTY DB RESPONSE (CORE FIX)
+                    if isinstance(tool_result, dict):
+                        if tool_result.get("p_count", 0) == 0:
+                            logger.info("⚠️ Empty DB result detected")
+
+                            return (
+                                "No results found for the given query.",
+                                messages
+                            )
 
                     messages.append(
                         ToolMessage(
-                            content=str(tool_result),
+                            content=json.dumps({ "status": "success", "data": tool_result }),
+                            
                             tool_call_id=tool_call["id"]
                         )
                     )
 
                 # STEP 3 — Call model again to generate final answer
                 final_ai_msg = self.model.invoke(messages)
+                final_content = final_ai_msg.content
+                 # ✅ FINAL SAFETY NET (NO EMPTY STRING EVER)
+                if not final_content or str(final_content).strip() == "":
+                    final_content = "No results found for the given query."
 
                 logger.info("✅ Final response generated after tool execution")
-                return final_ai_msg.content, messages
+                return final_content, messages
+
+    
 
             else:
+                content = ai_msg.content
+                if not content or str(content).strip() == "":
+                    content = "No results found for the given query."
                 logger.info("✅ No tool call — direct response")
-                return ai_msg.content, messages
+                return content, messages
 
         except Exception as e:
             logger.error(f"❌ Query processing error: {e}", exc_info=True)

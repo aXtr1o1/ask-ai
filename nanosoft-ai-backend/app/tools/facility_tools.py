@@ -66,6 +66,7 @@ def ASSETS(
 ) -> str:
     # user_id is always injected from the frontend request; never use model-provided value
     if not user_id:
+        logger.error(" ASSETS called without user_id")
         return "Error: user_id is required. It is set from the authenticated request."
     logger.info(f"📦 ASSETS TOOL TRIGGERED for user_id: {user_id}")
 
@@ -80,32 +81,42 @@ def ASSETS(
         "enable_ppm": enable_ppm, "enable_bdm": enable_bdm,
         "barcode": barcode, "keyword": keyword,
         "date_from": date_from, "date_to": date_to,
-        "limit": 20,   
+        "limit": limit,   
         "offset": 0,   
     }
 
     clean_payload = {k: v for k, v in payload.items() if v is not None}
+    
 
-    print("********************** clean payload *************")
-    print(clean_payload)
-
-    logger.debug(f"📤 Payload: {clean_payload}")
+    logger.debug("Clean payload prepared: %s", clean_payload)
 
     try:
+        logger.info("🚀 Sending payload to /get-assets endpoint")
+        
         response = requests.post(f"{settings.DATABASE_API_URL}/get-assets", json=clean_payload)
-        logger.info(f"✅ API Status: {response.status_code}")
+        
+        logger.info(
+            "📥 Response received from /get-assets | status_code=%s",
+            response.status_code
+        )
 
         if response.status_code != 200:
-            logger.error(f"❌ API Error Response: {response.text}")
-            return f"❌ API Error: {response.text}"
+            
+            logger.error(f"❌ API Error Response No message is recived: {response.status_code,response.text}")
+            return f"❌ API Error No message is recived:: {response.status_code,response.text}"
 
         response_json = response.json()
-
-        print("*************response from the db********")
-        print(json.dumps(response_json, indent=2))
-
+        
+        logger.debug(
+            "📦 Response data from DB: %s",
+            json.dumps(response_json, indent=2)
+        )
+        logger.info("✅ Assets data successfully processed")
+        
         return json.dumps(response_json)
+    
     except Exception as e:
+        
         logger.error(f"❌ Assets tool error: {e}", exc_info=True)
         return f"Error calling assets endpoint: {str(e)}"
 
@@ -156,7 +167,9 @@ def PPM(
     limit=20, offset=0
 ) -> str:
     if not user_id:
+        logger.error("❌ PPM called without user_id")
         return "Error: user_id is required. It is set from the authenticated request."
+    
     logger.info(f"🛠️ PPM TOOL TRIGGERED for user_id: {user_id}")
 
     payload = {
@@ -168,30 +181,40 @@ def PPM(
         "date_from": date_from, "date_to": date_to,
         "comp_from": comp_from, "comp_to": comp_to,
         "sla_min": sla_min, "sla_max": sla_max,
-        "limit": 20,   # ← hardcoded — LLM cannot change this
+        "limit": limit,   # ← hardcoded — LLM cannot change this
         "offset": 0,   # ← hardcoded — LLM cannot change this
     }
 
     clean_payload = {k: v for k, v in payload.items() if v is not None}
-
-    print("********************** clean payload *************")
-    print(clean_payload)
-
-    logger.debug(f"📤 Payload: {clean_payload}")
+    
+    logger.debug("📤 PPM payload prepared: %s", clean_payload)
+    
 
     try:
+        logger.info("🚀 Sending PPM request to /get-ppm")
+        
         response = requests.post(f"{settings.DATABASE_API_URL}/get-ppm", json=clean_payload)
-        logger.info(f"✅ API Status: {response.status_code}")
+        
+        logger.info(
+            "📥 PPM response received | status_code=%s",
+            response.status_code
+        )
 
         if response.status_code != 200:
-            logger.error(f"❌ API Error Response: {response.text}")
-            return f"❌ API Error: {response.text}"
+            
+            logger.error(f"❌ API Error Response: {response.status_code,response.text}")
+            return f"❌ API Error: {response.status_code,response.text}"
 
         response_json = response.json()
-        logger.debug("📥 API Response JSON:")
-        logger.debug(json.dumps(response_json, indent=2))
-
+        logger.debug(
+            "📦 PPM response data: %s",
+            json.dumps(response_json, indent=2)
+        )
+        
+        logger.info("✅ PPM data processed successfully")
+        
         return json.dumps(response_json)
+    
     except Exception as e:
         logger.error(f"❌ PPM tool error: {e}", exc_info=True)
         return f"Error calling PPM endpoint: {str(e)}"
@@ -250,7 +273,9 @@ def BDM(
     limit=20, offset=0
 ) -> str:
     if not user_id:
+        logger.error("❌ BDM called without user_id")
         return "Error: user_id is required. It is set from the authenticated request."
+    
     logger.info(f"🔧 BDM TOOL TRIGGERED for user_id: {user_id}")
 
     payload = {
@@ -264,26 +289,43 @@ def BDM(
         "execution_tech": execution_tech, "complainer": complainer,
         "keyword": keyword, "date_from": date_from, "date_to": date_to,
         "completed_from": completed_from, "completed_to": completed_to,
-        "limit": 20,  
+        "limit":limit,
         "offset": 0,  
     }
 
     clean_payload = {k: v for k, v in payload.items() if v is not None}
-    logger.debug(f"📤 Payload: {clean_payload}")
+    logger.debug("📤 BDM payload prepared: %s", clean_payload)
 
     try:
+        logger.info("🚀 Sending BDM request to /get-bdm")
+        
         response = requests.post(f"{settings.DATABASE_API_URL}/get-bdm", json=clean_payload)
-        logger.info(f"✅ API Status: {response.status_code}")
-
+        
+        logger.info(
+            "📥 BDM response received | status_code=%s",
+            response.status_code
+        )
+        
         if response.status_code != 200:
-            logger.error(f"❌ API Error Response: {response.text}")
+            logger.error(
+                "❌ BDM API error | status_code=%s | response=%s",
+                response.status_code,
+                response.text
+            )
             return f"❌ API Error: {response.text}"
 
         response_json = response.json()
-        logger.debug("📥 API Response JSON:")
-        logger.debug(json.dumps(response_json, indent=2))
+        
+        logger.debug(
+            "📦 BDM response data: %s",
+            json.dumps(response_json, indent=2)
+        )
+        
+        logger.info("✅ BDM data processed successfully")
 
         return json.dumps(response_json)
+    
     except Exception as e:
         logger.error(f"❌ BDM tool error: {e}", exc_info=True)
+        
         return f"Error calling BDM endpoint: {str(e)}"
