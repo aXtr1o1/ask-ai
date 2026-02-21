@@ -52,7 +52,7 @@ VALID_USER_IDS = {"101", "102"}
 #   }
 # }
 # =====================================================
-MAX_HISTORY = 10
+MAX_HISTORY = 5
 memory_store = {}
 
 
@@ -83,8 +83,7 @@ async def chat_endpoint(request: ChatRequest):
     user_query = request.query
     user_id = request.userId  # constant from frontend; used for all processing and tool calls
     session_id = request.sessionId
-    print(f"{user_id}---------{user_query}-------{session_id}")
-    
+    logger.info(f"Request | user_id={user_id} | session_id={session_id} | query={user_query}")
 
     # 1️⃣ Validate user ID
     if user_id not in VALID_USER_IDS:
@@ -105,8 +104,10 @@ async def chat_endpoint(request: ChatRequest):
         }
         logger.info(f"🆕 Memory initialized for session_id: {session_id}")
 
-    lc_memory = memory_store[session_id]["lc_memory"]
-    history = memory_store[session_id]["history"]
+    # ✅ FIX — copy lc_memory, not a reference.
+    # Prevents parallel requests from mutating the same list
+    # and corrupting each other's message context.
+    lc_memory = list(memory_store[session_id]["lc_memory"])
 
     # 3️⃣ Build message context: system prompt includes authenticated user_id so model never asks for it
     messages = [get_system_prompt(user_id)] + lc_memory
@@ -120,14 +121,15 @@ async def chat_endpoint(request: ChatRequest):
         logger.error(f"❌ LangChain error: {e}", exc_info=True)
         final_response_text = "Sorry, something went wrong while processing your request."
 
-    # 5️⃣ Update in-memory (keep last MAX_HISTORY interactions per session)
-    lc_memory.append(HumanMessage(content=user_query))
-    lc_memory.append(AIMessage(content=final_response_text))
-    history.append({"query": user_query, "assistant": final_response_text})
+    # 5️⃣ Update in-memory directly on store (not on the copy).
+    # Keep last MAX_HISTORY interactions per session.
+    memory_store[session_id]["lc_memory"].append(HumanMessage(content=user_query))
+    memory_store[session_id]["lc_memory"].append(AIMessage(content=final_response_text))
+    memory_store[session_id]["history"].append({"query": user_query, "assistant": final_response_text})
 
-    if len(history) > MAX_HISTORY:
-        memory_store[session_id]["history"] = history[-MAX_HISTORY:]
-        memory_store[session_id]["lc_memory"] = lc_memory[-(MAX_HISTORY * 2):]
+    if len(memory_store[session_id]["history"]) > MAX_HISTORY:
+        memory_store[session_id]["history"] = memory_store[session_id]["history"][-MAX_HISTORY:]
+        memory_store[session_id]["lc_memory"] = memory_store[session_id]["lc_memory"][-(MAX_HISTORY * 2):]
 
     # 6️⃣ Print in-memory after every request
     print_memory(session_id)
