@@ -32,6 +32,7 @@ def get_assets(req: AssetRequest):
         response = client.rpc("sp_asset_query", {
             "p_user_id": req.user_id,
             "p_status": req.status,
+            "p_asset_tag_no": req.asset_tag_no,
             "p_condition": req.condition,
             "p_priority": req.priority,
             "p_asset_type": req.asset_type,
