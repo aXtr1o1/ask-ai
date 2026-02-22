@@ -22,7 +22,7 @@ class LangChainService:
     def __init__(self):
         try:
             self.model = ChatGoogleGenerativeAI(
-                model="gemini-2.5-flash-lite",
+                model=settings.GOOGLE_AI_MODEL,
                 google_api_key=settings.GOOGLE_API_KEY
             ).bind_tools([ASSETS, PPM, BDM])
 
@@ -150,6 +150,57 @@ class LangChainService:
     
 
             else:
+
+                # Model skipped tool — check if this is a data query that REQUIRES a tool
+                # if the model skipped the tool, we need to inject a synthetic tool call and result so the model formats from live data
+###
+                user_query = ""
+                for m in reversed(messages):
+                    if isinstance(m, HumanMessage):
+                        user_query = (m.content or "") if isinstance(m.content, str) else ""
+                        break
+                q = user_query.lower()
+                data_patterns = ("how many", "list", "count", "total", "number of", "show me", "get ", "fetch ")
+                needs_bdm = any(w in q for w in ("complaint", "bdm", "breakdown"))
+                needs_assets = any(w in q for w in ("asset", "equipment"))
+                needs_ppm = any(w in q for w in ("ppm", "preventive", "planned", "scheduled"))
+
+                if any(p in q for p in data_patterns) and (needs_bdm or needs_assets or needs_ppm):
+                    tool_name = "BDM" if needs_bdm else ("ASSETS" if needs_assets else "PPM")
+                    logger.warning("⚠️ Model skipped tool for data query — forcing %s", tool_name)
+                    tool_fn = self.tool_map[tool_name]
+                    args = {"user_id": user_id, "limit": None}
+                    tool_result = tool_fn.invoke(args)
+                    try:
+                        parsed = json.loads(tool_result) if isinstance(tool_result, str) else tool_result
+                    except json.JSONDecodeError:
+                        parsed = {}
+                    p_list = parsed.get("p_list", []) if isinstance(parsed, dict) else (parsed if isinstance(parsed, list) else [])
+                    p_count = parsed.get("p_count", len(p_list)) if isinstance(parsed, dict) else len(p_list)
+                    total_for_count = p_count
+                    if p_list and isinstance(p_list[0], dict):
+                        for key in ("total_count", "total_count_over", "full_count", "overall_count"):
+                            val = p_list[0].get(key)
+                            if isinstance(val, (int, float)) and val >= 0:
+                                total_for_count = int(val)
+                                break
+                    display_count = total_for_count if total_for_count > len(p_list) else p_count
+                    if p_count == 0 and total_for_count == 0:
+                        return "No results found for the given query.", messages
+                    # Inject synthetic tool call + result so model formats from live data
+                    fake_tool_id = "forced-" + tool_name.lower() + "-1"
+                    synthetic_ai = AIMessage(content="", tool_calls=[{"name": tool_name, "id": fake_tool_id, "args": {"user_id": user_id}}])
+                    messages.append(synthetic_ai)
+                    messages.append(ToolMessage(
+                        content=json.dumps({"message": f"{display_count} records found", "total_count": display_count, "records": p_list}),
+                        tool_call_id=fake_tool_id
+                    ))
+                    final_ai_msg = self.model.invoke(messages)
+                    content = final_ai_msg.content or "No results found for the given query."
+                    logger.info("✅ Response after forced tool call")
+                    return content, messages
+####
+
                 content = ai_msg.content
                 if not content or str(content).strip() == "":
                     content = "No results found for the given query."
