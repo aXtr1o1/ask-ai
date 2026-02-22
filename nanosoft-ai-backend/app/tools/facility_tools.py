@@ -62,7 +62,7 @@ def ASSETS(
     owner=None, make=None, model=None, service_area=None, trade_group=None,
     on_hold=None, is_snagged=None, is_scraped=None, enable_ppm=None, enable_bdm=None,
     barcode=None, keyword=None, date_from=None, date_to=None,
-    limit=20, offset=0
+    limit=None, offset=None 
 ) -> str:
     # user_id is always injected from the frontend request; never use model-provided value
     if not user_id:
@@ -164,7 +164,7 @@ def PPM(
     contract=None, tech=None, keyword=None,
     date_from=None, date_to=None, comp_from=None, comp_to=None,
     sla_min=None, sla_max=None,
-    limit=20, offset=0
+    limit=None, offset=None 
 ) -> str:
     if not user_id:
         logger.error("❌ PPM called without user_id")
@@ -181,8 +181,8 @@ def PPM(
         "date_from": date_from, "date_to": date_to,
         "comp_from": comp_from, "comp_to": comp_to,
         "sla_min": sla_min, "sla_max": sla_max,
-        "limit": limit,   # ← hardcoded — LLM cannot change this
-        "offset": 0,   # ← hardcoded — LLM cannot change this
+        "limit": limit,   
+        "offset": 0,   
     }
 
     clean_payload = {k: v for k, v in payload.items() if v is not None}
@@ -270,7 +270,7 @@ def BDM(
     contract=None, analysis_tech=None, execution_tech=None, complainer=None,
     keyword=None, date_from=None, date_to=None,
     completed_from=None, completed_to=None,
-    limit=20, offset=0
+    limit=None, offset=None 
 ) -> str:
     if not user_id:
         logger.error("❌ BDM called without user_id")

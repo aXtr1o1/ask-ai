@@ -69,10 +69,15 @@ function md(text: string): string {
 function buildTable(rows: Record<string, string>[], cols?: string[]): string {
   if (!rows.length) return "";
 
-  // Auto-collect column order from all rows
+ // ✅ Step 1: Filter technical and requested columns (Case-insensitive)
+  const hiddenKeys = ["id", "user_id", "created_at", "owner","ID", "User_ID"]; 
+  
   const allCols: string[] = cols ?? (() => {
     const seen: string[] = [];
-    rows.forEach(r => Object.keys(r).forEach(k => { if (!seen.includes(k)) seen.push(k); }));
+    rows.forEach(r => Object.keys(r).forEach(k => { 
+      const isHidden = hiddenKeys.some(h => h.toLowerCase() === k.toLowerCase());
+      if (!seen.includes(k) && !isHidden) seen.push(k); 
+    }));
     return seen;
   })();
 
@@ -97,23 +102,18 @@ function buildTable(rows: Record<string, string>[], cols?: string[]): string {
       ${rows.map(row =>
         `<tr>${allCols.map(col => {
           const val  = row[col] ?? "—";
-          const cell = col.toLowerCase() === "status" ? badge(val) : esc(val);
-          // Long-value columns (Location, Description, Notes etc) get wrap class
-          const isLong = col.toLowerCase().includes("location") ||
-                         col.toLowerCase().includes("description") ||
-                         col.toLowerCase().includes("address") ||
-                         col.toLowerCase().includes("notes") ||
-                         val.length > 40;
-          return `<td${isLong ? ' class="wrap"' : ""}>${cell}</td>`;
+          const cell = col.toLowerCase().includes("status") ? badge(val) : esc(val);
+          
+          // ✅ FIX: Using "compact-cell" class and removed wrapping to keep box size small
+          return `<td class="compact-cell">${cell}</td>`;
         }).join("")}</tr>`
-      ).join("\n      ")}
+      ).join("\n")}
     </tbody>`;
 
-  // Row count shown as a clean tfoot row instead of a separate div
-  // (separate div caused vertical character rendering bug)
   const tfoot = `<tfoot><tr><td colspan="${allCols.length}" class="table-footer">${rows.length} row${rows.length !== 1 ? "s" : ""}</td></tr></tfoot>`;
 
-  return `<div class="table-wrapper"><table class="ai-table">${thead}${tbody}${tfoot}</table></div>`;
+  // ✅ FIX: Added "scrollable-table" and "compact" classes to cap the huge box size
+  return `<div class="table-wrapper scrollable-table"><table class="ai-table compact">${thead}${tbody}${tfoot}</table></div>`;
 }
 
 // ── REGEX constants ───────────────────────────────────────────────────────────
@@ -517,8 +517,8 @@ try {
 
   const chunk = decoder.decode(value, { stream: true });
   
-  // The .filter(l => l.trim()) is the key fix for the empty bubble bug
-  for (const raw of chunk.split("\n").filter(l => l.trim())) {
+  // The .filter(l => l.trim().length > 0) is the key fix for the empty bubble bug
+  for (const raw of chunk.split("\n").filter(l => l.trim().length > 0)) {
     try {
       // Handle "data: " prefix common in SSE streams
       const jsonStr = raw.startsWith("data: ") ? raw.slice(6) : raw;

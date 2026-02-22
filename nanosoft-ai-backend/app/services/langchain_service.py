@@ -73,21 +73,30 @@ class LangChainService:
                     logger.info("📡 DB HIT | tool=%s | user_id=%s", tool_name, user_id)
                     
                     tool_result = tool_fn.invoke(args)
-                    # ✅ HANDLE EMPTY DB RESPONSE (CORE FIX)
+        
+                    # ✅ EMPTY RESULT HANDLING
                     if isinstance(tool_result, dict):
-                        if tool_result.get("p_count", 0) == 0:
-                            logger.info("⚠️ Empty DB result detected")
+                        p_count = tool_result.get("p_count", 0)
+                        p_list = tool_result.get("p_list", [])
 
-                            return (
-                                "No results found for the given query.",
-                                messages
-                            )
+                        logger.info(
+                            "📊 Tool result | %s | p_list_length=%s | p_count=%s",
+                            tool_name, len(p_list), p_count
+                        )
 
-                    tool_result = tool_fn.invoke(tool_call["args"])
+                        if p_count == 0:
+                            return "No results found for the given query.", messages
+                    else:
+                        p_list = tool_result
+                        p_count = len(p_list)
+
+                    # ✅ CLEAR MESSAGE TO MODEL
                     messages.append(
                         ToolMessage(
-                            content=json.dumps({ "status": "success", "data": tool_result }),
-                            
+                            content=json.dumps({
+                                "message": f"{p_count} records found",
+                                "records": p_list
+                            }),
                             tool_call_id=tool_call["id"]
                         )
                     )

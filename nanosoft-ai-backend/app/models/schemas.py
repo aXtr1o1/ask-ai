@@ -36,8 +36,8 @@ class AssetsInput(BaseModel):
     keyword: Optional[str] = Field(default=None, description="Free text search keyword")
     date_from: Optional[str] = Field(default=None, description="Date from YYYY-MM-DD")
     date_to: Optional[str] = Field(default=None, description="Date to YYYY-MM-DD")
-    limit: int = Field(default=20, description="Max number of results")
-    offset: int = Field(default=0, description="Pagination offset")
+    limit: Optional[int] = Field(default=None, description="Max number of results. Only set if user specifies a number. Omit if user wants all records.")
+    offset: Optional[int] = Field(default=None, description="Pagination offset. Omit unless explicitly requested.")
 
 
 class PPMInput(BaseModel):
@@ -60,8 +60,8 @@ class PPMInput(BaseModel):
     comp_to: Optional[str] = Field(default=None, description="Completion date to YYYY-MM-DD")
     sla_min: Optional[int] = Field(default=None, description="SLA duration minimum")
     sla_max: Optional[int] = Field(default=None, description="SLA duration maximum")
-    limit: int = Field(default=20, description="Max number of results")
-    offset: int = Field(default=0, description="Pagination offset")
+    limit: Optional[int] = Field(default=None, description="Max number of results. Only set if user specifies a number. Omit if user wants all records.")
+    offset: Optional[int] = Field(default=None, description="Pagination offset. Omit unless explicitly requested.")
 
 
 class BDMInput(BaseModel):
@@ -89,8 +89,8 @@ class BDMInput(BaseModel):
     date_to: Optional[str] = Field(default=None, description="Complaint date to YYYY-MM-DD")
     completed_from: Optional[str] = Field(default=None, description="Completed date from YYYY-MM-DD")
     completed_to: Optional[str] = Field(default=None, description="Completed date to YYYY-MM-DD")
-    limit: int = Field(default=20, description="Max number of results")
-    offset: int = Field(default=0, description="Pagination offset")
+    limit: Optional[int] = Field(default=None, description="Max number of results. Only set if user specifies a number. Omit if user wants all records.")
+    offset: Optional[int] = Field(default=None, description="Pagination offset. Omit unless explicitly requested.")
 
 
 # ==========================================

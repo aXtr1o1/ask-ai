@@ -36,6 +36,10 @@ html, body {
 
 /* ─── 2. SCROLLBARS ─── */
 ::-webkit-scrollbar { width: 2px; }
+::-webkit-scrollbar { 
+  width: 8px;   /* Slightly wider for better grip on medium tables */
+  height: 8px;  /* ✅ FIX: Reduces the thick dark bar at the bottom */
+}
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #2a3a2a; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #3a5a3a; }
@@ -580,6 +584,7 @@ html, body {
 
 /* ─── 13. TABLE STYLES ─── */
 .table-wrapper {
+  max-height: 280px;
   width: 100%;
   overflow-x: auto;
   margin: 14px 0;
@@ -837,4 +842,33 @@ html, body {
   font-size: 10px;
   color: #4a5a4a;
   margin-top: 10px;
+}
+/* ✅ 1. Medium Box Size Adjustment */
+.scrollable-table {
+  max-height: 450px; /* Increased for medium visibility */
+  overflow-y: auto;
+  overflow-x: auto;
+  border: 1.5px solid rgba(176, 219, 156, 0.9); /* Slightly thicker border */
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+/* ✅ 2. Medium Row Density */
+.ai-table.compact td.compact-cell {
+  padding: 6px 12px; /* Increased from 2px for better readability */
+  height: 32px;      /* Medium static row size */
+  font-size: 12px;   /* Slightly larger font */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-bottom: 1px solid #eeeeee;
+}
+
+.ai-table.compact th {
+  padding: 8px 12px;
+  font-size: 12px;
+  background: #d6edd8;
+  position: sticky;
+  top: 0;
+  z-index: 20;
 }
