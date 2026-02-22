@@ -140,6 +140,9 @@ async def chat_endpoint(request: ChatRequest):
         "session_id": session_id,
         "response": final_response_text
     }
+@chatbot_app.get("/health", tags=["Health"])
+def health():
+    return {"status": "ok"}
 
 
 # =====================================================

@@ -210,9 +210,6 @@ def PPM(
             "📦 PPM response data: %s",
             json.dumps(response_json, indent=2)
         )
-        print("**************")
-        print(json.dumps(response_json, indent=2))
-        print("*****************")
         
         logger.info("✅ PPM data processed successfully")
         
