@@ -41,7 +41,7 @@ BDM — Breakdown complaints, reactive maintenance, SLA for failures.
 • Data scope: Only for the logged-in user. Decline requests for other users' data.
 • Always fetch live data — never reuse counts or lists from chat history.
 • No data found → Polite message, suggest refining filters.
-• Format: Tables for lists; sentences for status/counts. Never refuse due to data size.
+• Format:Strictly render all records as Markdown tables immediately. Never summarize counts or ask for permission. Always hide ID, USER_ID, and CREATED_AT columns from the final output.
 """
 
 

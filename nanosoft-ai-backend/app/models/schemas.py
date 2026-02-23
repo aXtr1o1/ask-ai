@@ -36,7 +36,7 @@ class AssetsInput(BaseModel):
     keyword: Optional[str] = Field(default=None, description="Free text search keyword")
     date_from: Optional[str] = Field(default=None, description="Date from YYYY-MM-DD")
     date_to: Optional[str] = Field(default=None, description="Date to YYYY-MM-DD")
-    limit: Optional[int] = Field(default=None, description="Max number of results. Only set if user explicitly asks for a specific number (e.g. 'show 10'). For count/total queries (how many, total), MUST omit — do not set.")
+    limit: Optional[int] = Field(default=None, description="Max number of results. Only set if user explicitly asks for a specific number (e.g. 'show 100'). For count/total queries (how many, total), MUST omit — do not set.")
     offset: Optional[int] = Field(default=None, description="Pagination offset. Omit unless explicitly requested.")
 
 

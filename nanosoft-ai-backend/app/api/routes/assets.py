@@ -81,6 +81,7 @@ def get_assets(req: AssetRequest):
         "p_limit": req.limit,
         "p_offset": req.offset,
     }
+    
     logger.info("[GET-ASSETS] Calling sp_asset_query | params=%s", list(rpc_params.keys()))
 
     try:
