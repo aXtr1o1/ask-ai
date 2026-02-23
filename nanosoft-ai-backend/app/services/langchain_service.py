@@ -7,6 +7,8 @@ from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 
 from app.config import settings
 from app.tools.facility_tools import ASSETS, PPM, BDM
+from app.services.redis_service import cache_manager #for redis cache system
+
 
 import json
 
@@ -79,11 +81,19 @@ class LangChainService:
                     if any(p in user_query.lower() for p in count_patterns) and args.get("limit") is not None:
                         logger.info("📊 Count query detected — clearing limit=%s", args.get("limit"))
                         args["limit"] = None
-
-                    logger.info("📡 DB HIT | tool=%s | user_id=%s | limit=%s", tool_name, user_id, args.get("limit"))
                     
-                    tool_result = tool_fn.invoke(args)
-
+                    # Previously: tool_result = tool_fn.invoke(args)
+                    # Now: cache is checked first; DB is only hit on a full cache miss
+                    logger.info("🔍 Cache lookup | tool=%s | user_id=%s | limit=%s", tool_name, user_id, args.get("limit"))
+                    tool_result = cache_manager.get_or_fetch(
+                        tool_name=tool_name,
+                        user_id=user_id,
+                        args=args,
+                        fetch_fn=lambda: json.loads(tool_fn.invoke(dict(args)))
+                                 if isinstance(tool_fn.invoke(dict(args)), str)
+                                 else tool_fn.invoke(dict(args)),
+                    )   
+                    
                     # Parse tool result — tools return JSON string, not dict
                     parsed = tool_result
                     if isinstance(tool_result, str):
@@ -99,8 +109,16 @@ class LangChainService:
 
                     # Extract p_list and p_count from API response shape
                     if isinstance(parsed, dict):
-                        p_count = parsed.get("p_count", 0)
-                        p_list = parsed.get("p_list", [])
+                        #worked by mega
+                        # cache returns indexed format {"1": row, "2": row, ...}
+                        # detect indexed dict vs raw API shape {p_list: [...], p_count: N}
+                        if "p_list" in parsed:
+                            p_count = parsed.get("p_count", 0)
+                            p_list = parsed.get("p_list", [])
+                        else:
+                            # indexed format from cache — convert back to list
+                            p_list = list(parsed.values())
+                            p_count = len(p_list)
                     else:
                         p_list = parsed if isinstance(parsed, list) else []
                         p_count = len(p_list)
@@ -121,6 +139,7 @@ class LangChainService:
                     )
 
                     if p_count == 0 and total_for_count == 0:
+                        logger.info("📊 No records found for tool %s", tool_name)
                         return "No results found for the given query.", messages
 
                     # Use total_for_count for message when it differs (SP pagination with total in rows)
@@ -143,6 +162,7 @@ class LangChainService:
                  # ✅ FINAL SAFETY NET (NO EMPTY STRING EVER)
                 if not final_content or str(final_content).strip() == "":
                     final_content = "No results found for the given query."
+                    logger.info("final_ai_content is empty")
 
                 logger.info("✅ Final response generated after tool execution")
                 return final_content, messages
@@ -170,14 +190,35 @@ class LangChainService:
                     logger.warning("⚠️ Model skipped tool for data query — forcing %s", tool_name)
                     tool_fn = self.tool_map[tool_name]
                     args = {"user_id": user_id, "limit": None}
-                    tool_result = tool_fn.invoke(args)
+                    #same L1 → L2 → DB cache lookup for the forced-tool path
+                    #tool_result = tool_fn.invoke(args)
+                    tool_result = cache_manager.get_or_fetch(
+                        tool_name=tool_name,
+                        user_id=user_id,
+                        args=args,
+                        fetch_fn=lambda: json.loads(tool_fn.invoke(dict(args)))
+                                 if isinstance(tool_fn.invoke(dict(args)), str)
+                                 else tool_fn.invoke(dict(args)),
+                    )
+                    
                     try:
                         parsed = json.loads(tool_result) if isinstance(tool_result, str) else tool_result
                     except json.JSONDecodeError:
                         parsed = {}
-                    p_list = parsed.get("p_list", []) if isinstance(parsed, dict) else (parsed if isinstance(parsed, list) else [])
-                    p_count = parsed.get("p_count", len(p_list)) if isinstance(parsed, dict) else len(p_list)
+                        
+                    #handle indexed dict from cache same as normal path
+                    if isinstance(parsed, dict) and "p_list" in parsed:
+                        p_list = parsed.get("p_list", [])
+                        p_count = parsed.get("p_count", len(p_list))
+                    elif isinstance(parsed, dict):
+                        p_list = list(parsed.values())
+                        p_count = len(p_list)
+                    else:
+                        p_list = parsed if isinstance(parsed, list) else []
+                        p_count = len(p_list)
+                        
                     total_for_count = p_count
+                    
                     if p_list and isinstance(p_list[0], dict):
                         for key in ("total_count", "total_count_over", "full_count", "overall_count"):
                             val = p_list[0].get(key)
