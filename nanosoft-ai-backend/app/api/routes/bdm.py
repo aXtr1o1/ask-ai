@@ -48,21 +48,16 @@ def format_response(data):
 
 @router.post("/get-bdm")
 def get_bdm(req: BDMRequest):
-    
     logger.info(
-        "🔧 bdm  endpoint called | user_id=%s | status=%s | limit=%s",
-        req.user_id, req.status, req.limit
+        "[GET-BDM] Incoming | user_id=%s | status=%s | limit=%s | offset=%s",
+        req.user_id, req.status, req.limit, req.offset
     )
+    logger.debug("[GET-BDM] Full payload: %s", req.model_dump())
 
-    logger.debug(
-        "📥 Incoming BDM request payload: %s",
-        req.model_dump()
-    )
-    
     try:
         client = get_supabase_client()
         
-        logger.info("🚀 Calling sp_bdm_query RPC")
+        logger.info("[GET-BDM] Calling sp_bdm_query")
         
         response = client.rpc("sp_bdm_query", {
             "p_user_id": req.user_id,
@@ -92,19 +87,25 @@ def get_bdm(req: BDMRequest):
             "p_offset": req.offset,
         }).execute()
         formatted = format_response(response.data)
-
-        logger.info(
-            "✅ BDM response ready | count=%s",
-            formatted["p_count"]
-        )
-
-        logger.debug(
-            "📤 BDM final response: %s",
-            formatted
-        )
-        
+        p_list = formatted.get("p_list", [])
+        if p_list:
+            fields = list(p_list[0].keys()) if isinstance(p_list[0], dict) else []
+            sample = [r.get("complaint_no") or r.get("id") or str(r)[:50] for r in p_list[:3]]
+            logger.info("[GET-BDM] Fetched | count=%s | fields=%s | sample_ids=%s", formatted["p_count"], fields[:8], sample)
+        else:
+            logger.info("[GET-BDM] Success | count=0")
         return formatted
-    
     except Exception as e:
-        logger.error(f"❌ BDM Error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        err_msg = str(e)
+        if hasattr(e, "args") and e.args and isinstance(e.args[0], dict):
+            err_dict = e.args[0]
+            logger.error(
+                "[GET-BDM] RPC failed | code=%s | message=%s | hint=%s",
+                err_dict.get("code", "?"),
+                err_dict.get("message", err_msg),
+                err_dict.get("hint", ""),
+                exc_info=True
+            )
+        else:
+            logger.error("[GET-BDM] RPC failed | error=%s", err_msg, exc_info=True)
+        raise HTTPException(status_code=500, detail=err_msg)

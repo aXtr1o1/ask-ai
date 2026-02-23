@@ -7,6 +7,8 @@ from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 
 from app.config import settings
 from app.tools.facility_tools import ASSETS, PPM, BDM
+from app.services.redis_service import cache_manager #for redis cache system
+
 
 import json
 
@@ -22,7 +24,7 @@ class LangChainService:
     def __init__(self):
         try:
             self.model = ChatGoogleGenerativeAI(
-                model="gemini-2.5-flash-lite",
+                model=settings.GOOGLE_AI_MODEL,
                 google_api_key=settings.GOOGLE_API_KEY
             ).bind_tools([ASSETS, PPM, BDM])
 
@@ -66,35 +68,87 @@ class LangChainService:
                     tool_fn = self.tool_map[tool_call["name"]]
                     if tool_call.get("args") is None:
                         tool_call["args"] = {}
-                    args_before = dict(tool_call["args"])
-
-                    args = tool_call.get("args", {})
+                    args = dict(tool_call["args"])
                     args["user_id"] = user_id
-                    logger.info("📡 DB HIT | tool=%s | user_id=%s", tool_name, user_id)
+
+                    # Override limit for count queries — LLM often passes limit=1 incorrectly
+                    user_query = ""
+                    for m in reversed(messages):
+                        if isinstance(m, HumanMessage):
+                            user_query = (m.content or "") if isinstance(m.content, str) else ""
+                            break
+                    count_patterns = ("how many", "total", "number of", "count of", "count ", "how many ")
+                    if any(p in user_query.lower() for p in count_patterns) and args.get("limit") is not None:
+                        logger.info("📊 Count query detected — clearing limit=%s", args.get("limit"))
+                        args["limit"] = None
                     
-                    tool_result = tool_fn.invoke(args)
-        
-                    # ✅ EMPTY RESULT HANDLING
-                    if isinstance(tool_result, dict):
-                        p_count = tool_result.get("p_count", 0)
-                        p_list = tool_result.get("p_list", [])
+                    # Previously: tool_result = tool_fn.invoke(args)
+                    # Now: cache is checked first; DB is only hit on a full cache miss
+                    logger.info("🔍 Cache lookup | tool=%s | user_id=%s | limit=%s", tool_name, user_id, args.get("limit"))
+                    tool_result = cache_manager.get_or_fetch(
+                        tool_name=tool_name,
+                        user_id=user_id,
+                        args=args,
+                        fetch_fn=lambda: json.loads(tool_fn.invoke(dict(args)))
+                                 if isinstance(tool_fn.invoke(dict(args)), str)
+                                 else tool_fn.invoke(dict(args)),
+                    )   
+                    
+                    # Parse tool result — tools return JSON string, not dict
+                    parsed = tool_result
+                    if isinstance(tool_result, str):
+                        try:
+                            parsed = json.loads(tool_result)
+                        except json.JSONDecodeError:
+                            # Error message from tool — pass through to model
+                            logger.warning("Tool %s returned non-JSON (likely error): %s", tool_name, tool_result[:100])
+                            messages.append(
+                                ToolMessage(content=tool_result, tool_call_id=tool_call["id"])
+                            )
+                            continue
 
-                        logger.info(
-                            "📊 Tool result | %s | p_list_length=%s | p_count=%s",
-                            tool_name, len(p_list), p_count
-                        )
-
-                        if p_count == 0:
-                            return "No results found for the given query.", messages
+                    # Extract p_list and p_count from API response shape
+                    if isinstance(parsed, dict):
+                        #worked by mega
+                        # cache returns indexed format {"1": row, "2": row, ...}
+                        # detect indexed dict vs raw API shape {p_list: [...], p_count: N}
+                        if "p_list" in parsed:
+                            p_count = parsed.get("p_count", 0)
+                            p_list = parsed.get("p_list", [])
+                        else:
+                            # indexed format from cache — convert back to list
+                            p_list = list(parsed.values())
+                            p_count = len(p_list)
                     else:
-                        p_list = tool_result
+                        p_list = parsed if isinstance(parsed, list) else []
                         p_count = len(p_list)
 
-                    # ✅ CLEAR MESSAGE TO MODEL
+                    # For count queries: SP may return total in rows (COUNT(*) OVER ()) — prefer that
+                    total_for_count = p_count
+                    if p_list and isinstance(p_list[0], dict):
+                        for key in ("total_count", "total_count_over", "full_count", "overall_count"):
+                            val = p_list[0].get(key)
+                            if isinstance(val, (int, float)) and val >= 0:
+                                total_for_count = int(val)
+                                logger.info("📊 Using total from row field '%s' = %s", key, total_for_count)
+                                break
+
+                    logger.info(
+                        "📊 Tool result | %s | p_list_length=%s | p_count=%s | total_for_count=%s",
+                        tool_name, len(p_list), p_count, total_for_count
+                    )
+
+                    if p_count == 0 and total_for_count == 0:
+                        return "No results found for the given query.", messages
+
+                    # Use total_for_count for message when it differs (SP pagination with total in rows)
+                    display_count = total_for_count if total_for_count > len(p_list) else p_count
                     messages.append(
                         ToolMessage(
                             content=json.dumps({
-                                "message": f"{p_count} records found",
+                                "message": f"{display_count} records found",
+                                "records_returned": len(p_list),
+                                "total_count": display_count,
                                 "records": p_list
                             }),
                             tool_call_id=tool_call["id"]
@@ -114,6 +168,78 @@ class LangChainService:
     
 
             else:
+
+                # Model skipped tool — check if this is a data query that REQUIRES a tool
+                # if the model skipped the tool, we need to inject a synthetic tool call and result so the model formats from live data
+###
+                user_query = ""
+                for m in reversed(messages):
+                    if isinstance(m, HumanMessage):
+                        user_query = (m.content or "") if isinstance(m.content, str) else ""
+                        break
+                q = user_query.lower()
+                data_patterns = ("how many", "list", "count", "total", "number of", "show me", "get ", "fetch ")
+                needs_bdm = any(w in q for w in ("complaint", "bdm", "breakdown"))
+                needs_assets = any(w in q for w in ("asset", "equipment"))
+                needs_ppm = any(w in q for w in ("ppm", "preventive", "planned", "scheduled"))
+
+                if any(p in q for p in data_patterns) and (needs_bdm or needs_assets or needs_ppm):
+                    tool_name = "BDM" if needs_bdm else ("ASSETS" if needs_assets else "PPM")
+                    logger.warning("⚠️ Model skipped tool for data query — forcing %s", tool_name)
+                    tool_fn = self.tool_map[tool_name]
+                    args = {"user_id": user_id, "limit": None}
+                    #same L1 → L2 → DB cache lookup for the forced-tool path
+                    #tool_result = tool_fn.invoke(args)
+                    tool_result = cache_manager.get_or_fetch(
+                        tool_name=tool_name,
+                        user_id=user_id,
+                        args=args,
+                        fetch_fn=lambda: json.loads(tool_fn.invoke(dict(args)))
+                                 if isinstance(tool_fn.invoke(dict(args)), str)
+                                 else tool_fn.invoke(dict(args)),
+                    )
+                    
+                    try:
+                        parsed = json.loads(tool_result) if isinstance(tool_result, str) else tool_result
+                    except json.JSONDecodeError:
+                        parsed = {}
+                        
+                    #handle indexed dict from cache same as normal path
+                    if isinstance(parsed, dict) and "p_list" in parsed:
+                        p_list = parsed.get("p_list", [])
+                        p_count = parsed.get("p_count", len(p_list))
+                    elif isinstance(parsed, dict):
+                        p_list = list(parsed.values())
+                        p_count = len(p_list)
+                    else:
+                        p_list = parsed if isinstance(parsed, list) else []
+                        p_count = len(p_list)
+                        
+                    total_for_count = p_count
+                    
+                    if p_list and isinstance(p_list[0], dict):
+                        for key in ("total_count", "total_count_over", "full_count", "overall_count"):
+                            val = p_list[0].get(key)
+                            if isinstance(val, (int, float)) and val >= 0:
+                                total_for_count = int(val)
+                                break
+                    display_count = total_for_count if total_for_count > len(p_list) else p_count
+                    if p_count == 0 and total_for_count == 0:
+                        return "No results found for the given query.", messages
+                    # Inject synthetic tool call + result so model formats from live data
+                    fake_tool_id = "forced-" + tool_name.lower() + "-1"
+                    synthetic_ai = AIMessage(content="", tool_calls=[{"name": tool_name, "id": fake_tool_id, "args": {"user_id": user_id}}])
+                    messages.append(synthetic_ai)
+                    messages.append(ToolMessage(
+                        content=json.dumps({"message": f"{display_count} records found", "total_count": display_count, "records": p_list}),
+                        tool_call_id=fake_tool_id
+                    ))
+                    final_ai_msg = self.model.invoke(messages)
+                    content = final_ai_msg.content or "No results found for the given query."
+                    logger.info("✅ Response after forced tool call")
+                    return content, messages
+####
+
                 content = ai_msg.content
                 if not content or str(content).strip() == "":
                     content = "No results found for the given query."

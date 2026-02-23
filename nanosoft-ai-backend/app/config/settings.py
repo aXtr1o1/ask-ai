@@ -13,16 +13,20 @@ if not SUPABASE_URL or not SUPABASE_KEY:
     raise RuntimeError("Supabase URL or Key not set in environment variables")
 
 # Redis, Google API, Session config as before
-REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
-REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
-REDIS_USERNAME = os.getenv("REDIS_USERNAME", "default")
-REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", "")
+REDIS_HOST = os.getenv("REDIS_HOST")
+REDIS_PORT = int(os.getenv("REDIS_PORT"))
+REDIS_USERNAME = os.getenv("REDIS_USERNAME")
+REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-SESSION_TTL_SECONDS = int(os.getenv("SESSION_TTL_SECONDS", 86400))
-MAX_HISTORY = int(os.getenv("MAX_HISTORY", 10))
-DATABASE_API_URL = os.getenv("DATABASE_API_URL", "http://127.0.0.1:8000")
-# # Optional debug
+GOOGLE_AI_MODEL = os.getenv("GOOGLE_AI_MODEL")
+MAX_HISTORY = int(os.getenv("MAX_HISTORY"))
+DATABASE_API_URL = os.getenv("DATABASE_API_URL")
+L1_TTL_SECONDS   =int(os.getenv("L1_TTL_SECONDS"))
+L2_TTL_SECONDS   =int(os.getenv("L2_TTL_SECONDS")) 
+L1_SIZE_THRESHOLD =int(os.getenv("L1_SIZE_THRESHOLD"))
+# # Optional debug to see whether the variables are loaded or not .
+
 # if __name__ == "__main__":
 #     print("✅ Loaded .env from:", BASE_DIR / ".env")
 #     print("✅ Supabase URL:", SUPABASE_URL)
