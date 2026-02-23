@@ -23,7 +23,7 @@ class LangChainService:
         try:
             self.model = ChatGoogleGenerativeAI(
                 model="gemini-2.5-flash-lite",
-                google_api_key="AIzaSyD1beb6M9n72YO2PaLZXn9IzDUW_i6q6dA"#settings.GOOGLE_API_KEY
+                google_api_key=settings.GOOGLE_API_KEY
             ).bind_tools([ASSETS, PPM, BDM])
 
             self.tool_map = {
