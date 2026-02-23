@@ -32,6 +32,7 @@ if not logger.handlers:
         MAPPING DIRECTIVES:
         - division: Map if user mentions "Division", "Division Name", or "DivisionName". Matches p_division.
         - discipline: Map if user mentions "Discipline", "Discipline Name", or "DisciplineName". Matches p_discipline.
+        - status: Map if user mentions "Status" or "Status Name".
         - keyword: Mandatory fallback for terms, equipment types, or manufacturers not explicitly labeled. Matches p_keyword.
         
         FULL PARAMETER CAPABILITIES:
@@ -128,6 +129,7 @@ def ASSETS(
         MAPPING DIRECTIVES:
         - division: Map if user mentions "Division", "Division Name", or "DivisionName". Matches p_division.
         - discipline: Map if user mentions "Discipline", "Discipline Name", or "DisciplineName". Matches p_discipline.
+        - status: Map if user mentions "Status" or "Status Name".
         - keyword: Mandatory fallback for terms, equipment types, or manufacturers not explicitly labeled. Matches p_keyword.
         
         FULL PARAMETER CAPABILITIES:
@@ -223,6 +225,7 @@ def PPM(
         MAPPING DIRECTIVES:
         - division: Map if user mentions "Division", "Division Name", or "DivisionName". Matches p_division.
         - discipline: Map if user mentions "Discipline", "Discipline Name", or "DisciplineName". Matches p_discipline.
+        - status: Map if user mentions "Status" or "Status Name".
         - keyword: Mandatory fallback for terms, equipment types, or manufacturers not explicitly labeled. Matches p_keyword.
         
         FULL PARAMETER CAPABILITIES:

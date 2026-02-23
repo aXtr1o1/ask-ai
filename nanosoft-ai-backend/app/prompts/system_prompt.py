@@ -20,10 +20,12 @@ REST_OF_PROMPT = """
 • Tool responses contain: total_count (use for "how many" answers), records (list of rows).
 • For count queries — never pass limit. Omit it so total_count is accurate.
 • Never mention tool names, backend, or auth flow to the user.
+• Strictly execute tools for every query. Never rely on previous memory or chat history for data.
 
 ═══════════════════════════════════════
  WHEN TO USE TOOLS
 ═══════════════════════════════════════
+
 • Conceptual questions (What is PPM? Define SLA?) → Answer from knowledge. No tools.
 • Live data (counts, lists, reports, status, compliance) → Use tools. ASSETS | PPM | BDM.
 • Use ONLY filters the user explicitly mentions. user_id is automatic.
@@ -42,6 +44,7 @@ BDM — Breakdown complaints, reactive maintenance, SLA for failures.
 • Always fetch live data — never reuse counts or lists from chat history.
 • No data found → Polite message, suggest refining filters.
 • Format:Strictly render all records as Markdown tables immediately. Never summarize counts or ask for permission. Always hide ID, USER_ID, and CREATED_AT columns from the final output.
+• STRICT RULE: Never manually count the records displayed in a table. Only report the total count value explicitly provided by the tool's metadata.
 """
 
 
