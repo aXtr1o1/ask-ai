@@ -13,38 +13,47 @@ interface Message {
 interface FolderItem { id: string; name: string; }
 
 // ─── Extract text from any backend response shape ─────────────────────────────
+// Improved: handles JSON strings without spaces, array join, and reply/content/text fields
 function extractText(raw: any, depth = 0): string {
   if (depth > 10 || raw == null) return "";
   if (typeof raw === "string") {
-    const t = raw.trim();
-    if (t.startsWith("{") || t.startsWith("[")) {
-      try { return extractText(JSON.parse(t), depth + 1); } catch { return raw; }
+    const trimmed = raw.trim();
+    // Only try JSON parse if it looks like JSON AND has no spaces (avoids parsing prose)
+    if ((trimmed.startsWith("{") || trimmed.startsWith("[")) && !trimmed.includes(" ")) {
+      try { return extractText(JSON.parse(trimmed), depth + 1); } catch { return raw; }
     }
     return raw;
   }
   if (Array.isArray(raw))
-    return raw.map(x => extractText(x, depth + 1)).filter(t => t.trim()).join(" ");
+    return raw.map(item => extractText(item, depth + 1)).filter(t => t.trim()).join("");
   if (typeof raw === "object") {
-    for (const k of ["response", "content", "text", "reply"])
-      if (raw[k]) return extractText(raw[k], depth + 1);
+    // Priority order: response → content → text → reply
+    if (raw.response) return extractText(raw.response, depth + 1);
+    if (raw.content)  return extractText(raw.content,  depth + 1);
+    if (raw.text)     return extractText(raw.text,     depth + 1);
+    if (raw.reply)    return extractText(raw.reply,    depth + 1);
     return "";
   }
   return String(raw);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  UNIVERSAL TABULAR FORMATTER
+//  DYNAMIC UNIVERSAL FORMATTER  v3
 //
-//  Converts ANY structured model output → clean HTML <table> matching the
-//  "Tabular Data" image: columns auto-detected, header row, data rows.
+//  ONE RULE:
+//    Any KV data with ≥3 fields  → TABLE  (even 1 record)
+//    Any KV data with <3 fields  → BULLET LIST
+//    Plain bullets (no KV)       → BULLET LIST
+//    Pipe table (|col|col|)      → TABLE  always
 //
-//  Handles ALL formats the model may return:
-//  ┌─────────────────────────────────────────────────────────────────────┐
-//  │ FMT-1  Bullet KV   "• Key1: Val, Key2: Val, Key3: Val"             │
-//  │ FMT-2  Numbered KV "1. Key1: Val, Key2: Val"                       │
-//  │ FMT-3  Plain KV    "Key1: Val\nKey2: Val\n\nKey1: Val\n..."        │
-//  │ FMT-4  Pipe table  "| Col | Col |\n|---|\n| V | V |"              │
-//  └─────────────────────────────────────────────────────────────────────┘
+//  Handles ALL backend output shapes:
+//  ┌──────────────────────────────────────────────────────────────────────────┐
+//  │ A  Pipe table    "| Col | Col |\n|---|\n| V | V |"    → TABLE always    │
+//  │ B  Horiz KV     "• Key: V, Key: V, Key: V"           → TABLE if ≥3 KV  │
+//  │ C  Vert bullet  "• Key: V\n• Key: V\n• Key: V..."    → TABLE if ≥3 KV  │
+//  │ D  Plain block  "Key: V\nKey: V\n\nKey: V\n..."       → TABLE if ≥3 KV  │
+//  │ E  Plain prose  "• text\n• text"                      → BULLET LIST      │
+//  └──────────────────────────────────────────────────────────────────────────┘
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // ── HTML escape ───────────────────────────────────────────────────────────────
@@ -65,147 +74,168 @@ function md(text: string): string {
   return text;
 }
 
-// ── Build <table> from an array of row objects ────────────────────────────────
+// ── Strip bullet/number prefix + strip **bold** and *italic* from a line ──────
+function cleanLine(raw: string): string {
+  let s = raw.replace(/^[\s]*(?:[-*•]|\d+[.)]):?\s?/, "").trim();
+  s = s.replace(/\*\*(.+?)\*\*/g, "$1").replace(/\*(.+?)\*/g, "$1");
+  return s;
+}
+
+// ── Regex: matches "Key: value" or "**Key**: value" (key 2–30 alpha chars) ────
+const KV_LINE_RE   = /^\*{0,2}([A-Za-z][A-Za-z ]{1,28})\*{0,2}:[ \t]+(.+)$/;
+// Multi-KV on one line: "Key: Val, Key: Val"
+const KV_BOUND_SRC = String.raw`(?:^|(?:,\s+))([A-Za-z][A-Za-z ]{0,25}?):\s*`;
+
+// ── Status badge renderer ─────────────────────────────────────────────────────
+function badge(val: string): string {
+  const v   = val.toLowerCase();
+  const cls = ["online","open","good","active","operational","serviceable","completed"].includes(v)
+            ? "status-online"
+            : ["offline","closed","inactive","fault","immobilized","cancelled"].includes(v)
+            ? "status-offline"
+            : "status-neutral";
+  return `<span class="status-badge ${cls}">${esc(val)}</span>`;
+}
+
+const BADGE_COLS = new Set(["status","condition","state","wostatus","ppstatus","ppmstatus"]);
+function isBadgeCol(col: string): boolean {
+  return BADGE_COLS.has(col.toLowerCase().replace(/[\s_]/g, ""));
+}
+
+// ── Build HTML <table> from rows ──────────────────────────────────────────────
 function buildTable(rows: Record<string, string>[], cols?: string[]): string {
   if (!rows.length) return "";
 
- // ✅ Step 1: Filter technical and requested columns (Case-insensitive)
-  const hiddenKeys = ["id", "user_id", "created_at", "owner","ID", "User_ID"]; 
-  
+  // Collect column order preserving insertion order
   const allCols: string[] = cols ?? (() => {
     const seen: string[] = [];
-    rows.forEach(r => Object.keys(r).forEach(k => { 
-      const isHidden = hiddenKeys.some(h => h.toLowerCase() === k.toLowerCase());
-      if (!seen.includes(k) && !isHidden) seen.push(k); 
-    }));
+    rows.forEach(r => Object.keys(r).forEach(k => { if (!seen.includes(k)) seen.push(k); }));
     return seen;
   })();
 
-  // Status badge renderer
-  const badge = (val: string) => {
-    const v = val.toLowerCase();
-    const cls = v === "online"  ? "status-online"
-              : v === "offline" ? "status-offline"
-              :                   "status-neutral";
-    return `<span class="status-badge ${cls}">${esc(val)}</span>`;
-  };
+  const thead = `<thead><tr>${allCols.map(c => `<th>${esc(c)}</th>`).join("")}</tr></thead>`;
 
-  // Header row
-  const thead = `
-    <thead>
-      <tr>${allCols.map(c => `<th>${esc(c)}</th>`).join("")}</tr>
-    </thead>`;
-
-  // Body rows
-  const tbody = `
-    <tbody>
-      ${rows.map(row =>
-        `<tr>${allCols.map(col => {
-          const val  = row[col] ?? "—";
-          const cell = col.toLowerCase().includes("status") ? badge(val) : esc(val);
-          
-          // ✅ FIX: Using "compact-cell" class and removed wrapping to keep box size small
-          return `<td class="compact-cell">${cell}</td>`;
-        }).join("")}</tr>`
-      ).join("\n")}
-    </tbody>`;
+  const tbody = `<tbody>${rows.map((row, ri) =>
+    `<tr${ri % 2 === 1 ? ' class="row-even"' : ""}>${allCols.map(col => {
+      const val  = row[col] ?? "—";
+      const cell = isBadgeCol(col) ? badge(val) : esc(val);
+      return `<td>${cell}</td>`;
+    }).join("")}</tr>`
+  ).join("")}</tbody>`;
 
   const tfoot = `<tfoot><tr><td colspan="${allCols.length}" class="table-footer">${rows.length} row${rows.length !== 1 ? "s" : ""}</td></tr></tfoot>`;
 
-  // ✅ FIX: Added "scrollable-table" and "compact" classes to cap the huge box size
-  return `<div class="table-wrapper scrollable-table"><table class="ai-table compact">${thead}${tbody}${tfoot}</table></div>`;
+  return `<div class="table-wrapper"><table class="ai-table">${thead}${tbody}${tfoot}</table></div>`;
 }
 
-// ── REGEX constants ───────────────────────────────────────────────────────────
-// Matches "Key:" boundary after start-of-string or ", "
-const KV_BOUND_SRC = String.raw`(?:^|(?:,\s+))([A-Za-z][A-Za-z ]{0,25}?):\s*`;
-// Matches a single plain "Key: Value" line
-// Matches plain "Key: Value" OR "**Key**: Value" (bold keys)
-const PLAIN_KV_RE  = /^\*{0,2}([A-Za-z][A-Za-z ]{0,28})\*{0,2}:\s*(.+)$/;
+// ── Render plain bullet list ──────────────────────────────────────────────────
+function renderBullets(lines: string[]): string {
+  let html = '<ul style="margin:8px 0 8px 20px;padding:0;list-style:disc">';
+  lines.forEach(l => {
+    html += `<li style="margin:4px 0;line-height:1.6;color:#1f2933">${md(cleanLine(l))}</li>`;
+  });
+  return html + "</ul>";
+}
 
-// ── FMT-1 / FMT-2: Parse one bullet/numbered line with "Key: Val, Key: Val" ──
-function parseBulletKV(rawLine: string): Record<string, string> | null {
-  // Strip bullet/number prefix
-  // Strip bullet/number prefix
-  let line = rawLine.replace(/^[\s]*(?:[-*•]|\d+[.)]) ?/, "").trim();
+// ── Render single KV record as a 2-col vertical table (Key | Value) ───────────
+function renderKVVertical(pairs: { key: string; val: string }[]): string {
+  const rows = pairs.map(({ key, val }) => {
+    const cell = isBadgeCol(key) ? badge(val) : esc(val);
+    return `<tr><th style="width:35%;text-align:left">${esc(key)}</th><td>${cell}</td></tr>`;
+  });
+  return `<div class="table-wrapper"><table class="ai-table"><tbody>${rows.join("")}</tbody></table></div>`;
+}
+
+// ── Parse one line as horizontal multi-KV: "Key: V, Key: V" → {K:V, K:V} ─────
+function parseHorizKV(raw: string): Record<string, string> | null {
+  const line = cleanLine(raw);
   if (!line) return null;
-
-  // ⚡ Strip **bold** and *italic* markdown — model often bolds keys:
-  //    "• **Asset Tag**: X, **Barcode**: Y" → "• Asset Tag: X, Barcode: Y"
-  line = line.replace(/\*\*(.+?)\*\*/g, "$1").replace(/\*(.+?)\*/g, "$1");
-
   const re   = new RegExp(KV_BOUND_SRC, "g");
   const hits: { key: string; vs: number; rs: number }[] = [];
-  let   m:   RegExpExecArray | null;
-
+  let m: RegExpExecArray | null;
   while ((m = re.exec(line)) !== null) {
     const key = m[1].trim();
-    // Reject empty keys, keys with digits, or over-long keys
-    if (!key || /\d/.test(key) || key.length > 30) continue;
+    if (!key || /\d/.test(key) || key.length < 2 || key.length > 30) continue;
     hits.push({ key, vs: m.index + m[0].length, rs: m.index });
   }
-
   if (hits.length < 2) return null;
-
   const result: Record<string, string> = {};
   for (let i = 0; i < hits.length; i++) {
-    // Slice from this key's value start to next key's raw start
     const end = i + 1 < hits.length ? hits[i + 1].rs : line.length;
     result[hits[i].key] = line.slice(hits[i].vs, end).replace(/,\s*$/, "").trim() || "—";
   }
-
   return Object.keys(result).length >= 2 ? result : null;
 }
 
-// ── FMT-3: Parse plain "Key: Value" lines separated by blank lines into rows ──
+// ── Parse one line as single KV: "Key: value" → {key, val} ───────────────────
+function parseSingleKV(raw: string): { key: string; val: string } | null {
+  const line = cleanLine(raw);
+  const m    = KV_LINE_RE.exec(line);
+  if (!m) return null;
+  return { key: m[1].trim(), val: m[2].trim() };
+}
+
+// ── Parse plain KV blocks (blank-line-separated records) ─────────────────────
+//    "Key: V\nKey: V\n\nKey: V\nKey: V" → [{K:V,K:V},{K:V,K:V}]
 function parsePlainKVBlocks(lines: string[]): Record<string, string>[] | null {
-  const blocks: Record<string, string>[] = [];
-  let   cur:    Record<string, string>   = {};
+  const records: Record<string, string>[] = [];
+  let cur: Record<string, string> = {};
 
   const flush = () => {
-    if (Object.keys(cur).length >= 2) { blocks.push(cur); }
-    cur = {};
+    if (Object.keys(cur).length >= 1) { records.push(cur); cur = {}; }
   };
 
   for (const raw of lines) {
-    const line = raw.trim();
-    if (line === "") { flush(); continue; }
-    const m = PLAIN_KV_RE.exec(line);
-    if (m) {
-      cur[m[1].trim()] = m[2].trim();
+    const t = raw.trim();
+    if (t === "") { flush(); continue; }
+    const m = KV_LINE_RE.exec(cleanLine(t));
+    // also try with bullet prefix stripped already applied by cleanLine
+    const m2 = m ?? KV_LINE_RE.exec(t);
+    if (m2) {
+      cur[m2[1].trim()] = m2[2].trim();
     } else {
-      return null;  // non-KV line found — abort
+      return null; // non-KV line → abort, not a KV block
     }
   }
   flush();
-
-  return blocks.length >= 1 ? blocks : null;
+  return records.length >= 1 ? records : null;
 }
 
-// ── FMT-4: Parse markdown pipe-table lines ────────────────────────────────────
+// ── Parse pipe table (with or without separator row) ─────────────────────────
 function parsePipeTable(lines: string[]): { cols: string[]; rows: Record<string, string>[] } | null {
   const tl = lines.filter(l => /^\|.+\|$/.test(l.trim()));
   if (tl.length < 2) return null;
 
-  const split = (l: string) =>
+  const split  = (l: string) =>
     l.split("|").map(c => c.trim()).filter((_, i, a) => i > 0 && i < a.length - 1);
+  const isSep  = (l: string) =>
+    /^\|[\s\-:|]+\|$/.test(l.trim()) && split(l).every(c => /^[\-:\s]+$/.test(c));
 
-  const cols = split(tl[0]);
-  const rows = tl.slice(2).map(l => {
+  const hasSep   = tl.length > 1 && isSep(tl[1]);
+  const cols     = split(tl[0]);
+  const dataRows = (hasSep ? tl.slice(2) : tl.slice(1)).filter(l => !isSep(l));
+  if (!dataRows.length) return null;
+
+  const rows = dataRows.map(l => {
     const cells = split(l);
     const row: Record<string, string> = {};
-    cols.forEach((c, i) => { row[c] = cells[i] ?? "—"; });
+    cols.forEach((c, idx) => { row[c] = cells[idx] ?? "—"; });
     return row;
   });
-
   return { cols, rows };
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  MASTER formatOutput()
-//  Walks the raw model text line-by-line.
-//  Detects structured blocks and emits <table> HTML.
-//  Falls back to styled prose for non-structured content.
+//
+//  Decision logic:
+//    Pipe table            → TABLE always
+//    Horiz KV bullets      → TABLE (multi-row, 1 record per bullet line)
+//    Vert KV bullets       → TABLE if ≥3 fields, else 2-col KV table
+//    Plain KV blocks       → TABLE (multi-record), 2-col if 1 record < 3 keys
+//    Pure bullets (no KV)  → BULLET LIST
+//    Numbered list         → ORDERED LIST
+//    Prose                 → paragraph
 // ══════════════════════════════════════════════════════════════════════════════
 function formatOutput(text: string): string {
   if (!text.trim()) return "";
@@ -220,105 +250,130 @@ function formatOutput(text: string): string {
 
     // ── Blank line ─────────────────────────────────────────────────────────
     if (trimmed === "") {
-      html += '<div style="height:8px"></div>';
-      i++;
-      continue;
+      html += '<div style="height:6px"></div>';
+      i++; continue;
     }
 
-    // ── FMT-4: Pipe table ──────────────────────────────────────────────────
+    // ── A: Pipe table | col | col | ────────────────────────────────────────
     if (/^\|.+\|$/.test(trimmed)) {
       const block: string[] = [];
       while (i < allLines.length && /^\|.+\|$/.test(allLines[i].trim())) {
-        block.push(allLines[i].trim());
-        i++;
+        block.push(allLines[i].trim()); i++;
       }
       const parsed = parsePipeTable(block);
-      if (parsed) {
-        html += buildTable(parsed.rows, parsed.cols);
-      } else {
-        html += block.map(l => `<div>${md(l)}</div>`).join("");
-      }
+      html += parsed
+        ? buildTable(parsed.rows, parsed.cols)
+        : block.map(l => `<div>${md(l)}</div>`).join("");
       continue;
     }
 
-    // ── FMT-1 / FMT-2: Bullet / numbered lines ─────────────────────────────
+    // ── B / C: Bullet or numbered block ────────────────────────────────────
     if (/^[\s]*(?:[-*•]|\d+[.)]) /.test(line)) {
       const block: string[] = [];
       while (
         i < allLines.length &&
         allLines[i].trim() !== "" &&
         /^[\s]*(?:[-*•]|\d+[.)]) /.test(allLines[i])
-      ) {
-        block.push(allLines[i]);
-        i++;
+      ) { block.push(allLines[i]); i++; }
+
+      // B: Horizontal KV per line: "• Key: V, Key: V" → each line = 1 table row
+      const hRows = block.map(parseHorizKV).filter(Boolean) as Record<string, string>[];
+      if (hRows.length > 0 && hRows.length >= Math.ceil(block.length * 0.5)) {
+        html += buildTable(hRows);
+        continue;
       }
 
-      const kvRows  = block.map(parseBulletKV);
-      const validKV = kvRows.filter(Boolean) as Record<string, string>[];
+      // C: Vertical KV: "• Key: V" lines together = fields of one record
+      //    BUT if repeated keys found → multiple records
+      const vPairs = block.map(parseSingleKV).filter(Boolean) as { key: string; val: string }[];
+      const kvRatio = vPairs.length / block.length;
 
-      if (validKV.length >= Math.ceil(block.length * 0.5)) {
-        // ✅ Most lines are KV pairs → render as table
-        html += buildTable(validKV);
-      } else {
-        // Regular unordered list
-        html += '<ul style="margin:8px 0 8px 20px;padding:0;list-style:disc">';
-        block.forEach(bl => {
-          const t = bl.replace(/^[\s]*(?:[-*•]|\d+[.)]) ?/, "").trim();
-          html += `<li style="margin:4px 0;line-height:1.6">${md(t)}</li>`;
-        });
-        html += "</ul>";
+      if (vPairs.length >= 1 && kvRatio >= 0.6) {
+        // Check if keys repeat → multiple records
+        const keysSeen = new Set<string>();
+        const multiRecords: Record<string, string>[] = [];
+        let cur: Record<string, string> = {};
+        for (const { key, val } of vPairs) {
+          if (keysSeen.has(key)) {
+            // Key repeated → flush current record, start new
+            if (Object.keys(cur).length) multiRecords.push(cur);
+            cur = {}; keysSeen.clear();
+          }
+          cur[key] = val;
+          keysSeen.add(key);
+        }
+        if (Object.keys(cur).length) multiRecords.push(cur);
+
+        if (multiRecords.length > 1) {
+          // Multiple records → wide table
+          html += buildTable(multiRecords);
+        } else {
+          // Single record: ≥3 fields → wide table; <3 → 2-col KV table
+          const fields = Object.keys(multiRecords[0] ?? {}).length;
+          html += fields >= 3
+            ? buildTable(multiRecords)
+            : renderKVVertical(vPairs);
+        }
+        continue;
       }
+
+      // E: Pure bullet list (no KV)
+      html += renderBullets(block);
       continue;
     }
 
-    // ── FMT-3: Plain "Key: Value" block ────────────────────────────────────
-    if (PLAIN_KV_RE.test(trimmed)) {
-      // Collect all consecutive KV lines (blank lines separate records)
+    // ── D: Plain KV block (no bullet prefix) ───────────────────────────────
+    //    "Asset Tag: X\nType: Fixed\n\nAsset Tag: Y\n..."
+    if (KV_LINE_RE.test(cleanLine(trimmed))) {
+      // Collect all lines until we hit something that is not KV and not blank
       const block: string[] = [];
       let j = i;
       while (j < allLines.length) {
         const t = allLines[j].trim();
-        if (t === "" || PLAIN_KV_RE.test(t)) {
-          block.push(allLines[j]);
-          j++;
-        } else break;
+        if (t === "") { block.push(allLines[j]); j++; continue; }
+        if (KV_LINE_RE.test(cleanLine(t))) { block.push(allLines[j]); j++; continue; }
+        break;
       }
-      // Remove trailing blank lines from block
+      // Strip trailing blanks
       while (block.length && block[block.length - 1].trim() === "") block.pop();
 
-      if (block.length >= 2) {
-        const parsed = parsePlainKVBlocks(block);
-        if (parsed) {
-          html += buildTable(parsed);
-          i = j;
-          continue;
+      if (block.length >= 1) {
+        const records = parsePlainKVBlocks(block);
+        if (records && records.length >= 1) {
+          if (records.length > 1) {
+            // Multiple records → wide multi-row table
+            html += buildTable(records);
+          } else {
+            // Single record: ≥3 keys → wide table, else 2-col KV table
+            const keys = Object.keys(records[0]);
+            html += keys.length >= 3
+              ? buildTable(records)
+              : renderKVVertical(keys.map(k => ({ key: k, val: records![0][k] })));
+          }
+          i = j; continue;
         }
       }
     }
 
-    // ── Ordered list item ──────────────────────────────────────────────────
-    const ordM = trimmed.match(/^(\d+)[.)]\s+(.*)/);
-    if (ordM) {
-      html += '<ol style="margin:8px 0 8px 20px;padding:0;list-style:decimal">';
+    // ── Ordered list ───────────────────────────────────────────────────────
+    if (/^\d+[.)]\s/.test(trimmed)) {
+      let listHtml = '<ol style="margin:8px 0 8px 20px;padding:0;list-style:decimal">';
       while (i < allLines.length) {
-        const oLine = allLines[i].trim();
-        const oM    = oLine.match(/^(\d+)[.)]\s+(.*)/);
+        const oM = allLines[i].trim().match(/^\d+[.)]\s+(.*)/);
         if (!oM) break;
-        html += `<li style="margin:4px 0;line-height:1.6">${md(oM[2])}</li>`;
+        listHtml += `<li style="margin:4px 0;line-height:1.6">${md(oM[1])}</li>`;
         i++;
       }
-      html += "</ol>";
-      continue;
+      html += listHtml + "</ol>"; continue;
     }
 
-    // ── Heading: # ## ### ──────────────────────────────────────────────────
+    // ── Heading # ## ### ───────────────────────────────────────────────────
     const headM = trimmed.match(/^(#{1,3})\s+(.*)/);
     if (headM) {
-      const sz  = ["20px", "17px", "15px"][headM[1].length - 1];
-      const fw  = headM[1].length === 1 ? "700" : "600";
-      html += `<div style="font-size:${sz};font-weight:${fw};margin:14px 0 6px;color:#1a2e1a;letter-spacing:-0.01em">${md(headM[2])}</div>`;
-      i++;
-      continue;
+      const sz = ["20px","17px","15px"][headM[1].length - 1];
+      const fw = headM[1].length === 1 ? "700" : "600";
+      html += `<div style="font-size:${sz};font-weight:${fw};margin:12px 0 5px;color:#1a2e1a">${md(headM[2])}</div>`;
+      i++; continue;
     }
 
     // ── Regular prose ──────────────────────────────────────────────────────
@@ -422,6 +477,7 @@ export default function Home() {
   const inputRef         = useRef<HTMLTextAreaElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const menuRef          = useRef<HTMLDivElement>(null);
+  const socketsRef = useRef<Map<string, WebSocket>>(new Map());
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -463,8 +519,172 @@ export default function Home() {
   };
   useEffect(() => { resizeTA(); }, [input]);
 
-  const handleNewChat = () => { setMessages([]); setSessionId(generateSessionId()); };
-  const handleLogout  = () => { localStorage.removeItem("loggedInUser"); router.replace("/login"); };
+  // ── Persistent WebSocket: connect once on mount, stay open all session ───────
+  const accRef = useRef<string>("");   // accumulates current response text
+
+  const getWsUrl = () =>
+    (process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8001")
+      .replace(/^http:/,  "ws:")
+      .replace(/^https:/, "wss:") + "/ws/chat";
+
+  const connectWS = () => {
+    const ws = new WebSocket(getWsUrl());
+    socketsRef.current.set(sessionId, ws);
+
+    ws.onopen = () => {
+      console.log("✅ WebSocket connected");
+    };
+
+    // ── Every message from backend ────────────────────────────────────────
+    ws.onmessage = (event: MessageEvent) => {
+      try {
+        const raw     = typeof event.data === "string" ? event.data : "";
+        const jsonStr = raw.startsWith("data: ") ? raw.slice(6) : raw;
+
+        // "[DONE]" = end of this response → finalize bubble, stay connected
+        if (jsonStr.trim() === "[DONE]" || jsonStr.trim() === "__END__") {
+          const finalText = accRef.current;
+          setMessages(prev => {
+            const u = [...prev];
+            const l = u.length - 1;
+            if (u[l]?.role === "ai") u[l] = { role: "ai", text: finalText, streaming: false };
+            return u;
+          });
+          accRef.current = "";          // reset for next message
+          setIsLoading(false);
+          setTimeout(() => inputRef.current?.focus(), 50);
+          return;
+        }
+
+        const part = extractText(JSON.parse(jsonStr));
+        if (part) {
+          accRef.current += part;
+          const snap = accRef.current;
+          setMessages(prev => {
+            const u = [...prev];
+            const l = u.length - 1;
+            // If last message is already our streaming AI bubble → update it
+            if (u[l]?.role === "ai" && u[l]?.streaming === true) {
+              u[l] = { role: "ai", text: snap, streaming: true };
+            } else {
+              // First chunk → create the AI bubble now (only once)
+              u.push({ role: "ai", text: snap, streaming: true });
+            }
+            return u;
+          });
+        }
+      } catch { /* non-JSON frame — ignore */ }
+    };
+
+    // ── Connection dropped → auto-reconnect after 2 s ─────────────────────
+   ws.onclose = (event) => {
+  console.warn("⚠️ WebSocket closed");
+
+  setIsLoading(false);
+
+  // Only auto-reconnect if it was NOT manually closed
+  if (!event.wasClean) {
+    setTimeout(() => connectWS(), 2000);
+  }
+};
+
+    ws.onerror = () => {
+      console.error("❌ WebSocket error");
+      setMessages(prev => [...prev, { role: "error", text: "❌ Connection failed. Retrying…" }]);
+      setIsLoading(false);
+    };
+  };
+
+  // Connect when component mounts (after auth is confirmed)
+useEffect(() => {
+  if (!authChecked) return;
+  connectWS();
+  return () => {
+    socketsRef.current.forEach(ws => ws.close());
+  };
+},[authChecked]);
+ 
+
+  const handleNewChat = () => {
+  // Close all existing sockets
+  socketsRef.current.forEach(ws => ws.close());
+  socketsRef.current.clear();
+
+  setMessages([]);
+  accRef.current = "";
+  setIsLoading(false);
+
+  const newSessionId = generateSessionId();
+  setSessionId(newSessionId);
+
+  // Open a fresh socket with the same streaming logic as connectWS
+  const ws = new WebSocket(getWsUrl());
+  socketsRef.current.set(newSessionId, ws);
+
+  ws.onopen = () => {
+    console.log("✅ Connected:", newSessionId);
+  };
+
+  ws.onmessage = (event: MessageEvent) => {
+    try {
+      const raw     = typeof event.data === "string" ? event.data : "";
+      const jsonStr = raw.startsWith("data: ") ? raw.slice(6) : raw;
+
+      if (jsonStr.trim() === "[DONE]" || jsonStr.trim() === "__END__") {
+        const finalText = accRef.current;
+        setMessages(prev => {
+          const u = [...prev];
+          const l = u.length - 1;
+          if (u[l]?.role === "ai") u[l] = { role: "ai", text: finalText, streaming: false };
+          return u;
+        });
+        accRef.current = "";
+        setIsLoading(false);
+        setTimeout(() => inputRef.current?.focus(), 50);
+        return;
+      }
+
+      const part = extractText(JSON.parse(jsonStr));
+      if (part) {
+        accRef.current += part;
+        const snap = accRef.current;
+        setMessages(prev => {
+          const u = [...prev];
+          const l = u.length - 1;
+          if (u[l]?.role === "ai" && u[l]?.streaming === true) {
+            u[l] = { role: "ai", text: snap, streaming: true };
+          } else {
+            u.push({ role: "ai", text: snap, streaming: true });
+          }
+          return u;
+        });
+      }
+    } catch { /* non-JSON frame — ignore */ }
+  };
+
+  ws.onclose = (event) => {
+    console.warn("⚠️ WebSocket closed:", newSessionId);
+    socketsRef.current.delete(newSessionId);
+    setIsLoading(false);
+    if (!event.wasClean) {
+      setTimeout(() => connectWS(), 2000);
+    }
+  };
+
+  ws.onerror = () => {
+    console.error("❌ WebSocket error");
+    setMessages(prev => [...prev, { role: "error", text: "❌ Connection failed. Retrying…" }]);
+    setIsLoading(false);
+  };
+};
+
+const handleLogout = () => {
+  socketsRef.current.forEach(ws => ws.close());
+  socketsRef.current.clear();
+
+  localStorage.removeItem("loggedInUser");
+  router.replace("/login");
+};
 
   const toggleRecording = async () => {
     if (isRecording) {
@@ -479,98 +699,31 @@ export default function Home() {
         setIsRecording(true);
       } catch { alert("Please allow microphone access."); }
     }
-  };
+   }; 
 
-  // ── Send & stream ──────────────────────────────────────────────────────────
-  const sendMessage = async () => {
-    if (!input.trim() || isLoading) return;
-    const userText = input.trim();
+  // ── Send message over the persistent WebSocket ────────────────────────────
+  const sendMessage = () => {
+  if (!input.trim() || isLoading) return;
+  const userText = input.trim();
 
-    setMessages(prev => [...prev, { role: "user", text: userText }]);
-    setInput("");
-    setIsLoading(true);
+  const ws = socketsRef.current.get(sessionId);
 
-      const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
-
-try {
-      const res = await fetch(`${baseUrl}/chat`, {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ query: userText, userId: loggedInUser, sessionId }),
-      });
-      if (!res.ok) throw new Error(`Server error: ${res.status}`);
-      if (!res.ok) throw new Error(`Server error: ${res.status}`);
-
-      const reader  = res.body?.getReader();
-      const decoder = new TextDecoder();
-      if (!reader) throw new Error("No response body");
-
-      setIsLoading(false);
-      // streaming:true → renders as plain text while chunks arrive
-      setMessages(prev => [...prev, { role: "ai" as const, text: "", streaming: true }]);
-
-      let accumulated = "";
-
-     while (true) {
-  const { done, value } = await reader.read();
-  if (done) break;
-
-  const chunk = decoder.decode(value, { stream: true });
-  
-  // The .filter(l => l.trim().length > 0) is the key fix for the empty bubble bug
-  for (const raw of chunk.split("\n").filter(l => l.trim().length > 0)) {
-    try {
-      // Handle "data: " prefix common in SSE streams
-      const jsonStr = raw.startsWith("data: ") ? raw.slice(6) : raw;
-      const parsed = JSON.parse(jsonStr);
-      const part = extractText(parsed);
-
-      if (part) {
-        accumulated += part;
-        setMessages(prev => {
-          const u = [...prev];
-          const l = u.length - 1;
-
-          // Update the existing AI bubble instead of creating a new empty one
-          if (u[l]?.role === "ai") {
-            u[l] = { role: "ai", text: accumulated, streaming: true };
-          } else {
-            // This handles the very first real chunk received
-            u.push({ role: "ai", text: accumulated, streaming: true });
-          }
-          return u;
-        });
-
-        // Small delay for smooth typing effect
-        await new Promise(r => setTimeout(r, 10));
-      }
-    } catch (e) {
-      // Silently catch partial chunks to prevent the loop from crashing
-      console.warn("Partial chunk received:", raw);
-    }
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    console.warn("Socket not ready for session:", sessionId);
+    return;
   }
-}
 
-      // ✅ Stream done: flip streaming:false → formatOutput() runs → table shown
-      setMessages(prev => {
-        const u = [...prev];
-        const l = u.length - 1;
-        if (u[l]?.role === "ai") u[l] = { role: "ai", text: accumulated, streaming: false };
-        return u;
-      });
+  setMessages(prev => [...prev, { role: "user", text: userText }]);
+  setInput("");
+  setIsLoading(true);
+  accRef.current = "";
 
-    } catch (err) {
-      console.error("Chat Error:", err);
-      setMessages(prev => [...prev, { role: "error", text: "❌ Connection failed. Check backend." }]);
-      setIsLoading(false);
-      setIsLoading(false);
-       return "Try again";
-
-    } finally {
-      setTimeout(() => inputRef.current?.focus(), 50);
-    }
-  };
-
+  ws.send(JSON.stringify({
+    query: userText,
+    userId: loggedInUser,
+    sessionId
+  }));
+};
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   };
@@ -639,7 +792,7 @@ try {
               <div className="profile-dropdown-inner">
                 <div className="profile-dropdown-item profile-user-row">
                   <div className="profile-avatar">
-                    {loggedInUser ? loggedInUser.charAt(0).toUpperCase() : "U"}
+                    {loggedInUser?.charAt(0).toUpperCase() ?? "U"}
                   </div>
                   <div className="profile-user-info">
                     <span className="profile-label">Logged in as</span>
@@ -707,7 +860,7 @@ try {
                       ) : (
                         /* ── Complete: run formatOutput() → HTML table ── */
                         <div className="ai-bubble">
-                          <div dangerouslySetInnerHTML={{ __html: formatOutput(msg.text) }}/>
+                         <div dangerouslySetInnerHTML={{ __html: formatOutput(msg.text) }} />
                         </div>
                       )}
 

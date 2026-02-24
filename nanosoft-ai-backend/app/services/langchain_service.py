@@ -157,6 +157,7 @@ class LangChainService:
                     )
 
                 # STEP 3 — Call model again to generate final answer
+                messages.append(HumanMessage(content="Use the above tool results and give the final answer."))
                 final_ai_msg = self.model.invoke(messages)
                 final_content = final_ai_msg.content
                  # ✅ FINAL SAFETY NET (NO EMPTY STRING EVER)
