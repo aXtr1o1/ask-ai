@@ -5,7 +5,6 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from langchain_core.messages import HumanMessage, AIMessage
 import logging
-import asyncio
 import json
 from fastapi import WebSocket, WebSocketDisconnect
 
@@ -105,23 +104,13 @@ async def chat_endpoint(request: ChatRequest):
 # =====================================================
 @chatbot_app.websocket("/ws/chat")
 async def ws_chat_endpoint(websocket: WebSocket):
-
     await websocket.accept()
     logger.info("🔌 WebSocket connection accepted")
 
     try:
         while True:
-            try:
-                # Auto close after 2 minutes inactivity
-                raw = await asyncio.wait_for(
-                    websocket.receive_text(),
-                    timeout=120
-                )
-            except asyncio.TimeoutError:
-                logger.info("⏰ WebSocket auto-closed after 2 minutes")
-                await websocket.close()
-                break
-
+            # ── Receive JSON payload from frontend ───────────────────────
+            raw = await websocket.receive_text()
             try:
                 data = json.loads(raw)
             except json.JSONDecodeError:
@@ -130,59 +119,68 @@ async def ws_chat_endpoint(websocket: WebSocket):
 
             user_query = data.get("query", "").strip()
             user_id    = str(data.get("userId", ""))
-            session_id = str(data.get("sessionId", ""))  # keep from body
+            session_id = str(data.get("sessionId", ""))
 
             logger.info(f"WS Request | user_id={user_id} | session_id={session_id} | query={user_query}")
 
+            # ── Validate user ─────────────────────────────────────────────
             if user_id not in VALID_USER_IDS:
-                await websocket.send_text(json.dumps({"error": "Invalid user ID"}))
+                logger.warning(f"🚫 WS Invalid user_id: '{user_id}'")
+                await websocket.send_text(json.dumps({"error": f"Invalid user ID '{user_id}'. Access denied."}))
                 continue
 
             if not user_query:
                 await websocket.send_text(json.dumps({"error": "Empty query"}))
                 continue
 
-            if not session_id:
-                await websocket.send_text(json.dumps({"error": "Missing sessionId"}))
-                continue
-
+            # ── Initialize session memory if needed ───────────────────────
             if session_id not in memory_store:
-                memory_store[session_id] = {
-                    "lc_memory": [],
-                    "history": [],
-                    "user_id": user_id
-                }
+                memory_store[session_id] = {"lc_memory": [], "history": [], "user_id": user_id}
+                logger.info(f"🆕 WS Memory initialized for session_id: {session_id}")
 
             lc_memory = list(memory_store[session_id]["lc_memory"])
             messages  = [get_system_prompt(user_id)] + lc_memory
             messages.append(HumanMessage(content=user_query))
 
+            # ── Process with LangChain ────────────────────────────────────
             try:
-                final_response_text, _ = await langchain_service.process_query(
-                    messages,
-                    user_id=user_id
-                )
-            except Exception:
-                final_response_text = "Sorry, something went wrong."
+                final_response_text, _ = await langchain_service.process_query(messages, user_id=user_id)
+                logger.info(f"✅ WS Response generated for session_id: {session_id}")
+            except Exception as e:
+                logger.error(f"❌ WS LangChain error: {e}", exc_info=True)
+                final_response_text = "Sorry, something went wrong while processing your request."
 
-            await websocket.send_text(json.dumps({
-                "session_id": session_id,
-                "response": final_response_text
-            }))
+            # ── Send response as JSON chunk then close signal ─────────────
+            await websocket.send_text(json.dumps({"response": final_response_text}))
             await websocket.send_text("[DONE]")
 
+            # ── Update memory (same logic as HTTP endpoint) ───────────────
             memory_store[session_id]["lc_memory"].append(HumanMessage(content=user_query))
             memory_store[session_id]["lc_memory"].append(AIMessage(content=final_response_text))
-            memory_store[session_id]["history"].append({
-                "query": user_query,
-                "assistant": final_response_text
-            })
+            memory_store[session_id]["history"].append({"query": user_query, "assistant": final_response_text})
 
             if len(memory_store[session_id]["history"]) > MAX_HISTORY:
-                memory_store[session_id]["history"] = memory_store[session_id]["history"][-MAX_HISTORY:]
+                memory_store[session_id]["history"]   = memory_store[session_id]["history"][-MAX_HISTORY:]
                 memory_store[session_id]["lc_memory"] = memory_store[session_id]["lc_memory"][-(MAX_HISTORY * 2):]
 
+            # ── Print memory (same as HTTP endpoint) ──────────────────────
             print_memory(session_id)
 
     except WebSocketDisconnect:
         logger.info("🔌 WebSocket client disconnected")
+    except Exception as e:
+        logger.error(f"❌ WebSocket error: {e}", exc_info=True)
+        try:
+            await websocket.send_text(json.dumps({"error": "Internal server error"}))
+        except Exception:
+            pass
+
+
+@chatbot_app.get("/health", tags=["Health"])
+def health():
+    return {"status": "ok"}
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("app.main:chatbot_app", host="0.0.0.0", port=8001, reload=True)
