@@ -115,7 +115,7 @@ async def chat_endpoint(request: ChatRequest):
 
     # 4️⃣ Process with LangChain — same user_id used for all tool calls
     try:
-        final_response_text, _ = await langchain_service.process_query(messages, user_id=user_id)
+        final_response_text, _ = await langchain_service.process_query(messages, user_id=user_id,session_id=session_id)
         logger.info(f"✅ Response generated for session_id: {session_id}")
     except Exception as e:
         logger.error(f"❌ LangChain error: {e}", exc_info=True)
