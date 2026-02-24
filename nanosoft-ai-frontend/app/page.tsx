@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface Message {
   role: "user" | "ai" | "error";
@@ -458,11 +459,13 @@ const IconAI = () => (
 );
 
 // ─── Main Component ───────────────────────────────────────────────────────────
+export const dynamic = "force-dynamic";
+
 export default function Home() {
   const router        = useRouter();
-  const searchParams  = useSearchParams();
-  const userIdFromUrl = searchParams.get("userId");
-
+  // const searchParams  = useSearchParams();
+  // const userIdFromUrl = searchParams.get("userId");
+  const [userIdFromUrl, setUserIdFromUrl] = useState<string | null>(null);
   const [input,        setInput]        = useState<string>("");
   const [messages,     setMessages]     = useState<Message[]>([]);
   const [isLoading,    setIsLoading]    = useState<boolean>(false);
@@ -480,6 +483,13 @@ export default function Home() {
   const socketsRef = useRef<Map<string, WebSocket>>(new Map());
 
   // Close dropdown on outside click
+  useEffect(() => {
+  if (typeof window !== "undefined") {
+    const params = new URLSearchParams(window.location.search);
+    setUserIdFromUrl(params.get("userId"));
+  }
+  }, []);
+
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
@@ -532,7 +542,7 @@ export default function Home() {
     baseUrl
       .replace(/^http:/, "ws:")
       .replace(/^https:/, "wss:") + "/ws/chat";
-      
+
   const connectWS = () => {
     const ws = new WebSocket(getWsUrl());
     socketsRef.current.set(sessionId, ws);
