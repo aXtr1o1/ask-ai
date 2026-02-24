@@ -531,6 +531,11 @@ export default function Home() {
 
   // ── Persistent WebSocket: connect once on mount, stay open all session ───────
   const accRef = useRef<string>("");   // accumulates current response text
+  const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+
+  if (!baseUrl) {
+    throw new Error("NEXT_PUBLIC_API_BASE_URL is not defined");
+  }
 
   const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
 
@@ -542,6 +547,10 @@ export default function Home() {
     baseUrl
       .replace(/^http:/, "ws:")
       .replace(/^https:/, "wss:") + "/ws/chat";
+  // const getWsUrl = () =>
+  //   process.env.NEXT_PUBLIC_API_BASE_URL
+  //     .replace(/^http:/,  "ws:")
+  //     .replace(/^https:/, "wss:") + "/ws/chat";
 
   const connectWS = () => {
     const ws = new WebSocket(getWsUrl());
