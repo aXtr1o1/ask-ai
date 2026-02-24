@@ -36,7 +36,19 @@ chatbot_app.add_middleware(
 
 VALID_USER_IDS = {"101", "102"}
 
-MAX_HISTORY = settings.MAX_HISTORY
+# =====================================================
+# In-Memory Store
+#
+# Structure:
+# {
+#   "session-abc-123": {
+#     "lc_memory": [HumanMessage, AIMessage, ...],
+#     "history": [...],
+#     "user_id": "101"
+#   }
+# }
+# =====================================================
+MAX_HISTORY = 5
 memory_store = {}
 
 
@@ -80,7 +92,7 @@ async def chat_endpoint(request: ChatRequest):
     messages.append(HumanMessage(content=user_query))
 
     try:
-        final_response_text, _ = await langchain_service.process_query(messages, user_id=user_id)
+        final_response_text, _ = await langchain_service.process_query(messages, user_id=user_id,session_id=session_id)
         logger.info(f"✅ Response generated for session_id: {session_id}")
     except Exception as e:
         logger.error(f"❌ LangChain error: {e}", exc_info=True)
