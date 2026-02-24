@@ -51,7 +51,7 @@ class LangChainService:
         try:
             self.model = ChatGoogleGenerativeAI(
                 model=settings.GOOGLE_AI_MODEL,
-                google_api_key="AIzaSyDEkOv1S9n3XpdkXffNHauz_kfnQwG_CUI"#settings.GOOGLE_API_KEY
+                google_api_key=settings.GOOGLE_API_KEY
             ).bind_tools([ASSETS, PPM, BDM])
 
             self.tool_map = {
@@ -170,6 +170,7 @@ class LangChainService:
                     )
 
                     if p_count == 0 and total_for_count == 0:
+                        logger.info("📊 No records found for tool %s", tool_name)
                         return "No results found for the given query.", messages
 
                     # Use total_for_count for message when it differs (SP pagination with total in rows)
@@ -208,6 +209,7 @@ class LangChainService:
                  # ✅ FINAL SAFETY NET (NO EMPTY STRING EVER)
                 if not final_content or str(final_content).strip() == "":
                     final_content = "No results found for the given query."
+                    logger.info("final_ai_content is empty")
 
                 logger.info("✅ Final response generated after tool execution")
                 return final_content, messages

@@ -23,35 +23,28 @@ if not logger.handlers:
 
 @tool(
     description="""
-        Use this tool when the user asks about ASSETS (physical or master equipment records).
+       Use this tool for queries regarding physical equipment, master asset records, or metadata.
+        
+        DEFAULT ROUTING RULE: Trigger this tool for any general request to list, show, or search 
+        categories of equipment or locations. Do not use PPM or BDM tools unless the user 
+        explicitly mentions maintenance schedules, service complaints, or breakdowns.
 
-        This tool retrieves asset details used as the foundation for SLA tracking, 
-        maintenance planning, and compliance evaluation.
-
-        It supports advanced filtering to identify assets by:
-        - Ownership and user isolation (user_id)
-        - Operational state (status, condition, priority)
-        - Asset classification (asset_type, division, discipline, trade_group)
-        - Physical location hierarchy (locality, building, floor, service_area)
-        - Manufacturer details (make, model)
-        - Maintenance configuration flags:
-        - on_hold (temporarily inactive assets)
-        - is_snagged (assets with issues)
-        - is_scraped (decommissioned assets)
-        - enable_ppm (Preventive Maintenance enabled)
-        - enable_bdm (Breakdown Maintenance enabled)
-        - Asset identification (barcode, keyword search)
-        - Asset creation or update date range
-        - Pagination support (limit, offset)
-
-        This tool is commonly used to:
-        - List active or inactive assets
-        - Identify assets eligible for PPM or BDM
-        - Filter assets for SLA compliance analysis
-        - Perform asset-level searches before fetching PPM or BDM records
-
-        Always use this tool when the query is about equipment, asset metadata, 
-        or asset-level maintenance eligibility.
+        MAPPING DIRECTIVES:
+        - division: Map if user mentions "Division", "Division Name", or "DivisionName". Matches p_division.
+        - discipline: Map if user mentions "Discipline", "Discipline Name", or "DisciplineName". Matches p_discipline.
+        - status: Map if user mentions "Status" or "Status Name".
+        - keyword: Mandatory fallback for terms, equipment types, or manufacturers not explicitly labeled. Matches p_keyword.
+        
+        FULL PARAMETER CAPABILITIES:
+        - user_id: Required for user isolation and ownership.
+        - status, condition, priority: Filter by current operational state.
+        - asset_type, division, discipline, trade_group: Filter by asset classification.
+        - locality, building, floor, service_area: Filter by physical location hierarchy.
+        - on_hold, is_snagged, is_scraped: Filter by asset lifecycle flags.
+        - enable_ppm, enable_bdm: Filter by maintenance eligibility configuration.
+        - asset_tag_no, barcode, keyword: Filter by specific identification or search terms.
+        - date_from, date_to: Filter by asset creation or update timestamps.
+        - limit, offset: Control data pagination.
         """,
         args_schema=AssetsInput
 )
@@ -88,7 +81,8 @@ def ASSETS(
     clean_payload = {k: v for k, v in payload.items() if v is not None}
     
 
-    logger.debug("Clean payload prepared: %s", clean_payload)
+    formatted_payload = json.dumps(clean_payload, indent=2, default=str)
+    logger.info(" [ALLOCATED PAYLOAD FROM AI]:\n%s", formatted_payload)
 
     try:
         logger.info("🚀 Sending payload to /get-assets endpoint")
@@ -127,33 +121,29 @@ def ASSETS(
 
 @tool(
     description="""
-        Use this tool when the user asks about PPM (Planned / Preventive Maintenance) records.
+       Use this tool specifically for Planned / Preventive Maintenance (PPM) records and schedules.
+        
+        ROUTING RULE: Trigger this tool only if the user explicitly mentions maintenance schedules, 
+        preventive tasks, PPM, or maintenance SLA compliance. Do not use for generic equipment lists.
 
-        This tool retrieves scheduled maintenance jobs and their SLA performance,
-        helping to evaluate preventive maintenance compliance.
-
-        It supports filtering by:
-        - User isolation (user_id)
-        - PPM execution status and workflow stage
-        - Maintenance frequency (daily, weekly, monthly, etc.)
-        - Organizational structure (division, discipline)
-        - Location hierarchy (locality, building, floor)
-        - Contract association
-        - Assigned technician
-        - Keyword-based search
-        - Planned or actual maintenance date ranges
-        - Completion date ranges
-        - SLA duration filters (sla_min, sla_max in minutes)
-        - Pagination (limit, offset)
-
-        This tool is primarily used to:
-        - Monitor PPM completion against SLA timelines
-        - Identify delayed or overdue preventive maintenance
-        - Analyze technician or contract-based SLA performance
-        - Generate compliance reports for audits and dashboards
-
-        Always use this tool when the query is about scheduled maintenance,
-        preventive tasks, or SLA compliance related to PPM.
+        MAPPING DIRECTIVES:
+        - division: Map if user mentions "Division", "Division Name", or "DivisionName". Matches p_division.
+        - discipline: Map if user mentions "Discipline", "Discipline Name", or "DisciplineName". Matches p_discipline.
+        - status: Map if user mentions "Status" or "Status Name".
+        - keyword: Mandatory fallback for terms, equipment types, or manufacturers not explicitly labeled. Matches p_keyword.
+        
+        FULL PARAMETER CAPABILITIES:
+        - user_id: Required for user isolation and ownership.
+        - status, stage: Filter by maintenance workflow or execution state.
+        - frequency: Filter by schedule intervals (e.g., daily, weekly, monthly).
+        - division, discipline: Filter by organizational structure.
+        - locality, building, floor: Filter by location hierarchy.
+        - contract, tech: Filter by service provider or assigned technician.
+        - keyword: General search for maintenance tasks or asset types.
+        - date_from, date_to: Filter by planned or actual maintenance start dates.
+        - comp_from, comp_to: Filter by maintenance completion date ranges.
+        - sla_min, sla_max: Filter by SLA duration (in minutes).
+        - limit, offset: Control data pagination.
         """,
             args_schema=PPMInput
 )
@@ -187,7 +177,8 @@ def PPM(
 
     clean_payload = {k: v for k, v in payload.items() if v is not None}
     
-    logger.debug("📤 PPM payload prepared: %s", clean_payload)
+    formatted_ppm_payload = json.dumps(clean_payload, indent=2, default=str)
+    logger.info("[PPM ALLOCATED PAYLOAD FROM AI]:\n%s", formatted_ppm_payload)
     
 
     try:
@@ -226,38 +217,30 @@ def PPM(
 
 @tool(
     description="""
-        Use this tool when the user asks about BDM (Breakdown Maintenance) complaints 
-        or reactive maintenance work orders.
+       Use this tool for queries regarding BDM (Breakdown Maintenance) complaints or reactive work orders.
+        
+        ROUTING RULE: Trigger this tool only if the user explicitly mentions breakdowns, complaints, 
+        failures, reactive maintenance, or breakdown SLA compliance. Do not use for general equipment lists.
 
-        This tool retrieves breakdown complaints and work orders used to track
-        response time, resolution time, and SLA violations.
-
-        It supports filtering by:
-        - User isolation (user_id)
-        - Complaint lifecycle (status, stage, priority)
-        - Complaint classification:
-        - complaint_type
-        - complaint_mode
-        - complaint_nature
-        - Work order and service classification (wo_type, service_type)
-        - Organizational structure (division, discipline)
-        - Location hierarchy (locality, building, floor)
-        - Contract mapping
-        - Assigned technicians (analysis_tech, execution_tech)
-        - Complaint raised by (complainer)
-        - Keyword search
-        - Complaint raised date range
-        - Complaint completion date range
-        - Pagination support (limit, offset)
-
-        This tool is mainly used to:
-        - Track breakdown response and resolution SLAs
-        - Identify overdue or escalated complaints
-        - Analyze SLA violations by priority or technician
-        - Support operational dashboards and real-time alerts
-
-        Always use this tool when the query is about breakdown complaints,
-        reactive maintenance, or SLA compliance related to failures.
+        MAPPING DIRECTIVES:
+        - division: Map if user mentions "Division", "Division Name", or "DivisionName". Matches p_division.
+        - discipline: Map if user mentions "Discipline", "Discipline Name", or "DisciplineName". Matches p_discipline.
+        - status: Map if user mentions "Status" or "Status Name".
+        - keyword: Mandatory fallback for terms, equipment types, or manufacturers not explicitly labeled. Matches p_keyword.
+        
+        FULL PARAMETER CAPABILITIES:
+        - user_id: Required for user isolation and ownership.
+        - status, stage, priority: Filter by complaint lifecycle and urgency.
+        - complaint_type, complaint_mode, complaint_nature: Filter by classification.
+        - wo_type, service_type: Filter by work order or service category.
+        - division, discipline: Filter by organizational structure.
+        - locality, building, floor: Filter by location hierarchy.
+        - contract, analysis_tech, execution_tech: Filter by service provider or assigned staff.
+        - complainer: Filter by the individual who raised the complaint.
+        - keyword: General search for complaints or equipment issues.
+        - date_from, date_to: Filter by complaint registration date range.
+        - completed_from, completed_to: Filter by complaint resolution date range.
+        - limit, offset: Control data pagination.
         """,
             args_schema=BDMInput
 )
@@ -294,7 +277,8 @@ def BDM(
     }
 
     clean_payload = {k: v for k, v in payload.items() if v is not None}
-    logger.debug("📤 BDM payload prepared: %s", clean_payload)
+    formatted_bdm_payload = json.dumps(clean_payload, indent=2, default=str)
+    logger.info(" [BDM ALLOCATED PAYLOAD FROM AI]:\n%s", formatted_bdm_payload)
 
     try:
         logger.info("🚀 Sending BDM request to /get-bdm")
