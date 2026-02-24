@@ -411,6 +411,7 @@ class CacheManager:
                     "CACHE | BG REFRESH SKIPPED (no running loop)  tool=%s  user=%s",
                     tool_name, user_id,
                 )
+                
         except RuntimeError:
             logger.warning(
                 "CACHE | BG REFRESH SKIPPED (RuntimeError)  tool=%s  user=%s",
