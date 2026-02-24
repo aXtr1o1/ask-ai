@@ -8,7 +8,7 @@ from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 from app.config import settings
 from app.tools.facility_tools import ASSETS, PPM, BDM
 from app.services.redis_service import cache_manager #for redis cache system
-
+from typing import Any
 
 import json
 
@@ -20,12 +20,38 @@ if not logger.handlers:
     logger.addHandler(ch)
 
 
+
+def _unwrap_cache_result(tool_result: Any) -> tuple[Any, bool]:
+    """
+    Cache returns either:
+        - plain indexed dict          → fresh data, no queue involved
+        - {"data": ..., "is_traffic_fallback": True/False} → came through queue layer
+
+    Returns:
+        (actual_data, is_traffic_fallback)
+    """
+    if isinstance(tool_result, dict) and "is_traffic_fallback" in tool_result:
+        is_fallback = tool_result.get("is_traffic_fallback", False)
+        actual_data = tool_result.get("data", {})
+        if is_fallback:
+            logger.warning(
+                "LANGCHAIN | TRAFFIC FALLBACK DETECTED — stale data returned due to queue timeout, LLM will be notified"
+            )
+        else:
+            logger.info(
+                "LANGCHAIN | QUEUE RESOLVED — fresh data returned via queue layer"
+            )
+        return actual_data, is_fallback
+    # plain result — no queue involved
+    return tool_result, False
+
+
 class LangChainService:
     def __init__(self):
         try:
             self.model = ChatGoogleGenerativeAI(
                 model=settings.GOOGLE_AI_MODEL,
-                google_api_key=settings.GOOGLE_API_KEY
+                google_api_key="AIzaSyDEkOv1S9n3XpdkXffNHauz_kfnQwG_CUI"#settings.GOOGLE_API_KEY
             ).bind_tools([ASSETS, PPM, BDM])
 
             self.tool_map = {
@@ -48,7 +74,7 @@ class LangChainService:
             return content
         return str(content)
 
-    async def process_query(self, messages: list, user_id: str = None) -> tuple[str, list]:
+    async def process_query(self, messages: list, user_id: str = None, session_id: str = None) -> tuple[str, list]:
         try:
             # user_id is always from the frontend request; use it for all tool calls
             if not user_id:
@@ -85,15 +111,20 @@ class LangChainService:
                     # Previously: tool_result = tool_fn.invoke(args)
                     # Now: cache is checked first; DB is only hit on a full cache miss
                     logger.info("🔍 Cache lookup | tool=%s | user_id=%s | limit=%s", tool_name, user_id, args.get("limit"))
-                    tool_result = cache_manager.get_or_fetch(
+                    raw_cache_result = cache_manager.get_or_fetch(
                         tool_name=tool_name,
                         user_id=user_id,
+                        session_id=session_id,
                         args=args,
                         fetch_fn=lambda: json.loads(tool_fn.invoke(dict(args)))
                                  if isinstance(tool_fn.invoke(dict(args)), str)
                                  else tool_fn.invoke(dict(args)),
-                    )   
+                    )
+
+                    #  unwrap queue layer result and extract traffic fallback flag
+                    tool_result, is_traffic_fallback = _unwrap_cache_result(raw_cache_result)
                     
+
                     # Parse tool result — tools return JSON string, not dict
                     parsed = tool_result
                     if isinstance(tool_result, str):
@@ -143,6 +174,22 @@ class LangChainService:
 
                     # Use total_for_count for message when it differs (SP pagination with total in rows)
                     display_count = total_for_count if total_for_count > len(p_list) else p_count
+
+                    # ADDED: inject traffic note into ToolMessage if stale fallback occurred
+                    traffic_note = ""
+                    if is_traffic_fallback:
+                        traffic_note = (
+                            "\n\nNOTE TO AI: This data was retrieved from cache due to high system traffic. "
+                            "The live database could not be reached within the allotted time. "
+                            "Please inform the user politely and professionally that due to current high traffic, "
+                            "you are presenting the most recently available data, and it may not reflect the absolute latest updates."
+                        )
+                        logger.warning(
+                            "LANGCHAIN | TRAFFIC NOTE INJECTED into ToolMessage  tool=%s  user=%s",
+                            tool_name, user_id,
+                        )
+                    # END ADDED
+
                     messages.append(
                         ToolMessage(
                             content=json.dumps({
@@ -150,7 +197,7 @@ class LangChainService:
                                 "records_returned": len(p_list),
                                 "total_count": display_count,
                                 "records": p_list
-                            }),
+                            }) + traffic_note,   # ADDED: traffic_note appended here
                             tool_call_id=tool_call["id"]
                         )
                     )
@@ -190,7 +237,7 @@ class LangChainService:
                     args = {"user_id": user_id, "limit": None}
                     #same L1 → L2 → DB cache lookup for the forced-tool path
                     #tool_result = tool_fn.invoke(args)
-                    tool_result = cache_manager.get_or_fetch(
+                    raw_cache_result = cache_manager.get_or_fetch(
                         tool_name=tool_name,
                         user_id=user_id,
                         args=args,
@@ -198,7 +245,11 @@ class LangChainService:
                                  if isinstance(tool_fn.invoke(dict(args)), str)
                                  else tool_fn.invoke(dict(args)),
                     )
-                    
+
+                    # ADDED: unwrap queue layer result for forced-tool path
+                    tool_result, is_traffic_fallback = _unwrap_cache_result(raw_cache_result)
+                    # END ADDED
+
                     try:
                         parsed = json.loads(tool_result) if isinstance(tool_result, str) else tool_result
                     except json.JSONDecodeError:
@@ -226,12 +277,28 @@ class LangChainService:
                     display_count = total_for_count if total_for_count > len(p_list) else p_count
                     if p_count == 0 and total_for_count == 0:
                         return "No results found for the given query.", messages
+
+                    # ADDED: traffic note for forced-tool path
+                    traffic_note = ""
+                    if is_traffic_fallback:
+                        traffic_note = (
+                            "\n\nNOTE TO AI: This data was retrieved from cache due to high system traffic. "
+                            "The live database could not be reached within the allotted time. "
+                            "Please inform the user politely and professionally that due to current high traffic, "
+                            "you are presenting the most recently available data, and it may not reflect the absolute latest updates."
+                        )
+                        logger.warning(
+                            "LANGCHAIN | TRAFFIC NOTE INJECTED (forced-tool path)  tool=%s  user=%s",
+                            tool_name, user_id,
+                        )
+                    # END ADDED
+
                     # Inject synthetic tool call + result so model formats from live data
                     fake_tool_id = "forced-" + tool_name.lower() + "-1"
                     synthetic_ai = AIMessage(content="", tool_calls=[{"name": tool_name, "id": fake_tool_id, "args": {"user_id": user_id}}])
                     messages.append(synthetic_ai)
                     messages.append(ToolMessage(
-                        content=json.dumps({"message": f"{display_count} records found", "total_count": display_count, "records": p_list}),
+                        content=json.dumps({"message": f"{display_count} records found", "total_count": display_count, "records": p_list}) + traffic_note,  # ADDED: traffic_note appended here
                         tool_call_id=fake_tool_id
                     ))
                     final_ai_msg = self.model.invoke(messages)
