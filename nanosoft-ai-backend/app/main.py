@@ -5,6 +5,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from langchain_core.messages import HumanMessage, AIMessage
 import logging
+import asyncio
+import json
+from fastapi import WebSocket, WebSocketDisconnect
 
 from app.models.schemas import ChatRequest
 from app.config import settings
@@ -46,7 +49,7 @@ VALID_USER_IDS = {"101", "102"}
 #   }
 # }
 # =====================================================
-MAX_HISTORY = 5
+MAX_HISTORY = settings.MAX_HISTORY
 memory_store = {}
 
 
@@ -106,20 +109,98 @@ async def chat_endpoint(request: ChatRequest):
 
     print_memory(session_id)
 
-    # 7️⃣ Return response
-    return {
-        "user_id": user_id,
-        "session_id": session_id,
-        "response": final_response_text
-    }
-@chatbot_app.get("/health", tags=["Health"])
-def health():
-    return {"status": "ok"}
+    return {"user_id": user_id, "session_id": session_id, "response": final_response_text}
 
 
 # =====================================================
-# ✅ Run Application on port 8001
+# WebSocket Chat Endpoint  /ws/chat
 # =====================================================
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("app.main:chatbot_app", host="0.0.0.0", port=8001, reload=True)
+@chatbot_app.websocket("/ws/chat")
+async def ws_chat_endpoint(websocket: WebSocket):
+
+    await websocket.accept()
+    logger.info("🔌 WebSocket connection accepted")
+
+    try:
+        while True:
+            try:
+                # Wait for next message; timeout = WS_SESSION_TIMEOUT (default 30 min)
+                raw = await asyncio.wait_for(
+                    websocket.receive_text(),
+                    timeout=settings.WS_SESSION_TIMEOUT
+                )
+            except asyncio.TimeoutError:
+                logger.info(f"⏰ WebSocket auto-closed after {settings.WS_SESSION_TIMEOUT}s inactivity")
+                await websocket.close()
+                break
+
+            # ── Ping / pong keep-alive ──────────────────────────────────
+            if raw.strip() == "ping":
+                await websocket.send_text("pong")
+                continue
+
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                await websocket.send_text(json.dumps({"error": "Invalid JSON"}))
+                continue
+
+            user_query = data.get("query", "").strip()
+            user_id    = str(data.get("userId", ""))
+            session_id = str(data.get("sessionId", ""))  # keep from body
+
+            logger.info(f"WS Request | user_id={user_id} | session_id={session_id} | query={user_query}")
+
+            if user_id not in VALID_USER_IDS:
+                await websocket.send_text(json.dumps({"error": "Invalid user ID"}))
+                continue
+
+            if not user_query:
+                await websocket.send_text(json.dumps({"error": "Empty query"}))
+                continue
+
+            if not session_id:
+                await websocket.send_text(json.dumps({"error": "Missing sessionId"}))
+                continue
+
+            if session_id not in memory_store:
+                memory_store[session_id] = {
+                    "lc_memory": [],
+                    "history": [],
+                    "user_id": user_id
+                }
+
+            lc_memory = list(memory_store[session_id]["lc_memory"])
+            messages  = [get_system_prompt(user_id)] + lc_memory
+            messages.append(HumanMessage(content=user_query))
+
+            try:
+                final_response_text, _ = await langchain_service.process_query(
+                    messages,
+                    user_id=user_id,
+                    session_id=session_id
+                )
+            except Exception:
+                final_response_text = "Sorry, something went wrong."
+
+            await websocket.send_text(json.dumps({
+                "session_id": session_id,
+                "response": final_response_text
+            }))
+            await websocket.send_text("[DONE]")
+
+            memory_store[session_id]["lc_memory"].append(HumanMessage(content=user_query))
+            memory_store[session_id]["lc_memory"].append(AIMessage(content=final_response_text))
+            memory_store[session_id]["history"].append({
+                "query": user_query,
+                "assistant": final_response_text
+            })
+
+            if len(memory_store[session_id]["history"]) > MAX_HISTORY:
+                memory_store[session_id]["history"] = memory_store[session_id]["history"][-MAX_HISTORY:]
+                memory_store[session_id]["lc_memory"] = memory_store[session_id]["lc_memory"][-(MAX_HISTORY * 2):]
+
+            print_memory(session_id)
+
+    except WebSocketDisconnect:
+        logger.info("🔌 WebSocket client disconnected")

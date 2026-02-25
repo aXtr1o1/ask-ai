@@ -481,6 +481,7 @@ export default function Home() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const menuRef          = useRef<HTMLDivElement>(null);
   const socketsRef = useRef<Map<string, WebSocket>>(new Map());
+  const sessionIdRef = useRef<string>(sessionId);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -536,12 +537,10 @@ export default function Home() {
 
   // ── Persistent WebSocket: connect once on mount, stay open all session ───────
   const accRef = useRef<string>("");   // accumulates current response text
-  const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
-
-  if (!baseUrl) {
-    throw new Error("NEXT_PUBLIC_API_BASE_URL is not defined");
-  }
-
+  const pingRef = useRef<ReturnType<typeof setInterval> | null>(null);   // ping for ACTIVE session only
+  const userActiveRef = useRef<boolean>(true);  // is user actively using the page?
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const IDLE_TIMEOUT = 2 * 60 * 1000;  // 2 minutes
   const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
 
   if (!baseUrl) {
@@ -557,18 +556,79 @@ export default function Home() {
   //     .replace(/^http:/,  "ws:")
   //     .replace(/^https:/, "wss:") + "/ws/chat";
 
+  // ── Start pinging only the ACTIVE session socket ──────────────────────────
+  const connectWSRef = useRef<() => void>(() => {});  // forward ref for connectWS
+
+  const startPingForActiveSession = () => {
+    // Clear any previous ping interval
+    if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
+
+    pingRef.current = setInterval(() => {
+      if (!userActiveRef.current) return; // user idle → don't ping anything
+      const activeSid = sessionIdRef.current;
+      const ws = socketsRef.current.get(activeSid);
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send("ping");
+      }
+    }, 30_000);
+  };
+
+  // ── User activity detection ───────────────────────────────────────────────
+  const markUserActive = () => {
+    const wasIdle = !userActiveRef.current;
+    userActiveRef.current = true;
+
+    // Reset idle timer
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    idleTimerRef.current = setTimeout(() => {
+      userActiveRef.current = false;
+      // Stop pinging — backend will close idle sockets after its timeout
+      if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
+      console.log("💤 User idle — stopped pinging, sockets will auto-close");
+    }, IDLE_TIMEOUT);
+
+    // If user was idle and came back, reconnect the active session if needed
+    if (wasIdle) {
+      const activeSid = sessionIdRef.current;
+      const ws = socketsRef.current.get(activeSid);
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        console.log("🔄 User active again — reconnecting...");
+        connectWSRef.current();
+      }
+      startPingForActiveSession();
+    }
+  };
+
+  useEffect(() => {
+    const events = ["mousemove", "mousedown", "keydown", "scroll", "touchstart"] as const;
+    events.forEach(e => window.addEventListener(e, markUserActive));
+    // Start initial idle timer
+    markUserActive();
+    return () => {
+      events.forEach(e => window.removeEventListener(e, markUserActive));
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    };
+  }, []);
+
   const connectWS = () => {
+    const sid = sessionIdRef.current;
     const ws = new WebSocket(getWsUrl());
-    socketsRef.current.set(sessionId, ws);
+    socketsRef.current.set(sid, ws);
 
     ws.onopen = () => {
-      console.log("✅ WebSocket connected");
+      console.log("✅ WebSocket connected:", sid);
+      // Start pinging only for the active session
+      startPingForActiveSession();
     };
 
     // ── Every message from backend ────────────────────────────────────────
     ws.onmessage = (event: MessageEvent) => {
       try {
         const raw     = typeof event.data === "string" ? event.data : "";
+
+        // Ignore pong heartbeat responses
+        if (raw.trim() === "pong") return;
+
         const jsonStr = raw.startsWith("data: ") ? raw.slice(6) : raw;
 
         // "[DONE]" = end of this response → finalize bubble, stay connected
@@ -608,13 +668,17 @@ export default function Home() {
 
     // ── Connection dropped → auto-reconnect after 2 s ─────────────────────
    ws.onclose = (event) => {
-  console.warn("⚠️ WebSocket closed");
+  console.warn("⚠️ WebSocket closed:", sid);
+  socketsRef.current.delete(sid);
 
-  setIsLoading(false);
-
-  // Only auto-reconnect if it was NOT manually closed
-  if (!event.wasClean) {
-    setTimeout(() => connectWS(), 2000);
+  // If this was the active session socket, stop pinging and reconnect if user is active
+  if (sid === sessionIdRef.current) {
+    if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
+    setIsLoading(false);
+    // Auto-reconnect active session only if user is active and it wasn't a clean close
+    if (!event.wasClean && userActiveRef.current) {
+      setTimeout(() => connectWS(), 2000);
+    }
   }
 };
 
@@ -625,90 +689,47 @@ export default function Home() {
     };
   };
 
+  // Keep ref in sync so markUserActive can call connectWS
+  useEffect(() => { connectWSRef.current = connectWS; });
+
   // Connect when component mounts (after auth is confirmed)
 useEffect(() => {
   if (!authChecked) return;
+
+  // Capture ref value for cleanup
+  const sockets = socketsRef.current;
   connectWS();
+
   return () => {
-    socketsRef.current.forEach(ws => ws.close());
+    if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
+    if (idleTimerRef.current) { clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
+    sockets.forEach(ws => ws.close());
+    sockets.clear();
   };
 },[authChecked]);
  
 
   const handleNewChat = () => {
-  // Close all existing sockets
-  socketsRef.current.forEach(ws => ws.close());
-  socketsRef.current.clear();
+  // Stop pinging old session (it will auto-close after backend timeout)
+  if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
+  // DON'T close old sockets — let them live until backend times them out
 
   setMessages([]);
   accRef.current = "";
   setIsLoading(false);
 
+  // Generate new session and update ref immediately so connectWS picks it up
   const newSessionId = generateSessionId();
   setSessionId(newSessionId);
+  sessionIdRef.current = newSessionId;
 
-  // Open a fresh socket with the same streaming logic as connectWS
-  const ws = new WebSocket(getWsUrl());
-  socketsRef.current.set(newSessionId, ws);
-
-  ws.onopen = () => {
-    console.log("✅ Connected:", newSessionId);
-  };
-
-  ws.onmessage = (event: MessageEvent) => {
-    try {
-      const raw     = typeof event.data === "string" ? event.data : "";
-      const jsonStr = raw.startsWith("data: ") ? raw.slice(6) : raw;
-
-      if (jsonStr.trim() === "[DONE]" || jsonStr.trim() === "__END__") {
-        const finalText = accRef.current;
-        setMessages(prev => {
-          const u = [...prev];
-          const l = u.length - 1;
-          if (u[l]?.role === "ai") u[l] = { role: "ai", text: finalText, streaming: false };
-          return u;
-        });
-        accRef.current = "";
-        setIsLoading(false);
-        setTimeout(() => inputRef.current?.focus(), 50);
-        return;
-      }
-
-      const part = extractText(JSON.parse(jsonStr));
-      if (part) {
-        accRef.current += part;
-        const snap = accRef.current;
-        setMessages(prev => {
-          const u = [...prev];
-          const l = u.length - 1;
-          if (u[l]?.role === "ai" && u[l]?.streaming === true) {
-            u[l] = { role: "ai", text: snap, streaming: true };
-          } else {
-            u.push({ role: "ai", text: snap, streaming: true });
-          }
-          return u;
-        });
-      }
-    } catch { /* non-JSON frame — ignore */ }
-  };
-
-  ws.onclose = (event) => {
-    console.warn("⚠️ WebSocket closed:", newSessionId);
-    socketsRef.current.delete(newSessionId);
-    setIsLoading(false);
-    if (!event.wasClean) {
-      setTimeout(() => connectWS(), 2000);
-    }
-  };
-
-  ws.onerror = () => {
-    console.error("❌ WebSocket error");
-    setMessages(prev => [...prev, { role: "error", text: "❌ Connection failed. Retrying…" }]);
-    setIsLoading(false);
-  };
+  // Open a fresh socket for the new session, pings start automatically
+  connectWS();
 };
 
 const handleLogout = () => {
+  if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
+  if (idleTimerRef.current) { clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
   socketsRef.current.forEach(ws => ws.close());
   socketsRef.current.clear();
 
