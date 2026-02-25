@@ -16,7 +16,7 @@ if not logger.handlers:
 db_api_app = FastAPI(
     title="Facility Management Database API",
     description="API for querying Assets, PPM, and BDM",
-    version="3.0.0"
+    version="3.0.0",root_path="/db"
 )
 
 db_api_app.include_router(assets.router, tags=["Assets"])
