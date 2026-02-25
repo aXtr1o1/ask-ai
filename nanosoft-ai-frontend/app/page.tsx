@@ -476,11 +476,13 @@ export default function Home() {
   const [authChecked,  setAuthChecked]  = useState<boolean>(false);
   const [menuOpen,     setMenuOpen]     = useState(false);
 
-  const messagesEndRef   = useRef<HTMLDivElement | null>(null);
-  const inputRef         = useRef<HTMLTextAreaElement>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const menuRef          = useRef<HTMLDivElement>(null);
-  const socketsRef = useRef<Map<string, WebSocket>>(new Map());
+  const messagesEndRef      = useRef<HTMLDivElement | null>(null);
+  const inputRef            = useRef<HTMLTextAreaElement>(null);
+  const mediaRecorderRef    = useRef<MediaRecorder | null>(null);
+  const menuRef             = useRef<HTMLDivElement>(null);
+  const socketsRef          = useRef<Map<string, WebSocket>>(new Map());
+  const sessionIdRef        = useRef<string>(sessionId);
+  const intentionalCloseRef = useRef<boolean>(false);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -514,6 +516,11 @@ export default function Home() {
     setAuthChecked(true);
   }, [router, userIdFromUrl]);
 
+  // Keep sessionIdRef in sync with state
+  useEffect(() => {
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
+
   // Auto-scroll
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -532,17 +539,9 @@ export default function Home() {
   // ── Persistent WebSocket: connect once on mount, stay open all session ───────
   const accRef = useRef<string>("");   // accumulates current response text
   const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
-
-  if (!baseUrl) {
+   if (!baseUrl) {
     throw new Error("NEXT_PUBLIC_API_BASE_URL is not defined");
   }
-
-  const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
-
-  if (!baseUrl) {
-    throw new Error("NEXT_PUBLIC_API_BASE_URL is not defined");
-  }
-
   const getWsUrl = () =>
     baseUrl
       .replace(/^http:/, "ws:")
@@ -553,11 +552,12 @@ export default function Home() {
   //     .replace(/^https:/, "wss:") + "/ws/chat";
 
   const connectWS = () => {
+    const sid = sessionIdRef.current;
     const ws = new WebSocket(getWsUrl());
-    socketsRef.current.set(sessionId, ws);
+    socketsRef.current.set(sid, ws);
 
     ws.onopen = () => {
-      console.log("✅ WebSocket connected");
+      console.log("✅ WebSocket connected for session:", sid);
     };
 
     // ── Every message from backend ────────────────────────────────────────
@@ -588,11 +588,9 @@ export default function Home() {
           setMessages(prev => {
             const u = [...prev];
             const l = u.length - 1;
-            // If last message is already our streaming AI bubble → update it
             if (u[l]?.role === "ai" && u[l]?.streaming === true) {
               u[l] = { role: "ai", text: snap, streaming: true };
             } else {
-              // First chunk → create the AI bubble now (only once)
               u.push({ role: "ai", text: snap, streaming: true });
             }
             return u;
@@ -601,115 +599,65 @@ export default function Home() {
       } catch { /* non-JSON frame — ignore */ }
     };
 
-    // ── Connection dropped → auto-reconnect after 2 s ─────────────────────
-   ws.onclose = (event) => {
-  console.warn("⚠️ WebSocket closed");
+    // ── Connection dropped → only reconnect if it's the ACTIVE session ─────
+    ws.onclose = () => {
+      console.warn("⚠️ WebSocket closed for session:", sid);
+      socketsRef.current.delete(sid);
 
-  setIsLoading(false);
-
-  // Only auto-reconnect if it was NOT manually closed
-  if (!event.wasClean) {
-    setTimeout(() => connectWS(), 2000);
-  }
-};
+      // Only act if this was the active session's socket
+      if (sid === sessionIdRef.current) {
+        setIsLoading(false);
+        // Auto-reconnect the active session (unless logout/unmount)
+        if (!intentionalCloseRef.current) {
+          setTimeout(() => connectWS(), 2000);
+        }
+      }
+    };
 
     ws.onerror = () => {
-      console.error("❌ WebSocket error");
-      setMessages(prev => [...prev, { role: "error", text: "❌ Connection failed. Retrying…" }]);
-      setIsLoading(false);
+      console.error("❌ WebSocket error for session:", sid);
+      if (sid === sessionIdRef.current) {
+        setMessages(prev => [...prev, { role: "error", text: "❌ Connection failed. Retrying…" }]);
+        setIsLoading(false);
+      }
     };
   };
 
   // Connect when component mounts (after auth is confirmed)
-useEffect(() => {
-  if (!authChecked) return;
-  connectWS();
-  return () => {
-    socketsRef.current.forEach(ws => ws.close());
-  };
-},[authChecked]);
+  useEffect(() => {
+    if (!authChecked) return;
+    connectWS();
+    const sockets = socketsRef.current;
+    return () => {
+      intentionalCloseRef.current = true;
+      sockets.forEach(ws => ws.close());
+      sockets.clear();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authChecked]);
  
 
   const handleNewChat = () => {
-  // Close all existing sockets
-  socketsRef.current.forEach(ws => ws.close());
-  socketsRef.current.clear();
-
-  setMessages([]);
-  accRef.current = "";
-  setIsLoading(false);
-
-  const newSessionId = generateSessionId();
-  setSessionId(newSessionId);
-
-  // Open a fresh socket with the same streaming logic as connectWS
-  const ws = new WebSocket(getWsUrl());
-  socketsRef.current.set(newSessionId, ws);
-
-  ws.onopen = () => {
-    console.log("✅ Connected:", newSessionId);
-  };
-
-  ws.onmessage = (event: MessageEvent) => {
-    try {
-      const raw     = typeof event.data === "string" ? event.data : "";
-      const jsonStr = raw.startsWith("data: ") ? raw.slice(6) : raw;
-
-      if (jsonStr.trim() === "[DONE]" || jsonStr.trim() === "__END__") {
-        const finalText = accRef.current;
-        setMessages(prev => {
-          const u = [...prev];
-          const l = u.length - 1;
-          if (u[l]?.role === "ai") u[l] = { role: "ai", text: finalText, streaming: false };
-          return u;
-        });
-        accRef.current = "";
-        setIsLoading(false);
-        setTimeout(() => inputRef.current?.focus(), 50);
-        return;
-      }
-
-      const part = extractText(JSON.parse(jsonStr));
-      if (part) {
-        accRef.current += part;
-        const snap = accRef.current;
-        setMessages(prev => {
-          const u = [...prev];
-          const l = u.length - 1;
-          if (u[l]?.role === "ai" && u[l]?.streaming === true) {
-            u[l] = { role: "ai", text: snap, streaming: true };
-          } else {
-            u.push({ role: "ai", text: snap, streaming: true });
-          }
-          return u;
-        });
-      }
-    } catch { /* non-JSON frame — ignore */ }
-  };
-
-  ws.onclose = (event) => {
-    console.warn("⚠️ WebSocket closed:", newSessionId);
-    socketsRef.current.delete(newSessionId);
+    // Reset chat state — keep old sockets alive (they'll timeout naturally)
+    setMessages([]);
+    accRef.current = "";
     setIsLoading(false);
-    if (!event.wasClean) {
-      setTimeout(() => connectWS(), 2000);
-    }
+
+    // New session + new socket (old ones stay connected in parallel)
+    const newSessionId = generateSessionId();
+    setSessionId(newSessionId);
+    sessionIdRef.current = newSessionId;
+    connectWS();
   };
 
-  ws.onerror = () => {
-    console.error("❌ WebSocket error");
-    setMessages(prev => [...prev, { role: "error", text: "❌ Connection failed. Retrying…" }]);
-    setIsLoading(false);
+  const handleLogout = () => {
+    intentionalCloseRef.current = true;
+    socketsRef.current.forEach(ws => ws.close());
+    socketsRef.current.clear();
+
+    localStorage.removeItem("loggedInUser");
+    router.replace("/login");
   };
-};
-
-const handleLogout = () => {
-  socketsRef.current.forEach(ws => ws.close());
-  socketsRef.current.clear();
-
-  localStorage.removeItem("loggedInUser");
-  router.replace("/login");
-};
 
   const toggleRecording = async () => {
     if (isRecording) {
@@ -728,27 +676,28 @@ const handleLogout = () => {
 
   // ── Send message over the persistent WebSocket ────────────────────────────
   const sendMessage = () => {
-  if (!input.trim() || isLoading) return;
-  const userText = input.trim();
+    if (!input.trim() || isLoading) return;
+    const userText = input.trim();
+    const sid = sessionIdRef.current;
 
-  const ws = socketsRef.current.get(sessionId);
+    const ws = socketsRef.current.get(sid);
 
-  if (!ws || ws.readyState !== WebSocket.OPEN) {
-    console.warn("Socket not ready for session:", sessionId);
-    return;
-  }
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      console.warn("Socket not ready for session:", sid);
+      return;
+    }
 
-  setMessages(prev => [...prev, { role: "user", text: userText }]);
-  setInput("");
-  setIsLoading(true);
-  accRef.current = "";
+    setMessages(prev => [...prev, { role: "user", text: userText }]);
+    setInput("");
+    setIsLoading(true);
+    accRef.current = "";
 
-  ws.send(JSON.stringify({
-    query: userText,
-    userId: loggedInUser,
-    sessionId
-  }));
-};
+    ws.send(JSON.stringify({
+      query: userText,
+      userId: loggedInUser,
+      sessionId: sid
+    }));
+  };
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   };
