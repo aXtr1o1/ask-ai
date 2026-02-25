@@ -475,6 +475,7 @@ export default function Home() {
   const [loggedInUser, setLoggedInUser] = useState<string | null>(null);
   const [authChecked,  setAuthChecked]  = useState<boolean>(false);
   const [menuOpen,     setMenuOpen]     = useState(false);
+  const [wsConnectionState, setWsConnectionState] = useState<'connecting'|'connected'|'failed'>('connecting');
 
   const messagesEndRef   = useRef<HTMLDivElement | null>(null);
   const inputRef         = useRef<HTMLTextAreaElement>(null);
@@ -482,6 +483,8 @@ export default function Home() {
   const menuRef          = useRef<HTMLDivElement>(null);
   const socketsRef = useRef<Map<string, WebSocket>>(new Map());
   const sessionIdRef = useRef<string>(sessionId);
+  const wsConnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectDelayRef = useRef(2000);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -610,14 +613,31 @@ export default function Home() {
     };
   }, []);
 
+  const WS_CONNECT_TIMEOUT_MS = 15000; // 15s: fail fast in production if proxy/backend is slow
+
   const connectWS = () => {
     const sid = sessionIdRef.current;
+    setWsConnectionState('connecting');
     const ws = new WebSocket(getWsUrl());
     socketsRef.current.set(sid, ws);
 
+    wsConnectTimeoutRef.current = setTimeout(() => {
+      if (ws.readyState === WebSocket.CONNECTING) {
+        ws.close();
+        setWsConnectionState('failed');
+        console.warn("⚠️ WebSocket connection timeout");
+      }
+      wsConnectTimeoutRef.current = null;
+    }, WS_CONNECT_TIMEOUT_MS);
+
     ws.onopen = () => {
+      if (wsConnectTimeoutRef.current) {
+        clearTimeout(wsConnectTimeoutRef.current);
+        wsConnectTimeoutRef.current = null;
+      }
+      reconnectDelayRef.current = 2000;
+      setWsConnectionState('connected');
       console.log("✅ WebSocket connected:", sid);
-      // Start pinging only for the active session
       startPingForActiveSession();
     };
 
@@ -666,23 +686,32 @@ export default function Home() {
       } catch { /* non-JSON frame — ignore */ }
     };
 
-    // ── Connection dropped → auto-reconnect after 2 s ─────────────────────
-   ws.onclose = (event) => {
-  console.warn("⚠️ WebSocket closed:", sid);
-  socketsRef.current.delete(sid);
+    ws.onclose = (event) => {
+      if (wsConnectTimeoutRef.current) {
+        clearTimeout(wsConnectTimeoutRef.current);
+        wsConnectTimeoutRef.current = null;
+      }
+      setWsConnectionState('failed');
+      console.warn("⚠️ WebSocket closed:", sid);
+      socketsRef.current.delete(sid);
 
-  // If this was the active session socket, stop pinging and reconnect if user is active
-  if (sid === sessionIdRef.current) {
-    if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
-    setIsLoading(false);
-    // Auto-reconnect active session only if user is active and it wasn't a clean close
-    if (!event.wasClean && userActiveRef.current) {
-      setTimeout(() => connectWS(), 2000);
-    }
-  }
-};
+      if (sid === sessionIdRef.current) {
+        if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
+        setIsLoading(false);
+        if (!event.wasClean && userActiveRef.current) {
+          const delay = reconnectDelayRef.current;
+          reconnectDelayRef.current = Math.min(15000, delay * 2);
+          setTimeout(() => connectWS(), delay);
+        }
+      }
+    };
 
     ws.onerror = () => {
+      if (wsConnectTimeoutRef.current) {
+        clearTimeout(wsConnectTimeoutRef.current);
+        wsConnectTimeoutRef.current = null;
+      }
+      setWsConnectionState('failed');
       console.error("❌ WebSocket error");
       setMessages(prev => [...prev, { role: "error", text: "❌ Connection failed. Retrying…" }]);
       setIsLoading(false);
@@ -703,6 +732,7 @@ useEffect(() => {
   return () => {
     if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
     if (idleTimerRef.current) { clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
+    if (wsConnectTimeoutRef.current) { clearTimeout(wsConnectTimeoutRef.current); wsConnectTimeoutRef.current = null; }
     sockets.forEach(ws => ws.close());
     sockets.clear();
   };
@@ -761,6 +791,7 @@ const handleLogout = () => {
 
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     console.warn("Socket not ready for session:", sessionId);
+    setMessages(prev => [...prev, { role: "error", text: "Still connecting. Please wait." }]);
     return;
   }
 
@@ -941,6 +972,17 @@ const handleLogout = () => {
 
         {/* Input footer */}
         <div className="input-footer">
+          {wsConnectionState !== 'connected' && (
+            <div style={{
+              fontSize: 12, color: "#6b7280", marginBottom: 6, display: "flex", alignItems: "center", gap: 6,
+            }}>
+              <span style={{
+                width: 6, height: 6, borderRadius: "50%", background: wsConnectionState === "connecting" ? "#f59e0b" : "#ef4444",
+                animation: wsConnectionState === "connecting" ? "pulse 1.5s ease-in-out infinite" : undefined,
+              }}/>
+              {wsConnectionState === "connecting" ? "Connecting…" : "Reconnecting…"}
+            </div>
+          )}
           <div className="input-wrapper">
             <textarea
               ref={inputRef}
@@ -948,11 +990,11 @@ const handleLogout = () => {
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              disabled={isLoading}
-              placeholder="Type your prompt here…"
+              disabled={isLoading || wsConnectionState !== 'connected'}
+              placeholder={wsConnectionState === 'connected' ? "Type your prompt here…" : "Waiting for connection…"}
               rows={1}
             />
-            <button className="send-btn" onClick={sendMessage} disabled={isLoading || !input.trim()}>
+            <button className="send-btn" onClick={sendMessage} disabled={isLoading || wsConnectionState !== 'connected' || !input.trim()}>
               <IconSend/>
             </button>
           </div>

@@ -2,12 +2,15 @@
 LangChain Tools for Facility Management
 """
 from langchain.tools import tool
-import requests
 import json
 import logging
 
 from app.models.schemas import AssetsInput, PPMInput, BDMInput
-from app.config import settings
+from fastapi import HTTPException
+from app.api.models.schemas import AssetRequest, PPMRequest, BDMRequest
+from app.api.routes.assets import get_assets
+from app.api.routes.ppm import get_ppm
+from app.api.routes.bdm import get_bdm
 
 logger = logging.getLogger("facility_tools")
 logger.setLevel(logging.INFO)
@@ -79,40 +82,23 @@ def ASSETS(
     }
 
     clean_payload = {k: v for k, v in payload.items() if v is not None}
-    
-
+    if "offset" not in clean_payload:
+        clean_payload["offset"] = 0
     formatted_payload = json.dumps(clean_payload, indent=2, default=str)
     logger.info(" [ALLOCATED PAYLOAD FROM AI]:\n%s", formatted_payload)
 
     try:
-        logger.info("🚀 Sending payload to /get-assets endpoint")
-        
-        response = requests.post(f"{settings.DATABASE_API_URL}/get-assets", json=clean_payload)
-        
-        logger.info(
-            "📥 Response received from /get-assets | status_code=%s",
-            response.status_code
-        )
-
-        if response.status_code != 200:
-            
-            logger.error(f"❌ API Error Response No message is recived: {response.status_code,response.text}")
-            return f"❌ API Error No message is recived:: {response.status_code,response.text}"
-
-        response_json = response.json()
-        
-        logger.debug(
-            "📦 Response data from DB: %s",
-            json.dumps(response_json, indent=2)
-        )
+        logger.info("🚀 Calling get_assets directly")
+        req = AssetRequest(**clean_payload)
+        result = get_assets(req)
         logger.info("✅ Assets data successfully processed")
-        
-        return json.dumps(response_json)
-    
+        return json.dumps(result)
+    except HTTPException as e:
+        logger.error("❌ Assets API error: %s", e.detail)
+        return f"❌ API Error: {e.detail}"
     except Exception as e:
-        
         logger.error(f"❌ Assets tool error: {e}", exc_info=True)
-        return f"Error calling assets endpoint: {str(e)}"
+        return f"Error calling assets: {str(e)}"
 
 
 # =====================================================
@@ -176,39 +162,23 @@ def PPM(
     }
 
     clean_payload = {k: v for k, v in payload.items() if v is not None}
-    
+    if "offset" not in clean_payload:
+        clean_payload["offset"] = 0
     formatted_ppm_payload = json.dumps(clean_payload, indent=2, default=str)
     logger.info("[PPM ALLOCATED PAYLOAD FROM AI]:\n%s", formatted_ppm_payload)
-    
 
     try:
-        logger.info("🚀 Sending PPM request to /get-ppm")
-        
-        response = requests.post(f"{settings.DATABASE_API_URL}/get-ppm", json=clean_payload)
-        
-        logger.info(
-            "📥 PPM response received | status_code=%s",
-            response.status_code
-        )
-
-        if response.status_code != 200:
-            
-            logger.error(f"❌ API Error Response: {response.status_code,response.text}")
-            return f"❌ API Error: {response.status_code,response.text}"
-
-        response_json = response.json()
-        logger.debug(
-            "📦 PPM response data: %s",
-            json.dumps(response_json, indent=2)
-        )
-        
+        logger.info("🚀 Calling get_ppm directly")
+        req = PPMRequest(**clean_payload)
+        result = get_ppm(req)
         logger.info("✅ PPM data processed successfully")
-        
-        return json.dumps(response_json)
-    
+        return json.dumps(result)
+    except HTTPException as e:
+        logger.error("❌ PPM API error: %s", e.detail)
+        return f"❌ API Error: {e.detail}"
     except Exception as e:
         logger.error(f"❌ PPM tool error: {e}", exc_info=True)
-        return f"Error calling PPM endpoint: {str(e)}"
+        return f"Error calling PPM: {str(e)}"
 
 
 # =====================================================
@@ -277,39 +247,21 @@ def BDM(
     }
 
     clean_payload = {k: v for k, v in payload.items() if v is not None}
+    # Ensure offset is set for BDMRequest (default 0)
+    if "offset" not in clean_payload:
+        clean_payload["offset"] = 0
     formatted_bdm_payload = json.dumps(clean_payload, indent=2, default=str)
     logger.info(" [BDM ALLOCATED PAYLOAD FROM AI]:\n%s", formatted_bdm_payload)
 
     try:
-        logger.info("🚀 Sending BDM request to /get-bdm")
-        
-        response = requests.post(f"{settings.DATABASE_API_URL}/get-bdm", json=clean_payload)
-        
-        logger.info(
-            "📥 BDM response received | status_code=%s",
-            response.status_code
-        )
-        
-        if response.status_code != 200:
-            logger.error(
-                "❌ BDM API error | status_code=%s | response=%s",
-                response.status_code,
-                response.text
-            )
-            return f"❌ API Error: {response.text}"
-
-        response_json = response.json()
-        
-        logger.debug(
-            "📦 BDM response data: %s",
-            json.dumps(response_json, indent=2)
-        )
-        
+        logger.info("🚀 Calling get_bdm directly")
+        req = BDMRequest(**clean_payload)
+        result = get_bdm(req)
         logger.info("✅ BDM data processed successfully")
-
-        return json.dumps(response_json)
-    
+        return json.dumps(result)
+    except HTTPException as e:
+        logger.error("❌ BDM API error: %s", e.detail)
+        return f"❌ API Error: {e.detail}"
     except Exception as e:
         logger.error(f"❌ BDM tool error: {e}", exc_info=True)
-        
-        return f"Error calling BDM endpoint: {str(e)}"
+        return f"Error calling BDM: {str(e)}"
