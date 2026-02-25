@@ -49,7 +49,7 @@ VALID_USER_IDS = {"101", "102"}
 #   }
 # }
 # =====================================================
-MAX_HISTORY = 5
+MAX_HISTORY = settings.MAX_HISTORY
 memory_store = {}
 
 
@@ -124,15 +124,20 @@ async def ws_chat_endpoint(websocket: WebSocket):
     try:
         while True:
             try:
-                # Auto close after 2 minutes inactivity
+                # Wait for next message; timeout = WS_SESSION_TIMEOUT (default 30 min)
                 raw = await asyncio.wait_for(
                     websocket.receive_text(),
-                    timeout=120
+                    timeout=settings.WS_SESSION_TIMEOUT
                 )
             except asyncio.TimeoutError:
-                logger.info("⏰ WebSocket auto-closed after 2 minutes")
+                logger.info(f"⏰ WebSocket auto-closed after {settings.WS_SESSION_TIMEOUT}s inactivity")
                 await websocket.close()
                 break
+
+            # ── Ping / pong keep-alive ──────────────────────────────────
+            if raw.strip() == "ping":
+                await websocket.send_text("pong")
+                continue
 
             try:
                 data = json.loads(raw)
@@ -172,7 +177,8 @@ async def ws_chat_endpoint(websocket: WebSocket):
             try:
                 final_response_text, _ = await langchain_service.process_query(
                     messages,
-                    user_id=user_id
+                    user_id=user_id,
+                    session_id=session_id
                 )
             except Exception:
                 final_response_text = "Sorry, something went wrong."
