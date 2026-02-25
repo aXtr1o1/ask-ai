@@ -344,6 +344,32 @@ if not logger.handlers:
     logger.addHandler(ch)
 
 
+
+def _unwrap_cache_result(tool_result: Any) -> tuple[Any, bool]:
+    """
+    Cache returns either:
+        - plain indexed dict          → fresh data, no queue involved
+        - {"data": ..., "is_traffic_fallback": True/False} → came through queue layer
+
+    Returns:
+        (actual_data, is_traffic_fallback)
+    """
+    if isinstance(tool_result, dict) and "is_traffic_fallback" in tool_result:
+        is_fallback = tool_result.get("is_traffic_fallback", False)
+        actual_data = tool_result.get("data", {})
+        if is_fallback:
+            logger.warning(
+                "LANGCHAIN | TRAFFIC FALLBACK DETECTED — stale data returned due to queue timeout, LLM will be notified"
+            )
+        else:
+            logger.info(
+                "LANGCHAIN | QUEUE RESOLVED — fresh data returned via queue layer"
+            )
+        return actual_data, is_fallback
+    # plain result — no queue involved
+    return tool_result, False
+
+
 class LangChainService:
     def __init__(self):
         try:
@@ -407,6 +433,7 @@ class LangChainService:
                         args["limit"] = None
                     tool_result = tool_fn.invoke(dict(args))
                     
+
                     # Parse tool result — tools return JSON string, not dict
                     parsed = tool_result
                     if isinstance(tool_result, str):
@@ -465,7 +492,7 @@ class LangChainService:
                                 "records_returned": len(p_list),
                                 "total_count": display_count,
                                 "records": p_list
-                            }),
+                            }) + traffic_note,   # ADDED: traffic_note appended here
                             tool_call_id=tool_call["id"]
                         )
                     )
@@ -543,7 +570,7 @@ class LangChainService:
                     synthetic_ai = AIMessage(content="", tool_calls=[{"name": tool_name, "id": fake_tool_id, "args": {"user_id": user_id}}])
                     messages.append(synthetic_ai)
                     messages.append(ToolMessage(
-                        content=json.dumps({"message": f"{display_count} records found", "total_count": display_count, "records": p_list}),
+                        content=json.dumps({"message": f"{display_count} records found", "total_count": display_count, "records": p_list}) + traffic_note,  # ADDED: traffic_note appended here
                         tool_call_id=fake_tool_id
                     ))
                     final_ai_msg = self.model.invoke(messages)
