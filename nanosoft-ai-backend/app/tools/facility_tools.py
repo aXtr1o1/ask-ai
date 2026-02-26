@@ -9,6 +9,11 @@ import logging
 from app.models.schemas import AssetsInput, PPMInput, BDMInput
 from app.config import settings
 
+
+from app.api.routes.assets import query_assets
+from app.api.routes.bdm import query_bdm
+from app.api.routes.ppm import query_ppm
+
 logger = logging.getLogger("facility_tools")
 logger.setLevel(logging.INFO)
 ch = logging.StreamHandler()
@@ -62,35 +67,50 @@ def ASSETS(
         logger.error(" ASSETS called without user_id")
         return "Error: user_id is required. It is set from the authenticated request."
     logger.info(f"📦 ASSETS TOOL TRIGGERED for user_id: {user_id}")
-
-    payload = {
-        "user_id": user_id,
-        "status": status, "condition": condition, "priority": priority,"asset_tag_no":asset_tag_no,
-        "asset_type": asset_type, "division": division, "discipline": discipline,
-        "locality": locality, "building": building, "floor": floor,
-        "owner": owner, "make": make, "model": model,
-        "service_area": service_area, "trade_group": trade_group,
-        "on_hold": on_hold, "is_snagged": is_snagged, "is_scraped": is_scraped,
-        "enable_ppm": enable_ppm, "enable_bdm": enable_bdm,
-        "barcode": barcode, "keyword": keyword,
-        "date_from": date_from, "date_to": date_to,
-        "limit": limit,   
-        "offset": 0,   
-    }
-
-    clean_payload = {k: v for k, v in payload.items() if v is not None}
+    #schema pydanmic validation
+    request_data = AssetsInput(
+        user_id=user_id,
+        status=status,
+        condition=condition,
+        priority=priority,
+        asset_type=asset_type,
+        asset_tag_no=asset_tag_no,
+        division=division,
+        discipline=discipline,
+        locality=locality,
+        building=building,
+        floor=floor,
+        owner=owner,
+        make=make,
+        model=model,
+        service_area=service_area,
+        trade_group=trade_group,
+        on_hold=on_hold,
+        is_snagged=is_snagged,
+        is_scraped=is_scraped,
+        enable_ppm=enable_ppm,
+        enable_bdm=enable_bdm,
+        barcode=barcode,
+        keyword=keyword,
+        date_from=date_from,
+        date_to=date_to,
+        limit=limit,
+        offset=offset or 0
+    )
+    clean_payload = {k: v for k, v in request_data.items() if v is not None}
     
 
     formatted_payload = json.dumps(clean_payload, indent=2, default=str)
     logger.info(" [ALLOCATED PAYLOAD FROM AI]:\n%s", formatted_payload)
 
     try:
-        logger.info("🚀 Sending payload to /get-assets endpoint")
+        logger.info("🚀 Calling query_assets function directly ")
         
-        response = requests.post(f"{settings.DATABASE_API_URL}/get-assets", json=clean_payload)
+        
+        response =query_assets(clean_payload)
         
         logger.info(
-            "📥 Response received from /get-assets | status_code=%s",
+            "📥 Response received from assets function | status_code=%s",
             response.status_code
         )
 
@@ -112,7 +132,7 @@ def ASSETS(
     except Exception as e:
         
         logger.error(f"❌ Assets tool error: {e}", exc_info=True)
-        return f"Error calling assets endpoint: {str(e)}"
+        return f"Error calling assets function: {str(e)}"
 
 
 # =====================================================
@@ -162,29 +182,39 @@ def PPM(
     
     logger.info(f"🛠️ PPM TOOL TRIGGERED for user_id: {user_id}")
 
-    payload = {
-        "user_id": user_id,
-        "status": status, "stage": stage, "frequency": frequency,
-        "division": division, "discipline": discipline,
-        "locality": locality, "building": building, "floor": floor,
-        "contract": contract, "tech": tech, "keyword": keyword,
-        "date_from": date_from, "date_to": date_to,
-        "comp_from": comp_from, "comp_to": comp_to,
-        "sla_min": sla_min, "sla_max": sla_max,
-        "limit": limit,   
-        "offset": 0,   
-    }
+    request_data = PPMInput(
+        user_id=user_id,
+        status=status,
+        stage=stage,
+        frequency=frequency,
+        division=division,
+        discipline=discipline,
+        locality=locality,
+        building=building,
+        floor=floor,
+        contract=contract,
+        tech=tech,
+        keyword=keyword,
+        date_from=date_from,
+        date_to=date_to,
+        comp_from=comp_from,
+        comp_to=comp_to,
+        sla_min=sla_min,
+        sla_max=sla_max,
+        limit=limit,
+        offset=offset or 0
+    )
 
-    clean_payload = {k: v for k, v in payload.items() if v is not None}
+    clean_payload = {k: v for k, v in request_data.items() if v is not None}
     
     formatted_ppm_payload = json.dumps(clean_payload, indent=2, default=str)
     logger.info("[PPM ALLOCATED PAYLOAD FROM AI]:\n%s", formatted_ppm_payload)
     
 
     try:
-        logger.info("🚀 Sending PPM request to /get-ppm")
+        logger.info("🚀 Sending PPM request to ppm function")
         
-        response = requests.post(f"{settings.DATABASE_API_URL}/get-ppm", json=clean_payload)
+        response = query_ppm(clean_payload)
         
         logger.info(
             "📥 PPM response received | status_code=%s",
@@ -208,7 +238,7 @@ def PPM(
     
     except Exception as e:
         logger.error(f"❌ PPM tool error: {e}", exc_info=True)
-        return f"Error calling PPM endpoint: {str(e)}"
+        return f"Error calling PPM function: {str(e)}"
 
 
 # =====================================================
@@ -261,29 +291,43 @@ def BDM(
     
     logger.info(f"🔧 BDM TOOL TRIGGERED for user_id: {user_id}")
 
-    payload = {
-        "user_id": user_id,
-        "status": status, "priority": priority, "stage": stage,
-        "complaint_type": complaint_type, "complaint_mode": complaint_mode,
-        "complaint_nature": complaint_nature, "wo_type": wo_type,
-        "service_type": service_type, "division": division, "discipline": discipline,
-        "locality": locality, "building": building, "floor": floor,
-        "contract": contract, "analysis_tech": analysis_tech,
-        "execution_tech": execution_tech, "complainer": complainer,
-        "keyword": keyword, "date_from": date_from, "date_to": date_to,
-        "completed_from": completed_from, "completed_to": completed_to,
-        "limit":limit,
-        "offset": 0,  
-    }
+    request_data = BDMInput(
+        user_id=user_id,
+        status=status,
+        priority=priority,
+        stage=stage,
+        complaint_type=complaint_type,
+        complaint_mode=complaint_mode,
+        complaint_nature=complaint_nature,
+        wo_type=wo_type,
+        service_type=service_type,
+        division=division,
+        discipline=discipline,
+        locality=locality,
+        building=building,
+        floor=floor,
+        contract=contract,
+        analysis_tech=analysis_tech,
+        execution_tech=execution_tech,
+        complainer=complainer,
+        keyword=keyword,
+        date_from=date_from,
+        date_to=date_to,
+        completed_from=completed_from,
+        completed_to=completed_to,
+        limit=limit,
+        offset=offset or 0
+    )
 
-    clean_payload = {k: v for k, v in payload.items() if v is not None}
+    clean_payload = {k: v for k, v in request_data.items() if v is not None}
+    
     formatted_bdm_payload = json.dumps(clean_payload, indent=2, default=str)
     logger.info(" [BDM ALLOCATED PAYLOAD FROM AI]:\n%s", formatted_bdm_payload)
 
     try:
-        logger.info("🚀 Sending BDM request to /get-bdm")
+        logger.info("🚀 Sending BDM request to bdm function")
         
-        response = requests.post(f"{settings.DATABASE_API_URL}/get-bdm", json=clean_payload)
+        response = query_bdm(clean_payload)
         
         logger.info(
             "📥 BDM response received | status_code=%s",
@@ -312,4 +356,4 @@ def BDM(
     except Exception as e:
         logger.error(f"❌ BDM tool error: {e}", exc_info=True)
         
-        return f"Error calling BDM endpoint: {str(e)}"
+        return f"Error calling BDM function: {str(e)}"

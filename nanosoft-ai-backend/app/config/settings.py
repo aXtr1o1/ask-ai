@@ -25,6 +25,8 @@ DATABASE_API_URL = os.getenv("DATABASE_API_URL")
 L1_TTL_SECONDS   =int(os.getenv("L1_TTL_SECONDS"))
 L2_TTL_SECONDS   =int(os.getenv("L2_TTL_SECONDS")) 
 L1_SIZE_THRESHOLD =int(os.getenv("L1_SIZE_THRESHOLD"))
+WS_SESSION_TIMEOUT = int(os.getenv("WS_SESSION_TIMEOUT", "120"))   
+WS_PING_INTERVAL   = int(os.getenv("WS_PING_INTERVAL", "30"))
 # # Optional debug to see whether the variables are loaded or not .
 
 # if __name__ == "__main__":

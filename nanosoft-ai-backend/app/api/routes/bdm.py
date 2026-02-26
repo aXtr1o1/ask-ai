@@ -1,15 +1,12 @@
 """
-BDM Route (Breakdown Maintenance / Complaints)
+BDM Query Functions - Direct Database Access
+Replaces the /get-bdm endpoint with a callable function
 """
-from fastapi import APIRouter, HTTPException
 import logging
-
 from app.api.models.schemas import BDMRequest
 from app.api.database.supabase_client import get_supabase_client
 
-router = APIRouter()
-
-logger = logging.getLogger("bdm_route")
+logger = logging.getLogger("bdm_queries")
 logger.setLevel(logging.INFO)
 ch = logging.StreamHandler()
 ch.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
@@ -18,8 +15,10 @@ if not logger.handlers:
 
 
 def format_response(data):
-    
-    logger.info("you can view the length of the p_list  and p_count value so that you can cross verify it")
+    """
+    Format the response from Supabase RPC call
+    """
+    logger.info("you can view the length of the p_list and p_count value so that you can cross verify it")
     if isinstance(data, dict):
         p_list = data.get("p_list", [])
         p_count = data.get("p_count", 0)
@@ -43,21 +42,24 @@ def format_response(data):
         "p_list": safe_list,
         "p_count": len(safe_list)
     }
-    
-    
 
-@router.post("/get-bdm")
-def get_bdm(req: BDMRequest):
+
+# ✅ UPDATED: Converted from endpoint to function
+def query_bdm(req: BDMRequest) -> dict:
+    """
+    Query BDM from database - Direct function call 
+    
+    """
     logger.info(
-        "[GET-BDM] Incoming | user_id=%s | status=%s | limit=%s | offset=%s",
+        "[QUERY-BDM] Incoming | user_id=%s | status=%s | limit=%s | offset=%s",
         req.user_id, req.status, req.limit, req.offset
     )
-    logger.debug("[GET-BDM] Full payload: %s", req.model_dump())
+    logger.debug("[QUERY-BDM] Full payload: %s", req.model_dump())
 
     try:
         client = get_supabase_client()
         
-        logger.info("[GET-BDM] Calling sp_bdm_query")
+        logger.info("[QUERY-BDM] Calling sp_bdm_query")
         
         response = client.rpc("sp_bdm_query", {
             "p_user_id": req.user_id,
@@ -91,21 +93,21 @@ def get_bdm(req: BDMRequest):
         if p_list:
             fields = list(p_list[0].keys()) if isinstance(p_list[0], dict) else []
             sample = [r.get("complaint_no") or r.get("id") or str(r)[:50] for r in p_list[:3]]
-            logger.info("[GET-BDM] Fetched | count=%s | fields=%s | sample_ids=%s", formatted["p_count"], fields[:8], sample)
+            logger.info("[QUERY-BDM] Fetched | count=%s | fields=%s | sample_ids=%s", formatted["p_count"], fields[:8], sample)
         else:
-            logger.info("[GET-BDM] Success | count=0")
+            logger.info("[QUERY-BDM] Success | count=0")
         return formatted
     except Exception as e:
         err_msg = str(e)
         if hasattr(e, "args") and e.args and isinstance(e.args[0], dict):
             err_dict = e.args[0]
             logger.error(
-                "[GET-BDM] RPC failed | code=%s | message=%s | hint=%s",
+                "[QUERY-BDM] RPC failed | code=%s | message=%s | hint=%s",
                 err_dict.get("code", "?"),
                 err_dict.get("message", err_msg),
                 err_dict.get("hint", ""),
                 exc_info=True
             )
         else:
-            logger.error("[GET-BDM] RPC failed | error=%s", err_msg, exc_info=True)
-        raise HTTPException(status_code=500, detail=err_msg)
+            logger.error("[QUERY-BDM] RPC failed | error=%s", err_msg, exc_info=True)
+        raise Exception(f"BDM query failed: {err_msg}")
