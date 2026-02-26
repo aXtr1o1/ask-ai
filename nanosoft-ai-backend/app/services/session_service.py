@@ -1,8 +1,8 @@
 """
-Session Service — Fetch sessions and chat history from Supabase
+Session Service — Fetch sessions and chat history from PostgreSQL (chat_sessions).
 """
 import logging
-from app.api.database.supabase_client import get_supabase_client
+from app.api.database.postgres_client import get_pool
 
 logger = logging.getLogger("session_service")
 logger.setLevel(logging.INFO)
@@ -11,22 +11,32 @@ ch.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(me
 if not logger.handlers:
     logger.addHandler(ch)
 
-#this function is used to fetch all the availabe sessions to the users   when he log ins 
+
 async def get_sessions_for_user(user_id: str) -> list:
     """
     Returns all sessions for a given user_id.
-    Each session contains: session_id, created_at, updated_at
-    (NO chat_history — just the session list)
+    Each session contains: session_id, title, created_at, updated_at (no chat_history).
     """
     try:
-        supabase = get_supabase_client()
-        response = supabase.table("chat_sessions") \
-            .select("session_id, title,created_at, updated_at") \
-            .eq("user_id", user_id) \
-            .order("updated_at", desc=True) \
-            .execute()
-
-        sessions = response.data or []
+        pool = await get_pool()
+        rows = await pool.fetch(
+            """
+            SELECT session_id, title, created_at, updated_at
+            FROM chat_sessions
+            WHERE user_id = $1
+            ORDER BY updated_at DESC
+            """,
+            user_id,
+        )
+        sessions = [
+            {
+                "session_id": r["session_id"],
+                "title": r["title"],
+                "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+                "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None,
+            }
+            for r in rows
+        ]
         logger.info(f"✅ Sessions fetched | user_id={user_id} | count={len(sessions)}")
         return sessions
 
@@ -34,7 +44,6 @@ async def get_sessions_for_user(user_id: str) -> list:
         logger.error(f"❌ Failed to fetch sessions | user_id={user_id} | error={e}", exc_info=True)
         return []
 
-#this function is used to send the  only the chat history  to the user for  the respective sessions
 
 async def get_chat_history_for_session(user_id: str, session_id: str) -> list:
     """
@@ -42,19 +51,23 @@ async def get_chat_history_for_session(user_id: str, session_id: str) -> list:
     Returns list of {query, assistant} dicts.
     """
     try:
-        supabase = get_supabase_client()
-        response = supabase.table("chat_sessions") \
-            .select("chat_history") \
-            .eq("user_id", user_id) \
-            .eq("session_id", session_id) \
-            .single() \
-            .execute()
-
-        if not response.data:
+        pool = await get_pool()
+        row = await pool.fetchrow(
+            """
+            SELECT chat_history FROM chat_sessions
+            WHERE user_id = $1 AND session_id = $2
+            """,
+            user_id,
+            session_id,
+        )
+        if not row:
             logger.info(f"⚠️ No session found | session_id={session_id} | user_id={user_id}")
             return []
 
-        history = response.data.get("chat_history", [])
+        history = row["chat_history"] if row["chat_history"] is not None else []
+        if isinstance(history, str):
+            import json
+            history = json.loads(history) if history else []  # fallback if returned as string
         logger.info(f"✅ Chat history fetched | session_id={session_id} | messages={len(history)}")
         return history
 

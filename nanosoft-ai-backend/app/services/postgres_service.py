@@ -1,13 +1,14 @@
 """
-Supabase Service — Save and retrieve chat session history
+Chat session persistence — Save and retrieve chat session history (PostgreSQL).
 """
 import logging
+import json
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage
-from app.api.database.supabase_client import get_supabase_client
+from app.api.database.postgres_client import get_pool
 from app.config import settings
 
-logger = logging.getLogger("supabase_service")
+logger = logging.getLogger("postgres_service")
 logger.setLevel(logging.INFO)
 ch = logging.StreamHandler()
 ch.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
@@ -68,13 +69,12 @@ async def generate_session_title(history: list) -> str:
         return "New Chat"
 
 
-# ── Save session to Supabase ──────────────────────────────────────────────────
+# ── Save session to PostgreSQL ─────────────────────────────────────────────────
 async def save_session_to_supabase(session_id: str, user_id: str, history: list):
-
     """
-    Saves chat session history + generated title to Supabase.
+    Saves chat session history + generated title to PostgreSQL (chat_sessions).
     Called on WebSocket disconnect (timeout or client disconnect).
-    
+    Uses upsert on session_id (insert or update).
     """
     logger.info("trying to store the data in the db")
     if not history:
@@ -82,22 +82,56 @@ async def save_session_to_supabase(session_id: str, user_id: str, history: list)
         return
 
     try:
-        # ── Generate title from first 3 interactions ──
         title = await generate_session_title(history)
+        pool = await get_pool()
+        history_json = json.dumps(history)
 
-        # ── Upsert to Supabase ──
-        supabase = get_supabase_client()
-        supabase.table("chat_sessions").upsert(
-            {
-                "session_id":   session_id,
-                "user_id":      user_id,
-                "chat_history": history,
-                "title":        title,       
-            },
-            on_conflict="session_id"
-        ).execute()
+        try:
+            # Upsert: requires UNIQUE(session_id). Run scripts/add_session_id_unique.sql if missing.
+            await pool.execute(
+                """
+                INSERT INTO chat_sessions (session_id, user_id, chat_history, title, updated_at)
+                VALUES ($1, $2, $3::jsonb, $4, NOW())
+                ON CONFLICT (session_id) DO UPDATE SET
+                    user_id = EXCLUDED.user_id,
+                    chat_history = EXCLUDED.chat_history,
+                    title = EXCLUDED.title,
+                    updated_at = NOW()
+                """,
+                session_id,
+                user_id,
+                history_json,
+                title,
+            )
+        except Exception as conflict_err:
+            if "unique or exclusion constraint" in str(conflict_err).lower() or "on_conflict" in str(conflict_err).lower():
+                # Fallback: update if row exists, else insert
+                row = await pool.fetchrow(
+                    "SELECT 1 FROM chat_sessions WHERE session_id = $1", session_id
+                )
+                if row:
+                    await pool.execute(
+                        """
+                        UPDATE chat_sessions
+                        SET user_id = $2, chat_history = $3::jsonb, title = $4, updated_at = NOW()
+                        WHERE session_id = $1
+                        """,
+                        session_id, user_id, history_json, title,
+                    )
+                else:
+                    await pool.execute(
+                        """
+                        INSERT INTO chat_sessions (session_id, user_id, chat_history, title, updated_at)
+                        VALUES ($1, $2, $3::jsonb, $4, NOW())
+                        """,
+                        session_id, user_id, history_json, title,
+                    )
+            else:
+                raise
 
-        logger.info(f"✅ Supabase save successful | session_id={session_id} | title='{title}' | messages={len(history)}")
+        logger.info(f"✅ PostgreSQL save successful | session_id={session_id} | title='{title}' | messages={len(history)}")
 
     except Exception as e:
-        logger.error(f"❌ Supabase save failed | session_id={session_id} | error={e}", exc_info=True)
+        logger.error(f"❌ PostgreSQL save failed | session_id={session_id} | error={e}", exc_info=True)
+
+

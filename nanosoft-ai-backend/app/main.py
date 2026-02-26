@@ -13,9 +13,10 @@ from app.models.schemas import ChatRequest
 from app.config import settings
 from app.services.langchain_service import langchain_service
 from app.prompts.system_prompt import get_system_prompt
-from app.services.supabase_service import save_session_to_supabase 
+from app.services.postgres_service import save_session_to_supabase 
 
 from app.api.database.supabase_client import get_supabase_client
+from app.api.database.postgres_client import get_pool
 
 from app.services.session_service import get_sessions_for_user, get_chat_history_for_session
 from app.models.schemas import SessionRequest
@@ -275,9 +276,10 @@ async def sessions_endpoint(request: SessionRequest):
 
 
 @chatbot_app.on_event("startup")
-def startup_event():
+async def startup_event():
     get_supabase_client()
-    logger.info("🚀 Supabase client initialized during startup")
+    await get_pool()
+    logger.info("🚀 Supabase and PostgreSQL clients initialized during startup")
 
 @chatbot_app.get("/health", tags=["Health"])
 def health():
