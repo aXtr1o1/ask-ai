@@ -2,7 +2,6 @@
 
 import { useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import Image from "next/image";
 
 const VALID_USERS = ["101", "102"];
 const VALID_PASSWORD = "password";
@@ -36,125 +35,33 @@ export default function LoginPage() {
   };
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background:
-          "radial-gradient(circle at top, #ECFAE5 0, #DDF6D2 35%, #CAE8BD 75%)",
-        padding: "16px",
-      }}
-    >
-      <div
-        style={{
-          width: "100%",
-          maxWidth: "380px",
-          background:
-            "linear-gradient(135deg, #FFFFFF, #ECFAE5)",
-          borderRadius: "18px",
-          border: "1px solid rgba(148, 163, 184, 0.4)",
-          boxShadow:
-            "0 18px 40px rgba(15,23,42,0.7), 0 0 0 1px rgba(15,23,42,0.9)",
-          padding: "26px 24px 24px",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "10px",
-            marginBottom: "20px",
-          }}
-        >
-          <div
-            // style={{
-            //   width: 32,
-            //   height: 32,
-            //   borderRadius: 10,
-            //   // background:
-            //   //   "linear-gradient(135deg, #B0DB9C, #6fb24f, #CAE8BD)",
-            //   display: "flex",
-            //   alignItems: "center",
-            //   justifyContent: "center",
-            //   boxShadow: "0 10px 25px rgba(34,197,94,0.45)",
-            // }}
-          >
-            <Image
-              src="/icon.png"
-              alt="Nanosoft Ask AI"
-              width={20}
-              height={20}
-              style={{ borderRadius: 6 }}
-            />
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-            <span
-              style={{
-                fontSize: 13,
-                fontWeight: 600,
-                letterSpacing: 0.4,
-                color: "#1f2933",
-              }}
-            >
-              NANOSOFT ASK AI
-            </span>
-            <span
-              style={{
-                fontSize: 11,
-                color: "#4b5f45",
-              }}
-            >
-              Sign in to continue
-            </span>
-          </div>
-        </div>
+    <div className="login-page">
+      <div className="login-greeting">
+        <h1 className="login-greeting-title">Welcome back to NanoSoft Ask AI</h1>
+        <p className="login-greeting-subtitle">
+          Sign in to continue your conversation with your AI assistant.
+        </p>
+      </div>
 
-        <h1
-          style={{
-            fontSize: 20,
-            fontWeight: 600,
-            color: "#1f2933",
-            marginBottom: 18,
-          }}
-        >
-          Welcome back
-        </h1>
-
-        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <label
-              htmlFor="userId"
-              style={{ fontSize: 12, color: "#4b5f45", fontWeight: 500 }}
-            >
-              User ID
+      <div className="login-card">
+        <form onSubmit={handleSubmit} className="login-form">
+          <div className="login-field">
+            <label htmlFor="userId" className="login-label">
+              Username
             </label>
             <input
               id="userId"
               type="text"
               value={userId}
               onChange={(e) => setUserId(e.target.value)}
-              placeholder="Enter 101 or 102"
+              placeholder="Enter your admin username"
               autoComplete="off"
-              style={{
-                height: 40,
-                borderRadius: 10,
-                border: "1px solid rgba(176, 219, 156, 0.9)",
-                background: "#FFFFFF",
-                color: "#1f2933",
-                padding: "0 12px",
-                fontSize: 13,
-                outline: "none",
-              }}
+              className="login-input"
             />
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <label
-              htmlFor="password"
-              style={{ fontSize: 12, color: "#4b5f45", fontWeight: 500 }}
-            >
+          <div className="login-field">
+            <label htmlFor="password" className="login-label">
               Password
             </label>
             <input
@@ -162,71 +69,29 @@ export default function LoginPage() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder='Use "password"'
+              placeholder="Enter your password"
               autoComplete="off"
-              style={{
-                height: 40,
-                borderRadius: 10,
-                border: "1px solid rgba(176, 219, 156, 0.9)",
-                background: "#FFFFFF",
-                color: "#1f2933",
-                padding: "0 12px",
-                fontSize: 13,
-                outline: "none",
-              }}
+              className="login-input"
             />
           </div>
 
-          {error && (
-            <div
-              style={{
-                fontSize: 12,
-                color: "#b91c1c",
-                background: "rgba(254, 202, 202, 0.7)",
-                borderRadius: 8,
-                padding: "6px 10px",
-                border: "1px solid rgba(248, 113, 113, 0.7)",
-              }}
-            >
-              {error}
-            </div>
-          )}
+          {error && <div className="login-error">{error}</div>}
 
           <button
             type="submit"
             disabled={isSubmitting}
+            className="login-submit"
             style={{
-              marginTop: 6,
-              height: 42,
-              borderRadius: 999,
-            border: "1px solid #B0DB9C",
-            background: isSubmitting ? "#DDF6D2" : "#B0DB9C",
-            color: "#1f2933",
-              fontSize: 14,
-              fontWeight: 600,
-              cursor: "pointer",
-            boxShadow: "none",
-            transition: "background 0.1s ease-out, opacity 0.1s",
               opacity: isSubmitting ? 0.7 : 1,
+              background: isSubmitting ? "rgba(212, 175, 55, 0.5)" : undefined,
             }}
           >
-            {isSubmitting ? "Signing in..." : "Sign in"}
+            {isSubmitting ? "Signing in..." : "Continue to chat"}
           </button>
-
-          <p
-            style={{
-              marginTop: 10,
-              fontSize: 11,
-              color: "#4b5f45",
-              textAlign: "center",
-            }}
-          >
-            Demo users: <span style={{ color: "#000000" }}>101</span> or{" "}
-            <span style={{ color: "#000000" }}>102</span> with password{" "}
-            <span style={{ color: "#000000" }}>password</span>.
-          </p>
         </form>
       </div>
+
+      <p className="login-footer">NanoSoft Ask AI</p>
     </div>
   );
 }
