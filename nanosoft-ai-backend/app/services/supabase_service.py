@@ -70,11 +70,13 @@ async def generate_session_title(history: list) -> str:
 
 # ── Save session to Supabase ──────────────────────────────────────────────────
 async def save_session_to_supabase(session_id: str, user_id: str, history: list):
+
     """
     Saves chat session history + generated title to Supabase.
     Called on WebSocket disconnect (timeout or client disconnect).
     
     """
+    logger.info("trying to store the data in the db")
     if not history:
         logger.info(f"⚠️ Empty history for session_id: {session_id} — skipping save")
         return

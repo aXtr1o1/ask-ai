@@ -2,17 +2,15 @@
 LangChain Tools for Facility Management
 """
 from langchain.tools import tool
-import requests
 import json
 import logging
 
 from app.models.schemas import AssetsInput, PPMInput, BDMInput
-from app.config import settings
-
-
-from app.api.routes.assets import query_assets
-from app.api.routes.bdm import query_bdm
-from app.api.routes.ppm import query_ppm
+from fastapi import HTTPException
+from app.api.models.schemas import AssetRequest, PPMRequest, BDMRequest
+from app.api.routes.assets import get_assets
+from app.api.routes.ppm import get_ppm
+from app.api.routes.bdm import get_bdm
 
 logger = logging.getLogger("facility_tools")
 logger.setLevel(logging.INFO)
@@ -67,72 +65,40 @@ def ASSETS(
         logger.error(" ASSETS called without user_id")
         return "Error: user_id is required. It is set from the authenticated request."
     logger.info(f"📦 ASSETS TOOL TRIGGERED for user_id: {user_id}")
-    #schema pydanmic validation
-    request_data = AssetsInput(
-        user_id=user_id,
-        status=status,
-        condition=condition,
-        priority=priority,
-        asset_type=asset_type,
-        asset_tag_no=asset_tag_no,
-        division=division,
-        discipline=discipline,
-        locality=locality,
-        building=building,
-        floor=floor,
-        owner=owner,
-        make=make,
-        model=model,
-        service_area=service_area,
-        trade_group=trade_group,
-        on_hold=on_hold,
-        is_snagged=is_snagged,
-        is_scraped=is_scraped,
-        enable_ppm=enable_ppm,
-        enable_bdm=enable_bdm,
-        barcode=barcode,
-        keyword=keyword,
-        date_from=date_from,
-        date_to=date_to,
-        limit=limit,
-        offset=offset or 0
-    )
-    clean_payload = {k: v for k, v in request_data.items() if v is not None}
-    
 
+    payload = {
+        "user_id": user_id,
+        "status": status, "condition": condition, "priority": priority,"asset_tag_no":asset_tag_no,
+        "asset_type": asset_type, "division": division, "discipline": discipline,
+        "locality": locality, "building": building, "floor": floor,
+        "owner": owner, "make": make, "model": model,
+        "service_area": service_area, "trade_group": trade_group,
+        "on_hold": on_hold, "is_snagged": is_snagged, "is_scraped": is_scraped,
+        "enable_ppm": enable_ppm, "enable_bdm": enable_bdm,
+        "barcode": barcode, "keyword": keyword,
+        "date_from": date_from, "date_to": date_to,
+        "limit": limit,   
+        "offset": 0,   
+    }
+
+    clean_payload = {k: v for k, v in payload.items() if v is not None}
+    if "offset" not in clean_payload:
+        clean_payload["offset"] = 0
     formatted_payload = json.dumps(clean_payload, indent=2, default=str)
     logger.info(" [ALLOCATED PAYLOAD FROM AI]:\n%s", formatted_payload)
 
     try:
-        logger.info("🚀 Calling query_assets function directly ")
-        
-        
-        response =query_assets(clean_payload)
-        
-        logger.info(
-            "📥 Response received from assets function | status_code=%s",
-            response.status_code
-        )
-
-        if response.status_code != 200:
-            
-            logger.error(f"❌ API Error Response No message is recived: {response.status_code,response.text}")
-            return f"❌ API Error No message is recived:: {response.status_code,response.text}"
-
-        response_json = response.json()
-        
-        logger.debug(
-            "📦 Response data from DB: %s",
-            json.dumps(response_json, indent=2)
-        )
+        logger.info("🚀 Calling get_assets directly")
+        req = AssetRequest(**clean_payload)
+        result = get_assets(req)
         logger.info("✅ Assets data successfully processed")
-        
-        return json.dumps(response_json)
-    
+        return json.dumps(result)
+    except HTTPException as e:
+        logger.error("❌ Assets API error: %s", e.detail)
+        return f"❌ API Error: {e.detail}"
     except Exception as e:
-        
         logger.error(f"❌ Assets tool error: {e}", exc_info=True)
-        return f"Error calling assets function: {str(e)}"
+        return f"Error calling assets: {str(e)}"
 
 
 # =====================================================
@@ -182,63 +148,37 @@ def PPM(
     
     logger.info(f"🛠️ PPM TOOL TRIGGERED for user_id: {user_id}")
 
-    request_data = PPMInput(
-        user_id=user_id,
-        status=status,
-        stage=stage,
-        frequency=frequency,
-        division=division,
-        discipline=discipline,
-        locality=locality,
-        building=building,
-        floor=floor,
-        contract=contract,
-        tech=tech,
-        keyword=keyword,
-        date_from=date_from,
-        date_to=date_to,
-        comp_from=comp_from,
-        comp_to=comp_to,
-        sla_min=sla_min,
-        sla_max=sla_max,
-        limit=limit,
-        offset=offset or 0
-    )
+    payload = {
+        "user_id": user_id,
+        "status": status, "stage": stage, "frequency": frequency,
+        "division": division, "discipline": discipline,
+        "locality": locality, "building": building, "floor": floor,
+        "contract": contract, "tech": tech, "keyword": keyword,
+        "date_from": date_from, "date_to": date_to,
+        "comp_from": comp_from, "comp_to": comp_to,
+        "sla_min": sla_min, "sla_max": sla_max,
+        "limit": limit,   
+        "offset": 0,   
+    }
 
-    clean_payload = {k: v for k, v in request_data.items() if v is not None}
-    
+    clean_payload = {k: v for k, v in payload.items() if v is not None}
+    if "offset" not in clean_payload:
+        clean_payload["offset"] = 0
     formatted_ppm_payload = json.dumps(clean_payload, indent=2, default=str)
     logger.info("[PPM ALLOCATED PAYLOAD FROM AI]:\n%s", formatted_ppm_payload)
-    
 
     try:
-        logger.info("🚀 Sending PPM request to ppm function")
-        
-        response = query_ppm(clean_payload)
-        
-        logger.info(
-            "📥 PPM response received | status_code=%s",
-            response.status_code
-        )
-
-        if response.status_code != 200:
-            
-            logger.error(f"❌ API Error Response: {response.status_code,response.text}")
-            return f"❌ API Error: {response.status_code,response.text}"
-
-        response_json = response.json()
-        logger.debug(
-            "📦 PPM response data: %s",
-            json.dumps(response_json, indent=2)
-        )
-        
+        logger.info("🚀 Calling get_ppm directly")
+        req = PPMRequest(**clean_payload)
+        result = get_ppm(req)
         logger.info("✅ PPM data processed successfully")
-        
-        return json.dumps(response_json)
-    
+        return json.dumps(result)
+    except HTTPException as e:
+        logger.error("❌ PPM API error: %s", e.detail)
+        return f"❌ API Error: {e.detail}"
     except Exception as e:
         logger.error(f"❌ PPM tool error: {e}", exc_info=True)
-        return f"Error calling PPM function: {str(e)}"
+        return f"Error calling PPM: {str(e)}"
 
 
 # =====================================================
@@ -291,69 +231,37 @@ def BDM(
     
     logger.info(f"🔧 BDM TOOL TRIGGERED for user_id: {user_id}")
 
-    request_data = BDMInput(
-        user_id=user_id,
-        status=status,
-        priority=priority,
-        stage=stage,
-        complaint_type=complaint_type,
-        complaint_mode=complaint_mode,
-        complaint_nature=complaint_nature,
-        wo_type=wo_type,
-        service_type=service_type,
-        division=division,
-        discipline=discipline,
-        locality=locality,
-        building=building,
-        floor=floor,
-        contract=contract,
-        analysis_tech=analysis_tech,
-        execution_tech=execution_tech,
-        complainer=complainer,
-        keyword=keyword,
-        date_from=date_from,
-        date_to=date_to,
-        completed_from=completed_from,
-        completed_to=completed_to,
-        limit=limit,
-        offset=offset or 0
-    )
+    payload = {
+        "user_id": user_id,
+        "status": status, "priority": priority, "stage": stage,
+        "complaint_type": complaint_type, "complaint_mode": complaint_mode,
+        "complaint_nature": complaint_nature, "wo_type": wo_type,
+        "service_type": service_type, "division": division, "discipline": discipline,
+        "locality": locality, "building": building, "floor": floor,
+        "contract": contract, "analysis_tech": analysis_tech,
+        "execution_tech": execution_tech, "complainer": complainer,
+        "keyword": keyword, "date_from": date_from, "date_to": date_to,
+        "completed_from": completed_from, "completed_to": completed_to,
+        "limit":limit,
+        "offset": 0,  
+    }
 
-    clean_payload = {k: v for k, v in request_data.items() if v is not None}
-    
+    clean_payload = {k: v for k, v in payload.items() if v is not None}
+    # Ensure offset is set for BDMRequest (default 0)
+    if "offset" not in clean_payload:
+        clean_payload["offset"] = 0
     formatted_bdm_payload = json.dumps(clean_payload, indent=2, default=str)
     logger.info(" [BDM ALLOCATED PAYLOAD FROM AI]:\n%s", formatted_bdm_payload)
 
     try:
-        logger.info("🚀 Sending BDM request to bdm function")
-        
-        response = query_bdm(clean_payload)
-        
-        logger.info(
-            "📥 BDM response received | status_code=%s",
-            response.status_code
-        )
-        
-        if response.status_code != 200:
-            logger.error(
-                "❌ BDM API error | status_code=%s | response=%s",
-                response.status_code,
-                response.text
-            )
-            return f"❌ API Error: {response.text}"
-
-        response_json = response.json()
-        
-        logger.debug(
-            "📦 BDM response data: %s",
-            json.dumps(response_json, indent=2)
-        )
-        
+        logger.info("🚀 Calling get_bdm directly")
+        req = BDMRequest(**clean_payload)
+        result = get_bdm(req)
         logger.info("✅ BDM data processed successfully")
-
-        return json.dumps(response_json)
-    
+        return json.dumps(result)
+    except HTTPException as e:
+        logger.error("❌ BDM API error: %s", e.detail)
+        return f"❌ API Error: {e.detail}"
     except Exception as e:
         logger.error(f"❌ BDM tool error: {e}", exc_info=True)
-        
-        return f"Error calling BDM function: {str(e)}"
+        return f"Error calling BDM: {str(e)}"

@@ -477,6 +477,7 @@ export default function Home() {
   const [menuOpen,     setMenuOpen]     = useState(false);
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [sessionRefreshFlag, setSessionRefreshFlag] = useState(false);
   const sessionMessagesRef = useRef<Map<string, Message[]>>(new Map());
 
   const messagesEndRef   = useRef<HTMLDivElement | null>(null);
@@ -523,7 +524,7 @@ export default function Home() {
     sessionIdRef.current = sessionId;
   }, [sessionId]);
 
-  // Fetch chat history from backend on first auth
+  // Fetch chat history from backend on first auth or when sessionRefreshFlag changes
   useEffect(() => {
     if (!authChecked || !loggedInUser) return;
     const fetchSessions = async () => {
@@ -540,19 +541,16 @@ export default function Home() {
           title: s.title || "Chat",
           createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
         }));
-        // Prepend the current "New Chat" session, then fetched history
-        setChatSessions([
-          { id: sessionId, title: "New Chat", createdAt: Date.now() },
-          ...fetched,
-        ]);
+        // Only show sessions fetched from backend, do not add a local 'New Chat' session
+        setChatSessions([...fetched]);
       } catch (err) {
         console.warn("Failed to fetch chat sessions:", err);
-        // Fallback: just register the current session
-        setChatSessions([{ id: sessionId, title: "New Chat", createdAt: Date.now() }]);
+        // Fallback: show nothing if fetch fails
+        setChatSessions([]);
       }
     };
     fetchSessions();
-  }, [authChecked]);
+  }, [authChecked, loggedInUser, sessionRefreshFlag]);
 
   // Auto-scroll
   useEffect(() => {
@@ -796,9 +794,20 @@ useEffect(() => {
   setSessionId(newSessionId);
   sessionIdRef.current = newSessionId;
 
-  // Add to chat sessions list (newest first)
-
-  // Do not add a local 'New Chat' session; sessions should only come from backend
+  // Create new session in backend and refresh session list
+  (async () => {
+    try {
+      await fetch(`${baseUrl}/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: loggedInUser, sessionId: newSessionId, historyOnClick: false }),
+      });
+    } catch (err) {
+      console.warn("Failed to create new session:", err);
+    }
+    // Refresh session list by toggling a state flag
+    setSessionRefreshFlag(flag => !flag);
+  })();
 
   // Open a fresh socket for the new session, pings start automatically
   connectWS();
@@ -965,52 +974,53 @@ const handleLogout = async () => {
   return (
     <div className="app-container">
       <div className="bg-gradient" />
-
       {/* ── Sidebar ─────────────────────────────────────────────────────── */}
       <aside className="sidebar">
-        <div className="sidebar-header">
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div className="brand-box">
-              <Image src="/icon.png" alt="Nanosoft Ask AI" width={20} height={20} style={{ borderRadius: 6 }}/>
-            </div>
-            <span style={{ fontSize: 14, fontWeight: 600, color: "#1f2933" }}>NANOSOFT ASK AI</span>
-          </div>
-        </div>
-
-        <div className="search-container">
-          <div className="search-input-box">
-            <IconSearch/>
-            <input type="text" placeholder="Search" value={searchVal} onChange={e => setSearchVal(e.target.value)}/>
-          </div>
-        </div>
-
-        <div className="sidebar-scroll">
-          <div className="section-title">Chat History</div>
-          {chatSessions
-            .filter(s => !searchVal || s.title.toLowerCase().includes(searchVal.toLowerCase()))
-            .map(s => (
-            <div
-              key={s.id}
-              className={`sidebar-item${s.id === sessionId ? " active" : ""}`}
-              onClick={() => switchSession(s.id)}
-              style={{ cursor: "pointer" }}
-            >
-              <div className="content">
-                <IconChat/>
-                <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.title}</span>
+          <div className="sidebar-header">
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div className="brand-box">
+                <Image src="/icon.png" alt="Nanosoft Ask AI" width={20} height={20} style={{ borderRadius: 6 }}/>
               </div>
+              <span style={{ fontSize: 14, fontWeight: 600, color: "#1f2933" }}>NANOSOFT ASK AI</span>
             </div>
-          ))}
-          {chatSessions.length === 0 && (
-            <div style={{ padding: "12px 16px", fontSize: 12, color: "#7a8f75", fontStyle: "italic" }}>
-              No chats yet — click New Chat to start
-            </div>
-          )}
-        </div>
+          </div>
 
-        {/* Removed New Chat button as session creation should be backend-driven */}
+          <div className="search-container">
+            <div className="search-input-box">
+              <IconSearch/>
+              <input type="text" placeholder="Search" value={searchVal} onChange={e => setSearchVal(e.target.value)}/>
+            </div>
+          </div>
+
+          <div className="sidebar-scroll">
+            <div className="section-title">Chat History</div>
+            {chatSessions
+              .filter(s => !searchVal || s.title.toLowerCase().includes(searchVal.toLowerCase()))
+              .map(s => (
+              <div
+                key={s.id}
+                className={`sidebar-item${s.id === sessionId ? " active" : ""}`}
+                onClick={() => switchSession(s.id)}
+                style={{ cursor: "pointer" }}
+              >
+                <div className="content">
+                  <IconChat/>
+                  <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.title}</span>
+                </div>
+              </div>
+            ))}
+            {chatSessions.length === 0 && (
+              <div style={{ padding: "12px 16px", fontSize: 12, color: "#7a8f75", fontStyle: "italic" }}>
+                No chats yet — click New Chat to start
+              </div>
+            )}
+          </div>
+
+          {/* Restored New Chat button at the bottom */}
+          <div className="new-chat-container">
+            <button className="new-chat-btn" onClick={handleNewChat}>New Chat &nbsp;<IconPlus/></button>
+          </div>
       </aside>
-
       {/* ── Main Content ─────────────────────────────────────────────────── */}
       <div className="main-content">
 
@@ -1118,7 +1128,7 @@ const handleLogout = async () => {
                     </div>
                   </div>
                 );
-              })}
+                })}
 
               {isLoading && (
                 <div className="loading-indicator">

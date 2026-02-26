@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
+import { ApiPreconnect } from "./components/ApiPreconnect";
 
 const sometypeMono = localFont({
   variable: "--font-sometype-mono",
@@ -34,6 +35,7 @@ export default function RootLayout({
       <body
         className={`${sometypeMono.variable} antialiased`}
       >
+        <ApiPreconnect />
         {children}
       </body>
     </html>

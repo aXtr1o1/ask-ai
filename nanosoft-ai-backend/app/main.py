@@ -14,9 +14,12 @@ from app.config import settings
 from app.services.langchain_service import langchain_service
 from app.prompts.system_prompt import get_system_prompt
 from app.services.supabase_service import save_session_to_supabase 
+
+from app.api.database.supabase_client import get_supabase_client
+
 from app.services.session_service import get_sessions_for_user, get_chat_history_for_session
 from app.models.schemas import SessionRequest
-from app.api.database.supabase_client import get_supabase_client
+
 
 
 
@@ -77,7 +80,47 @@ def print_memory(session_id: str):
     print("=" * 50 + "\n")
 
 
-#endpoint by sudharsan for websocket 
+# @chatbot_app.post("/chat")
+# async def chat_endpoint(request: ChatRequest):
+#     user_query = request.query
+#     user_id = request.userId
+#     session_id = request.sessionId
+#     logger.info(f"Request | user_id={user_id} | session_id={session_id} | query={user_query}")
+
+#     if user_id not in VALID_USER_IDS:
+#         logger.warning(f"🚫 Invalid user_id attempted: '{user_id}'")
+#         raise HTTPException(status_code=403, detail=f"Invalid user ID '{user_id}'. Access denied.")
+
+#     logger.info(f"✅ Valid user: {user_id} | Session: {session_id}")
+
+#     if session_id not in memory_store:
+#         memory_store[session_id] = {"lc_memory": [], "history": [], "user_id": user_id}
+#         logger.info(f"🆕 Memory initialized for session_id: {session_id}")
+
+    # lc_memory = list(memory_store[session_id]["lc_memory"])
+    # messages = [get_system_prompt(user_id)] + lc_memory
+    # messages.append(HumanMessage(content=user_query))
+
+    # try:
+    #     final_response_text, _ = await langchain_service.process_query(messages, user_id=user_id,session_id=session_id)
+    #     logger.info(f"✅ Response generated for session_id: {session_id}")
+    # except Exception as e:
+    #     logger.error(f"❌ LangChain error: {e}", exc_info=True)
+    #     final_response_text = "Sorry, something went wrong while processing your request."
+
+    # memory_store[session_id]["lc_memory"].append(HumanMessage(content=user_query))
+    # memory_store[session_id]["lc_memory"].append(AIMessage(content=final_response_text))
+    # memory_store[session_id]["history"].append({"query": user_query, "assistant": final_response_text})
+
+    # if len(memory_store[session_id]["history"]) > MAX_HISTORY:
+    #     memory_store[session_id]["history"] = memory_store[session_id]["history"][-MAX_HISTORY:]
+    #     memory_store[session_id]["lc_memory"] = memory_store[session_id]["lc_memory"][-(MAX_HISTORY * 2):]
+
+    # print_memory(session_id)
+
+    # return {"user_id": user_id, "session_id": session_id, "response": final_response_text}
+
+
 # =====================================================
 # WebSocket Chat Endpoint  /ws/chat
 @chatbot_app.websocket("/ws/chat")
@@ -91,7 +134,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
     try:
         while True:
             try:
-                # Wait for next message; timeout = WS_SESSION_TIMEOUT
+                # Wait for next message; timeout = WS_SESSION_TIMEOUT (default 30 min)
                 raw = await asyncio.wait_for(
                     websocket.receive_text(),
                     timeout=settings.WS_SESSION_TIMEOUT
@@ -141,7 +184,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
                 await websocket.send_text(json.dumps({"error": "Missing sessionId"}))
                 continue
 
-            # ✅ Track current session_id for disconnect save
+            #  Track current session_id for disconnect save
             current_session_id = session_id
 
             if session_id not in memory_store:
@@ -188,8 +231,6 @@ async def ws_chat_endpoint(websocket: WebSocket):
             print_memory(session_id)
 
     except WebSocketDisconnect:
-        logger.info("🔌 WebSocket client disconnected")
-        # ✅ Save to Supabase on client disconnect
         if current_session_id:
             session_data = memory_store.get(current_session_id, {})
             await save_session_to_supabase(
@@ -197,23 +238,19 @@ async def ws_chat_endpoint(websocket: WebSocket):
                 user_id    = session_data.get("user_id", ""),
                 history    = session_data.get("history", [])
             )
-            
-
-# Endpoint — Fetch sessions or chat history
-# POST /sessions
-#
-# Request:
-#   { "userId": "101", "sessionId": "" }         → returns all sessions for user
-#   { "userId": "101", "sessionId": "abc-123" }  → returns chat history for session
+        logger.info("🔌 WebSocket client disconnected")
+        
 @chatbot_app.post("/sessions")
 async def sessions_endpoint(request: SessionRequest):
     user_id    = request.userId.strip()
     session_id = request.sessionId.strip()
 
     if not user_id:
+        logger.info("invalid user id")
         raise HTTPException(status_code=400, detail="userId is required")
 
     if user_id not in VALID_USER_IDS:
+        
         raise HTTPException(status_code=403, detail=f"Invalid user ID '{user_id}'. Access denied.")
 
     # ── Case 1: session_id is empty → return all sessions for user ──
@@ -235,6 +272,8 @@ async def sessions_endpoint(request: SessionRequest):
         "type":         "history",
         "chat_history": history
     }
+
+
 @chatbot_app.on_event("startup")
 def startup_event():
     get_supabase_client()
@@ -243,3 +282,4 @@ def startup_event():
 @chatbot_app.get("/health", tags=["Health"])
 def health():
     return {"status": "ok", "service": "Facility Management AI Assistant"}
+
