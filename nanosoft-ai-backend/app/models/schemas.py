@@ -95,3 +95,9 @@ class ChatRequest(BaseModel):
     query: str
     userId: str
     sessionId: str
+
+
+class SessionRequest(BaseModel):
+    """Request schema for fetching sessions or chat history"""
+    userId:    str
+    sessionId: str = ""  # empty string = fetch all sessions, non-empty = fetch chat history
