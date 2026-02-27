@@ -540,10 +540,28 @@ html, body {
 
 .sidebar-scroll {
   flex: 1;
-  overflow-y: auto;
   padding: 4px 8px;
   display: flex;
   flex-direction: column;
+  overflow: hidden; /* only inner chat list scrolls */
+}
+
+/* Inner scroll just for chat history list */
+.chat-history-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 2px; /* small breathing room on the right */
+}
+
+/* Hide scrollbar for chat history list (WebKit) */
+.chat-history-scroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+/* Hide scrollbar for chat history list (Firefox) */
+.chat-history-scroll {
+  scrollbar-width: none;
 }
 
 .section-title {
@@ -597,7 +615,17 @@ html, body {
   min-width: 0;
   transition: color 0.3s ease;
   font-weight: 500;
+
+
 }
+
+.sidebar-item.active .content {
+  color: #facc15;   /* solid yellow, for example */
+  font-weight: 600;
+}
+
+/* 
+
 
 .sidebar-item.active .content {
   background: linear-gradient(180deg, #AE8625 0%, #F7EF8A 35%, #D2AC47 65%, #EDC967 100%);
@@ -607,7 +635,7 @@ html, body {
   -webkit-text-fill-color: transparent;
   font-weight: 600;
   animation: goldShine 3s ease-in-out infinite;
-}
+} */
 
 .sidebar-item.active .title { 
   color: var(--color-primary); 
@@ -1264,7 +1292,6 @@ html, body {
 .message-bubble.user {
   background: var(--color-bg-alt);
   border: 2px solid var(--color-border);
-  color: var(--color-text-muted);
   padding: 12px 16px;
   border-radius: 18px 18px 4px 18px;
   min-width: 0;
@@ -1280,9 +1307,9 @@ html, body {
   transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease, box-shadow 0.3s ease;
 }
 
-/* AI response content uses theme muted text */
+/* User query content color is theme-specific (set below) */
 .message-bubble.user * {
-  color: var(--color-text-muted) !important;
+  color: inherit !important;
 }
 
 /* Gold gradient for headings in AI responses */
@@ -1318,7 +1345,6 @@ html, body {
 .message-bubble.ai {
   background: var(--color-bg-alt);
   border: 2px solid var(--color-border);
-  color: var(--color-text-muted);
   padding: 12px 16px;
   border-radius: 18px 18px 18px 4px;
   min-width: 0;
@@ -1334,9 +1360,31 @@ html, body {
   transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease, box-shadow 0.3s ease;
 }
 
-/* AI response content uses theme muted text */
+/* AI response content color is theme-specific (set below) */
 .message-bubble.ai * {
-  color: var(--color-text-muted) !important;
+  color: inherit !important;
+}
+
+/* Light theme: black AI text */
+:root[data-theme='light'] .message-bubble.ai {
+  color: #111827;
+}
+
+/* Dark theme (and default): white / off-white AI text */
+:root[data-theme='dark'] .message-bubble.ai,
+:root:not([data-theme]) .message-bubble.ai {
+  color: #F9FAFB;
+}
+
+/* Light theme: black user query text */
+:root[data-theme='light'] .message-bubble.user {
+  color: #111827;
+}
+
+/* Dark theme (and default): off-white user query text */
+:root[data-theme='dark'] .message-bubble.user,
+:root:not([data-theme]) .message-bubble.user {
+  color: #F3F4F6;
 }
 
 /* Gold gradient for headings in AI responses */
@@ -1669,6 +1717,7 @@ font-size: 15px;
   font-family: inherit;
   transition: color 0.3s ease, font-size 0.2s ease;
   font-weight: 400;
+  user-select: none; /* prevent accidental text selection / miss-clicks */
 }
 
 .main-input::placeholder {
@@ -1906,4 +1955,43 @@ input:focus-visible,
 textarea:focus-visible {
   outline: 2px solid var(--color-focus-ring);
   outline-offset: 2px;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────────
+   Sidebar Chat History Search
+   Rounded, larger input that matches the warm gold theme
+   ─────────────────────────────────────────────────────────────────────────── */
+.search-container {
+  padding: 6px 14px 14px;
+  margin-bottom: 10px;
+}
+
+.search-input-box {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1.5px solid #e5d3a3;
+  background: #faf4e4;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+}
+
+.search-input-box svg {
+  flex-shrink: 0;
+}
+
+.search-input-box input {
+  border: none;
+  outline: none;
+  background: transparent;
+  width: 100%;
+  font-size: 12px;
+  font-weight: 500;
+  color: #374151;
+}
+
+.search-input-box input::placeholder {
+  color: #a1a1aa;
+  font-weight: 400;
 }

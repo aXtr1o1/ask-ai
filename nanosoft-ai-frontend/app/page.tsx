@@ -15,7 +15,6 @@ interface Message {
 }
 interface FolderItem { id: string; name: string; }
 interface ChatSession { id: string; title: string; createdAt: number; }
-interface ChatSession { id: string; title: string; createdAt: number; }
 
 // ─── Extract text from any backend response shape ─────────────────────────────
 // Improved: handles JSON strings without spaces, array join, and reply/content/text fields
@@ -401,12 +400,8 @@ function generateSessionId(): string {
   return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;
 }
 
-// ─── Chat icon ───────────────────────────────────────────────────────────────
-// const IconChat = () => (
-//   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-//     <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
-//   </svg>
-// );
+// ─── Static Data ─────────────────────────────────────────────────────────────
+// Chat history will be implemented later
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 const IconFolder = () => (
@@ -420,8 +415,18 @@ const IconPlus = () => (
   </svg>
 );
 const IconSearch = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+  <svg
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="#9CA3AF"
+    strokeWidth="1.7"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <circle cx="11" cy="11" r="5.5" />
+    <line x1="15" y1="15" x2="20" y2="20" />
   </svg>
 );
 const IconSend = () => (
@@ -530,9 +535,7 @@ export default function Home() {
   const [showFeaturePlaceholder, setShowFeaturePlaceholder] = useState<boolean>(false);
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
-  const [sessionRefreshFlag, setSessionRefreshFlag] = useState(false);
-  const sessionMessagesRef = useRef<Map<string, Message[]>>(new Map());
-  
+
   const messagesEndRef   = useRef<HTMLDivElement | null>(null);
   const inputRef         = useRef<HTMLTextAreaElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -541,6 +544,7 @@ export default function Home() {
   const sessionIdRef = useRef<string>(sessionId);
   const wsConnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectDelayRef = useRef(2000);
+  const sessionMessagesRef = useRef<Map<string, Message[]>>(new Map());
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -583,33 +587,6 @@ export default function Home() {
   useEffect(() => {
     sessionIdRef.current = sessionId;
   }, [sessionId]);
-  // Fetch chat history from backend on first auth or when sessionRefreshFlag changes
-  useEffect(() => {
-    if (!authChecked || !loggedInUser) return;
-    const fetchSessions = async () => {
-      try {
-        const res = await fetch(`${baseUrl}/sessions`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId: loggedInUser, historyOnClick: false }),
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        const fetched: ChatSession[] = (data?.sessions ?? []).map((s: { session_id: string; title?: string; created_at?: string }) => ({
-          id: s.session_id,
-          title: s.title || "Chat",
-          createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
-        }));
-        // Only show sessions fetched from backend, do not add a local 'New Chat' session
-        setChatSessions([...fetched]);
-      } catch (err) {
-        console.warn("Failed to fetch chat sessions:", err);
-        // Fallback: show nothing if fetch fails
-        setChatSessions([]);
-      }
-    };
-    fetchSessions();
-  }, [authChecked, loggedInUser, sessionRefreshFlag]);
 
   // Auto-scroll
   useEffect(() => {
@@ -632,7 +609,6 @@ export default function Home() {
   const userActiveRef = useRef<boolean>(true);  // is user actively using the page?
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const IDLE_TIMEOUT = 2 * 60 * 1000;  // 2 minutes
-  
   const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
 
   if (!baseUrl) {
@@ -665,6 +641,27 @@ export default function Home() {
     }, 30_000);
   };
 
+  // ── Save chat history to backend (Supabase) ───────────────────────────────
+  const saveChatHistory = async (sid: string, msgs: Message[]) => {
+    const valid = msgs.filter(m => m.role !== "error");
+    if (valid.length === 0) return;
+    try {
+      await fetch(`${baseUrl}/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: loggedInUser,
+          sessionId: sid,
+          chatHistory: valid.map(m => ({ role: m.role, text: m.text })),
+        }),
+      });
+    } catch (err) {
+      console.warn("Failed to save chat history:", err);
+    }
+  };
+  const saveChatHistoryRef = useRef(saveChatHistory);
+  useEffect(() => { saveChatHistoryRef.current = saveChatHistory; });
+
   // ── User activity detection ───────────────────────────────────────────────
   const markUserActive = () => {
     const wasIdle = !userActiveRef.current;
@@ -676,14 +673,7 @@ export default function Home() {
       userActiveRef.current = false;
       // Stop pinging — backend will close idle sockets after its timeout
       if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
-      // Save current session to Supabase before going idle
-      const idleSid = sessionIdRef.current;
-      const idleMsgs = sessionMessagesRef.current.get(idleSid);
-      if (idleMsgs && idleMsgs.filter(m => m.role !== "error").length > 0) {
-        saveChatHistoryRef.current(idleSid, idleMsgs);
-      }
-      console.log("💤 User idle — stopped pinging, saved session, sockets will auto-close");
-      // Save current session to Supabase before going idle
+      // Save current session to backend before going idle
       const idleSid = sessionIdRef.current;
       const idleMsgs = sessionMessagesRef.current.get(idleSid);
       if (idleMsgs && idleMsgs.filter(m => m.role !== "error").length > 0) {
@@ -751,10 +741,6 @@ export default function Home() {
         // Ignore pong heartbeat responses
         if (raw.trim() === "pong") return;
 
-
-        // Ignore pong heartbeat responses
-        if (raw.trim() === "pong") return;
-
         const jsonStr = raw.startsWith("data: ") ? raw.slice(6) : raw;
 
         // "[DONE]" = end of this response → finalize bubble, stay connected
@@ -764,8 +750,6 @@ export default function Home() {
             const u = [...prev];
             const l = u.length - 1;
             if (u[l]?.role === "ai") u[l] = { role: "ai", text: finalText, streaming: false };
-            // Persist to per-session store so switching sessions keeps history
-            sessionMessagesRef.current.set(sid, u);
             // Persist to per-session store so switching sessions keeps history
             sessionMessagesRef.current.set(sid, u);
             return u;
@@ -817,6 +801,11 @@ export default function Home() {
     };
 
     ws.onerror = () => {
+      if (wsConnectTimeoutRef.current) {
+        clearTimeout(wsConnectTimeoutRef.current);
+        wsConnectTimeoutRef.current = null;
+      }
+      setWsConnectionState('failed');
       console.error("❌ WebSocket error");
       setMessages(prev => [...prev, { role: "error", text: "❌ Connection failed. Retrying…" }]);
       setIsLoading(false);
@@ -849,41 +838,44 @@ useEffect(() => {
   };
 },[authChecked]);
 
-  const handleFeatureClick = (featureName: string) => {
-    // For now these sections are not implemented; just show the placeholder card
+  // Fetch chat sessions list for sidebar
+  useEffect(() => {
+    if (!authChecked || !loggedInUser) return;
+
+    const fetchSessions = async () => {
+      try {
+        const res = await fetch(`${baseUrl}/sessions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: loggedInUser, historyOnClick: false }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const fetched: ChatSession[] = (data?.sessions ?? []).map(
+          (s: { session_id: string; title?: string; created_at?: string }) => ({
+            id: s.session_id,
+            title: s.title || "Chat",
+            createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
+          })
+        );
+        setChatSessions([...fetched]);
+      } catch (err) {
+        console.warn("Failed to fetch chat sessions:", err);
+        setChatSessions([]);
+      }
+    };
+
+    fetchSessions();
+  }, [authChecked, loggedInUser]);
+
+  const handleFeatureClick = (featureName: 'chat' | 'archived' | 'library') => {
+    // Chat is the primary active feature, so don't show the "yet to be implemented" placeholder
+    if (featureName === 'chat') {
+      setShowFeaturePlaceholder(false);
+      return;
+    }
     setShowFeaturePlaceholder(true);
   };
-
-  // const handleNewChat = () => {
-  //   // Stop pinging old session (it will auto-close after backend timeout)
-  //   if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
-  //   // DON'T close old sockets — let them live until backend times them out
-
-  //   setShowFeaturePlaceholder(false);
-  //   setMessages([]);
-  //   accRef.current = "";
-  //   setIsLoading(false);
-
-  //   // Generate new session and update ref immediately so connectWS picks it up
-  //   const newSessionId = generateSessionId();
-  //   setSessionId(newSessionId);
-  //   sessionIdRef.current = newSessionId;
-
-  //   // Open a fresh socket for the new session, pings start automatically
-  //   connectWS();
-  // };
-
-  // // ── On page reload/close: disconnect all sockets so backend saves, then sidebar refetches on next load ──
-  // useEffect(() => {
-  //   if (!loggedInUser) return;
-  //   const handleBeforeUnload = () => {
-  //     // Close all WebSockets first — backend saves each session on disconnect
-  //     socketsRef.current.forEach(ws => ws.close());
-  //     socketsRef.current.clear();
-  //   };
-  //   window.addEventListener("beforeunload", handleBeforeUnload);
-  //   return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  // }, [loggedInUser]);
 
   const handleNewChat = async () => {
     // Persist current session messages to ref before leaving
@@ -897,16 +889,11 @@ useEffect(() => {
       socketsRef.current.delete(sessionId);
     }
 
-    setMessages([]);
-    accRef.current = "";
-    setIsLoading(false);
+    setShowFeaturePlaceholder(false);
     setMessages([]);
     accRef.current = "";
     setIsLoading(false);
 
-    const newSessionId = generateSessionId();
-    setSessionId(newSessionId);
-    sessionIdRef.current = newSessionId;
     const newSessionId = generateSessionId();
     setSessionId(newSessionId);
     sessionIdRef.current = newSessionId;
@@ -921,36 +908,13 @@ useEffect(() => {
         });
         if (!res.ok) return;
         const data = await res.json();
-        const fetched: ChatSession[] = (data?.sessions ?? []).map((s: { session_id: string; title?: string; created_at?: string }) => ({
-          id: s.session_id,
-          title: s.title || "Chat",
-          createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
-        }));
-        setChatSessions([...fetched]);
-      } catch (err) {
-        console.warn("Failed to refetch sessions:", err);
-      }
-    };
-    setTimeout(() => refetchSessions(), 400);
-
-    // Open a fresh socket for the new session
-    connectWS();
-  };
-    // Give backend a moment to persist on disconnect, then refetch session list for sidebar
-    const refetchSessions = async () => {
-      try {
-        const res = await fetch(`${baseUrl}/sessions`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId: loggedInUser, historyOnClick: false }),
-        });
-        if (!res.ok) return;
-        const data = await res.json();
-        const fetched: ChatSession[] = (data?.sessions ?? []).map((s: { session_id: string; title?: string; created_at?: string }) => ({
-          id: s.session_id,
-          title: s.title || "Chat",
-          createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
-        }));
+        const fetched: ChatSession[] = (data?.sessions ?? []).map(
+          (s: { session_id: string; title?: string; created_at?: string }) => ({
+            id: s.session_id,
+            title: s.title || "Chat",
+            createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
+          })
+        );
         setChatSessions([...fetched]);
       } catch (err) {
         console.warn("Failed to refetch sessions:", err);
@@ -962,141 +926,50 @@ useEffect(() => {
     connectWS();
   };
 
-const handleLogout = async () => {
-  // Save all sessions to Supabase before logging out
-  const savePromises: Promise<void>[] = [];
-  sessionMessagesRef.current.forEach((msgs, sid) => {
-    const valid = msgs.filter(m => m.role !== "error");
-    if (valid.length > 0) {
-      savePromises.push(saveChatHistoryRef.current(sid, msgs));
-    }
-  });
-  try { await Promise.all(savePromises); } catch { /* best-effort */ }
-
-  if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
-  if (idleTimerRef.current) { clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
-  if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
-  if (idleTimerRef.current) { clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
-  socketsRef.current.forEach(ws => ws.close());
-  socketsRef.current.clear();
-
-  localStorage.removeItem("loggedInUser");
-  router.replace("/login");
-};
-
-  /**const toggleRecording = async () => {
-  /**const toggleRecording = async () => {
-    if (isRecording) {
-      mediaRecorderRef.current?.stop();
-      setIsRecording(false);
-    } else {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const rec    = new MediaRecorder(stream);
-        rec.start();
-        mediaRecorderRef.current = rec;
-        setIsRecording(true);
-      } catch { alert("Please allow microphone access."); }
-    }
-   };**/
-
-  // ── Save chat history to Supabase ──────────────────────────────────────────
-  const saveChatHistory = async (sid: string, msgs: Message[]) => {
-    const valid = msgs.filter(m => m.role !== "error");
-    if (valid.length === 0) return;
-    try {
-      await fetch(`${baseUrl}/sessions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId: loggedInUser,
-          sessionId: sid,
-          chatHistory: valid.map(m => ({ role: m.role, text: m.text })),
-        }),
-      });
-    } catch (err) {
-      console.warn("Failed to save chat history:", err);
-    }
-  };
-  const saveChatHistoryRef = useRef(saveChatHistory);
-  useEffect(() => { saveChatHistoryRef.current = saveChatHistory; });
-   };**/
-
-  // ── Save chat history to Supabase ──────────────────────────────────────────
-  const saveChatHistory = async (sid: string, msgs: Message[]) => {
-    const valid = msgs.filter(m => m.role !== "error");
-    if (valid.length === 0) return;
-    try {
-      await fetch(`${baseUrl}/sessions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId: loggedInUser,
-          sessionId: sid,
-          chatHistory: valid.map(m => ({ role: m.role, text: m.text })),
-        }),
-      });
-    } catch (err) {
-      console.warn("Failed to save chat history:", err);
-    }
-  };
-  const saveChatHistoryRef = useRef(saveChatHistory);
-  useEffect(() => { saveChatHistoryRef.current = saveChatHistory; });
-
-  // ── Send message over the persistent WebSocket ────────────────────────────
-  const sendMessage = () => {
-  if (!input.trim() || isLoading) return;
-  const userText = input.trim();
-
-  const ws = socketsRef.current.get(sessionId);
-
-  if (!ws || ws.readyState !== WebSocket.OPEN) {
-    console.warn("Socket not ready for session:", sessionId);
-    return;
-  }
-
-  setMessages(prev => {
-    const updated = [...prev, { role: "user" as const, text: userText }];
-    // Save to per-session store
-    sessionMessagesRef.current.set(sessionId, updated);
-    return updated;
-  });
-
-  // Do not update session title locally; always use backend-provided titles
-
-  setMessages(prev => {
-    const updated = [...prev, { role: "user" as const, text: userText }];
-    // Save to per-session store
-    sessionMessagesRef.current.set(sessionId, updated);
-    return updated;
-  });
-
-  // Do not update session title locally; always use backend-provided titles
-
-  setInput("");
-  setIsLoading(true);
-  accRef.current = "";
-
-  ws.send(JSON.stringify({
-    query: userText,
-    userId: loggedInUser,
-    sessionId
-  }));
-};
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
-  };
-
-  const { theme } = useTheme();
   // ── Switch to an existing session ─────────────────────────────────────────
   const switchSession = async (targetSid: string) => {
     if (targetSid === sessionId) return; // already active
 
+    // Capture the currently active session ID
+    const currentSid = sessionIdRef.current;
+
     // Save current messages
-    sessionMessagesRef.current.set(sessionId, messages);
+    sessionMessagesRef.current.set(currentSid, messages);
 
     // Stop pinging old session
     if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
+
+    // Disconnect WebSocket for the old session so backend can persist and clean up
+    const currentWs = socketsRef.current.get(currentSid);
+    if (currentWs && currentWs.readyState === WebSocket.OPEN) {
+      currentWs.close();
+      socketsRef.current.delete(currentSid);
+    }
+
+    // After closing the socket, refresh sessions so updated display names from backend are shown
+    const refreshSessions = async () => {
+      if (!loggedInUser) return;
+      try {
+        const res = await fetch(`${baseUrl}/sessions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: loggedInUser, historyOnClick: false }),
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        const fetched: ChatSession[] = (data?.sessions ?? []).map(
+          (s: { session_id: string; title?: string; created_at?: string }) => ({
+            id: s.session_id,
+            title: s.title || "Chat",
+            createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
+          })
+        );
+        setChatSessions([...fetched]);
+      } catch (err) {
+        console.warn("Failed to refresh sessions:", err);
+      }
+    };
+    refreshSessions();
 
     // Switch session ID immediately
     setSessionId(targetSid);
@@ -1144,6 +1017,88 @@ const handleLogout = async () => {
     }
   };
 
+  const handleLogout = async () => {
+    // Save all sessions to backend before logging out
+    const savePromises: Promise<void>[] = [];
+    sessionMessagesRef.current.forEach((msgs, sid) => {
+      const valid = msgs.filter(m => m.role !== "error");
+      if (valid.length > 0) {
+        savePromises.push(saveChatHistoryRef.current(sid, msgs));
+      }
+    });
+    try { await Promise.all(savePromises); } catch { /* best-effort */ }
+
+    if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
+    if (idleTimerRef.current) { clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
+    socketsRef.current.forEach(ws => ws.close());
+    socketsRef.current.clear();
+
+    localStorage.removeItem("loggedInUser");
+    router.replace("/login");
+  };
+
+  const toggleRecording = async () => {
+    if (isRecording) {
+      mediaRecorderRef.current?.stop();
+      setIsRecording(false);
+    } else {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const rec    = new MediaRecorder(stream);
+        rec.start();
+        mediaRecorderRef.current = rec;
+        setIsRecording(true);
+      } catch { alert("Please allow microphone access."); }
+    }
+   }; 
+
+  // ── Send message over the persistent WebSocket ────────────────────────────
+  const sendMessage = () => {
+  if (!input.trim() || isLoading) return;
+  const userText = input.trim();
+
+  const ws = socketsRef.current.get(sessionId);
+
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    console.warn("Socket not ready for session:", sessionId);
+    setMessages(prev => [...prev, { role: "error", text: "Still connecting. Please wait." }]);
+    return;
+  }
+
+  // Ensure a chat history capsule exists for this session
+  setChatSessions(prev => {
+    if (prev.some(s => s.id === sessionId)) return prev;
+    const newCapsule: ChatSession = {
+      id: sessionId,
+      title: "New Chat",        // common name for all sessions
+      createdAt: Date.now()
+    };
+    // Put newest at the top
+    return [newCapsule, ...prev];
+  });
+
+  setShowFeaturePlaceholder(false);
+  setMessages(prev => {
+    const updated = [...prev, { role: "user" as const, text: userText }];
+    // Save to per-session store
+    sessionMessagesRef.current.set(sessionId, updated);
+    return updated;
+  });
+  setInput("");
+  setIsLoading(true);
+  accRef.current = "";
+
+  ws.send(JSON.stringify({
+    query: userText,
+    userId: loggedInUser,
+    sessionId
+  }));
+};
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  };
+
+  const { theme } = useTheme();
   const isLanding = messages.length === 0;
 
   if (!authChecked) {
@@ -1236,34 +1191,35 @@ const handleLogout = async () => {
           </button>
         </div>
 
-        {/* FEATURES Section */}
+        {/* FEATURES + Chat History Section */}
         <div className="sidebar-scroll">
+          {/* FEATURES */}
           <div className="section-title">FEATURES</div>
-          <div 
+          <div
             className={`feature-item ${activeFeature === 'chat' ? 'active' : ''}`}
             onClick={() => {
               setActiveFeature('chat');
-              handleFeatureClick('Chat');
+              handleFeatureClick('chat');
             }}
           >
             <IconChat/>
             <span>Chat</span>
           </div>
-          <div 
+          <div
             className={`feature-item ${activeFeature === 'archived' ? 'active' : ''}`}
             onClick={() => {
               setActiveFeature('archived');
-              handleFeatureClick('Archived');
+              handleFeatureClick('archived');
             }}
           >
             <IconArchive/>
             <span>Archived</span>
           </div>
-          <div 
+          <div
             className={`feature-item ${activeFeature === 'library' ? 'active' : ''}`}
             onClick={() => {
               setActiveFeature('library');
-              handleFeatureClick('Library');
+              handleFeatureClick('library');
             }}
           >
             <IconLibrary/>
@@ -1274,48 +1230,41 @@ const handleLogout = async () => {
             <div className="feature-placeholder-sidebar">
               <div className="feature-placeholder-box">
                 <div className="feature-placeholder-title">
-                  {activeFeature === 'chat' ? 'Chat' : activeFeature === 'archived' ? 'Archived' : 'Library'}
+                  {activeFeature === 'archived' ? 'Archived' : 'Library'}
                 </div>
-                {activeFeature === 'chat' &&(
-                  <div className="flex-1 overflow-y-auto px-2 py-3">
-                  {historyLoading && (
-                    <div className="text-xs text-gray-400 px-3 py-2">Loading history…</div>
-                  )}
-                
-                  {!historyLoading && chatSessions.length === 0 && (
-                    <div className="text-xs text-gray-400 px-3 py-2">No previous chats</div>
-                  )}
-                
-                  {chatSessions.map((session) => {
-                    const isActive = session.id === sessionId;
-                
-                    return (
-                      <button
-                        key={session.id}
-                        onClick={() => handleSessionClick(session.id)}
-                        className={`
-                          w-full text-left px-3 py-2 rounded-lg mb-1 text-sm
-                          flex items-center gap-2
-                          hover:bg-gray-100
-                          ${isActive ? "bg-gray-200 font-medium" : "text-gray-700"}
-                        `}
-                      >
-                        <IconChat />
-                
-                        <div className="flex-1 truncate">
-                          {session.title || "Chat"}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-
-)
-}
                 <div className="feature-placeholder-subtitle">
-                 
                   Yet to be implemented
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* Chat History – only visible when Chat feature is active */}
+          {activeFeature === 'chat' && (
+            <div style={{ marginTop: 24, display: "flex", flexDirection: "column", minHeight: 0 }}>
+              {/* <div className="section-title">Chat History</div> */}
+              <div className="chat-history-scroll">
+                {chatSessions.map(s => (
+                  <div
+                    key={s.id}
+                    className={`sidebar-item${s.id === sessionId ? " active" : ""}`}
+                    onClick={() => switchSession(s.id)}
+                    style={{ cursor: "pointer" }}
+                  >
+                    <div className="content">
+                      <IconChat width={16} height={16}/>
+                      <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {s.title}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+
+                {chatSessions.length === 0 && (
+                  <div style={{ padding: "12px 16px", fontSize: 12, color: "#7a8f75", fontStyle: "italic" }}>
+                    No chats yet — click New Chat to start
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -1340,9 +1289,6 @@ const handleLogout = async () => {
       {/* ── Main Content ─────────────────────────────────────────────────── */}
       <div className="main-content">
 
-        {/* Header with profile dropdown (like DigiRett) */}
-        
-
         {/* History loading spinner */}
         {historyLoading && (
           <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -1351,18 +1297,17 @@ const handleLogout = async () => {
                 {[0, 1, 2].map(i => (
                   <span key={i} style={{
                     display: "inline-block", width: 8, height: 8,
-                    borderRadius: "50%", background: "#4a8f3a",
+                    borderRadius: "50%", background: "#d4af37",
                     animation: `bounce 1.2s ease-in-out ${i * 0.2}s infinite`,
                   }}/>
                 ))}
               </div>
-              <span style={{ fontSize: 13, color: "#4b5f45" }}>Loading chat history…</span>
+              <span style={{ fontSize: 13, color: "#A0AEC0" }}>Loading chat history…</span>
             </div>
           </div>
         )}
 
         {/* Landing */}
-        {!historyLoading && isLanding && (
         {!historyLoading && isLanding && (
           <div className="landing-container">
             {/* <div style={{ marginBottom: 24, opacity: 0.5 }}>
@@ -1391,7 +1336,6 @@ const handleLogout = async () => {
         )}
 
         {/* Chat area */}
-        {!historyLoading && !isLanding && (
         {!historyLoading && !isLanding && (
           <div className="chat-scroll-area">
             <div className="messages-container">
@@ -1429,8 +1373,7 @@ const handleLogout = async () => {
                     </div>
                   </div>
                 );
-                })}
-                })}
+              })}
 
               {isLoading && (
                 <div className="loading-indicator">
@@ -1464,8 +1407,7 @@ const handleLogout = async () => {
               placeholder={wsConnectionState === 'connected' ? "Ask Anything..." : "Waiting for connection…"}
               rows={1}
             />
-            <button className="send-btn" onClick={sendMessage} disabled={isLoading || !input.trim()}>
-            <button className="send-btn" onClick={sendMessage} disabled={isLoading || !input.trim()}>
+            <button className="send-btn" onClick={sendMessage} disabled={isLoading || wsConnectionState !== 'connected' || !input.trim()}>
               <IconSend/>
             </button>
           </div>
