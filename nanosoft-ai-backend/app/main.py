@@ -14,8 +14,6 @@ from app.config import settings
 from app.services.langchain_service import langchain_service
 from app.prompts.system_prompt import get_system_prompt
 from app.services.postgres_service import save_session_to_postgres_service
-
-#from app.api.database.supabase_client import get_supabase_client
 from app.api.database.postgres_client import get_pool
 
 from app.services.session_service import get_sessions_for_user, get_chat_history_for_session
@@ -142,7 +140,6 @@ async def ws_chat_endpoint(websocket: WebSocket):
             except asyncio.TimeoutError:
                 logger.info(f"⏰ WebSocket auto-closed after {settings.WS_SESSION_TIMEOUT}s inactivity")
                 await websocket.close()
-                # ✅ Save to Supabase on timeout disconnect
                 if current_session_id:
                     session_data = memory_store.get(current_session_id, {})
                     await save_session_to_postgres_service(
@@ -276,9 +273,8 @@ async def sessions_endpoint(request: SessionRequest):
 
 @chatbot_app.on_event("startup")
 async def startup_event():
-    #get_supabase_client()
     get_pool()
-    logger.info("🚀 Supabase and PostgreSQL clients initialized during startup")
+    logger.info("🚀 PostgreSQL client initialized during startup")
 
 @chatbot_app.get("/health", tags=["Health"])
 def health():

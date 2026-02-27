@@ -17,8 +17,6 @@ if not all([PG_HOST, PG_DATABASE, PG_USER, PG_PASSWORD]):
     raise RuntimeError("PostgreSQL credentials not set in environment variables")
 
 
-#if not SUPABASE_URL or not SUPABASE_KEY:
- #   raise RuntimeError("Supabase URL or Key not set in environment variables")
 
 # Redis, Google API, Session config as before
 REDIS_HOST = os.getenv("REDIS_HOST")
@@ -37,8 +35,3 @@ WS_SESSION_TIMEOUT = int(os.getenv("WS_SESSION_TIMEOUT", "120"))
 WS_PING_INTERVAL   = int(os.getenv("WS_PING_INTERVAL", "30"))       
 
 
-# if __name__ == "__main__":
-#     print("✅ Loaded .env from:", BASE_DIR / ".env")
-#     print("✅ Supabase URL:", SUPABASE_URL)
-#     print("✅ Supabase Key loaded:", bool(SUPABASE_KEY))
-#     print("✅ Redis Host:", REDIS_HOST)

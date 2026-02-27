@@ -641,7 +641,7 @@ export default function Home() {
     }, 30_000);
   };
 
-  // ── Save chat history to backend (Supabase) ───────────────────────────────
+  // ── Save chat history to backend (PostgreSQL) ───────────────────────────────
   const saveChatHistory = async (sid: string, msgs: Message[]) => {
     const valid = msgs.filter(m => m.role !== "error");
     if (valid.length === 0) return;
