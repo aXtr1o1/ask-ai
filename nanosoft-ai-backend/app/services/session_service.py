@@ -1,11 +1,9 @@
 """
-Session Service — Fetch sessions and chat history from Supabase
-"""
-"""
-Session Service — Fetch sessions and chat history from Supabase
+Session Service — Fetch sessions and chat history from PostgreSQL (chat_sessions).
 """
 import logging
-from app.api.database.postgresql_client import get_postgresql_client
+import json
+from app.api.database.postgres_client import get_pool
 
 logger = logging.getLogger("session_service")
 logger.setLevel(logging.INFO)
@@ -14,27 +12,40 @@ ch.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(me
 if not logger.handlers:
     logger.addHandler(ch)
 
-#this function is used to fetch all the availabe sessions to the users   when he log ins 
+
 async def get_sessions_for_user(user_id: str) -> list:
     """
     Returns all sessions for a given user_id.
-    Each session contains: session_id, created_at, updated_at
-    (NO chat_history — just the session list)
+    Each session contains: session_id, title, created_at, updated_at (no chat_history).
     """
     try:
-        db = get_postgresql_client()
-        import psycopg2.extras
-        with db.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute(
-                """
-                SELECT session_id, title, created_at, updated_at
-                FROM chat_sessions
-                WHERE user_id = %s
-                ORDER BY updated_at DESC
-                """,
-                (user_id,)
-            )
-            sessions = cur.fetchall()
+        conn   = get_pool()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT session_id, title, created_at, updated_at
+            FROM chat_sessions
+            WHERE user_id = %s
+            ORDER BY updated_at DESC
+            """,
+            (user_id,)
+        )
+
+        rows = cursor.fetchall()
+        cols = [desc[0] for desc in cursor.description]
+        cursor.close()
+
+        sessions = [
+            {
+                "session_id": row[cols.index("session_id")],
+                "title":      row[cols.index("title")],
+                "created_at": row[cols.index("created_at")].isoformat() if row[cols.index("created_at")] else None,
+                "updated_at": row[cols.index("updated_at")].isoformat() if row[cols.index("updated_at")] else None,
+            }
+            for row in rows
+        ]
+
         logger.info(f"✅ Sessions fetched | user_id={user_id} | count={len(sessions)}")
         return sessions
 
@@ -42,7 +53,6 @@ async def get_sessions_for_user(user_id: str) -> list:
         logger.error(f"❌ Failed to fetch sessions | user_id={user_id} | error={e}", exc_info=True)
         return []
 
-#this function is used to send the  only the chat history  to the user for  the respective sessions
 
 async def get_chat_history_for_session(user_id: str, session_id: str) -> list:
     """
@@ -50,22 +60,28 @@ async def get_chat_history_for_session(user_id: str, session_id: str) -> list:
     Returns list of {query, assistant} dicts.
     """
     try:
-        db = get_postgresql_client()
-        import psycopg2.extras
-        with db.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute(
-                """
-                SELECT chat_history
-                FROM chat_sessions
-                WHERE user_id = %s AND session_id = %s
-                """,
-                (user_id, session_id)
-            )
-            row = cur.fetchone()
+        conn   = get_pool()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT chat_history FROM chat_sessions
+            WHERE user_id = %s AND session_id = %s
+            """,
+            (user_id, session_id)
+        )
+
+        row = cursor.fetchone()
+        cursor.close()
+
         if not row:
             logger.info(f"⚠️ No session found | session_id={session_id} | user_id={user_id}")
             return []
-        history = row.get("chat_history", [])
+
+        history = row[0] if row[0] is not None else []
+        if isinstance(history, str):
+            history = json.loads(history) if history else []
+
         logger.info(f"✅ Chat history fetched | session_id={session_id} | messages={len(history)}")
         return history
 

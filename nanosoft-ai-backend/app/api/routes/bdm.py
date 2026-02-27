@@ -6,7 +6,7 @@ import logging
 import json
 
 from app.api.models.schemas import BDMRequest
-from app.api.database.postgresql_client import get_postgresql_client
+from app.api.database.postgres_client import get_pool
 
 router = APIRouter()
 
@@ -19,19 +19,19 @@ if not logger.handlers:
 
 
 def format_response(data):
-
+    
     logger.info("you can view the length of the p_list  and p_count value so that you can cross verify it")
     if isinstance(data, dict):
         p_list = data.get("p_list", [])
         p_count = data.get("p_count", 0)
-
+        
         logger.info(
             "📊 format_response | p_list_length=%s | p_count=%s",
             len(p_list),
             p_count
         )
         return {"p_list": data.get("p_list", []), "p_count": data.get("p_count", 0)}
-
+    
     safe_list = data if isinstance(data, list) else []
 
     logger.info(
@@ -55,7 +55,7 @@ def get_bdm(req: BDMRequest):
     logger.debug("[GET-BDM] Full payload: %s", req.model_dump())
 
     try:
-        conn = get_postgresql_client()
+        conn = get_pool()
         cursor = conn.cursor()
 
         logger.info("[GET-BDM] Calling sp_bdm_query")
@@ -100,14 +100,12 @@ def get_bdm(req: BDMRequest):
 
         formatted = format_response(raw)
         p_list = formatted.get("p_list", [])
-
         if p_list:
             fields = list(p_list[0].keys()) if isinstance(p_list[0], dict) else []
             sample = [r.get("complaint_no") or r.get("id") or str(r)[:50] for r in p_list[:3]]
             logger.info("[GET-BDM] Fetched | count=%s | fields=%s | sample_ids=%s", formatted["p_count"], fields[:8], sample)
         else:
             logger.info("[GET-BDM] Success | count=0")
-
         return formatted
 
     except Exception as e:

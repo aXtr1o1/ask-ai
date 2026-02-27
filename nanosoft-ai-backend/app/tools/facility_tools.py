@@ -2,12 +2,16 @@
 LangChain Tools for Facility Management
 """
 from langchain.tools import tool
-import requests
 import json
 import logging
 
 from app.models.schemas import AssetsInput, PPMInput, BDMInput
-from app.config import settings
+from fastapi import HTTPException
+from app.api.models.schemas import AssetRequest, PPMRequest, BDMRequest
+from app.api.routes.assets import get_assets
+from app.api.routes.ppm import get_ppm
+from app.api.routes.bdm import get_bdm
+
 
 logger = logging.getLogger("facility_tools")
 logger.setLevel(logging.INFO)
@@ -24,8 +28,9 @@ if not logger.handlers:
     description="""
 Use this tool for queries regarding physical equipment, master asset records, or metadata.
 
-DEFAULT ROUTING RULE: Trigger this tool for any general request to list, show, or search categories of equipment or locations.
-Do not use PPM or BDM tools unless the user explicitly mentions maintenance schedules, service complaints, or breakdowns.
+DEFAULT ROUTING RULE: Trigger this tool for any general request to list, show, or search
+categories of equipment or locations. Do not use PPM or BDM tools unless the user
+explicitly mentions maintenance schedules, service complaints, or breakdowns.
 
 MAPPING DIRECTIVES:
 - division: Map if user mentions "Division", "Division Name", or "DivisionName". Matches p_division.
@@ -114,25 +119,22 @@ def ASSETS(
     }
 
     clean_payload = {k: v for k, v in payload.items() if v is not None}
+    if "offset" not in clean_payload:
+        clean_payload["offset"] = 0
     logger.info("📋 [ASSETS PAYLOAD FROM AI]:\n%s", json.dumps(clean_payload, indent=2, default=str))
 
     try:
-        logger.info("🚀 Sending payload to /get-assets endpoint")
-        response = requests.post(f"{settings.DATABASE_API_URL}/get-assets", json=clean_payload)
-        logger.info("📥 Response received from /get-assets | status_code=%s", response.status_code)
-
-        if response.status_code != 200:
-            logger.error("❌ API Error Response No message is received: %s %s", response.status_code, response.text)
-            return f"❌ API Error No message is received: {response.status_code, response.text}"
-
-        response_json = response.json()
-        logger.debug("📦 Response data from DB: %s", json.dumps(response_json, indent=2))
+        logger.info("🚀 Calling get_assets directly")
+        req = AssetRequest(**clean_payload)
+        result = get_assets(req)
         logger.info("✅ Assets data successfully processed")
-        return json.dumps(response_json)
-
+        return json.dumps(result)
+    except HTTPException as e:
+        logger.error("❌ Assets API error: %s", e.detail)
+        return f"❌ API Error: {e.detail}"
     except Exception as e:
         logger.error(f"❌ Assets tool error: {e}", exc_info=True)
-        return f"Error calling assets endpoint: {str(e)}"
+        return f"Error calling assets: {str(e)}"
 
 
 # =====================================================
@@ -142,8 +144,8 @@ def ASSETS(
     description="""
 Use this tool specifically for Planned / Preventive Maintenance (PPM) records and schedules.
 
-ROUTING RULE: Trigger this tool only if the user explicitly mentions maintenance schedules, preventive tasks,
-PPM, or maintenance SLA compliance. Do not use for generic equipment lists.
+ROUTING RULE: Trigger this tool only if the user explicitly mentions maintenance schedules,
+preventive tasks, PPM, or maintenance SLA compliance. Do not use for generic equipment lists.
 
 MAPPING DIRECTIVES:
 - division: Map if user mentions "Division", "Division Name", or "DivisionName". Matches p_division.
@@ -226,25 +228,22 @@ def PPM(
     }
 
     clean_payload = {k: v for k, v in payload.items() if v is not None}
+    if "offset" not in clean_payload:
+        clean_payload["offset"] = 0
     logger.info("📋 [PPM PAYLOAD FROM AI]:\n%s", json.dumps(clean_payload, indent=2, default=str))
 
     try:
-        logger.info("🚀 Sending PPM request to /get-ppm")
-        response = requests.post(f"{settings.DATABASE_API_URL}/get-ppm", json=clean_payload)
-        logger.info("📥 PPM response received | status_code=%s", response.status_code)
-
-        if response.status_code != 200:
-            logger.error("❌ API Error Response: %s %s", response.status_code, response.text)
-            return f"❌ API Error: {response.status_code, response.text}"
-
-        response_json = response.json()
-        logger.debug("📦 PPM response data: %s", json.dumps(response_json, indent=2))
+        logger.info("🚀 Calling get_ppm directly")
+        req = PPMRequest(**clean_payload)
+        result = get_ppm(req)
         logger.info("✅ PPM data processed successfully")
-        return json.dumps(response_json)
-
+        return json.dumps(result)
+    except HTTPException as e:
+        logger.error("❌ PPM API error: %s", e.detail)
+        return f"❌ API Error: {e.detail}"
     except Exception as e:
         logger.error(f"❌ PPM tool error: {e}", exc_info=True)
-        return f"Error calling PPM endpoint: {str(e)}"
+        return f"Error calling PPM: {str(e)}"
 
 
 # =====================================================
@@ -254,8 +253,8 @@ def PPM(
     description="""
 Use this tool for queries regarding BDM (Breakdown Maintenance) complaints or reactive work orders.
 
-ROUTING RULE: Trigger this tool only if the user explicitly mentions breakdowns, complaints, failures,
-reactive maintenance, or breakdown SLA compliance. Do not use for general equipment lists.
+ROUTING RULE: Trigger this tool only if the user explicitly mentions breakdowns, complaints,
+failures, reactive maintenance, or breakdown SLA compliance. Do not use for general equipment lists.
 
 MAPPING DIRECTIVES:
 - division: Map if user mentions "Division", "Division Name", or "DivisionName". Matches p_division.
@@ -345,25 +344,19 @@ def BDM(
     }
 
     clean_payload = {k: v for k, v in payload.items() if v is not None}
+    if "offset" not in clean_payload:
+        clean_payload["offset"] = 0
     logger.info("📋 [BDM PAYLOAD FROM AI]:\n%s", json.dumps(clean_payload, indent=2, default=str))
 
     try:
-        logger.info("🚀 Sending BDM request to /get-bdm")
-        response = requests.post(f"{settings.DATABASE_API_URL}/get-bdm", json=clean_payload)
-        logger.info("📥 BDM response received | status_code=%s", response.status_code)
-
-        if response.status_code != 200:
-            logger.error(
-                "❌ BDM API error | status_code=%s | response=%s",
-                response.status_code, response.text
-            )
-            return f"❌ API Error: {response.text}"
-
-        response_json = response.json()
-        logger.debug("📦 BDM response data: %s", json.dumps(response_json, indent=2))
+        logger.info("🚀 Calling get_bdm directly")
+        req = BDMRequest(**clean_payload)
+        result = get_bdm(req)
         logger.info("✅ BDM data processed successfully")
-        return json.dumps(response_json)
-
+        return json.dumps(result)
+    except HTTPException as e:
+        logger.error("❌ BDM API error: %s", e.detail)
+        return f"❌ API Error: {e.detail}"
     except Exception as e:
         logger.error(f"❌ BDM tool error: {e}", exc_info=True)
-        return f"Error calling BDM endpoint: {str(e)}"
+        return f"Error calling BDM: {str(e)}"

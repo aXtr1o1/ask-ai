@@ -6,16 +6,19 @@ import os
 BASE_DIR = Path(__file__).resolve().parent.parent 
 load_dotenv(dotenv_path=BASE_DIR / ".env")
 
-# PostgreSQL environment variables
-DB_HOST = os.getenv("DB_HOST")
-DB_PORT = os.getenv("DB_PORT", "5432")
-DB_NAME = os.getenv("DB_NAME")
-DB_USER = os.getenv("DB_USER")
-DB_PASS = os.getenv("DB_PASS")
 
-if not all([DB_HOST, DB_NAME, DB_USER, DB_PASS]):
+# PostgreSQL (for chat_sessions)
+PG_HOST = os.getenv("PG_HOST", "13.127.241.250")
+PG_PORT = int(os.getenv("PG_PORT", "5432"))
+PG_DATABASE = os.getenv("PG_DATABASE", "nanosoft_ask")
+PG_USER = os.getenv("PG_USER", "postgres")
+PG_PASSWORD = os.getenv("PG_PASSWORD", "axtr101")
+if not all([PG_HOST, PG_DATABASE, PG_USER, PG_PASSWORD]):
     raise RuntimeError("PostgreSQL credentials not set in environment variables")
 
+
+#if not SUPABASE_URL or not SUPABASE_KEY:
+ #   raise RuntimeError("Supabase URL or Key not set in environment variables")
 
 # Redis, Google API, Session config as before
 REDIS_HOST = os.getenv("REDIS_HOST")

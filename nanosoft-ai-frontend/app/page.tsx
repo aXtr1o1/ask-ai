@@ -748,70 +748,63 @@ useEffect(() => {
   };
 },[authChecked]);
 
-  // ── Save to Supabase on page close / refresh ──────────────────────────────
+  // ── On page reload/close: disconnect all sockets so backend saves, then sidebar refetches on next load ──
   useEffect(() => {
     if (!loggedInUser) return;
     const handleBeforeUnload = () => {
-      sessionMessagesRef.current.forEach((msgs, sid) => {
-        const valid = msgs.filter(m => m.role !== "error");
-        if (valid.length === 0) return;
-        const pairs: { query: string; assistant: string }[] = [];
-        for (let j = 0; j < valid.length; j++) {
-          if (valid[j].role === "user") {
-            const ai = valid[j + 1]?.role === "ai" ? valid[j + 1].text : "";
-            pairs.push({ query: valid[j].text, assistant: ai });
-            if (ai) j++;
-          }
-        }
-        navigator.sendBeacon(
-          `${baseUrl}/sessions`,
-          new Blob([JSON.stringify({
-            userId: loggedInUser,
-            sessionId: sid,
-            chatHistory: pairs,
-          })], { type: "application/json" })
-        );
-      });
+      // Close all WebSockets first — backend saves each session on disconnect
+      socketsRef.current.forEach(ws => ws.close());
+      socketsRef.current.clear();
     };
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [loggedInUser, baseUrl]);
+  }, [loggedInUser]);
 
-  const handleNewChat = () => {
-  // Save current messages for the old session
-  sessionMessagesRef.current.set(sessionId, messages);
+  const handleNewChat = async () => {
+    // Persist current session messages to ref before leaving
+    sessionMessagesRef.current.set(sessionId, messages);
 
-  // Stop pinging old session (it will auto-close after backend timeout)
-  if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
-  // DON'T close old sockets — let them live until backend times them out
-
-  setMessages([]);
-  accRef.current = "";
-  setIsLoading(false);
-
-  // Generate new session and update ref immediately so connectWS picks it up
-  const newSessionId = generateSessionId();
-  setSessionId(newSessionId);
-  sessionIdRef.current = newSessionId;
-
-  // Create new session in backend and refresh session list
-  (async () => {
-    try {
-      await fetch(`${baseUrl}/sessions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: loggedInUser, sessionId: newSessionId, historyOnClick: false }),
-      });
-    } catch (err) {
-      console.warn("Failed to create new session:", err);
+    // Stop pinging and disconnect current session's socket so backend saves on disconnect
+    if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
+    const currentWs = socketsRef.current.get(sessionId);
+    if (currentWs && currentWs.readyState === WebSocket.OPEN) {
+      currentWs.close();
+      socketsRef.current.delete(sessionId);
     }
-    // Refresh session list by toggling a state flag
-    setSessionRefreshFlag(flag => !flag);
-  })();
 
-  // Open a fresh socket for the new session, pings start automatically
-  connectWS();
-};
+    setMessages([]);
+    accRef.current = "";
+    setIsLoading(false);
+
+    const newSessionId = generateSessionId();
+    setSessionId(newSessionId);
+    sessionIdRef.current = newSessionId;
+
+    // Give backend a moment to persist on disconnect, then refetch session list for sidebar
+    const refetchSessions = async () => {
+      try {
+        const res = await fetch(`${baseUrl}/sessions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: loggedInUser, historyOnClick: false }),
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        const fetched: ChatSession[] = (data?.sessions ?? []).map((s: { session_id: string; title?: string; created_at?: string }) => ({
+          id: s.session_id,
+          title: s.title || "Chat",
+          createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
+        }));
+        setChatSessions([...fetched]);
+      } catch (err) {
+        console.warn("Failed to refetch sessions:", err);
+      }
+    };
+    setTimeout(() => refetchSessions(), 400);
+
+    // Open a fresh socket for the new session
+    connectWS();
+  };
 
 const handleLogout = async () => {
   // Save all sessions to Supabase before logging out
