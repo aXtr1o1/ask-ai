@@ -401,11 +401,11 @@ function generateSessionId(): string {
 }
 
 // ─── Chat icon ───────────────────────────────────────────────────────────────
-const IconChat = () => (
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
-  </svg>
-);
+// const IconChat = () => (
+//   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+//     <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
+//   </svg>
+// );
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 const IconFolder = () => (
@@ -844,36 +844,36 @@ useEffect(() => {
     setShowFeaturePlaceholder(true);
   };
 
-  const handleNewChat = () => {
-    // Stop pinging old session (it will auto-close after backend timeout)
-    if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
-    // DON'T close old sockets — let them live until backend times them out
+  // const handleNewChat = () => {
+  //   // Stop pinging old session (it will auto-close after backend timeout)
+  //   if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
+  //   // DON'T close old sockets — let them live until backend times them out
 
-    setShowFeaturePlaceholder(false);
-    setMessages([]);
-    accRef.current = "";
-    setIsLoading(false);
+  //   setShowFeaturePlaceholder(false);
+  //   setMessages([]);
+  //   accRef.current = "";
+  //   setIsLoading(false);
 
-    // Generate new session and update ref immediately so connectWS picks it up
-    const newSessionId = generateSessionId();
-    setSessionId(newSessionId);
-    sessionIdRef.current = newSessionId;
+  //   // Generate new session and update ref immediately so connectWS picks it up
+  //   const newSessionId = generateSessionId();
+  //   setSessionId(newSessionId);
+  //   sessionIdRef.current = newSessionId;
 
-    // Open a fresh socket for the new session, pings start automatically
-    connectWS();
-  };
+  //   // Open a fresh socket for the new session, pings start automatically
+  //   connectWS();
+  // };
 
-  // ── On page reload/close: disconnect all sockets so backend saves, then sidebar refetches on next load ──
-  useEffect(() => {
-    if (!loggedInUser) return;
-    const handleBeforeUnload = () => {
-      // Close all WebSockets first — backend saves each session on disconnect
-      socketsRef.current.forEach(ws => ws.close());
-      socketsRef.current.clear();
-    };
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [loggedInUser]);
+  // // ── On page reload/close: disconnect all sockets so backend saves, then sidebar refetches on next load ──
+  // useEffect(() => {
+  //   if (!loggedInUser) return;
+  //   const handleBeforeUnload = () => {
+  //     // Close all WebSockets first — backend saves each session on disconnect
+  //     socketsRef.current.forEach(ws => ws.close());
+  //     socketsRef.current.clear();
+  //   };
+  //   window.addEventListener("beforeunload", handleBeforeUnload);
+  //   return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  // }, [loggedInUser]);
 
   const handleNewChat = async () => {
     // Persist current session messages to ref before leaving
