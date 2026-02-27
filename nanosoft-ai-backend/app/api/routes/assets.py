@@ -3,9 +3,10 @@ Assets Route
 """
 from fastapi import APIRouter, HTTPException
 import logging
+import json
 
 from app.api.models.schemas import AssetRequest
-from app.api.database.supabase_client import get_supabase_client
+from app.api.database.postgresql_client import get_postgresql_client
 
 router = APIRouter()
 
@@ -54,51 +55,61 @@ def get_assets(req: AssetRequest):
     logger.debug("[GET-ASSETS] Full payload: %s", req.model_dump())
 
     rpc_params = {
-        "p_user_id": req.user_id,
-        "p_status": req.status,
-        "p_condition": req.condition,
-        "p_priority": req.priority,
-        "p_asset_type": req.asset_type,
+        "p_user_id":      req.user_id,
+        "p_user_name":    req.user_name,
         "p_asset_tag_no": req.asset_tag_no,
-        "p_division": req.division,
-        "p_discipline": req.discipline,
-        "p_locality": req.locality,
-        "p_building": req.building,
-        "p_floor": req.floor,
-        "p_owner": req.owner,
-        "p_make": req.make,
-        "p_model": req.model,
+        "p_status":       req.status,
+        "p_condition":    req.condition,
+        "p_priority":     req.priority,
+        "p_asset_type":   req.asset_type,
+        "p_division":     req.division,
+        "p_discipline":   req.discipline,
+        "p_locality":     req.locality,
+        "p_building":     req.building,
+        "p_floor":        req.floor,
+        "p_owner":        req.owner,
+        "p_make":         req.make,
+        "p_model":        req.model,
         "p_service_area": req.service_area,
-        "p_trade_group": req.trade_group,
-        "p_on_hold": req.on_hold,
-        "p_is_snagged": req.is_snagged,
-        "p_is_scraped": req.is_scraped,
-        "p_enable_ppm": req.enable_ppm,
-        "p_enable_bdm": req.enable_bdm,
-        "p_keyword": req.keyword,
-        "p_date_from": req.date_from,
-        "p_date_to": req.date_to,
-        "p_limit": req.limit,
-        "p_offset": req.offset,
+        "p_trade_group":  req.trade_group,
+        "p_on_hold":      req.on_hold,
+        "p_is_snagged":   req.is_snagged,
+        "p_is_scraped":   req.is_scraped,
+        "p_enable_ppm":   req.enable_ppm,
+        "p_enable_bdm":   req.enable_bdm,
+        "p_keyword":      req.keyword,
+        "p_date_from":    req.date_from,
+        "p_date_to":      req.date_to,
+        "p_limit":        req.limit,
+        "p_offset":       req.offset,
     }
     
     logger.info("[GET-ASSETS] Calling sp_asset_query | params=%s", list(rpc_params.keys()))
 
     try:
-        client = get_supabase_client()
-        response = client.rpc("sp_asset_query", rpc_params).execute()
-        formatted = format_response(response.data)
+        conn = get_postgresql_client()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT sp_asset_query(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                list(rpc_params.values())
+            )
+            raw = cur.fetchone()
+
+        data = raw[0] if raw else {}
+        if isinstance(data, str):
+            data = json.loads(data)
+
+        formatted = format_response(data)
         p_list = formatted.get("p_list", [])
         if p_list:
             fields = list(p_list[0].keys()) if isinstance(p_list[0], dict) else []
-            sample = [r.get("asset_tag_no") or r.get("id") or str(r)[:50] for r in p_list[:3]]
+            sample = [r.get("AssetTagNo") or r.get("id") or str(r)[:50] for r in p_list[:3]]
             logger.info("[GET-ASSETS] Fetched | count=%s | fields=%s | sample_ids=%s", formatted["p_count"], fields[:8], sample)
         else:
             logger.info("[GET-ASSETS] Success | count=0")
         return formatted
     except Exception as e:
         err_msg = str(e)
-        # Parse PostgREST/Supabase error for easier debugging
         if hasattr(e, "args") and e.args and isinstance(e.args[0], dict):
             err_dict = e.args[0]
             logger.error(

@@ -6,11 +6,16 @@ import os
 BASE_DIR = Path(__file__).resolve().parent.parent 
 load_dotenv(dotenv_path=BASE_DIR / ".env")
 
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+# PostgreSQL environment variables
+DB_HOST = os.getenv("DB_HOST")
+DB_PORT = os.getenv("DB_PORT", "5432")
+DB_NAME = os.getenv("DB_NAME")
+DB_USER = os.getenv("DB_USER")
+DB_PASS = os.getenv("DB_PASS")
 
-if not SUPABASE_URL or not SUPABASE_KEY:
-    raise RuntimeError("Supabase URL or Key not set in environment variables")
+if not all([DB_HOST, DB_NAME, DB_USER, DB_PASS]):
+    raise RuntimeError("PostgreSQL credentials not set in environment variables")
+
 
 # Redis, Google API, Session config as before
 REDIS_HOST = os.getenv("REDIS_HOST")

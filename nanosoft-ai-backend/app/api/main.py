@@ -3,7 +3,7 @@ Database API FastAPI Application
 """
 from fastapi import FastAPI
 import logging
-
+from app.api.database.postgresql_client import get_postgresql_client
 from app.api.routes import assets, ppm, bdm
 
 logger = logging.getLogger("db_api_app")
@@ -31,11 +31,10 @@ def health():
 
 @db_api_app.on_event("startup")
 def startup_event():
-    from app.api.database.supabase_client import get_supabase_client
-    get_supabase_client()
-    logger.info("🚀 Supabase client initialized during startup")
+    get_postgresql_client()
+    logger.info("🚀 PostgreSQL client initialized during startup")
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app.api.main:db_api_app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
