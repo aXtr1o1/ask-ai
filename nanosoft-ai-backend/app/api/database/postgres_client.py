@@ -1,9 +1,9 @@
 """
-PostgreSQL client for chat_sessions (async pool).
+PostgreSQL client (sync psycopg2 connection).
 """
 import logging
-import asyncpg
-from typing import Optional
+import psycopg2
+from psycopg2.extensions import connection
 from app.config import settings
 
 logger = logging.getLogger("postgres_client")
@@ -13,31 +13,27 @@ ch.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(me
 if not logger.handlers:
     logger.addHandler(ch)
 
-_pool: Optional[asyncpg.Pool] = None
+_client: connection | None = None
 
 
-async def get_pool() -> asyncpg.Pool:
-    """Get or create the async PostgreSQL connection pool."""
-    global _pool
-    if _pool is None:
-        _pool = await asyncpg.create_pool(
-            host=settings.PG_HOST,
-            port=settings.PG_PORT,
-            database=settings.PG_DATABASE,
-            user=settings.PG_USER,
-            password=settings.PG_PASSWORD,
-            min_size=1,
-            max_size=10,
-            command_timeout=60,
+def get_pool() -> connection:
+    """Get or create the sync PostgreSQL connection."""
+    global _client
+
+    if _client is None or _client.closed:
+        if not all([settings.PG_HOST, settings.PG_DATABASE, settings.PG_USER, settings.PG_PASSWORD]):
+            logger.critical("Database credentials not set in environment variables")
+            raise RuntimeError("Database credentials not set in environment variables")
+
+        _client = psycopg2.connect(
+            host     = settings.PG_HOST,
+            port     = settings.PG_PORT,
+            dbname   = settings.PG_DATABASE,
+            user     = settings.PG_USER,
+            password = settings.PG_PASSWORD,
         )
-        logger.info("✅ PostgreSQL connection pool initialized")
-    return _pool
+        logger.info("✅ PostgreSQL client initialized successfully")
+    else:
+        logger.debug("PostgreSQL client already initialized, returning existing instance")
 
-
-async def close_pool() -> None:
-    """Close the pool (e.g. on shutdown)."""
-    global _pool
-    if _pool is not None:
-        await _pool.close()
-        _pool = None
-        logger.info("PostgreSQL pool closed")
+    return _client

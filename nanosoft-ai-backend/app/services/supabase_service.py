@@ -1,14 +1,13 @@
 """
-Chat session persistence — Save and retrieve chat session history (PostgreSQL).
+PostgreSQL Service — Save and retrieve chat session history
 """
 import logging
-import json
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage
-from app.api.database.postgres_client import get_pool
+#from app.api.database.postgresql_client import get_postgresql_client
 from app.config import settings
 
-logger = logging.getLogger("postgres_service")
+logger = logging.getLogger("postgresql_service")
 logger.setLevel(logging.INFO)
 ch = logging.StreamHandler()
 ch.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
@@ -47,7 +46,7 @@ async def generate_session_title(history: list) -> str:
                 "Given a chat conversation, generate a crisp, clear title of 4-6 words maximum. "
                 "The title should describe what the conversation is about. "
                 "Return ONLY the title text. No quotes, no punctuation, no explanation."
-                "you can refer examples like  PPM Schedule Status Check,General Greeting,Online Assets Count Query,Breakdown Complaint Overview"
+                "You can refer examples like  PPM Schedule Status Check,General Greeting,Online Assets Count Query,Breakdown Complaint Overview"
             )),
             HumanMessage(content=f"Generate a title for this conversation:\n\n{conversation_text}")
         ]
@@ -69,69 +68,37 @@ async def generate_session_title(history: list) -> str:
         return "New Chat"
 
 
- # ── Save session to PostgreSQL ─────────────────────────────────────────────────
-async def save_session_to_postgres_service(session_id: str, user_id: str, history: list):
+# ── Save session to PostgreSQL ───────────────────────────────────────────────
+async def save_session_to_postgresql(session_id: str, user_id: str, history: list):
     """
-    Saves chat session history + generated title to PostgreSQL (chat_sessions).
+    Saves chat session history + generated title to PostgreSQL.
     Called on WebSocket disconnect (timeout or client disconnect).
-    Uses upsert on session_id (insert or update).
     """
-    logger.info("trying to store the data in the db")
     if not history:
         logger.info(f"⚠️ Empty history for session_id: {session_id} — skipping save")
         return
 
     try:
-        title = generate_session_title(history)
-        pool = get_pool()
-        history_json = json.dumps(history)
+        # ── Generate title from first 3 interactions ──
+        title = await generate_session_title(history)
 
-        try:
-            # Upsert: requires UNIQUE(session_id). Run scripts/add_session_id_unique.sql if missing.
-            pool.execute(
+        # ── Upsert to PostgreSQL ──
+       # db = get_postgresql_client()
+        import json
+        with db.cursor() as cur:
+            cur.execute(
                 """
-                INSERT INTO chat_sessions (session_id, user_id, chat_history, title, updated_at)
-                VALUES ($1, $2, $3::jsonb, $4, NOW())
+                INSERT INTO chat_sessions (session_id, user_id, chat_history, title)
+                VALUES (%s, %s, %s, %s)
                 ON CONFLICT (session_id) DO UPDATE SET
-                    user_id = EXCLUDED.user_id,
                     chat_history = EXCLUDED.chat_history,
-                    title = EXCLUDED.title,
-                    updated_at = NOW()
+                    title = EXCLUDED.title
                 """,
-                session_id,
-                user_id,
-                history_json,
-                title,
+                (session_id, user_id, json.dumps(history), title)
             )
-        except Exception as conflict_err:
-            if "unique or exclusion constraint" in str(conflict_err).lower() or "on_conflict" in str(conflict_err).lower():
-                # Fallback: update if row exists, else insert
-                row =  pool.fetchrow(
-                    "SELECT 1 FROM chat_sessions WHERE session_id = $1", session_id
-                )
-                if row:
-                    pool.execute(
-                        """
-                        UPDATE chat_sessions
-                        SET user_id = $2, chat_history = $3::jsonb, title = $4, updated_at = NOW()
-                        WHERE session_id = $1
-                        """,
-                        session_id, user_id, history_json, title,
-                    )
-                else:
-                     pool.execute(
-                        """
-                        INSERT INTO chat_sessions (session_id, user_id, chat_history, title, updated_at)
-                        VALUES ($1, $2, $3::jsonb, $4, NOW())
-                        """,
-                        session_id, user_id, history_json, title,
-                    )
-            else:
-                raise
+            db.commit()
 
         logger.info(f"✅ PostgreSQL save successful | session_id={session_id} | title='{title}' | messages={len(history)}")
 
     except Exception as e:
         logger.error(f"❌ PostgreSQL save failed | session_id={session_id} | error={e}", exc_info=True)
-
-

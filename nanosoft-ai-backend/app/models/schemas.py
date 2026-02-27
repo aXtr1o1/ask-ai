@@ -12,6 +12,7 @@ from typing import Optional
 class AssetsInput(BaseModel):
     """Schema for ASSETS tool. Covers physical equipment and master records."""
     user_id: Optional[str] = Field(None, description="Internal system-set ID; strictly mandatory for all queries. Never request this from the user.")
+    user_name: Optional[str] = Field(None, description="Internal system-set user name; strictly mandatory for all queries. Never request this from the user.")
     status: Optional[str] = Field(None, description="Maps if user mentions 'Status' or 'Status Name'. Mandatory fallback for offline/online states.")
     asset_tag_no: Optional[str] = Field(None, description="Unique identification number for equipment. Use for tag-based searches. Do not guess value.")
     condition: Optional[str] = Field(None, description="Physical state of asset. Map here if user mentions 'Condition' or 'State'.")
@@ -39,9 +40,11 @@ class AssetsInput(BaseModel):
     limit: Optional[int] = Field(default=None, description="Max number of results. Only set if user explicitly asks for a specific number (e.g. 'show 10'). For count/total queries (how many, total), MUST omit — do not set.")
     offset: Optional[int] = Field(default=None, description="Pagination offset. Omit unless requested.")
 
+
 class PPMInput(BaseModel):
     """Schema for PPM tool. Covers planned preventive maintenance schedules."""
     user_id: Optional[str] = Field(None, description="Internal system-set ID; strictly mandatory for all queries. Never request this from the user.")
+    user_name: Optional[str] = Field(None, description="Internal system-set user name; strictly mandatory for all queries. Never request this from the user.")
     status: Optional[str] = Field(None, description="Maps if user mentions 'PPM Status' or 'Status Name'. Mandatory for filtering schedule states.")
     stage: Optional[str] = Field(None, description="Maintenance workflow step. Map here if user mentions 'Stage' or 'Workflow Step'.")
     frequency: Optional[str] = Field(None, description="Interval of maintenance. Map here if user mentions 'Frequency', 'Daily', 'Weekly', or 'Monthly'.")
@@ -62,9 +65,11 @@ class PPMInput(BaseModel):
     limit: Optional[int] = Field(default=None, description="Max number of results. Only set if user explicitly asks for a specific number (e.g. 'show 10'). For count/total queries (how many, total), MUST omit — do not set.")
     offset: Optional[int] = Field(default=None, description="Pagination offset. Omit unless requested.")
 
+
 class BDMInput(BaseModel):
     """Schema for BDM tool. Covers breakdown complaints and reactive work orders."""
     user_id: Optional[str] = Field(None, description="Internal system-set ID; strictly mandatory for all queries. Never request this from the user.")
+    user_name: Optional[str] = Field(None, description="Internal system-set user name; strictly mandatory for all queries. Never request this from the user.")
     status: Optional[str] = Field(None, description="Maps if user mentions 'Status' or 'Status Name'. Mandatory for filtering complaint lifecycle states.")
     priority: Optional[str] = Field(None, description="Urgency level. Map here if user mentions 'Priority' or 'Urgency Level'.")
     stage: Optional[str] = Field(None, description="Workflow step. Map here if user mentions 'Stage' or 'Complaint Stage'.")
@@ -89,6 +94,7 @@ class BDMInput(BaseModel):
     completed_to: Optional[str] = Field(None, description="Resolution end range. Use YYYY-MM-DD. Map if user mentions 'Resolved To' or 'Closed'.")
     limit: Optional[int] = Field(default=None, description="Max number of results. Only set if user explicitly asks for a specific number (e.g. 'show 10'). For count/total queries (how many, total), MUST omit — do not set.")
     offset: Optional[int] = Field(default=None, description="Pagination offset. Omit unless requested.")
+
 
 class ChatRequest(BaseModel):
     """Request schema for chat endpoint"""

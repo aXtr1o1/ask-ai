@@ -3,9 +3,10 @@ BDM Route (Breakdown Maintenance / Complaints)
 """
 from fastapi import APIRouter, HTTPException
 import logging
+import json
 
 from app.api.models.schemas import BDMRequest
-from app.api.database.supabase_client import get_supabase_client
+from app.api.database.postgres_client import get_pool
 
 router = APIRouter()
 
@@ -43,8 +44,7 @@ def format_response(data):
         "p_list": safe_list,
         "p_count": len(safe_list)
     }
-    
-    
+
 
 @router.post("/get-bdm")
 def get_bdm(req: BDMRequest):
@@ -55,38 +55,50 @@ def get_bdm(req: BDMRequest):
     logger.debug("[GET-BDM] Full payload: %s", req.model_dump())
 
     try:
-        client = get_supabase_client()
-        
+        conn = get_pool()
+        cursor = conn.cursor()
+
         logger.info("[GET-BDM] Calling sp_bdm_query")
-        
-        response = client.rpc("sp_bdm_query", {
-            "p_user_id": req.user_id,
-            "p_status": req.status,
-            "p_priority": req.priority,
-            "p_stage": req.stage,
-            "p_complaint_type": req.complaint_type,
-            "p_complaint_mode": req.complaint_mode,
-            "p_complaint_nature": req.complaint_nature,
-            "p_wo_type": req.wo_type,
-            "p_service_type": req.service_type,
-            "p_division": req.division,
-            "p_discipline": req.discipline,
-            "p_locality": req.locality,
-            "p_building": req.building,
-            "p_floor": req.floor,
-            "p_contract": req.contract,
-            "p_analysis_tech": req.analysis_tech,
-            "p_execution_tech": req.execution_tech,
-            "p_complainer": req.complainer,
-            "p_keyword": req.keyword,
-            "p_date_from": req.date_from,
-            "p_date_to": req.date_to,
-            "p_completed_from": req.completed_from,
-            "p_completed_to": req.completed_to,
-            "p_limit": req.limit,
-            "p_offset": req.offset,
-        }).execute()
-        formatted = format_response(response.data)
+
+        # callproc avoids the "not all arguments converted" %s conflict
+        cursor.callproc("sp_bdm_query", [
+            req.user_id,
+            req.user_name,
+            req.complaint_no,
+            req.status,
+            req.priority,
+            req.stage,
+            req.complaint_type,
+            req.complaint_mode,
+            req.complaint_nature,
+            req.wo_type,
+            req.service_type,
+            req.division,
+            req.discipline,
+            req.locality,
+            req.building,
+            req.floor,
+            req.contract,
+            req.analysis_tech,
+            req.execution_tech,
+            req.complainer,
+            req.keyword,
+            req.date_from,
+            req.date_to,
+            req.completed_from,
+            req.completed_to,
+            req.limit,
+            req.offset,
+        ])
+
+        row = cursor.fetchone()
+        cursor.close()
+
+        raw = row[0] if row else {}
+        if isinstance(raw, str):
+            raw = json.loads(raw)
+
+        formatted = format_response(raw)
         p_list = formatted.get("p_list", [])
         if p_list:
             fields = list(p_list[0].keys()) if isinstance(p_list[0], dict) else []
@@ -95,6 +107,7 @@ def get_bdm(req: BDMRequest):
         else:
             logger.info("[GET-BDM] Success | count=0")
         return formatted
+
     except Exception as e:
         err_msg = str(e)
         if hasattr(e, "args") and e.args and isinstance(e.args[0], dict):

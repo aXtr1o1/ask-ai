@@ -13,9 +13,9 @@ from app.models.schemas import ChatRequest
 from app.config import settings
 from app.services.langchain_service import langchain_service
 from app.prompts.system_prompt import get_system_prompt
-from app.services.postgres_service import save_session_to_supabase 
+from app.services.postgres_service import save_session_to_postgres_service
 
-from app.api.database.supabase_client import get_supabase_client
+#from app.api.database.supabase_client import get_supabase_client
 from app.api.database.postgres_client import get_pool
 
 from app.services.session_service import get_sessions_for_user, get_chat_history_for_session
@@ -123,10 +123,9 @@ def print_memory(session_id: str):
 
 
 # =====================================================
-# WebSocket Chat Endpoint  /ws/chat
+
 @chatbot_app.websocket("/ws/chat")
 async def ws_chat_endpoint(websocket: WebSocket):
-
     await websocket.accept()
     logger.info("🔌 WebSocket connection accepted")
 
@@ -135,7 +134,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
     try:
         while True:
             try:
-                # Wait for next message; timeout = WS_SESSION_TIMEOUT (default 30 min)
+                # Wait for next message; timeout = WS_SESSION_TIMEOUT
                 raw = await asyncio.wait_for(
                     websocket.receive_text(),
                     timeout=settings.WS_SESSION_TIMEOUT
@@ -146,7 +145,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
                 # ✅ Save to Supabase on timeout disconnect
                 if current_session_id:
                     session_data = memory_store.get(current_session_id, {})
-                    await save_session_to_supabase(
+                    await save_session_to_postgres_service(
                         session_id = current_session_id,
                         user_id    = session_data.get("user_id", ""),
                         history    = session_data.get("history", [])
@@ -234,7 +233,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         if current_session_id:
             session_data = memory_store.get(current_session_id, {})
-            await save_session_to_supabase(
+            await save_session_to_postgres_service(
                 session_id = current_session_id,
                 user_id    = session_data.get("user_id", ""),
                 history    = session_data.get("history", [])
@@ -277,8 +276,8 @@ async def sessions_endpoint(request: SessionRequest):
 
 @chatbot_app.on_event("startup")
 async def startup_event():
-    get_supabase_client()
-    await get_pool()
+    #get_supabase_client()
+    get_pool()
     logger.info("🚀 Supabase and PostgreSQL clients initialized during startup")
 
 @chatbot_app.get("/health", tags=["Health"])

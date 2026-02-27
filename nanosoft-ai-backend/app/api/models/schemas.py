@@ -1,7 +1,6 @@
 from __future__ import annotations
-from typing import Any, Optional
-from pydantic import BaseModel, Field
 from typing import Optional
+from pydantic import BaseModel, Field
 
 
 # ==========================================
@@ -10,7 +9,8 @@ from typing import Optional
 
 class AssetRequest(BaseModel):
     """Request schema for assets endpoint"""
-    user_id: str
+    user_id: Optional[int] = None
+    user_name: Optional[str] = None
     status: Optional[str] = None
     condition: Optional[str] = None
     priority: Optional[str] = None
@@ -31,7 +31,6 @@ class AssetRequest(BaseModel):
     is_scraped: Optional[bool] = None
     enable_ppm: Optional[bool] = None
     enable_bdm: Optional[bool] = None
-    barcode: Optional[str] = None
     keyword: Optional[str] = None
     date_from: Optional[str] = None
     date_to: Optional[str] = None
@@ -41,7 +40,10 @@ class AssetRequest(BaseModel):
 
 class PPMRequest(BaseModel):
     """Request schema for PPM (work orders) endpoint"""
-    user_id: str
+    user_id: Optional[int] = None
+    user_name: Optional[str] = None
+    work_order: Optional[str] = None
+    asset_tag_no: Optional[str] = None
     status: Optional[str] = None
     stage: Optional[str] = None
     frequency: Optional[str] = None
@@ -52,6 +54,7 @@ class PPMRequest(BaseModel):
     floor: Optional[str] = None
     contract: Optional[str] = None
     tech: Optional[str] = None
+    equipment: Optional[str] = None
     keyword: Optional[str] = None
     date_from: Optional[str] = None
     date_to: Optional[str] = None
@@ -65,7 +68,9 @@ class PPMRequest(BaseModel):
 
 class BDMRequest(BaseModel):
     """Request schema for BDM (complaints) endpoint"""
-    user_id: str
+    user_id: Optional[int] = None
+    user_name: Optional[str] = None
+    complaint_no: Optional[str] = None
     status: Optional[str] = None
     priority: Optional[str] = None
     stage: Optional[str] = None

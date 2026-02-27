@@ -2,6 +2,7 @@
 Session Service — Fetch sessions and chat history from PostgreSQL (chat_sessions).
 """
 import logging
+import json
 from app.api.database.postgres_client import get_pool
 
 logger = logging.getLogger("session_service")
@@ -18,25 +19,33 @@ async def get_sessions_for_user(user_id: str) -> list:
     Each session contains: session_id, title, created_at, updated_at (no chat_history).
     """
     try:
-        pool = await get_pool()
-        rows = await pool.fetch(
+        conn   = get_pool()
+        cursor = conn.cursor()
+
+        cursor.execute(
             """
             SELECT session_id, title, created_at, updated_at
             FROM chat_sessions
-            WHERE user_id = $1
+            WHERE user_id = %s
             ORDER BY updated_at DESC
             """,
-            user_id,
+            (user_id,)
         )
+
+        rows = cursor.fetchall()
+        cols = [desc[0] for desc in cursor.description]
+        cursor.close()
+
         sessions = [
             {
-                "session_id": r["session_id"],
-                "title": r["title"],
-                "created_at": r["created_at"].isoformat() if r["created_at"] else None,
-                "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None,
+                "session_id": row[cols.index("session_id")],
+                "title":      row[cols.index("title")],
+                "created_at": row[cols.index("created_at")].isoformat() if row[cols.index("created_at")] else None,
+                "updated_at": row[cols.index("updated_at")].isoformat() if row[cols.index("updated_at")] else None,
             }
-            for r in rows
+            for row in rows
         ]
+
         logger.info(f"✅ Sessions fetched | user_id={user_id} | count={len(sessions)}")
         return sessions
 
@@ -51,23 +60,28 @@ async def get_chat_history_for_session(user_id: str, session_id: str) -> list:
     Returns list of {query, assistant} dicts.
     """
     try:
-        pool = await get_pool()
-        row = await pool.fetchrow(
+        conn   = get_pool()
+        cursor = conn.cursor()
+
+        cursor.execute(
             """
             SELECT chat_history FROM chat_sessions
-            WHERE user_id = $1 AND session_id = $2
+            WHERE user_id = %s AND session_id = %s
             """,
-            user_id,
-            session_id,
+            (user_id, session_id)
         )
+
+        row = cursor.fetchone()
+        cursor.close()
+
         if not row:
             logger.info(f"⚠️ No session found | session_id={session_id} | user_id={user_id}")
             return []
 
-        history = row["chat_history"] if row["chat_history"] is not None else []
+        history = row[0] if row[0] is not None else []
         if isinstance(history, str):
-            import json
-            history = json.loads(history) if history else []  # fallback if returned as string
+            history = json.loads(history) if history else []
+
         logger.info(f"✅ Chat history fetched | session_id={session_id} | messages={len(history)}")
         return history
 
