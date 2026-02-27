@@ -15,6 +15,7 @@ interface Message {
 }
 interface FolderItem { id: string; name: string; }
 interface ChatSession { id: string; title: string; createdAt: number; }
+interface ChatSession { id: string; title: string; createdAt: number; }
 
 // ─── Extract text from any backend response shape ─────────────────────────────
 // Improved: handles JSON strings without spaces, array join, and reply/content/text fields
@@ -531,7 +532,7 @@ export default function Home() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [sessionRefreshFlag, setSessionRefreshFlag] = useState(false);
   const sessionMessagesRef = useRef<Map<string, Message[]>>(new Map());
-
+  
   const messagesEndRef   = useRef<HTMLDivElement | null>(null);
   const inputRef         = useRef<HTMLTextAreaElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -682,6 +683,13 @@ export default function Home() {
         saveChatHistoryRef.current(idleSid, idleMsgs);
       }
       console.log("💤 User idle — stopped pinging, saved session, sockets will auto-close");
+      // Save current session to Supabase before going idle
+      const idleSid = sessionIdRef.current;
+      const idleMsgs = sessionMessagesRef.current.get(idleSid);
+      if (idleMsgs && idleMsgs.filter(m => m.role !== "error").length > 0) {
+        saveChatHistoryRef.current(idleSid, idleMsgs);
+      }
+      console.log("💤 User idle — stopped pinging, saved session, sockets will auto-close");
     }, IDLE_TIMEOUT);
 
     // If user was idle and came back, reconnect the active session if needed
@@ -756,6 +764,8 @@ export default function Home() {
             const u = [...prev];
             const l = u.length - 1;
             if (u[l]?.role === "ai") u[l] = { role: "ai", text: finalText, streaming: false };
+            // Persist to per-session store so switching sessions keeps history
+            sessionMessagesRef.current.set(sid, u);
             // Persist to per-session store so switching sessions keeps history
             sessionMessagesRef.current.set(sid, u);
             return u;
@@ -890,11 +900,42 @@ useEffect(() => {
     setMessages([]);
     accRef.current = "";
     setIsLoading(false);
+    setMessages([]);
+    accRef.current = "";
+    setIsLoading(false);
 
     const newSessionId = generateSessionId();
     setSessionId(newSessionId);
     sessionIdRef.current = newSessionId;
+    const newSessionId = generateSessionId();
+    setSessionId(newSessionId);
+    sessionIdRef.current = newSessionId;
 
+    // Give backend a moment to persist on disconnect, then refetch session list for sidebar
+    const refetchSessions = async () => {
+      try {
+        const res = await fetch(`${baseUrl}/sessions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: loggedInUser, historyOnClick: false }),
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        const fetched: ChatSession[] = (data?.sessions ?? []).map((s: { session_id: string; title?: string; created_at?: string }) => ({
+          id: s.session_id,
+          title: s.title || "Chat",
+          createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
+        }));
+        setChatSessions([...fetched]);
+      } catch (err) {
+        console.warn("Failed to refetch sessions:", err);
+      }
+    };
+    setTimeout(() => refetchSessions(), 400);
+
+    // Open a fresh socket for the new session
+    connectWS();
+  };
     // Give backend a moment to persist on disconnect, then refetch session list for sidebar
     const refetchSessions = async () => {
       try {
@@ -944,6 +985,7 @@ const handleLogout = async () => {
 };
 
   /**const toggleRecording = async () => {
+  /**const toggleRecording = async () => {
     if (isRecording) {
       mediaRecorderRef.current?.stop();
       setIsRecording(false);
@@ -978,6 +1020,28 @@ const handleLogout = async () => {
   };
   const saveChatHistoryRef = useRef(saveChatHistory);
   useEffect(() => { saveChatHistoryRef.current = saveChatHistory; });
+   };**/
+
+  // ── Save chat history to Supabase ──────────────────────────────────────────
+  const saveChatHistory = async (sid: string, msgs: Message[]) => {
+    const valid = msgs.filter(m => m.role !== "error");
+    if (valid.length === 0) return;
+    try {
+      await fetch(`${baseUrl}/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: loggedInUser,
+          sessionId: sid,
+          chatHistory: valid.map(m => ({ role: m.role, text: m.text })),
+        }),
+      });
+    } catch (err) {
+      console.warn("Failed to save chat history:", err);
+    }
+  };
+  const saveChatHistoryRef = useRef(saveChatHistory);
+  useEffect(() => { saveChatHistoryRef.current = saveChatHistory; });
 
   // ── Send message over the persistent WebSocket ────────────────────────────
   const sendMessage = () => {
@@ -990,6 +1054,15 @@ const handleLogout = async () => {
     console.warn("Socket not ready for session:", sessionId);
     return;
   }
+
+  setMessages(prev => {
+    const updated = [...prev, { role: "user" as const, text: userText }];
+    // Save to per-session store
+    sessionMessagesRef.current.set(sessionId, updated);
+    return updated;
+  });
+
+  // Do not update session title locally; always use backend-provided titles
 
   setMessages(prev => {
     const updated = [...prev, { role: "user" as const, text: userText }];
@@ -1203,7 +1276,44 @@ const handleLogout = async () => {
                 <div className="feature-placeholder-title">
                   {activeFeature === 'chat' ? 'Chat' : activeFeature === 'archived' ? 'Archived' : 'Library'}
                 </div>
+                {activeFeature === 'chat' &&(
+                  <div className="flex-1 overflow-y-auto px-2 py-3">
+                  {historyLoading && (
+                    <div className="text-xs text-gray-400 px-3 py-2">Loading history…</div>
+                  )}
+                
+                  {!historyLoading && chatSessions.length === 0 && (
+                    <div className="text-xs text-gray-400 px-3 py-2">No previous chats</div>
+                  )}
+                
+                  {chatSessions.map((session) => {
+                    const isActive = session.id === sessionId;
+                
+                    return (
+                      <button
+                        key={session.id}
+                        onClick={() => handleSessionClick(session.id)}
+                        className={`
+                          w-full text-left px-3 py-2 rounded-lg mb-1 text-sm
+                          flex items-center gap-2
+                          hover:bg-gray-100
+                          ${isActive ? "bg-gray-200 font-medium" : "text-gray-700"}
+                        `}
+                      >
+                        <IconChat />
+                
+                        <div className="flex-1 truncate">
+                          {session.title || "Chat"}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+)
+}
                 <div className="feature-placeholder-subtitle">
+                 
                   Yet to be implemented
                 </div>
               </div>
@@ -1253,6 +1363,7 @@ const handleLogout = async () => {
 
         {/* Landing */}
         {!historyLoading && isLanding && (
+        {!historyLoading && isLanding && (
           <div className="landing-container">
             {/* <div style={{ marginBottom: 24, opacity: 0.5 }}>
               <Image src="/nanosoft_logo.png" alt="" width={560} height={200}
@@ -1280,6 +1391,7 @@ const handleLogout = async () => {
         )}
 
         {/* Chat area */}
+        {!historyLoading && !isLanding && (
         {!historyLoading && !isLanding && (
           <div className="chat-scroll-area">
             <div className="messages-container">
@@ -1318,6 +1430,7 @@ const handleLogout = async () => {
                   </div>
                 );
                 })}
+                })}
 
               {isLoading && (
                 <div className="loading-indicator">
@@ -1351,6 +1464,7 @@ const handleLogout = async () => {
               placeholder={wsConnectionState === 'connected' ? "Ask Anything..." : "Waiting for connection…"}
               rows={1}
             />
+            <button className="send-btn" onClick={sendMessage} disabled={isLoading || !input.trim()}>
             <button className="send-btn" onClick={sendMessage} disabled={isLoading || !input.trim()}>
               <IconSend/>
             </button>
