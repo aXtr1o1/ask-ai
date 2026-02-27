@@ -569,6 +569,11 @@ export default function Home() {
     sessionIdRef.current = sessionId;
   }, [sessionId]);
 
+  // Keep sessionIdRef in sync with state
+  useEffect(() => {
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
+
   // Auto-scroll
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -590,7 +595,8 @@ export default function Home() {
   const userActiveRef = useRef<boolean>(true);  // is user actively using the page?
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const IDLE_TIMEOUT = 2 * 60 * 1000;  // 2 minutes
-  const baseUrl = "https://dev.axtr.in";
+  
+  const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
 
   if (!baseUrl) {
     throw new Error("NEXT_PUBLIC_API_BASE_URL is not defined");
@@ -695,6 +701,10 @@ export default function Home() {
         // Ignore pong heartbeat responses
         if (raw.trim() === "pong") return;
 
+
+        // Ignore pong heartbeat responses
+        if (raw.trim() === "pong") return;
+
         const jsonStr = raw.startsWith("data: ") ? raw.slice(6) : raw;
 
         // "[DONE]" = end of this response → finalize bubble, stay connected
@@ -767,13 +777,19 @@ export default function Home() {
   // Keep ref in sync so markUserActive can call connectWS
   useEffect(() => { connectWSRef.current = connectWS; });
 
+  // Keep ref in sync so markUserActive can call connectWS
+  useEffect(() => { connectWSRef.current = connectWS; });
+
   // Connect when component mounts (after auth is confirmed)
 useEffect(() => {
   if (!authChecked) return;
 
   // Capture ref value for cleanup
+
+  // Capture ref value for cleanup
   const sockets = socketsRef.current;
   connectWS();
+
 
   return () => {
     if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
@@ -809,6 +825,8 @@ useEffect(() => {
   };
 
 const handleLogout = () => {
+  if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
+  if (idleTimerRef.current) { clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
   if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
   if (idleTimerRef.current) { clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
   socketsRef.current.forEach(ws => ws.close());

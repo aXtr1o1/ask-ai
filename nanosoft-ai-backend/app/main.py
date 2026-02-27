@@ -49,7 +49,7 @@ VALID_USER_IDS = {"101", "102"}
 #   }
 # }
 # =====================================================
-MAX_HISTORY = 5
+MAX_HISTORY = settings.MAX_HISTORY
 memory_store = {}
 
 
