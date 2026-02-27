@@ -12,6 +12,7 @@ interface Message {
   streaming?: boolean;
 }
 interface FolderItem { id: string; name: string; }
+interface ChatSession { id: string; title: string; createdAt: number; }
 
 // ─── Extract text from any backend response shape ─────────────────────────────
 // Improved: handles JSON strings without spaces, array join, and reply/content/text fields
@@ -397,13 +398,12 @@ function generateSessionId(): string {
   return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;
 }
 
-// ─── Static Data ─────────────────────────────────────────────────────────────
-const FOLDERS: FolderItem[] = [
-  { id: "f1", name: "Work chats" },
-  { id: "f2", name: "Life chats" },
-  { id: "f3", name: "Projects chats" },
-  { id: "f4", name: "Clients chats" },
-];
+// ─── Chat icon ───────────────────────────────────────────────────────────────
+const IconChat = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
+  </svg>
+);
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 const IconFolder = () => (
@@ -475,6 +475,10 @@ export default function Home() {
   const [loggedInUser, setLoggedInUser] = useState<string | null>(null);
   const [authChecked,  setAuthChecked]  = useState<boolean>(false);
   const [menuOpen,     setMenuOpen]     = useState(false);
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [sessionRefreshFlag, setSessionRefreshFlag] = useState(false);
+  const sessionMessagesRef = useRef<Map<string, Message[]>>(new Map());
 
   const messagesEndRef   = useRef<HTMLDivElement | null>(null);
   const inputRef         = useRef<HTMLTextAreaElement>(null);
@@ -520,6 +524,34 @@ export default function Home() {
     sessionIdRef.current = sessionId;
   }, [sessionId]);
 
+  // Fetch chat history from backend on first auth or when sessionRefreshFlag changes
+  useEffect(() => {
+    if (!authChecked || !loggedInUser) return;
+    const fetchSessions = async () => {
+      try {
+        const res = await fetch(`${baseUrl}/sessions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: loggedInUser, historyOnClick: false }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const fetched: ChatSession[] = (data?.sessions ?? []).map((s: { session_id: string; title?: string; created_at?: string }) => ({
+          id: s.session_id,
+          title: s.title || "Chat",
+          createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
+        }));
+        // Only show sessions fetched from backend, do not add a local 'New Chat' session
+        setChatSessions([...fetched]);
+      } catch (err) {
+        console.warn("Failed to fetch chat sessions:", err);
+        // Fallback: show nothing if fetch fails
+        setChatSessions([]);
+      }
+    };
+    fetchSessions();
+  }, [authChecked, loggedInUser, sessionRefreshFlag]);
+
   // Auto-scroll
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -540,7 +572,7 @@ export default function Home() {
   const pingRef = useRef<ReturnType<typeof setInterval> | null>(null);   // ping for ACTIVE session only
   const userActiveRef = useRef<boolean>(true);  // is user actively using the page?
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const IDLE_TIMEOUT = 2 * 60 * 1000;  // 2 minutes
+  const IDLE_TIMEOUT = 1 * 60 * 1000;  // 1 minutes
   const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
 
   if (!baseUrl) {
@@ -584,7 +616,13 @@ export default function Home() {
       userActiveRef.current = false;
       // Stop pinging — backend will close idle sockets after its timeout
       if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
-      console.log("💤 User idle — stopped pinging, sockets will auto-close");
+      // Save current session to Supabase before going idle
+      const idleSid = sessionIdRef.current;
+      const idleMsgs = sessionMessagesRef.current.get(idleSid);
+      if (idleMsgs && idleMsgs.filter(m => m.role !== "error").length > 0) {
+        saveChatHistoryRef.current(idleSid, idleMsgs);
+      }
+      console.log("💤 User idle — stopped pinging, saved session, sockets will auto-close");
     }, IDLE_TIMEOUT);
 
     // If user was idle and came back, reconnect the active session if needed
@@ -638,6 +676,8 @@ export default function Home() {
             const u = [...prev];
             const l = u.length - 1;
             if (u[l]?.role === "ai") u[l] = { role: "ai", text: finalText, streaming: false };
+            // Persist to per-session store so switching sessions keeps history
+            sessionMessagesRef.current.set(sid, u);
             return u;
           });
           accRef.current = "";          // reset for next message
@@ -707,9 +747,40 @@ useEffect(() => {
     sockets.clear();
   };
 },[authChecked]);
- 
+
+  // ── Save to Supabase on page close / refresh ──────────────────────────────
+  useEffect(() => {
+    if (!loggedInUser) return;
+    const handleBeforeUnload = () => {
+      sessionMessagesRef.current.forEach((msgs, sid) => {
+        const valid = msgs.filter(m => m.role !== "error");
+        if (valid.length === 0) return;
+        const pairs: { query: string; assistant: string }[] = [];
+        for (let j = 0; j < valid.length; j++) {
+          if (valid[j].role === "user") {
+            const ai = valid[j + 1]?.role === "ai" ? valid[j + 1].text : "";
+            pairs.push({ query: valid[j].text, assistant: ai });
+            if (ai) j++;
+          }
+        }
+        navigator.sendBeacon(
+          `${baseUrl}/sessions`,
+          new Blob([JSON.stringify({
+            userId: loggedInUser,
+            sessionId: sid,
+            chatHistory: pairs,
+          })], { type: "application/json" })
+        );
+      });
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [loggedInUser, baseUrl]);
 
   const handleNewChat = () => {
+  // Save current messages for the old session
+  sessionMessagesRef.current.set(sessionId, messages);
+
   // Stop pinging old session (it will auto-close after backend timeout)
   if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
   // DON'T close old sockets — let them live until backend times them out
@@ -723,11 +794,36 @@ useEffect(() => {
   setSessionId(newSessionId);
   sessionIdRef.current = newSessionId;
 
+  // Create new session in backend and refresh session list
+  (async () => {
+    try {
+      await fetch(`${baseUrl}/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: loggedInUser, sessionId: newSessionId, historyOnClick: false }),
+      });
+    } catch (err) {
+      console.warn("Failed to create new session:", err);
+    }
+    // Refresh session list by toggling a state flag
+    setSessionRefreshFlag(flag => !flag);
+  })();
+
   // Open a fresh socket for the new session, pings start automatically
   connectWS();
 };
 
-const handleLogout = () => {
+const handleLogout = async () => {
+  // Save all sessions to Supabase before logging out
+  const savePromises: Promise<void>[] = [];
+  sessionMessagesRef.current.forEach((msgs, sid) => {
+    const valid = msgs.filter(m => m.role !== "error");
+    if (valid.length > 0) {
+      savePromises.push(saveChatHistoryRef.current(sid, msgs));
+    }
+  });
+  try { await Promise.all(savePromises); } catch { /* best-effort */ }
+
   if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
   if (idleTimerRef.current) { clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
   socketsRef.current.forEach(ws => ws.close());
@@ -737,7 +833,7 @@ const handleLogout = () => {
   router.replace("/login");
 };
 
-  const toggleRecording = async () => {
+  /**const toggleRecording = async () => {
     if (isRecording) {
       mediaRecorderRef.current?.stop();
       setIsRecording(false);
@@ -750,7 +846,28 @@ const handleLogout = () => {
         setIsRecording(true);
       } catch { alert("Please allow microphone access."); }
     }
-   }; 
+   };**/
+
+  // ── Save chat history to Supabase ──────────────────────────────────────────
+  const saveChatHistory = async (sid: string, msgs: Message[]) => {
+    const valid = msgs.filter(m => m.role !== "error");
+    if (valid.length === 0) return;
+    try {
+      await fetch(`${baseUrl}/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: loggedInUser,
+          sessionId: sid,
+          chatHistory: valid.map(m => ({ role: m.role, text: m.text })),
+        }),
+      });
+    } catch (err) {
+      console.warn("Failed to save chat history:", err);
+    }
+  };
+  const saveChatHistoryRef = useRef(saveChatHistory);
+  useEffect(() => { saveChatHistoryRef.current = saveChatHistory; });
 
   // ── Send message over the persistent WebSocket ────────────────────────────
   const sendMessage = () => {
@@ -764,7 +881,15 @@ const handleLogout = () => {
     return;
   }
 
-  setMessages(prev => [...prev, { role: "user", text: userText }]);
+  setMessages(prev => {
+    const updated = [...prev, { role: "user" as const, text: userText }];
+    // Save to per-session store
+    sessionMessagesRef.current.set(sessionId, updated);
+    return updated;
+  });
+
+  // Do not update session title locally; always use backend-provided titles
+
   setInput("");
   setIsLoading(true);
   accRef.current = "";
@@ -777,6 +902,62 @@ const handleLogout = () => {
 };
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  };
+
+  // ── Switch to an existing session ─────────────────────────────────────────
+  const switchSession = async (targetSid: string) => {
+    if (targetSid === sessionId) return; // already active
+
+    // Save current messages
+    sessionMessagesRef.current.set(sessionId, messages);
+
+    // Stop pinging old session
+    if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
+
+    // Switch session ID immediately
+    setSessionId(targetSid);
+    sessionIdRef.current = targetSid;
+    accRef.current = "";
+    setIsLoading(false);
+
+    // Check local cache first
+    const cached = sessionMessagesRef.current.get(targetSid);
+    if (cached && cached.length > 0) {
+      setMessages(cached);
+    } else {
+      // Fetch from backend
+      setHistoryLoading(true);
+      setMessages([]);
+      try {
+        const res = await fetch(`${baseUrl}/sessions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: loggedInUser, sessionId: targetSid, historyOnClick: true }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const history: Message[] = [];
+        for (const entry of (data?.chat_history ?? [])) {
+          if (entry.query) history.push({ role: "user", text: entry.query });
+          if (entry.assistant) history.push({ role: "ai", text: entry.assistant });
+        }
+        sessionMessagesRef.current.set(targetSid, history);
+        setMessages(history);
+      } catch (err) {
+        console.warn("Failed to fetch session history:", err);
+        setMessages([]);
+      } finally {
+        setHistoryLoading(false);
+      }
+    }
+
+    // Reconnect WS for the target session if not already open
+    const ws = socketsRef.current.get(targetSid);
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      connectWS();
+    } else {
+      startPingForActiveSession();
+    }
   };
 
   const isLanding = messages.length === 0;
@@ -793,42 +974,53 @@ const handleLogout = () => {
   return (
     <div className="app-container">
       <div className="bg-gradient" />
-
       {/* ── Sidebar ─────────────────────────────────────────────────────── */}
       <aside className="sidebar">
-        <div className="sidebar-header">
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div className="brand-box">
-              <Image src="/icon.png" alt="Nanosoft Ask AI" width={20} height={20} style={{ borderRadius: 6 }}/>
-            </div>
-            <span style={{ fontSize: 14, fontWeight: 600, color: "#1f2933" }}>NANOSOFT ASK AI</span>
-          </div>
-        </div>
-
-        <div className="search-container">
-          <div className="search-input-box">
-            <IconSearch/>
-            <input type="text" placeholder="Search" value={searchVal} onChange={e => setSearchVal(e.target.value)}/>
-          </div>
-        </div>
-
-        <div className="sidebar-scroll">
-          <div className="section-title">Folders</div>
-          {FOLDERS.map(f => (
-            <div key={f.id} className="sidebar-item">
-              <div className="content">
-                <IconFolder/>
-                <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{f.name}</span>
+          <div className="sidebar-header">
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div className="brand-box">
+                <Image src="/icon.png" alt="Nanosoft Ask AI" width={20} height={20} style={{ borderRadius: 6 }}/>
               </div>
+              <span style={{ fontSize: 14, fontWeight: 600, color: "#1f2933" }}>NANOSOFT ASK AI</span>
             </div>
-          ))}
-        </div>
+          </div>
 
-        <div className="new-chat-container">
-          <button className="new-chat-btn" onClick={handleNewChat}>New chat &nbsp;<IconPlus/></button>
-        </div>
+          <div className="search-container">
+            <div className="search-input-box">
+              <IconSearch/>
+              <input type="text" placeholder="Search" value={searchVal} onChange={e => setSearchVal(e.target.value)}/>
+            </div>
+          </div>
+
+          <div className="sidebar-scroll">
+            <div className="section-title">Chat History</div>
+            {chatSessions
+              .filter(s => !searchVal || s.title.toLowerCase().includes(searchVal.toLowerCase()))
+              .map(s => (
+              <div
+                key={s.id}
+                className={`sidebar-item${s.id === sessionId ? " active" : ""}`}
+                onClick={() => switchSession(s.id)}
+                style={{ cursor: "pointer" }}
+              >
+                <div className="content">
+                  <IconChat/>
+                  <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.title}</span>
+                </div>
+              </div>
+            ))}
+            {chatSessions.length === 0 && (
+              <div style={{ padding: "12px 16px", fontSize: 12, color: "#7a8f75", fontStyle: "italic" }}>
+                No chats yet — click New Chat to start
+              </div>
+            )}
+          </div>
+
+          {/* Restored New Chat button at the bottom */}
+          <div className="new-chat-container">
+            <button className="new-chat-btn" onClick={handleNewChat}>New Chat &nbsp;<IconPlus/></button>
+          </div>
       </aside>
-
       {/* ── Main Content ─────────────────────────────────────────────────── */}
       <div className="main-content">
 
@@ -862,8 +1054,26 @@ const handleLogout = () => {
           </div>
         </header>
 
+        {/* History loading spinner */}
+        {historyLoading && (
+          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ display: "flex", gap: 6, justifyContent: "center", marginBottom: 8 }}>
+                {[0, 1, 2].map(i => (
+                  <span key={i} style={{
+                    display: "inline-block", width: 8, height: 8,
+                    borderRadius: "50%", background: "#4a8f3a",
+                    animation: `bounce 1.2s ease-in-out ${i * 0.2}s infinite`,
+                  }}/>
+                ))}
+              </div>
+              <span style={{ fontSize: 13, color: "#4b5f45" }}>Loading chat history…</span>
+            </div>
+          </div>
+        )}
+
         {/* Landing */}
-        {isLanding && (
+        {!historyLoading && isLanding && (
           <div className="landing-container">
             <div style={{ marginBottom: 24, opacity: 0.5 }}>
               <Image src="/nanosoft_logo.png" alt="" width={560} height={200}
@@ -881,7 +1091,7 @@ const handleLogout = () => {
         )}
 
         {/* Chat area */}
-        {!isLanding && (
+        {!historyLoading && !isLanding && (
           <div className="chat-scroll-area">
             <div className="messages-container">
               {messages.map((msg, idx) => {
@@ -918,7 +1128,7 @@ const handleLogout = () => {
                     </div>
                   </div>
                 );
-              })}
+                })}
 
               {isLoading && (
                 <div className="loading-indicator">
