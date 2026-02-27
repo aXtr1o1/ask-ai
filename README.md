@@ -1,3 +1,50 @@
+## AskAI
+
+Simple AI assistant project with a Next.js frontend (`nanosoft-ai-frontend`) and a FastAPI backend (`nanosoft-ai-backend`).
+
+### Tech stack
+
+- **Frontend**: Next.js, React, Tailwind CSS  
+- **Backend**: FastAPI, Uvicorn  
+- **CI/CD**: GitHub Actions (tests frontend, deploys backend)
+
+### Prerequisites
+
+- **Node.js** 18+ and **npm**
+- **Python** 3.10+ and **pip**
+
+### Getting started
+
+Clone the repo, then from the project root (`ask-ai/ask-ai`):
+
+```bash
+cd nanosoft-ai-frontend
+npm install
+npm run dev
+```
+
+Frontend will be available on `http://localhost:3000`.
+
+In a separate terminal, start the backend:
+
+```bash
+cd nanosoft-ai-backend
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+uvicorn main:app --reload
+```
+
+### Useful scripts
+
+From `nanosoft-ai-frontend`:
+
+- **`npm run dev`**: Start the Next.js dev server
+- **`npm run build`**: Build for production
+- **`npm start`**: Run the production build
+- **`npm test`**: Run frontend tests
+- **`npm run lint`**: Run ESLint
+
 # NanoSoft Ask AI
 The system serves as an Intelligent Interface for Service Level Agreements workflows. It features an Agentic Reasoning Engine that autonomously queries PostgreSQL databases for assets and work orders using Google Gemini. With Audio sampling and real-time streaming, the platform ensures low-latency, Replacing AI hallucinations with factual operational insights through a secure gateway integrating text and Audio input
 # Frontend
