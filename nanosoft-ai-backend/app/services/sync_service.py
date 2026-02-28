@@ -6,7 +6,7 @@ import psycopg2.extras
 import requests
 from requests.exceptions import RequestException, Timeout
 
-from app.api.database.postgres_client import get_db_connection , get_pool
+from app.api.database.postgres_client import get_pool
 from app.config import settings
 
 # ─────────────────────────────────────────────────────────────
