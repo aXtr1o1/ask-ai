@@ -82,52 +82,53 @@ async def save_session_to_postgres_service(session_id: str, user_id: str, histor
         return
 
     try:
-        title = generate_session_title(history)
-        pool = get_pool()
+        title = await generate_session_title(history)
+        conn = get_pool()
         history_json = json.dumps(history)
 
-        try:
-            # Upsert: requires UNIQUE(session_id). Run scripts/add_session_id_unique.sql if missing.
-            pool.execute(
-                """
-                INSERT INTO chat_sessions (session_id, user_id, chat_history, title, updated_at)
-                VALUES ($1, $2, $3::jsonb, $4, NOW())
-                ON CONFLICT (session_id) DO UPDATE SET
-                    user_id = EXCLUDED.user_id,
-                    chat_history = EXCLUDED.chat_history,
-                    title = EXCLUDED.title,
-                    updated_at = NOW()
-                """,
-                session_id,
-                user_id,
-                history_json,
-                title,
-            )
-        except Exception as conflict_err:
-            if "unique or exclusion constraint" in str(conflict_err).lower() or "on_conflict" in str(conflict_err).lower():
-                # Fallback: update if row exists, else insert
-                row =  pool.fetchrow(
-                    "SELECT 1 FROM chat_sessions WHERE session_id = $1", session_id
+        with conn.cursor() as cur:
+            try:
+                # Upsert: requires UNIQUE(session_id). Run scripts/add_session_id_unique.sql if missing.
+                cur.execute(
+                    """
+                    INSERT INTO chat_sessions (session_id, user_id, chat_history, title, updated_at)
+                    VALUES (%s, %s, %s::jsonb, %s, NOW())
+                    ON CONFLICT (session_id) DO UPDATE SET
+                        user_id = EXCLUDED.user_id,
+                        chat_history = EXCLUDED.chat_history,
+                        title = EXCLUDED.title,
+                        updated_at = NOW()
+                    """,
+                    (session_id, user_id, history_json, title),
                 )
-                if row:
-                    pool.execute(
-                        """
-                        UPDATE chat_sessions
-                        SET user_id = $2, chat_history = $3::jsonb, title = $4, updated_at = NOW()
-                        WHERE session_id = $1
-                        """,
-                        session_id, user_id, history_json, title,
+            except Exception as conflict_err:
+                if "unique or exclusion constraint" in str(conflict_err).lower() or "on_conflict" in str(conflict_err).lower():
+                    # Fallback: update if row exists, else insert
+                    cur.execute(
+                        "SELECT 1 FROM chat_sessions WHERE session_id = %s",
+                        (session_id,),
                     )
+                    row = cur.fetchone()
+                    if row:
+                        cur.execute(
+                            """
+                            UPDATE chat_sessions
+                            SET user_id = %s, chat_history = %s::jsonb, title = %s, updated_at = NOW()
+                            WHERE session_id = %s
+                            """,
+                            (user_id, history_json, title, session_id),
+                        )
+                    else:
+                        cur.execute(
+                            """
+                            INSERT INTO chat_sessions (session_id, user_id, chat_history, title, updated_at)
+                            VALUES (%s, %s, %s::jsonb, %s, NOW())
+                            """,
+                            (session_id, user_id, history_json, title),
+                        )
                 else:
-                     pool.execute(
-                        """
-                        INSERT INTO chat_sessions (session_id, user_id, chat_history, title, updated_at)
-                        VALUES ($1, $2, $3::jsonb, $4, NOW())
-                        """,
-                        session_id, user_id, history_json, title,
-                    )
-            else:
-                raise
+                    raise
+            conn.commit()
 
         logger.info(f"✅ PostgreSQL save successful | session_id={session_id} | title='{title}' | messages={len(history)}")
 
