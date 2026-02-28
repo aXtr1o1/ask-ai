@@ -35,3 +35,5 @@ WS_SESSION_TIMEOUT = int(os.getenv("WS_SESSION_TIMEOUT", "120"))
 WS_PING_INTERVAL   = int(os.getenv("WS_PING_INTERVAL", "30"))       
 
 
+SYNC_INTERVAL_MINUTES: int = int(os.getenv("SYNC_INTERVAL_MINUTES"))
+SYNC_PAGE_SIZE: int = int(os.getenv("SYNC_PAGE_SIZE"))
