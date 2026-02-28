@@ -2,6 +2,8 @@
 LangChain Service — AI model with tool support
 """
 import logging
+from typing import Any
+
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 

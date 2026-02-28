@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
 import { ApiPreconnect } from "./components/ApiPreconnect";
+import { ThemeScript } from "./components/ThemeScript";
 
 const sometypeMono = localFont({
   variable: "--font-sometype-mono",
@@ -31,10 +32,33 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function() {
+                try {
+                  const stored = localStorage.getItem('theme');
+                  if (stored && (stored === 'light' || stored === 'dark')) {
+                    document.documentElement.setAttribute('data-theme', stored);
+                  } else {
+                    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                    const theme = prefersDark ? 'dark' : 'light';
+                    document.documentElement.setAttribute('data-theme', theme);
+                  }
+                } catch (e) {
+                  document.documentElement.setAttribute('data-theme', 'dark');
+                }
+              })();
+            `,
+          }}
+        />
+      </head>
       <body
         className={`${sometypeMono.variable} antialiased`}
       >
+        <ThemeScript />
         <ApiPreconnect />
         {children}
       </body>

@@ -3,8 +3,10 @@
 import { useState, useRef, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
-
-
+import { ThemeToggle } from "./components/ThemeToggle";
+import BackgroundLayer from "./components/BackgroundLayer";
+import { useTheme } from "./components/useTheme";
+import { IconUser } from "@tabler/icons-react";
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface Message {
   role: "user" | "ai" | "error";
@@ -12,6 +14,7 @@ interface Message {
   streaming?: boolean;
 }
 interface FolderItem { id: string; name: string; }
+interface ChatSession { id: string; title: string; createdAt: number; }
 
 // ─── Extract text from any backend response shape ─────────────────────────────
 // Improved: handles JSON strings without spaces, array join, and reply/content/text fields
@@ -133,7 +136,7 @@ function buildTable(rows: Record<string, string>[], cols?: string[]): string {
 function renderBullets(lines: string[]): string {
   let html = '<ul style="margin:8px 0 8px 20px;padding:0;list-style:disc">';
   lines.forEach(l => {
-    html += `<li style="margin:4px 0;line-height:1.6;color:#1f2933">${md(cleanLine(l))}</li>`;
+    html += `<li style="margin:4px 0;line-height:1.6;color:#F3F4F6">${md(cleanLine(l))}</li>`;
   });
   return html + "</ul>";
 }
@@ -373,12 +376,12 @@ function formatOutput(text: string): string {
     if (headM) {
       const sz = ["20px","17px","15px"][headM[1].length - 1];
       const fw = headM[1].length === 1 ? "700" : "600";
-      html += `<div style="font-size:${sz};font-weight:${fw};margin:12px 0 5px;color:#1a2e1a">${md(headM[2])}</div>`;
+      html += `<div style="font-size:${sz};font-weight:${fw};margin:12px 0 5px;background:linear-gradient(180deg, #AE8625 0%, #F7EF8A 35%, #D2AC47 65%, #EDC967 100%);background-size:200% 200%;-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent">${md(headM[2])}</div>`;
       i++; continue;
     }
 
     // ── Regular prose ──────────────────────────────────────────────────────
-    html += `<div style="line-height:1.75;margin:2px 0;color:#1f2933">${md(trimmed)}</div>`;
+    html += `<div style="line-height:1.75;margin:2px 0;color:#F3F4F6">${md(trimmed)}</div>`;
     i++;
   }
 
@@ -398,12 +401,7 @@ function generateSessionId(): string {
 }
 
 // ─── Static Data ─────────────────────────────────────────────────────────────
-const FOLDERS: FolderItem[] = [
-  { id: "f1", name: "Work chats" },
-  { id: "f2", name: "Life chats" },
-  { id: "f3", name: "Projects chats" },
-  { id: "f4", name: "Clients chats" },
-];
+// Chat history will be implemented later
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 const IconFolder = () => (
@@ -417,14 +415,24 @@ const IconPlus = () => (
   </svg>
 );
 const IconSearch = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+  <svg
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="#9CA3AF"
+    strokeWidth="1.7"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <circle cx="11" cy="11" r="5.5" />
+    <line x1="15" y1="15" x2="20" y2="20" />
   </svg>
 );
 const IconSend = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="white" stroke="none">
-    <path d="M22 2L11 13" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
-    <path d="M22 2L15 22L11 13L2 9L22 2Z" fill="white"/>
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="12" y1="19" x2="12" y2="5"/>
+    <polyline points="5 12 12 5 19 12"/>
   </svg>
 );
 const IconHamburger = () => (
@@ -440,21 +448,68 @@ const IconLogout = () => (
     <polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
   </svg>
 );
-const IconUser = () => (
+const IconUser1 = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+  </svg>
+);
+const IconChat = ({ width = 16, height = 16, style }: { width?: number; height?: number; style?: React.CSSProperties }) => (
+  <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+  </svg>
+);
+const IconArchive = ({ width = 16, height = 16, style }: { width?: number; height?: number; style?: React.CSSProperties }) => (
+  <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+    <rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><line x1="10" y1="12" x2="14" y2="12"/>
+  </svg>
+);
+const IconLibrary = ({ width = 16, height = 16, style }: { width?: number; height?: number; style?: React.CSSProperties }) => (
+  <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+    <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+  </svg>
+);
+const IconCheckbox = ({ width = 16, height = 16, style }: { width?: number; height?: number; style?: React.CSSProperties }) => (
+  <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+  </svg>
+);
+const IconWarning = ({ width = 14, height = 14, style }: { width?: number; height?: number; style?: React.CSSProperties }) => (
+  <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+    <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+  </svg>
+);
+const IconTheme = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 3v2M12 19v2M5.64 5.64l1.41 1.41M16.95 16.95l1.41 1.41M3 12h2M19 12h2M5.64 18.36l1.41-1.41M16.95 7.05l1.41-1.41"/>
+    <circle cx="12" cy="12" r="4"/>
   </svg>
 );
 const IconAI = () => (
   <svg width="22" height="22" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
     <defs>
       <linearGradient id="aiGrad" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
-        <stop offset="0%" stopColor="#6fb24f"/>
-        <stop offset="100%" stopColor="#2d6b22"/>
+        <stop offset="0%" stopColor="#f5c249"/>
+        <stop offset="50%" stopColor="#d4af37"/>
+        <stop offset="100%" stopColor="#b8941f"/>
       </linearGradient>
+      <radialGradient id="goldGlow" cx="50%" cy="50%">
+        <stop offset="0%" stopColor="#f5c249" stopOpacity="0.8"/>
+        <stop offset="100%" stopColor="#d4af37" stopOpacity="0.3"/>
+      </radialGradient>
+      <filter id="glow">
+        <feGaussianBlur stdDeviation="2.5" result="coloredBlur"/>
+        <feMerge>
+          <feMergeNode in="coloredBlur"/>
+          <feMergeNode in="SourceGraphic"/>
+        </feMerge>
+      </filter>
     </defs>
-    <path d="M16 2 L18 12 L28 16 L18 20 L16 30 L14 20 L4 16 L14 12 Z" fill="url(#aiGrad)" opacity="0.9"/>
-    <circle cx="16" cy="16" r="3" fill="white" opacity="0.95"/>
+    {/* Premium golden circle with glow */}
+    <circle cx="16" cy="16" r="15" fill="url(#goldGlow)" opacity="0.4"/>
+    <circle cx="16" cy="16" r="14" fill="url(#aiGrad)" filter="url(#glow)"/>
+    {/* Plus icon filling the circle */}
+    <line x1="16" y1="6" x2="16" y2="26" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round"/>
+    <line x1="6" y1="16" x2="26" y2="16" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round"/>
   </svg>
 );
 
@@ -476,6 +531,10 @@ export default function Home() {
   const [authChecked,  setAuthChecked]  = useState<boolean>(false);
   const [menuOpen,     setMenuOpen]     = useState(false);
   const [wsConnectionState, setWsConnectionState] = useState<'connecting'|'connected'|'failed'>('connecting');
+  const [activeFeature, setActiveFeature] = useState<'chat' | 'archived' | 'library'>('chat');
+  const [showFeaturePlaceholder, setShowFeaturePlaceholder] = useState<boolean>(false);
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   const messagesEndRef   = useRef<HTMLDivElement | null>(null);
   const inputRef         = useRef<HTMLTextAreaElement>(null);
@@ -485,6 +544,7 @@ export default function Home() {
   const sessionIdRef = useRef<string>(sessionId);
   const wsConnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectDelayRef = useRef(2000);
+  const sessionMessagesRef = useRef<Map<string, Message[]>>(new Map());
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -517,6 +577,11 @@ export default function Home() {
     setLoggedInUser(stored);
     setAuthChecked(true);
   }, [router, userIdFromUrl]);
+
+  // Keep sessionIdRef in sync with state
+  useEffect(() => {
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
 
   // Keep sessionIdRef in sync with state
   useEffect(() => {
@@ -576,6 +641,27 @@ export default function Home() {
     }, 30_000);
   };
 
+  // ── Save chat history to backend (PostgreSQL) ───────────────────────────────
+  const saveChatHistory = async (sid: string, msgs: Message[]) => {
+    const valid = msgs.filter(m => m.role !== "error");
+    if (valid.length === 0) return;
+    try {
+      await fetch(`${baseUrl}/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: loggedInUser,
+          sessionId: sid,
+          chatHistory: valid.map(m => ({ role: m.role, text: m.text })),
+        }),
+      });
+    } catch (err) {
+      console.warn("Failed to save chat history:", err);
+    }
+  };
+  const saveChatHistoryRef = useRef(saveChatHistory);
+  useEffect(() => { saveChatHistoryRef.current = saveChatHistory; });
+
   // ── User activity detection ───────────────────────────────────────────────
   const markUserActive = () => {
     const wasIdle = !userActiveRef.current;
@@ -587,7 +673,13 @@ export default function Home() {
       userActiveRef.current = false;
       // Stop pinging — backend will close idle sockets after its timeout
       if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
-      console.log("💤 User idle — stopped pinging, sockets will auto-close");
+      // Save current session to backend before going idle
+      const idleSid = sessionIdRef.current;
+      const idleMsgs = sessionMessagesRef.current.get(idleSid);
+      if (idleMsgs && idleMsgs.filter(m => m.role !== "error").length > 0) {
+        saveChatHistoryRef.current(idleSid, idleMsgs);
+      }
+      console.log("💤 User idle — stopped pinging, saved session, sockets will auto-close");
     }, IDLE_TIMEOUT);
 
     // If user was idle and came back, reconnect the active session if needed
@@ -658,6 +750,8 @@ export default function Home() {
             const u = [...prev];
             const l = u.length - 1;
             if (u[l]?.role === "ai") u[l] = { role: "ai", text: finalText, streaming: false };
+            // Persist to per-session store so switching sessions keeps history
+            sessionMessagesRef.current.set(sid, u);
             return u;
           });
           accRef.current = "";          // reset for next message
@@ -721,13 +815,19 @@ export default function Home() {
   // Keep ref in sync so markUserActive can call connectWS
   useEffect(() => { connectWSRef.current = connectWS; });
 
+  // Keep ref in sync so markUserActive can call connectWS
+  useEffect(() => { connectWSRef.current = connectWS; });
+
   // Connect when component mounts (after auth is confirmed)
 useEffect(() => {
   if (!authChecked) return;
 
   // Capture ref value for cleanup
+
+  // Capture ref value for cleanup
   const sockets = socketsRef.current;
   connectWS();
+
 
   return () => {
     if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
@@ -737,35 +837,205 @@ useEffect(() => {
     sockets.clear();
   };
 },[authChecked]);
- 
 
-  const handleNewChat = () => {
-  // Stop pinging old session (it will auto-close after backend timeout)
-  if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
-  // DON'T close old sockets — let them live until backend times them out
+  // Fetch chat sessions list for sidebar
+  useEffect(() => {
+    if (!authChecked || !loggedInUser) return;
 
-  setMessages([]);
-  accRef.current = "";
-  setIsLoading(false);
+    const fetchSessions = async () => {
+      try {
+        const res = await fetch(`${baseUrl}/sessions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: loggedInUser, historyOnClick: false }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const fetched: ChatSession[] = (data?.sessions ?? []).map(
+          (s: { session_id: string; title?: string; created_at?: string }) => ({
+            id: s.session_id,
+            title: s.title || "Chat",
+            createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
+          })
+        );
+        setChatSessions([...fetched]);
+      } catch (err) {
+        console.warn("Failed to fetch chat sessions:", err);
+        setChatSessions([]);
+      }
+    };
 
-  // Generate new session and update ref immediately so connectWS picks it up
-  const newSessionId = generateSessionId();
-  setSessionId(newSessionId);
-  sessionIdRef.current = newSessionId;
+    fetchSessions();
+  }, [authChecked, loggedInUser]);
 
-  // Open a fresh socket for the new session, pings start automatically
-  connectWS();
-};
+  const handleFeatureClick = (featureName: 'chat' | 'archived' | 'library') => {
+    // Chat is the primary active feature, so don't show the "yet to be implemented" placeholder
+    if (featureName === 'chat') {
+      setShowFeaturePlaceholder(false);
+      return;
+    }
+    setShowFeaturePlaceholder(true);
+  };
 
-const handleLogout = () => {
-  if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
-  if (idleTimerRef.current) { clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
-  socketsRef.current.forEach(ws => ws.close());
-  socketsRef.current.clear();
+  const handleNewChat = async () => {
+    // Persist current session messages to ref before leaving
+    sessionMessagesRef.current.set(sessionId, messages);
 
-  localStorage.removeItem("loggedInUser");
-  router.replace("/login");
-};
+    // Stop pinging and disconnect current session's socket so backend saves on disconnect
+    if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
+    const currentWs = socketsRef.current.get(sessionId);
+    if (currentWs && currentWs.readyState === WebSocket.OPEN) {
+      currentWs.close();
+      socketsRef.current.delete(sessionId);
+    }
+
+    setShowFeaturePlaceholder(false);
+    setMessages([]);
+    accRef.current = "";
+    setIsLoading(false);
+
+    const newSessionId = generateSessionId();
+    setSessionId(newSessionId);
+    sessionIdRef.current = newSessionId;
+
+    // Give backend a moment to persist on disconnect, then refetch session list for sidebar
+    const refetchSessions = async () => {
+      try {
+        const res = await fetch(`${baseUrl}/sessions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: loggedInUser, historyOnClick: false }),
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        const fetched: ChatSession[] = (data?.sessions ?? []).map(
+          (s: { session_id: string; title?: string; created_at?: string }) => ({
+            id: s.session_id,
+            title: s.title || "Chat",
+            createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
+          })
+        );
+        setChatSessions([...fetched]);
+      } catch (err) {
+        console.warn("Failed to refetch sessions:", err);
+      }
+    };
+    setTimeout(() => refetchSessions(), 400);
+
+    // Open a fresh socket for the new session
+    connectWS();
+  };
+
+  // ── Switch to an existing session ─────────────────────────────────────────
+  const switchSession = async (targetSid: string) => {
+    if (targetSid === sessionId) return; // already active
+
+    // Capture the currently active session ID
+    const currentSid = sessionIdRef.current;
+
+    // Save current messages
+    sessionMessagesRef.current.set(currentSid, messages);
+
+    // Stop pinging old session
+    if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
+
+    // Disconnect WebSocket for the old session so backend can persist and clean up
+    const currentWs = socketsRef.current.get(currentSid);
+    if (currentWs && currentWs.readyState === WebSocket.OPEN) {
+      currentWs.close();
+      socketsRef.current.delete(currentSid);
+    }
+
+    // After closing the socket, refresh sessions so updated display names from backend are shown
+    const refreshSessions = async () => {
+      if (!loggedInUser) return;
+      try {
+        const res = await fetch(`${baseUrl}/sessions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: loggedInUser, historyOnClick: false }),
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        const fetched: ChatSession[] = (data?.sessions ?? []).map(
+          (s: { session_id: string; title?: string; created_at?: string }) => ({
+            id: s.session_id,
+            title: s.title || "Chat",
+            createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
+          })
+        );
+        setChatSessions([...fetched]);
+      } catch (err) {
+        console.warn("Failed to refresh sessions:", err);
+      }
+    };
+    refreshSessions();
+
+    // Switch session ID immediately
+    setSessionId(targetSid);
+    sessionIdRef.current = targetSid;
+    accRef.current = "";
+    setIsLoading(false);
+
+    // Check local cache first
+    const cached = sessionMessagesRef.current.get(targetSid);
+    if (cached && cached.length > 0) {
+      setMessages(cached);
+    } else {
+      // Fetch from backend
+      setHistoryLoading(true);
+      setMessages([]);
+      try {
+        const res = await fetch(`${baseUrl}/sessions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: loggedInUser, sessionId: targetSid, historyOnClick: true }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const history: Message[] = [];
+        for (const entry of (data?.chat_history ?? [])) {
+          if (entry.query) history.push({ role: "user", text: entry.query });
+          if (entry.assistant) history.push({ role: "ai", text: entry.assistant });
+        }
+        sessionMessagesRef.current.set(targetSid, history);
+        setMessages(history);
+      } catch (err) {
+        console.warn("Failed to fetch session history:", err);
+        setMessages([]);
+      } finally {
+        setHistoryLoading(false);
+      }
+    }
+
+    // Reconnect WS for the target session if not already open
+    const ws = socketsRef.current.get(targetSid);
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      connectWS();
+    } else {
+      startPingForActiveSession();
+    }
+  };
+
+  const handleLogout = async () => {
+    // Save all sessions to backend before logging out
+    const savePromises: Promise<void>[] = [];
+    sessionMessagesRef.current.forEach((msgs, sid) => {
+      const valid = msgs.filter(m => m.role !== "error");
+      if (valid.length > 0) {
+        savePromises.push(saveChatHistoryRef.current(sid, msgs));
+      }
+    });
+    try { await Promise.all(savePromises); } catch { /* best-effort */ }
+
+    if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
+    if (idleTimerRef.current) { clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
+    socketsRef.current.forEach(ws => ws.close());
+    socketsRef.current.clear();
+
+    localStorage.removeItem("loggedInUser");
+    router.replace("/login");
+  };
 
   const toggleRecording = async () => {
     if (isRecording) {
@@ -795,7 +1065,25 @@ const handleLogout = () => {
     return;
   }
 
-  setMessages(prev => [...prev, { role: "user", text: userText }]);
+  // Ensure a chat history capsule exists for this session
+  setChatSessions(prev => {
+    if (prev.some(s => s.id === sessionId)) return prev;
+    const newCapsule: ChatSession = {
+      id: sessionId,
+      title: "New Chat",        // common name for all sessions
+      createdAt: Date.now()
+    };
+    // Put newest at the top
+    return [newCapsule, ...prev];
+  });
+
+  setShowFeaturePlaceholder(false);
+  setMessages(prev => {
+    const updated = [...prev, { role: "user" as const, text: userText }];
+    // Save to per-session store
+    sessionMessagesRef.current.set(sessionId, updated);
+    return updated;
+  });
   setInput("");
   setIsLoading(true);
   accRef.current = "";
@@ -810,109 +1098,245 @@ const handleLogout = () => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   };
 
+  const { theme } = useTheme();
   const isLanding = messages.length === 0;
 
   if (!authChecked) {
     return (
       <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center",
-        background: "radial-gradient(circle at top, #ECFAE5 0, #DDF6D2 35%, #CAE8BD 75%)" }}>
-        <span style={{ fontSize: 14, color: "#4b5f45" }}>Checking authentication…</span>
+        background: ` 
+            linear-gradient(135deg, #0A0A0A 0%, #111111 50%, #0A0A0A 100%)`}}>
+        <span style={{ fontSize: 14, color: "#A0AEC0" }}>Checking authentication…</span>
       </div>
     );
   }
 
   return (
-    <div className="app-container">
-      <div className="bg-gradient" />
-
+    <div className="app-container app-container-with-bg">
+      <BackgroundLayer theme={theme} />
+      {/* Content above background (MainLayout-style) */}
+      <div className="app-content-wrapper">
       {/* ── Sidebar ─────────────────────────────────────────────────────── */}
+      <div className="sidebar-shell">
       <aside className="sidebar">
+        {/* Sidebar Header with Logo */}
         <div className="sidebar-header">
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <div className="brand-box">
-              <Image src="/icon.png" alt="Nanosoft Ask AI" width={20} height={20} style={{ borderRadius: 6 }}/>
+              <Image src="/icon.png" alt="Nanosoft Ask AI" width={20} height={20} style={{ borderRadius: 0 }}/>
             </div>
-            <span style={{ fontSize: 14, fontWeight: 600, color: "#1f2933" }}>NANOSOFT ASK AI</span>
+            <span style={{ 
+              fontSize: 14, 
+              fontWeight: 600, 
+              background: "linear-gradient(180deg, #AE8625 0%, #F7EF8A 35%, #D2AC47 65%, #EDC967 100%)",
+              backgroundSize: "200% 200%",
+              WebkitBackgroundClip: "text",
+              backgroundClip: "text",
+              WebkitTextFillColor: "transparent",
+              animation: "goldShine 3s ease-in-out infinite"
+            }}>ASK AI</span>
           </div>
-        </div>
-
-        <div className="search-container">
-          <div className="search-input-box">
-            <IconSearch/>
-            <input type="text" placeholder="Search" value={searchVal} onChange={e => setSearchVal(e.target.value)}/>
-          </div>
-        </div>
-
-        <div className="sidebar-scroll">
-          <div className="section-title">Folders</div>
-          {FOLDERS.map(f => (
-            <div key={f.id} className="sidebar-item">
-              <div className="content">
-                <IconFolder/>
-                <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{f.name}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div className="new-chat-container">
-          <button className="new-chat-btn" onClick={handleNewChat}>New chat &nbsp;<IconPlus/></button>
-        </div>
-      </aside>
-
-      {/* ── Main Content ─────────────────────────────────────────────────── */}
-      <div className="main-content">
-
-        {/* Header */}
-        <header className="chat-header chat-header-transparent">
+          <div />
           <div className="hamburger-wrapper" ref={menuRef}>
-            <button className="hamburger-btn" onClick={() => setMenuOpen(p => !p)} title="Menu" aria-label="Open menu">
-              <IconHamburger/>
+            <button
+              className="hamburger-btn"
+              onClick={() => setMenuOpen((p) => !p)}
+              title="Profile menu"
+              aria-label="Open profile menu"
+            >
+              <IconHamburger />
             </button>
-
             <div className={`profile-dropdown ${menuOpen ? "open" : ""}`}>
               <div className="profile-dropdown-inner">
                 <div className="profile-dropdown-item profile-user-row">
                   <div className="profile-avatar">
-                    {loggedInUser?.charAt(0).toUpperCase() ?? "U"}
+                  <IconUser  />
                   </div>
                   <div className="profile-user-info">
-                    <span className="profile-label">Logged in as</span>
+                    {/* <span className="profile-label">LOGGED IN AS</span> */}
                     <span className="profile-userid">{loggedInUser}</span>
                   </div>
                 </div>
-                <div className="profile-divider"/>
-                <button className="profile-dropdown-item profile-action-btn">
-                  <IconUser/><span>Profile</span>
-                </button>
-                <button className="profile-dropdown-item profile-action-btn profile-logout" onClick={handleLogout}>
-                  <IconLogout/><span>Logout</span>
+                <div className="profile-divider" />
+                <div className="profile-dropdown-item profile-action-btn">
+                  <ThemeToggle />
+                </div>
+                <div className="profile-divider" />
+                <button
+                  className="profile-dropdown-item profile-action-btn profile-logout"
+                  onClick={handleLogout}
+                >
+                  <IconLogout />
+                  <span>Logout</span>
                 </button>
               </div>
             </div>
           </div>
-        </header>
+
+          {/* <button className="sidebar-hamburger-btn" onClick={() => setMenuOpen(p => !p)} title="Menu" aria-label="Open menu">
+            <IconHamburger/>
+          </button> */}
+
+        </div>
+        {/* <div className={`sidebar-profile-card ${menuOpen ? "open" : ""}`} ref={menuRef}> */}
+          
+           
+        {/* </div> */}
+
+        {/* + New Chat Button */}
+        <div className="new-chat-container-top">
+          <button className="new-chat-btn" onClick={handleNewChat}>
+            <IconChat width={16} height={16}/>
+            <span>+ New Chat</span>
+          </button>
+        </div>
+
+        {/* FEATURES + Chat History Section */}
+        <div className="sidebar-scroll">
+          {/* FEATURES */}
+          <div className="section-title">FEATURES</div>
+          <div
+            className={`feature-item ${activeFeature === 'chat' ? 'active' : ''}`}
+            onClick={() => {
+              setActiveFeature('chat');
+              handleFeatureClick('chat');
+            }}
+          >
+            <IconChat/>
+            <span>Chat</span>
+          </div>
+          <div
+            className={`feature-item ${activeFeature === 'archived' ? 'active' : ''}`}
+            onClick={() => {
+              setActiveFeature('archived');
+              handleFeatureClick('archived');
+            }}
+          >
+            <IconArchive/>
+            <span>Archived</span>
+          </div>
+          <div
+            className={`feature-item ${activeFeature === 'library' ? 'active' : ''}`}
+            onClick={() => {
+              setActiveFeature('library');
+              handleFeatureClick('library');
+            }}
+          >
+            <IconLibrary/>
+            <span>Library</span>
+          </div>
+
+          {showFeaturePlaceholder && (
+            <div className="feature-placeholder-sidebar">
+              <div className="feature-placeholder-box">
+                <div className="feature-placeholder-title">
+                  {activeFeature === 'archived' ? 'Archived' : 'Library'}
+                </div>
+                <div className="feature-placeholder-subtitle">
+                  Yet to be implemented
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Chat History – only visible when Chat feature is active */}
+          {activeFeature === 'chat' && (
+            <div style={{ marginTop: 24, display: "flex", flexDirection: "column", minHeight: 0 }}>
+              {/* <div className="section-title">Chat History</div> */}
+              <div className="chat-history-scroll">
+                {chatSessions.map(s => (
+                  <div
+                    key={s.id}
+                    className={`sidebar-item${s.id === sessionId ? " active" : ""}`}
+                    onClick={() => switchSession(s.id)}
+                    style={{ cursor: "pointer" }}
+                  >
+                    <div className="content">
+                      <IconChat width={16} height={16}/>
+                      <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {s.title}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+
+                {chatSessions.length === 0 && (
+                  <div style={{ padding: "12px 16px", fontSize: 12, color: "#7a8f75", fontStyle: "italic" }}>
+                    No chats yet — click New Chat to start
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Profile Card - Toggle on Hamburger Click */}
+        
+
+        {/* Beta Version Disclaimer */}
+        <div className="sidebar-disclaimer">
+          <IconWarning width={14} height={14}/>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 2 }}>BETA VERSION</div>
+            <div style={{ fontSize: 10, lineHeight: 1.4 }}>
+              NanoSoft Ask AI is currently in beta. Responses may be incomplete or inaccurate and should not be treated as formal legal advice.
+            </div>
+          </div>
+        </div>
+      </aside>
+      </div>
+
+      {/* ── Main Content ─────────────────────────────────────────────────── */}
+      <div className="main-content">
+
+        {/* History loading spinner */}
+        {historyLoading && (
+          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ display: "flex", gap: 6, justifyContent: "center", marginBottom: 8 }}>
+                {[0, 1, 2].map(i => (
+                  <span key={i} style={{
+                    display: "inline-block", width: 8, height: 8,
+                    borderRadius: "50%", background: "#d4af37",
+                    animation: `bounce 1.2s ease-in-out ${i * 0.2}s infinite`,
+                  }}/>
+                ))}
+              </div>
+              <span style={{ fontSize: 13, color: "#A0AEC0" }}>Loading chat history…</span>
+            </div>
+          </div>
+        )}
 
         {/* Landing */}
-        {isLanding && (
+        {!historyLoading && isLanding && (
           <div className="landing-container">
-            <div style={{ marginBottom: 24, opacity: 0.5 }}>
+            {/* <div style={{ marginBottom: 24, opacity: 0.5 }}>
               <Image src="/nanosoft_logo.png" alt="" width={560} height={200}
                 style={{ width: "auto", height: "auto", maxWidth: "min(600px,90vw)", maxHeight: 200, objectFit: "contain" }}/>
-            </div>
+            </div> */}
             <div className="landing-card">
-              <h1 style={{ fontSize: 24, fontWeight: 700, color: "#1f2933", marginBottom: 10 }}>
-                How can I help you today?
+              <h1 style={{ 
+                fontSize: 32, 
+                fontWeight: 700, 
+                marginBottom: 16,
+                background: "linear-gradient(180deg, #AE8625 0%, #F7EF8A 35%, #D2AC47 65%, #EDC967 100%)",
+                backgroundSize: "200% 200%",
+                WebkitBackgroundClip: "text",
+                backgroundClip: "text",
+                WebkitTextFillColor: "transparent",
+                animation: "goldShine 3s ease-in-out infinite"
+              }}>
+                Welcome to Ask AI
               </h1>
-              <p style={{ fontSize: 12, color: "#3f5f3a", lineHeight: 1.6, maxWidth: 380, margin: "0 auto 28px" }}>
-                Start a conversation to search assets, manage complaints, or check work orders.
+              <p className="landing-subtitle">
+                Let's work together buddy
               </p>
             </div>
           </div>
         )}
 
         {/* Chat area */}
-        {!isLanding && (
+        {!historyLoading && !isLanding && (
           <div className="chat-scroll-area">
             <div className="messages-container">
               {messages.map((msg, idx) => {
@@ -958,7 +1382,7 @@ const handleLogout = () => {
                     {[0, 1, 2].map(i => (
                       <span key={i} style={{
                         display: "inline-block", width: 7, height: 7,
-                        borderRadius: "50%", background: "#4a8f3a",
+                        borderRadius: "50%", background: "#d4af37",
                         animation: `bounce 1.2s ease-in-out ${i * 0.2}s infinite`,
                       }}/>
                     ))}
@@ -972,17 +1396,6 @@ const handleLogout = () => {
 
         {/* Input footer */}
         <div className="input-footer">
-          {wsConnectionState !== 'connected' && (
-            <div style={{
-              fontSize: 12, color: "#6b7280", marginBottom: 6, display: "flex", alignItems: "center", gap: 6,
-            }}>
-              <span style={{
-                width: 6, height: 6, borderRadius: "50%", background: wsConnectionState === "connecting" ? "#f59e0b" : "#ef4444",
-                animation: wsConnectionState === "connecting" ? "pulse 1.5s ease-in-out infinite" : undefined,
-              }}/>
-              {wsConnectionState === "connecting" ? "Connecting…" : "Reconnecting…"}
-            </div>
-          )}
           <div className="input-wrapper">
             <textarea
               ref={inputRef}
@@ -991,16 +1404,17 @@ const handleLogout = () => {
               onChange={e => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               disabled={isLoading || wsConnectionState !== 'connected'}
-              placeholder={wsConnectionState === 'connected' ? "Type your prompt here…" : "Waiting for connection…"}
+              placeholder={wsConnectionState === 'connected' ? "Ask Anything..." : "Waiting for connection…"}
               rows={1}
             />
             <button className="send-btn" onClick={sendMessage} disabled={isLoading || wsConnectionState !== 'connected' || !input.trim()}>
               <IconSend/>
             </button>
           </div>
-          <p className="footer-disclaimer">AI can make mistakes. Consider checking important information.</p>
+          <p className="footer-disclaimer">NanoSoft Ask AI can make mistakes. Verify important legal information.</p>
         </div>
 
+      </div>
       </div>
     </div>
   );
