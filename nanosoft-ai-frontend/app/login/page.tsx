@@ -3,7 +3,7 @@
 import { useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 
-const VALID_USERS = ["101", "102"];
+const VALID_USERS = ["v4demo", "poc"];
 const VALID_PASSWORD = "password";
 
 export default function LoginPage() {
@@ -31,7 +31,7 @@ export default function LoginPage() {
       localStorage.setItem("loggedInUser", trimmedUser);
     }
 
-    router.push(`/?userId=${encodeURIComponent(trimmedUser)}`);
+    router.push(`/?userName=${encodeURIComponent(trimmedUser)}`);
   };
 
   return (

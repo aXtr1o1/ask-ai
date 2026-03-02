@@ -46,7 +46,7 @@ chatbot_app.add_middleware(
 # API router — all backend endpoints under /api for nginx routing
 api_router = APIRouter(prefix="/api", tags=["api"])
 
-VALID_USER_IDS = {"101", "102"}
+VALID_USERNAMES = {"v4demo", "poc"}
 
 # =====================================================
 # In-Memory Store
@@ -56,7 +56,7 @@ VALID_USER_IDS = {"101", "102"}
 #   "session-abc-123": {
 #     "lc_memory": [HumanMessage, AIMessage, ...],
 #     "history": [...],
-#     "user_id": "101"
+#     "user_name": "v4demo"
 #   }
 # }
 # =====================================================
@@ -70,8 +70,8 @@ def print_memory(session_id: str):
     print("=" * 50)
     session_data = memory_store.get(session_id, {})
     history = session_data.get("history", [])
-    user_id = session_data.get("user_id", "N/A")
-    print(f"  User ID : {user_id}")
+    user_name = session_data.get("user_name", "N/A")
+    print(f"  User name : {user_name}")
     if not history:
         print("  (empty)")
     else:
@@ -147,7 +147,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
                     session_data = memory_store.get(current_session_id, {})
                     await save_session_to_postgres_service(
                         session_id = current_session_id,
-                        user_id    = session_data.get("user_id", ""),
+                        user_name  = session_data.get("user_name", ""),
                         history    = session_data.get("history", [])
                     )
                 break
@@ -164,14 +164,14 @@ async def ws_chat_endpoint(websocket: WebSocket):
                 continue
 
             user_query = data.get("query", "").strip()
-            user_id    = str(data.get("userId", ""))
+            user_name  = str(data.get("userName", ""))
             session_id = str(data.get("sessionId", ""))
 
-            logger.info(f"WS Request | user_id={user_id} | session_id={session_id} | query={user_query}")
+            logger.info(f"WS Request | user_name={user_name} | session_id={session_id} | query={user_query}")
 
-            if user_id not in VALID_USER_IDS:
-                logger.info("invalid user id")
-                await websocket.send_text(json.dumps({"error": "Invalid user ID"}))
+            if user_name not in VALID_USERNAMES:
+                logger.info("invalid user name")
+                await websocket.send_text(json.dumps({"error": "Invalid user name"}))
                 continue
 
             if not user_query:
@@ -191,18 +191,18 @@ async def ws_chat_endpoint(websocket: WebSocket):
                 memory_store[session_id] = {
                     "lc_memory": [],
                     "history":   [],
-                    "user_id":   user_id
+                    "user_name": user_name
                 }
                 logger.info(f"🆕 Memory initialized for session_id: {session_id}")
 
             lc_memory = list(memory_store[session_id]["lc_memory"])
-            messages  = [get_system_prompt(user_id)] + lc_memory
+            messages  = [get_system_prompt(user_name)] + lc_memory
             messages.append(HumanMessage(content=user_query))
 
             try:
                 final_response_text, _ = await langchain_service.process_query(
                     messages,
-                    user_id=user_id,
+                    user_name=user_name,
                     session_id=session_id
                 )
                 logger.info(f"✅ Response generated for session_id: {session_id}")
@@ -235,42 +235,41 @@ async def ws_chat_endpoint(websocket: WebSocket):
             session_data = memory_store.get(current_session_id, {})
             await save_session_to_postgres_service(
                 session_id = current_session_id,
-                user_id    = session_data.get("user_id", ""),
-                history    = session_data.get("history", [])
+                user_name = session_data.get("user_name", ""),
+                history   = session_data.get("history", [])
             )
         logger.info("🔌 WebSocket client disconnected")
         
 @api_router.post("/session")
 async def sessions_endpoint(request: SessionRequest):
-    user_id    = request.userId.strip()
+    user_name  = request.userName.strip()
     session_id = request.sessionId.strip()
 
-    if not user_id:
-        logger.info("invalid user id")
-        raise HTTPException(status_code=400, detail="userId is required")
+    if not user_name:
+        logger.info("invalid user name")
+        raise HTTPException(status_code=400, detail="userName is required")
 
-    if user_id not in VALID_USER_IDS:
-        
-        raise HTTPException(status_code=403, detail=f"Invalid user ID '{user_id}'. Access denied.")
+    if user_name not in VALID_USERNAMES:
+        raise HTTPException(status_code=403, detail=f"Invalid user name '{user_name}'. Access denied.")
 
     # ── Case 1: session_id is empty → return all sessions for user ──
     if not session_id:
-        logger.info(f"📋 Fetching all sessions | user_id={user_id}")
-        sessions = await get_sessions_for_user(user_id)
+        logger.info(f"📋 Fetching all sessions | user_name={user_name}")
+        sessions = await get_sessions_for_user(user_name)
         return {
-            "user_id":  user_id,
-            "type":     "sessions",
-            "sessions": sessions
+            "user_name": user_name,
+            "type":      "sessions",
+            "sessions":  sessions
         }
 
     # ── Case 2: session_id is provided → return chat history ──
-    logger.info(f"💬 Fetching chat history | user_id={user_id} | session_id={session_id}")
-    history = await get_chat_history_for_session(user_id, session_id)
+    logger.info(f"💬 Fetching chat history | user_name={user_name} | session_id={session_id}")
+    history = await get_chat_history_for_session(user_name, session_id)
     return {
-        "user_id":      user_id,
-        "session_id":   session_id,
-        "type":         "history",
-        "chat_history": history
+        "user_name":     user_name,
+        "session_id":    session_id,
+        "type":          "history",
+        "chat_history":  history
     }
 
 

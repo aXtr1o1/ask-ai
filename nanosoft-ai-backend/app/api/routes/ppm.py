@@ -49,8 +49,8 @@ def format_response(data):
 @router.post("/get-ppm")
 def get_ppm(req: BDMRequest):
     logger.info(
-        "[GET-PPM] Incoming | user_id=%s | status=%s | limit=%s | offset=%s",
-        req.user_id, req.status, req.limit, req.offset
+        "[GET-PPM] Incoming | user_name=%s | status=%s | limit=%s | offset=%s",
+        req.user_name, req.status, req.limit, req.offset
     )
     logger.debug("[GET-PPM] Full payload: %s", req.model_dump())
 
@@ -60,9 +60,8 @@ def get_ppm(req: BDMRequest):
 
         logger.info("[GET-BDM] Calling sp_bdm_query")
 
-        # callproc avoids the "not all arguments converted" %s conflict
+        # callproc: first param is p_user_name (no user_id)
         cursor.callproc("sp_bdm_query", [
-            req.user_id,
             req.user_name,
             req.complaint_no,
             req.status,

@@ -1,0 +1,17 @@
+[Unit]
+Description=Nanosoft AI Frontend (Next.js) — Production
+After=network.target
+
+[Service]
+Type=simple
+User=deploy
+Group=deploy
+WorkingDirectory=/var/www/html/ask-ai/nanosoft-ai-frontend
+# Use nvm Node 20 and run Next.js on port 4000 (same as: nvm use 20 && npm run start -- -p 4000)
+ExecStart=/bin/bash -c 'export NVM_DIR="/home/deploy/.nvm" && [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && nvm use 20 && npm run start -- -p 4000'
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target

@@ -48,12 +48,12 @@ class LangChainService:
             return content
         return str(content)
 
-    async def process_query(self, messages: list, user_id: str = None, session_id: str = None) -> tuple[str, list]:
+    async def process_query(self, messages: list, user_name: str = None, session_id: str = None) -> tuple[str, list]:
         try:
-            # user_id is always from the frontend request; use it for all tool calls
-            if not user_id:
-                raise ValueError("user_id is required (from frontend request)")
-            logger.info(f"💬 Processing query for user_id: {user_id}")
+            # user_name is always from the frontend request; use it for all tool calls
+            if not user_name:
+                raise ValueError("user_name is required (from frontend request)")
+            logger.info(f"💬 Processing query for user_name: {user_name}")
             ai_msg = self.model.invoke(messages)
             logger.info("🤖 First model call | tool_calls=%s", bool(ai_msg.tool_calls))
             
@@ -69,7 +69,7 @@ class LangChainService:
                     if tool_call.get("args") is None:
                         tool_call["args"] = {}
                     args = dict(tool_call["args"])
-                    args["user_id"] = user_id
+                    args["user_name"] = user_name
 
                     # Override limit for count queries — LLM often passes limit=1 incorrectly
                     user_query = ""
@@ -180,8 +180,8 @@ class LangChainService:
                     tool_name = "BDM" if needs_bdm else ("ASSETS" if needs_assets else "PPM")
                     logger.warning("⚠️ Model skipped tool for data query — forcing %s", tool_name)
                     tool_fn = self.tool_map[tool_name]
-                    args = {"user_id": user_id, "limit": None}
-                    logger.info("🔍 Calling forced tool directly | tool=%s | user_id=%s", tool_name, user_id)
+                    args = {"user_name": user_name, "limit": None}
+                    logger.info("🔍 Calling forced tool directly | tool=%s | user_name=%s", tool_name, user_name)
                     tool_result = tool_fn.invoke(dict(args))
                     
                     
@@ -216,7 +216,7 @@ class LangChainService:
 
                     # Inject synthetic tool call + result so model formats from live data
                     fake_tool_id = "forced-" + tool_name.lower() + "-1"
-                    synthetic_ai = AIMessage(content="", tool_calls=[{"name": tool_name, "id": fake_tool_id, "args": {"user_id": user_id}}])
+                    synthetic_ai = AIMessage(content="", tool_calls=[{"name": tool_name, "id": fake_tool_id, "args": {"user_name": user_name}}])
                     messages.append(synthetic_ai)
                     messages.append(ToolMessage(
                         content=json.dumps({"message": f"{display_count} records found", "total_count": display_count, "records": p_list}),

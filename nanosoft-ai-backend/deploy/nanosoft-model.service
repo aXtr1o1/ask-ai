@@ -1,5 +1,5 @@
 [Unit]
-Description=Nanosoft AI Model (FastAPI)
+Description=Nanosoft AI Model (FastAPI) — Testing / CI-CD
 After=network.target
 
 [Service]
