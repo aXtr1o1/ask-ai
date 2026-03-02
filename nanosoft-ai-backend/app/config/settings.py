@@ -28,9 +28,14 @@ L1_SIZE_THRESHOLD =int(os.getenv("L1_SIZE_THRESHOLD"))
 WS_SESSION_TIMEOUT = int(os.getenv("WS_SESSION_TIMEOUT", "120"))   
 WS_PING_INTERVAL   = int(os.getenv("WS_PING_INTERVAL", "30"))       
 
+PG_HOST: str = os.getenv("PG_HOST")
+PG_PORT: int = int(os.getenv("PG_PORT"))
+PG_DATABASE: str = os.getenv("PG_DATABASE")
+PG_USER: str = os.getenv("PG_USER")
+PG_PASSWORD: str = os.getenv("PG_PASSWORD")
 
-# if __name__ == "__main__":
-#     print("✅ Loaded .env from:", BASE_DIR / ".env")
-#     print("✅ Supabase URL:", SUPABASE_URL)
-#     print("✅ Supabase Key loaded:", bool(SUPABASE_KEY))
-#     print("✅ Redis Host:", REDIS_HOST)
+# Sync Interval
+SYNC_INTERVAL_MINUTES: int = int(os.getenv("SYNC_INTERVAL_MINUTES"))
+
+SYNC_PAGE_SIZE: int = int(os.getenv("SYNC_PAGE_SIZE"))
+

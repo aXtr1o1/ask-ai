@@ -13,14 +13,12 @@ from app.models.schemas import ChatRequest
 from app.config import settings
 from app.services.langchain_service import langchain_service
 from app.prompts.system_prompt import get_system_prompt
-from app.services.supabase_service import save_session_to_supabase 
+from app.services.supabase_service import save_session_to_supabase
 
 from app.api.database.supabase_client import get_supabase_client
 
 from app.services.session_service import get_sessions_for_user, get_chat_history_for_session
 from app.models.schemas import SessionRequest
-
-
 
 
 logger = logging.getLogger("chatbot_app")
@@ -29,12 +27,14 @@ ch = logging.StreamHandler()
 ch.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 if not logger.handlers:
     logger.addHandler(ch)
-
+    
+    
 chatbot_app = FastAPI(
     title="Facility Management AI Assistant",
     description="AI-powered chatbot for Assets, PPM, and BDM queries",
-    version="3.0.0"
+    version="3.0.0",
 )
+
 
 chatbot_app.add_middleware(
     CORSMiddleware,
@@ -272,13 +272,11 @@ async def sessions_endpoint(request: SessionRequest):
         "type":         "history",
         "chat_history": history
     }
-
-
 @chatbot_app.on_event("startup")
 def startup_event():
     get_supabase_client()
     logger.info("🚀 Supabase client initialized during startup")
-
+    
 @chatbot_app.get("/health", tags=["Health"])
 def health():
     return {"status": "ok", "service": "Facility Management AI Assistant"}
