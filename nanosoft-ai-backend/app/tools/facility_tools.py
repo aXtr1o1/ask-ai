@@ -53,6 +53,7 @@ FULL PARAMETER CAPABILITIES:
 )
 def ASSETS(
     user_name=None,
+    user_id=None,
     status=None,
     condition=None,
     priority=None,
@@ -169,6 +170,7 @@ FULL PARAMETER CAPABILITIES:
 )
 def PPM(
     user_name=None,
+    user_id=None,
     work_order=None,
     asset_tag_no=None,
     status=None,
@@ -278,6 +280,7 @@ FULL PARAMETER CAPABILITIES:
 )
 def BDM(
     user_name=None,
+    user_id=None,
     complaint_no=None,
     status=None,
     priority=None,
