@@ -6,7 +6,7 @@ import psycopg2.extras
 import requests
 from requests.exceptions import RequestException, Timeout
 
-from app.api.database.postgres_client import get_db_connection
+from app.api.database.postgres_client import get_pool
 from app.config import settings
 
 # ─────────────────────────────────────────────────────────────
@@ -351,7 +351,7 @@ def run_sync() -> dict:
     summary = {"started_at": sync_start.isoformat(), "clients": []}
 
     try:
-        conn   = get_db_connection()
+        conn   = get_pool()
         cursor = conn.cursor()
     except Exception as e:
         log.critical(f"❌ DB connection failed: {e}")

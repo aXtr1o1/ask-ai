@@ -1,15 +1,16 @@
 """
-PPM Route (Planned Preventive Maintenance / Work Orders)
+BDM Route (Breakdown Maintenance / Complaints)
 """
 from fastapi import APIRouter, HTTPException
 import logging
+import json
 
-from app.api.models.schemas import PPMRequest
-from app.api.database.supabase_client import get_supabase_client
+from app.api.models.schemas import BDMRequest
+from app.api.database.postgres_client import get_pool
 
 router = APIRouter()
 
-logger = logging.getLogger("ppm_route")
+logger = logging.getLogger("bdm_route")
 logger.setLevel(logging.INFO)
 ch = logging.StreamHandler()
 ch.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
@@ -46,7 +47,7 @@ def format_response(data):
 
 
 @router.post("/get-ppm")
-def get_ppm(req: PPMRequest):
+def get_ppm(req: BDMRequest):
     logger.info(
         "[GET-PPM] Incoming | user_id=%s | status=%s | limit=%s | offset=%s",
         req.user_id, req.status, req.limit, req.offset
@@ -54,51 +55,70 @@ def get_ppm(req: PPMRequest):
     logger.debug("[GET-PPM] Full payload: %s", req.model_dump())
 
     try:
-        client = get_supabase_client()
-        logger.info("[GET-PPM] Calling sp_ppm_query")
-        response = client.rpc("sp_ppm_query", {
-            "p_user_id": req.user_id,
-            "p_status": req.status,
-            "p_stage": req.stage,
-            "p_frequency": req.frequency,
-            "p_division": req.division,
-            "p_discipline": req.discipline,
-            "p_locality": req.locality,
-            "p_building": req.building,
-            "p_floor": req.floor,
-            "p_contract": req.contract,
-            "p_tech": req.tech,
-            "p_keyword": req.keyword,
-            "p_date_from": req.date_from,
-            "p_date_to": req.date_to,
-            "p_comp_from": req.comp_from,
-            "p_comp_to": req.comp_to,
-            "p_sla_min": req.sla_min,
-            "p_sla_max": req.sla_max,
-            "p_limit": req.limit,
-            "p_offset": req.offset,
-        }).execute()
-        
-        formatted = format_response(response.data)
+        conn = get_pool()
+        cursor = conn.cursor()
+
+        logger.info("[GET-BDM] Calling sp_bdm_query")
+
+        # callproc avoids the "not all arguments converted" %s conflict
+        cursor.callproc("sp_bdm_query", [
+            req.user_id,
+            req.user_name,
+            req.complaint_no,
+            req.status,
+            req.priority,
+            req.stage,
+            req.complaint_type,
+            req.complaint_mode,
+            req.complaint_nature,
+            req.wo_type,
+            req.service_type,
+            req.division,
+            req.discipline,
+            req.locality,
+            req.building,
+            req.floor,
+            req.contract,
+            req.analysis_tech,
+            req.execution_tech,
+            req.complainer,
+            req.keyword,
+            req.date_from,
+            req.date_to,
+            req.completed_from,
+            req.completed_to,
+            req.limit,
+            req.offset,
+        ])
+
+        row = cursor.fetchone()
+        cursor.close()
+
+        raw = row[0] if row else {}
+        if isinstance(raw, str):
+            raw = json.loads(raw)
+
+        formatted = format_response(raw)
         p_list = formatted.get("p_list", [])
         if p_list:
             fields = list(p_list[0].keys()) if isinstance(p_list[0], dict) else []
-            sample = [r.get("wo_no") or r.get("id") or str(r)[:50] for r in p_list[:3]]
-            logger.info("[GET-PPM] Fetched | count=%s | fields=%s | sample_ids=%s", formatted["p_count"], fields[:8], sample)
+            sample = [r.get("complaint_no") or r.get("id") or str(r)[:50] for r in p_list[:3]]
+            logger.info("[GET-BDM] Fetched | count=%s | fields=%s | sample_ids=%s", formatted["p_count"], fields[:8], sample)
         else:
-            logger.info("[GET-PPM] Success | count=0")
+            logger.info("[GET-BDM] Success | count=0")
         return formatted
+
     except Exception as e:
         err_msg = str(e)
         if hasattr(e, "args") and e.args and isinstance(e.args[0], dict):
             err_dict = e.args[0]
             logger.error(
-                "[GET-PPM] RPC failed | code=%s | message=%s | hint=%s",
+                "[GET-BDM] RPC failed | code=%s | message=%s | hint=%s",
                 err_dict.get("code", "?"),
                 err_dict.get("message", err_msg),
                 err_dict.get("hint", ""),
                 exc_info=True
             )
         else:
-            logger.error("[GET-PPM] RPC failed | error=%s", err_msg, exc_info=True)
+            logger.error("[GET-BDM] RPC failed | error=%s", err_msg, exc_info=True)
         raise HTTPException(status_code=500, detail=err_msg)
