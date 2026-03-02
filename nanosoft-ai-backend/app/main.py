@@ -1,7 +1,7 @@
 """
 Facility Management AI Chatbot — Main App
 """
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 from langchain_core.messages import HumanMessage, AIMessage
 import logging
@@ -42,6 +42,9 @@ chatbot_app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# API router — all backend endpoints under /api for nginx routing
+api_router = APIRouter(prefix="/api", tags=["api"])
 
 VALID_USER_IDS = {"101", "102"}
 
@@ -122,7 +125,7 @@ def print_memory(session_id: str):
 
 # =====================================================
 
-@chatbot_app.websocket("/ws/chat")
+@api_router.websocket("/chat")
 async def ws_chat_endpoint(websocket: WebSocket):
     await websocket.accept()
     logger.info("🔌 WebSocket connection accepted")
@@ -237,7 +240,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
             )
         logger.info("🔌 WebSocket client disconnected")
         
-@chatbot_app.post("/sessions")
+@api_router.post("/session")
 async def sessions_endpoint(request: SessionRequest):
     user_id    = request.userId.strip()
     session_id = request.sessionId.strip()
@@ -271,11 +274,14 @@ async def sessions_endpoint(request: SessionRequest):
     }
 
 
+@api_router.get("/health", tags=["Health"])
+def api_health():
+    return {"status": "ok", "service": "Facility Management AI Assistant"}
+
+
+chatbot_app.include_router(api_router)
+
 @chatbot_app.on_event("startup")
 async def startup_event():
     get_pool()
     logger.info("🚀 PostgreSQL client initialized during startup")
-
-@chatbot_app.get("/health", tags=["Health"])
-def health():
-    return {"status": "ok", "service": "Facility Management AI Assistant"}
