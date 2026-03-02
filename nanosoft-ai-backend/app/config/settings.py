@@ -8,21 +8,21 @@ load_dotenv(dotenv_path=BASE_DIR / ".env")
 
 
 # PostgreSQL (for chat_sessions)
-PG_HOST = os.getenv("PG_HOST", "13.127.241.250")
-PG_PORT = int(os.getenv("PG_PORT", "5432"))
-PG_DATABASE = os.getenv("PG_DATABASE", "nanosoft_ask")
-PG_USER = os.getenv("PG_USER", "postgres")
-PG_PASSWORD = os.getenv("PG_PASSWORD", "axtr101")
+PG_HOST = os.getenv("PG_HOST")
+PG_PORT = int(os.getenv("PG_PORT"))
+PG_DATABASE = os.getenv("PG_DATABASE")
+PG_USER = os.getenv("PG_USER")
+PG_PASSWORD = os.getenv("PG_PASSWORD")
 if not all([PG_HOST, PG_DATABASE, PG_USER, PG_PASSWORD]):
     raise RuntimeError("PostgreSQL credentials not set in environment variables")
 
 
 
 # Redis, Google API, Session config as before
-REDIS_HOST = os.getenv("REDIS_HOST")
-REDIS_PORT = int(os.getenv("REDIS_PORT"))
-REDIS_USERNAME = os.getenv("REDIS_USERNAME")
-REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")
+# REDIS_HOST = os.getenv("REDIS_HOST")
+# REDIS_PORT = int(os.getenv("REDIS_PORT"))
+# REDIS_USERNAME = os.getenv("REDIS_USERNAME")
+# REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 GOOGLE_AI_MODEL = os.getenv("GOOGLE_AI_MODEL")
