@@ -1,148 +1,352 @@
-# CI/CD setup: Frontend tests + Backend deploy to AWS t2.small
+# Nanosoft AI Backend — Ubuntu Cloud Deployment Guide
 
-## What the workflow does
-
-- **CI**: On every push/PR, runs **frontend tests only** (Node 18, `npm test` in `nanosoft-ai-frontend`).
-- **CD**: On push to `main` or `master`, after tests pass, deploys **backend only** to your t2.small EC2 via SSH (git pull + venv + restart).
-
-Frontend is not deployed; only the backend is deployed to EC2.
+Use this guide during a screen-share meeting to deploy the **Nanosoft AI Backend** (FastAPI + WebSocket) on an **Ubuntu** cloud instance. Follow the steps in order; each section has copy-paste commands where possible.
 
 ---
 
-## 1. One-time setup on the EC2 (t2.small)
+## What You’ll Deploy
 
-SSH into the instance and run:
+- **FastAPI app** (chat + WebSocket) — runs on port **8001**
+- **Sync runner** (optional) — scheduled via cron for data sync
+- **Systemd service** — keeps the API running and restarts on failure
+
+**Dependencies:** Python 3.10+, PostgreSQL (remote), Redis (remote), Google API key. No local DB/Redis install required if you use existing hosted services.
+
+---
+
+## 1. Prerequisites (Before the Meeting)
+
+- Ubuntu server (20.04 or 22.04) with SSH access.
+- **IP/hostname** and **SSH key or password** for the client.
+- **Git repo URL** (e.g. your GitHub/GitLab URL for the project).
+- **Environment values** ready (see Section 5): PostgreSQL, Redis, Google API key, etc. (Keep them in a secure note; do not paste into chat.)
+
+---
+
+## 2. Connect to the Server
+
+Ask the client to open a terminal and SSH in (replace with their IP and user):
 
 ```bash
-# Install git and Python 3.11 if needed
-sudo apt update
-sudo apt install -y git python3.11 python3.11-venv python3-pip
-
-# Clone the repo (use your real repo URL; HTTPS is fine for read-only deploy)
-sudo mkdir -p /home/ubuntu/ask-ai
-sudo chown ubuntu:ubuntu /home/ubuntu/ask-ai
-cd /home/ubuntu/ask-ai
-git clone https://github.com/YOUR_ORG/ask-ai.git .
-
-# Backend venv and deps
-cd nanosoft-ai-backend
-python3.11 -m venv .venv
-. .venv/bin/activate
-pip install -r requirements.txt
-
-# Create .env with URL, KEY, etc. (copy from your local or set in GitHub / Parameter Store)
-nano .env   # add URL=..., KEY=..., etc.
-
-# Install and enable systemd service (path must match your app location)
-sudo cp deploy/nanosoft-backend.service /etc/systemd/system/
-# If your app is not in /home/ubuntu/ask-ai, edit the service file paths first:
-# sudo nano /etc/systemd/system/nanosoft-backend.service
-sudo systemctl daemon-reload
-sudo systemctl enable nanosoft-backend
-sudo systemctl start nanosoft-backend
-sudo systemctl status nanosoft-backend
+ssh ubuntu@<SERVER_IP>
 ```
 
-Ensure port **8000** is open in the EC2 security group (inbound TCP 8000 from 0.0.0.0/0 or your load balancer).
+If they use a key:
+
+```bash
+ssh -i /path/to/key.pem ubuntu@<SERVER_IP>
+```
 
 ---
 
-## 2. GitHub repository secrets
+## 3. Initial Server Setup (One-Time)
 
-In the repo: **Settings → Secrets and variables → Actions**, add:
+Run these once on a fresh Ubuntu instance.
 
-| Secret           | Description |
-|------------------|-------------|
-| `EC2_HOST`       | EC2 public IP or DNS (e.g. `ec2-xx-xx-xx-xx.compute.amazonaws.com`) |
-| `EC2_USER`       | SSH user (usually `ubuntu`) |
-| `EC2_SSH_KEY`    | Full contents of the **private** key (.pem) used to **SSH into the EC2** (this is the key you added; it is not used for Git). Paste the **entire** key including `-----BEGIN ... PRIVATE KEY-----` and `-----END ... PRIVATE KEY-----` and keep newlines. |
-| `EC2_APP_PATH`   | Path to the repo on the server (e.g. `/home/ubuntu/ask-ai`) |
-| `GH_DEPLOY_TOKEN` | **(Private repo, Option B only)** A GitHub Personal Access Token (or fine-grained token) with `repo` read scope. The workflow uses it so EC2 can pull via HTTPS without a deploy key. |
+### 3.1 Update system and install basics
 
-**If the deploy step fails:** The workflow has a "Verify deploy secrets" step. If any of `EC2_HOST`, `EC2_USER`, `EC2_SSH_KEY`, or `EC2_APP_PATH` are missing, the run will fail there with a clear error. If the SSH step itself fails, check: EC2 security group allows SSH (port 22) from the internet or from GitHub’s IPs; `EC2_SSH_KEY` is the full PEM with correct newlines; `EC2_HOST` is the public IP or DNS of the instance.
+```bash
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y software-properties-common git curl
+```
 
-### Private repo: how EC2 pulls from GitHub
+### 3.2 Install Python 3.11 (or 3.10+)
 
-The key in `EC2_SSH_KEY` is only for GitHub Actions to SSH into your t2.small. The **EC2 instance itself** must be able to pull from your **private** repo when the workflow runs `git fetch` / `git reset`. Use one of these:
+```bash
+sudo add-apt-repository -y ppa:deadsnakes/ppa
+sudo apt update
+sudo apt install -y python3.11 python3.11-venv python3.11-dev
+```
 
-**Option A – Deploy key (SSH on EC2)**  
-1. On your EC2: `ssh-keygen -t ed25519 -C "deploy" -f ~/.ssh/github_deploy -N ""`  
-2. Add the **public** key to the repo: **Settings → Deploy keys → Add deploy key** (read-only is enough).  
-3. On EC2, set the Git remote to SSH and use that key:
-   ```bash
-   cd /home/ubuntu/ask-ai
-   git remote set-url origin git@github.com:YOUR_ORG/ask-ai.git
-   # Ensure ssh uses the deploy key for github.com (e.g. in ~/.ssh/config)
-   ```
-   Example `~/.ssh/config` on EC2:
-   ```
-   Host github.com
-     HostName github.com
-     User git
-     IdentityFile ~/.ssh/github_deploy
-     IdentitiesOnly yes
-   ```
+Check:
 
-**Option B – Token in GitHub Secrets (no key on EC2)**  
-1. Create a **Personal Access Token** (or fine-grained token) with `repo` (read) scope.  
-2. Add it as a repository secret: **Settings → Secrets → Actions** → `GH_DEPLOY_TOKEN`.  
-3. The workflow is set up to use this: it will configure the remote on EC2 to use `https://x-access-token:TOKEN@github.com/...` before each `git fetch`, so the server can pull without a deploy key.
+```bash
+python3.11 --version
+```
+
+### 3.3 Open firewall for the API (and SSH)
+
+```bash
+sudo ufw allow 22/tcp
+sudo ufw allow 8001/tcp
+sudo ufw enable
+sudo ufw status
+```
 
 ---
 
-## 3. Deploy flow
+## 4. Clone the Project and Set Up the App
 
-1. **Push to `Testing`** (or open a PR targeting `Testing`) → workflow runs.
-2. **test-frontend** always runs: installs frontend deps and runs `npm test`.
-3. **deploy-backend** runs only on **push** to `Testing` (not on PRs):
-   - SSHs into EC2, `cd EC2_APP_PATH`
-   - Updates Git remote (if `GH_DEPLOY_TOKEN` is set), then `git fetch` and `git checkout -B Testing origin/Testing`
-   - In `nanosoft-ai-backend`: venv, `pip install -r requirements.txt`, `sudo systemctl restart nanosoft-backend`
+### 4.1 Choose app directory
 
----
+We’ll use `/home/ubuntu/ask-ai` as the project root. If the repo is the **backend only**, clone into a folder that matches the systemd service path below.
 
-## 4. How to test the Actions
+**Option A — Repo contains the whole repo (e.g. `ask-ai` with `nanosoft-ai-backend` inside):**
 
-You do **not** push from EC2. You push from your **local machine** (or another dev); that triggers the workflow and the deploy step updates EC2.
+```bash
+cd /home/ubuntu
+git clone <YOUR_REPO_URL> ask-ai
+cd ask-ai/ask-ai/nanosoft-ai-backend
+```
 
-**From your local (after you’ve pulled the old Testing code on EC2):**
+**Option B — Repo is only the backend:**
 
-1. On your machine, switch to `Testing` and push any new commit:
-   ```bash
-   git checkout Testing
-   git pull origin Testing
-   # make a small change if you want, or just re-push
-   git push origin Testing
-   ```
-2. On GitHub: **Actions** tab → open the run that started for the push.
-3. You should see:
-   - **test-frontend** run (and turn green when frontend tests pass).
-   - **deploy-backend** run only if the trigger was a **push** (not a PR). It will SSH to EC2, update code to latest `Testing`, and restart the backend.
-4. To test **without** deploying: open a **Pull Request** into `Testing`. Only **test-frontend** will run; **deploy-backend** is skipped for PRs.
+```bash
+cd /home/ubuntu
+mkdir -p ask-ai/ask-ai
+git clone <YOUR_REPO_URL> ask-ai/ask-ai/nanosoft-ai-backend
+cd ask-ai/ask-ai/nanosoft-ai-backend
+```
 
-**After a successful deploy:** SSH to EC2 and check:
-   ```bash
-   cd /home/ubuntu/ask-ai && git log -1 --oneline
-   sudo systemctl status nanosoft-backend
-   curl -s http://localhost:8000/docs  # or your health endpoint
-   ```
+Confirm you’re in the backend folder (should see `app/`, `requirements.txt`):
 
----
+```bash
+pwd
+ls -la
+```
 
-## 5. Optional: deploy via rsync (no git on server)
+### 4.2 Create virtual environment and install dependencies
 
-If you prefer not to clone the repo on EC2, you can deploy by rsync from the runner. In `.github/workflows/main.yml`:
-
-- Comment out or remove the **Deploy backend to EC2** step that uses `appleboy/ssh-action`.
-- Uncomment the **deploy-backend-rsync** job and adjust the steps so the only deploy job is the rsync one.
-
-Then on the server you only need:
-
-- `EC2_APP_PATH` = directory where the backend should live (e.g. `/home/ubuntu/app`).
-- Python 3.11, venv, and the systemd unit updated so `WorkingDirectory` and paths point to that directory (e.g. `/home/ubuntu/app/nanosoft-ai-backend`).
+```bash
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+```
 
 ---
 
-## 6. Frontend tests only
+## 5. Configure Environment (.env)
 
-Backend tests are **not** run in this workflow; only frontend tests are. To run backend tests again in CI, add a job that uses `actions/setup-python` and runs `pytest` in `nanosoft-ai-backend`.
+The app reads `.env` from the **app** folder: `nanosoft-ai-backend/app/.env`.
+
+### 5.1 Create the file
+
+```bash
+nano app/.env
+```
+
+### 5.2 Paste the following and replace placeholders with real values
+
+Use the client’s actual PostgreSQL, Redis, and Google API details. **Do not commit this file to Git.**
+
+```env
+# --- Cache / memory ---
+L1_TTL_SECONDS=120
+L2_TTL_SECONDS=120
+L1_SIZE_THRESHOLD=5
+
+# --- Google AI ---
+GOOGLE_API_KEY=<THEIR_GOOGLE_API_KEY>
+GOOGLE_AI_MODEL=gemini-2.5-flash-lite
+
+# --- Redis (e.g. Redis Cloud) ---
+REDIS_HOST=<REDIS_HOST>
+REDIS_PORT=11355
+REDIS_USERNAME=default
+REDIS_PASSWORD=<REDIS_PASSWORD>
+
+# --- Session ---
+SESSION_TTL_SECONDS=86400
+MAX_HISTORY=5
+
+# --- PostgreSQL ---
+PG_HOST=<PG_HOST>
+PG_PORT=5432
+PG_DATABASE=nanosoft_ask
+PG_USER=postgres
+PG_PASSWORD=<PG_PASSWORD>
+
+# --- Optional: WebSocket timeouts (defaults used if missing) ---
+# WS_SESSION_TIMEOUT=120
+# WS_PING_INTERVAL=30
+
+# --- Sync (if using sync_runner with cron) ---
+SYNC_INTERVAL_MINUTES=20
+SYNC_PAGE_SIZE=1000
+```
+
+Save and exit: **Ctrl+O**, **Enter**, **Ctrl+X**.
+
+### 5.3 Optional: DATABASE_API_URL
+
+If the app or sync uses an external “database API”, add:
+
+```env
+DATABASE_API_URL=<URL_IF_NEEDED>
+```
+
+---
+
+## 6. Test Run (Manual)
+
+From the backend directory, with venv activated:
+
+```bash
+cd /home/ubuntu/ask-ai/ask-ai/nanosoft-ai-backend
+source .venv/bin/activate
+uvicorn app.main:chatbot_app --host 0.0.0.0 --port 8001
+```
+
+- From the server: `curl http://127.0.0.1:8001/health`
+- From a browser: `http://<SERVER_IP>:8001/health`  
+  Expected: `{"status":"ok","service":"Facility Management AI Assistant"}`
+
+Stop the server: **Ctrl+C**.
+
+---
+
+## 7. Install Systemd Service (Run on Boot + Auto-Restart)
+
+### 7.1 Paths
+
+The service file assumes:
+
+- **WorkingDirectory:** `/home/ubuntu/ask-ai/ask-ai/nanosoft-ai-backend`
+- **ExecStart:** same directory’s `.venv/bin/uvicorn`
+
+If you used a different path in Section 4, adjust the paths in the service file and in the commands below.
+
+### 7.2 Copy service file and enable
+
+```bash
+sudo cp /home/ubuntu/ask-ai/ask-ai/nanosoft-ai-backend/deploy/nanosoft-model.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable nanosoft-model
+sudo systemctl start nanosoft-model
+sudo systemctl status nanosoft-model
+```
+
+You should see **active (running)**. Check logs:
+
+```bash
+sudo journalctl -u nanosoft-model -f
+```
+
+Exit logs: **Ctrl+C**.
+
+### 7.3 If you changed the project path
+
+Edit the service file before copying:
+
+```bash
+nano /home/ubuntu/ask-ai/ask-ai/nanosoft-ai-backend/deploy/nanosoft-model.service
+```
+
+Update **WorkingDirectory** and **ExecStart** to match your actual path, then run the `sudo cp` and `systemctl` commands again.
+
+---
+
+## 8. Optional: Sync Runner with Cron
+
+If the client needs the **sync_runner** (e.g. every 20 minutes):
+
+```bash
+crontab -e
+```
+
+Add (adjust path if different):
+
+```cron
+*/20 * * * * cd /home/ubuntu/ask-ai/ask-ai/nanosoft-ai-backend && .venv/bin/python app/sync_runner.py >> /home/ubuntu/sync_runner.log 2>&1
+```
+
+Save and exit. Check after 20 minutes:
+
+```bash
+tail -50 /home/ubuntu/sync_runner.log
+```
+
+---
+
+## 9. Optional: Nginx Reverse Proxy (Port 80 / HTTPS)
+
+If the client wants the API on port 80 or behind HTTPS:
+
+### 9.1 Install Nginx
+
+```bash
+sudo apt install -y nginx
+```
+
+### 9.2 Create config (replace `your-domain.com` or use server IP)
+
+```bash
+sudo nano /etc/nginx/sites-available/nanosoft-ai
+```
+
+Paste (replace `your-domain.com` and optionally uncomment WebSocket lines if needed):
+
+```nginx
+server {
+    listen 80;
+    server_name your-domain.com;   # or server IP
+
+    location / {
+        proxy_pass http://127.0.0.1:8001;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # WebSocket support
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 86400;
+    }
+}
+```
+
+Enable and test:
+
+```bash
+sudo ln -s /etc/nginx/sites-available/nanosoft-ai /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+Open: `http://your-domain.com/health` (or `http://<SERVER_IP>/health`).
+
+### 9.3 HTTPS with Let’s Encrypt (optional)
+
+```bash
+sudo apt install -y certbot python3-certbot-nginx
+sudo certbot --nginx -d your-domain.com
+```
+
+Follow prompts. Certbot will adjust Nginx for HTTPS.
+
+---
+
+## 10. Post-Deploy Checklist
+
+- [ ] `http://<SERVER_IP>:8001/health` (or via Nginx) returns `{"status":"ok",...}`  
+- [ ] WebSocket URL: `ws://<SERVER_IP>:8001/ws/chat` (or `wss://` if using Nginx + SSL)  
+- [ ] `.env` is in `app/.env` and not committed to Git  
+- [ ] `sudo systemctl status nanosoft-model` shows **active (running)**  
+- [ ] If using cron sync: `tail sync_runner.log` shows no errors after one run  
+
+---
+
+## 11. Useful Commands (For the Client)
+
+| Task | Command |
+|------|--------|
+| View API logs | `sudo journalctl -u nanosoft-model -f` |
+| Restart API | `sudo systemctl restart nanosoft-model` |
+| Stop API | `sudo systemctl stop nanosoft-model` |
+| Start API | `sudo systemctl start nanosoft-model` |
+| Sync runner log | `tail -100 /home/ubuntu/sync_runner.log` |
+
+---
+
+## 12. Security Reminder
+
+- **Do not** commit `app/.env` or share it in chat/email.  
+- Prefer **SSH keys** over passwords for SSH.  
+- Keep **firewall** enabled and only open ports you need (e.g. 22, 8001 or 80/443).  
+- Rotate **PostgreSQL**, **Redis**, and **Google API** credentials if they were ever exposed.
+
+---
+
+**End of deployment guide.** Use Sections 1–7 for a minimal working deploy; add 8–9 as needed for sync and Nginx/HTTPS.
