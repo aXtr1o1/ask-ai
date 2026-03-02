@@ -69,6 +69,7 @@ class LangChainService:
                     if tool_call.get("args") is None:
                         tool_call["args"] = {}
                     args = dict(tool_call["args"])
+                    args.pop("user_id", None)
                     args["user_name"] = user_name
 
                     # Override limit for count queries — LLM often passes limit=1 incorrectly
