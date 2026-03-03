@@ -1,0 +1,17 @@
+[Unit]
+Description=Nanosoft AI Frontend (Next.js)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/ask-ai/ask-ai/nanosoft-ai-frontend
+# Use node + next directly (works when Node is installed via NodeSource; if using nvm, set ExecStart to your nvm node path + .../next start)
+ExecStart=/usr/bin/node node_modules/.bin/next start
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target
