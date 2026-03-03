@@ -70,7 +70,7 @@ async def generate_session_title(history: list) -> str:
 
 
  # ── Save session to PostgreSQL ─────────────────────────────────────────────────
-async def save_session_to_postgres_service(session_id: str, user_id: str, history: list):
+async def save_session_to_postgres_service(session_id: str, user_name: str, history: list):
     """
     Saves chat session history + generated title to PostgreSQL (chat_sessions).
     Called on WebSocket disconnect (timeout or client disconnect).
@@ -84,6 +84,8 @@ async def save_session_to_postgres_service(session_id: str, user_id: str, histor
     try:
         title = await generate_session_title(history)
         conn = get_pool()
+        # Clear any previous failed transaction so this request starts clean
+        conn.rollback()
         history_json = json.dumps(history)
 
         with conn.cursor() as cur:
@@ -91,15 +93,15 @@ async def save_session_to_postgres_service(session_id: str, user_id: str, histor
                 # Upsert: requires UNIQUE(session_id). Run scripts/add_session_id_unique.sql if missing.
                 cur.execute(
                     """
-                    INSERT INTO chat_sessions (session_id, user_id, chat_history, title, updated_at)
+                    INSERT INTO chat_sessions (session_id, user_name, chat_history, title, updated_at)
                     VALUES (%s, %s, %s::jsonb, %s, NOW())
                     ON CONFLICT (session_id) DO UPDATE SET
-                        user_id = EXCLUDED.user_id,
+                        user_name = EXCLUDED.user_name,
                         chat_history = EXCLUDED.chat_history,
                         title = EXCLUDED.title,
                         updated_at = NOW()
                     """,
-                    (session_id, user_id, history_json, title),
+                    (session_id, user_name, history_json, title),
                 )
             except Exception as conflict_err:
                 if "unique or exclusion constraint" in str(conflict_err).lower() or "on_conflict" in str(conflict_err).lower():
@@ -113,18 +115,18 @@ async def save_session_to_postgres_service(session_id: str, user_id: str, histor
                         cur.execute(
                             """
                             UPDATE chat_sessions
-                            SET user_id = %s, chat_history = %s::jsonb, title = %s, updated_at = NOW()
+                            SET user_name = %s, chat_history = %s::jsonb, title = %s, updated_at = NOW()
                             WHERE session_id = %s
                             """,
-                            (user_id, history_json, title, session_id),
+                            (user_name, history_json, title, session_id),
                         )
                     else:
                         cur.execute(
                             """
-                            INSERT INTO chat_sessions (session_id, user_id, chat_history, title, updated_at)
+                            INSERT INTO chat_sessions (session_id, user_name, chat_history, title, updated_at)
                             VALUES (%s, %s, %s::jsonb, %s, NOW())
                             """,
-                            (session_id, user_id, history_json, title),
+                            (session_id, user_name, history_json, title),
                         )
                 else:
                     raise
@@ -134,5 +136,11 @@ async def save_session_to_postgres_service(session_id: str, user_id: str, histor
 
     except Exception as e:
         logger.error(f"❌ PostgreSQL save failed | session_id={session_id} | error={e}", exc_info=True)
+        try:
+            conn = get_pool()
+            if conn and not conn.closed:
+                conn.rollback()
+        except Exception:
+            pass
 
 

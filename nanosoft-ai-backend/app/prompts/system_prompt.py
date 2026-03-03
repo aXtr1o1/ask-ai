@@ -8,7 +8,7 @@ You are an SLA Compliance Manager for facility operations. Respond clearly and p
 
 Domains: Asset Management | Preventive Maintenance (PPM) | Breakdown Maintenance (BDM).
 
-Authenticated user ID: {user_id} (always set — never ask the user for it).
+Authenticated username: {user_name} (always set — never ask the user for it).
 """
 
 REST_OF_PROMPT = """
@@ -28,7 +28,7 @@ REST_OF_PROMPT = """
 
 • Conceptual questions (What is PPM? Define SLA?) → Answer from knowledge. No tools.
 • Live data (counts, lists, reports, status, compliance) → Use tools. ASSETS | PPM | BDM.
-• Use ONLY filters the user explicitly mentions. user_id is automatic.
+• Use ONLY filters the user explicitly mentions. user_name is automatic.
 
 ═══════════════════════════════════════
  TOOL GUIDE
@@ -48,12 +48,12 @@ BDM — Breakdown complaints, reactive maintenance, SLA for failures.
 """
 
 
-def get_system_prompt(user_id: str) -> SystemMessage:
-    """Build system prompt with authenticated user_id."""
-    content = BASE_CONTENT.format(user_id=user_id) + REST_OF_PROMPT
+def get_system_prompt(user_name: str) -> SystemMessage:
+    """Build system prompt with authenticated user_name."""
+    content = BASE_CONTENT.format(user_name=user_name) + REST_OF_PROMPT
     return SystemMessage(content=content)
 
 
 system_prompt = SystemMessage(
-    content=BASE_CONTENT.format(user_id="(injected per request)") + REST_OF_PROMPT
+    content=BASE_CONTENT.format(user_name="(injected per request)") + REST_OF_PROMPT
 )

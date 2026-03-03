@@ -320,8 +320,9 @@ Follow prompts. Certbot will adjust Nginx for HTTPS.
 
 ## 10. Post-Deploy Checklist
 
-- [ ] `http://<SERVER_IP>:8001/health` (or via Nginx) returns `{"status":"ok",...}`  
-- [ ] WebSocket URL: `ws://<SERVER_IP>:8001/ws/chat` (or `wss://` if using Nginx + SSL)  
+- [ ] `http://<SERVER_IP>:8001/health` or `http://<SERVER_IP>:8001/api/health` (or via Nginx) returns `{"status":"ok",...}`  
+- [ ] WebSocket: `ws://<SERVER_IP>:8001/api/chat` (or `wss://` if using Nginx + SSL)  
+- [ ] Sessions API: `POST http://<SERVER_IP>:8001/api/session`  
 - [ ] `.env` is in `app/.env` and not committed to Git  
 - [ ] `sudo systemctl status nanosoft-model` shows **active (running)**  
 - [ ] If using cron sync: `tail sync_runner.log` shows no errors after one run  

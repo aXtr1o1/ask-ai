@@ -47,8 +47,8 @@ def format_response(data):
 @router.post("/get-assets")
 def get_assets(req: AssetRequest):
     logger.info(
-        "📦 [GET-ASSETS] Incoming | user_id=%s | limit=%s | offset=%s",
-        req.user_id, req.limit, req.offset
+        "📦 [GET-ASSETS] Incoming | user_name=%s | limit=%s | offset=%s",
+        req.user_name, req.limit, req.offset
     )
     logger.debug("[GET-ASSETS] Full payload: %s", req.model_dump())
 
@@ -58,9 +58,8 @@ def get_assets(req: AssetRequest):
        conn = get_pool()
        cursor = conn.cursor()
 
-       # callproc avoids the "not all arguments converted" %s conflict
+       # callproc: sp_asset_query(p_user_name, p_asset_tag_no, ...) — no user_id
        cursor.callproc("sp_asset_query", [
-           req.user_id,
            req.user_name,
            req.asset_tag_no,
            req.status,
