@@ -99,11 +99,11 @@ class BDMInput(BaseModel):
 class ChatRequest(BaseModel):
     """Request schema for chat endpoint"""
     query: str
-    userId: str
+    userName: str
     sessionId: str
 
 
 class SessionRequest(BaseModel):
     """Request schema for fetching sessions or chat history"""
-    userId:    str
+    userName:  str
     sessionId: str = ""  # empty string = fetch all sessions, non-empty = fetch chat history

@@ -13,23 +13,25 @@ if not logger.handlers:
     logger.addHandler(ch)
 
 
-async def get_sessions_for_user(user_id: str) -> list:
+async def get_sessions_for_user(user_name: str) -> list:
     """
-    Returns all sessions for a given user_id.
+    Returns all sessions for a given user_name.
     Each session contains: session_id, title, created_at, updated_at (no chat_history).
     """
+    conn = None
     try:
-        conn   = get_pool()
+        conn = get_pool()
+        conn.rollback()  # clear any previous failed transaction
         cursor = conn.cursor()
 
         cursor.execute(
             """
             SELECT session_id, title, created_at, updated_at
             FROM chat_sessions
-            WHERE user_id = %s
+            WHERE user_name = %s
             ORDER BY updated_at DESC
             """,
-            (user_id,)
+            (user_name,)
         )
 
         rows = cursor.fetchall()
@@ -46,36 +48,43 @@ async def get_sessions_for_user(user_id: str) -> list:
             for row in rows
         ]
 
-        logger.info(f"✅ Sessions fetched | user_id={user_id} | count={len(sessions)}")
+        logger.info(f"✅ Sessions fetched | user_name={user_name} | count={len(sessions)}")
         return sessions
 
     except Exception as e:
-        logger.error(f"❌ Failed to fetch sessions | user_id={user_id} | error={e}", exc_info=True)
+        logger.error(f"❌ Failed to fetch sessions | user_name={user_name} | error={e}", exc_info=True)
+        try:
+            if conn is not None and not getattr(conn, "closed", True):
+                conn.rollback()
+        except Exception:
+            pass
         return []
 
 
-async def get_chat_history_for_session(user_id: str, session_id: str) -> list:
+async def get_chat_history_for_session(user_name: str, session_id: str) -> list:
     """
-    Returns full chat_history for a given session_id + user_id.
+    Returns full chat_history for a given session_id + user_name.
     Returns list of {query, assistant} dicts.
     """
+    conn = None
     try:
-        conn   = get_pool()
+        conn = get_pool()
+        conn.rollback()  # clear any previous failed transaction
         cursor = conn.cursor()
 
         cursor.execute(
             """
             SELECT chat_history FROM chat_sessions
-            WHERE user_id = %s AND session_id = %s
+            WHERE user_name = %s AND session_id = %s
             """,
-            (user_id, session_id)
+            (user_name, session_id)
         )
 
         row = cursor.fetchone()
         cursor.close()
 
         if not row:
-            logger.info(f"⚠️ No session found | session_id={session_id} | user_id={user_id}")
+            logger.info(f"⚠️ No session found | session_id={session_id} | user_name={user_name}")
             return []
 
         history = row[0] if row[0] is not None else []
@@ -87,4 +96,9 @@ async def get_chat_history_for_session(user_id: str, session_id: str) -> list:
 
     except Exception as e:
         logger.error(f"❌ Failed to fetch chat history | session_id={session_id} | error={e}", exc_info=True)
+        try:
+            if conn is not None and not getattr(conn, "closed", True):
+                conn.rollback()
+        except Exception:
+            pass
         return []

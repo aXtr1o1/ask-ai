@@ -39,7 +39,7 @@ MAPPING DIRECTIVES:
 - keyword: Mandatory fallback for terms, equipment types, or manufacturers not explicitly labeled. Matches p_keyword.
 
 FULL PARAMETER CAPABILITIES:
-- user_id: Required for user isolation and ownership.
+- user_name: Required for user isolation and ownership.
 - status, condition, priority: Filter by current operational state.
 - asset_type, division, discipline, trade_group: Filter by asset classification.
 - locality, building, floor, service_area: Filter by physical location hierarchy.
@@ -52,8 +52,8 @@ FULL PARAMETER CAPABILITIES:
     args_schema=AssetsInput
 )
 def ASSETS(
-    user_id=None,
     user_name=None,
+    user_id=None,
     status=None,
     condition=None,
     priority=None,
@@ -81,14 +81,14 @@ def ASSETS(
     limit=None,
     offset=None
 ) -> str:
-    if not user_id:
-        logger.error("❌ ASSETS called without user_id")
-        return "Error: user_id is required. It is set from the authenticated request."
+    if not user_name:
+        logger.error("❌ ASSETS called without user_name")
+        return "Error: user_name is required. It is set from the authenticated request."
 
-    logger.info(f"📦 ASSETS TOOL TRIGGERED for user_id: {user_id} | user_name: {user_name}")
+    logger.info(f"📦 ASSETS TOOL TRIGGERED for user_name: {user_name}")
 
     payload = {
-        "user_id":      user_id,
+        "user_id":      None,
         "user_name":    user_name,
         "status":       status,
         "condition":    condition,
@@ -154,7 +154,7 @@ MAPPING DIRECTIVES:
 - keyword: Mandatory fallback for terms, equipment types, or manufacturers not explicitly labeled. Matches p_keyword.
 
 FULL PARAMETER CAPABILITIES:
-- user_id: Required for user isolation and ownership.
+- user_name: Required for user isolation and ownership.
 - status, stage: Filter by maintenance workflow or execution state.
 - frequency: Filter by schedule intervals (e.g., daily, weekly, monthly).
 - division, discipline: Filter by organizational structure.
@@ -169,8 +169,8 @@ FULL PARAMETER CAPABILITIES:
     args_schema=PPMInput
 )
 def PPM(
-    user_id=None,
     user_name=None,
+    user_id=None,
     work_order=None,
     asset_tag_no=None,
     status=None,
@@ -194,14 +194,14 @@ def PPM(
     limit=None,
     offset=None
 ) -> str:
-    if not user_id:
-        logger.error("❌ PPM called without user_id")
-        return "Error: user_id is required. It is set from the authenticated request."
+    if not user_name:
+        logger.error("❌ PPM called without user_name")
+        return "Error: user_name is required. It is set from the authenticated request."
 
-    logger.info(f"🛠️ PPM TOOL TRIGGERED for user_id: {user_id} | user_name: {user_name}")
+    logger.info(f"🛠️ PPM TOOL TRIGGERED for user_name: {user_name}")
 
     payload = {
-        "user_id":      user_id,
+        "user_id":      None,
         "user_name":    user_name,
         "work_order":   work_order,
         "asset_tag_no": asset_tag_no,
@@ -263,7 +263,7 @@ MAPPING DIRECTIVES:
 - keyword: Mandatory fallback for terms, equipment types, or manufacturers not explicitly labeled. Matches p_keyword.
 
 FULL PARAMETER CAPABILITIES:
-- user_id: Required for user isolation and ownership.
+- user_name: Required for user isolation and ownership.
 - status, stage, priority: Filter by complaint lifecycle and urgency.
 - complaint_type, complaint_mode, complaint_nature: Filter by classification.
 - wo_type, service_type: Filter by work order or service category.
@@ -279,8 +279,8 @@ FULL PARAMETER CAPABILITIES:
     args_schema=BDMInput
 )
 def BDM(
-    user_id=None,
     user_name=None,
+    user_id=None,
     complaint_no=None,
     status=None,
     priority=None,
@@ -307,14 +307,14 @@ def BDM(
     limit=None,
     offset=None
 ) -> str:
-    if not user_id:
-        logger.error("❌ BDM called without user_id")
-        return "Error: user_id is required. It is set from the authenticated request."
+    if not user_name:
+        logger.error("❌ BDM called without user_name")
+        return "Error: user_name is required. It is set from the authenticated request."
 
-    logger.info(f"🔧 BDM TOOL TRIGGERED for user_id: {user_id} | user_name: {user_name}")
+    logger.info(f"🔧 BDM TOOL TRIGGERED for user_name: {user_name}")
 
     payload = {
-        "user_id":          user_id,
+        "user_id":          None,
         "user_name":        user_name,
         "complaint_no":     complaint_no,
         "status":           status,
