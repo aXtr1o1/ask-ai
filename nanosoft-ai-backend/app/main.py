@@ -28,14 +28,12 @@ ch = logging.StreamHandler()
 ch.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 if not logger.handlers:
     logger.addHandler(ch)
-    
-    
+
 chatbot_app = FastAPI(
     title="Facility Management AI Assistant",
     description="AI-powered chatbot for Assets, PPM, and BDM queries",
-    version="3.0.0",
+    version="3.0.0"
 )
-
 
 chatbot_app.add_middleware(
     CORSMiddleware,
@@ -123,6 +121,7 @@ def print_memory(session_id: str):
 
 
 # =====================================================
+
 @chatbot_app.websocket("/ws/chat")
 async def ws_chat_endpoint(websocket: WebSocket):
     await websocket.accept()
