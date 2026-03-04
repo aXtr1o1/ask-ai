@@ -14,6 +14,7 @@ from app.api.routes.bdm import get_bdm
 from datetime import date, timedelta
 
 
+
 logger = logging.getLogger("facility_tools")
 logger.setLevel(logging.INFO)
 ch = logging.StreamHandler()

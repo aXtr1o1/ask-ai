@@ -112,7 +112,7 @@ def get_ppm(req: PPMRequest):
         if hasattr(e, "args") and e.args and isinstance(e.args[0], dict):
             err_dict = e.args[0]
             logger.error(
-                "[GET-PPM] RPC failed | code=%s | message=%s | hint=%s",
+                "[GET-BDM] RPC failed | code=%s | message=%s | hint=%s",
                 err_dict.get("code", "?"),
                 err_dict.get("message", err_msg),
                 err_dict.get("hint", ""),
