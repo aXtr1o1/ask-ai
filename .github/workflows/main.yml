@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - Testing
+      - production
   pull_request:
     branches:
       - Testing
+      - production
   
 jobs:
   # --- CI: test frontend only ---
@@ -75,3 +77,42 @@ jobs:
             . .venv/bin/activate
             pip install -q -r requirements.txt
             sudo systemctl restart nanosoft-model || true
+
+  # # --- CD: deploy backend to AWS t2.small for production branch ---
+  # deploy-backend-production:
+  #   needs: [test-frontend]
+  #   if: github.event_name == 'push' && github.ref == 'refs/heads/production'
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
+
+  #     - name: Verify production deploy secrets
+  #       run: |
+  #         if [ -z "${{ secrets.EC2_HOST_PROD }}" ]; then echo "::error::Secret EC2_HOST_PROD is not set."; exit 1; fi
+  #         if [ -z "${{ secrets.EC2_USER_PROD }}" ]; then echo "::error::Secret EC2_USER_PROD is not set."; exit 1; fi
+  #         if [ -z "${{ secrets.EC2_SSH_KEY_PROD }}" ]; then echo "::error::Secret EC2_SSH_KEY_PROD is not set."; exit 1; fi
+  #         echo "Production deploy secrets are set."
+
+  #     - name: Deploy backend to EC2 (production)
+  #       uses: appleboy/ssh-action@v1.0.3
+  #       with:
+  #         host: ${{ secrets.EC2_HOST_PROD }}
+  #         username: ${{ secrets.EC2_USER_PROD }}
+  #         key: ${{ secrets.EC2_SSH_KEY_PROD }}
+  #         timeout: 30s
+  #         command_timeout: 2m
+  #         envs: GH_DEPLOY_TOKEN=${{ secrets.GH_DEPLOY_TOKEN }},REPO_SLUG=${{ github.repository }}
+  #         script: |
+  #           set -e
+  #           cd /var/www/html/ask-ai/nanosoft-ai-backend
+  #           if [ -n "$GH_DEPLOY_TOKEN" ]; then
+  #             git remote set-url origin "https://x-access-token:${GH_DEPLOY_TOKEN}@github.com/${REPO_SLUG}.git"
+  #           fi
+  #           git fetch origin
+  #           git reset --hard
+  #           git checkout -B ${{ github.ref_name }} origin/${{ github.ref_name }}
+  #           python3 -m venv .venv 2>/dev/null || true
+  #           . .venv/bin/activate
+  #           pip install -q -r requirements.txt
+  #           sudo systemctl restart nanosoft-model-production || true

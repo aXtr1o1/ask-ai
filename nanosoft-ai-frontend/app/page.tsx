@@ -608,7 +608,7 @@ export default function Home() {
   const pingRef = useRef<ReturnType<typeof setInterval> | null>(null);   // ping for ACTIVE session only
   const userActiveRef = useRef<boolean>(true);  // is user actively using the page?
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const IDLE_TIMEOUT = 1 * 60 * 1000;  // 1 minutes
+  const IDLE_TIMEOUT = 2 * 60 * 1000;  // 2 minutes
   const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
 
   if (!baseUrl) {
@@ -705,14 +705,31 @@ export default function Home() {
     };
   }, []);
 
+  const WS_CONNECT_TIMEOUT_MS = 15000; // 15s: fail fast in production if proxy/backend is slow
+
   const connectWS = () => {
     const sid = sessionIdRef.current;
+    setWsConnectionState('connecting');
     const ws = new WebSocket(getWsUrl());
     socketsRef.current.set(sid, ws);
 
+    wsConnectTimeoutRef.current = setTimeout(() => {
+      if (ws.readyState === WebSocket.CONNECTING) {
+        ws.close();
+        setWsConnectionState('failed');
+        console.warn("⚠️ WebSocket connection timeout");
+      }
+      wsConnectTimeoutRef.current = null;
+    }, WS_CONNECT_TIMEOUT_MS);
+
     ws.onopen = () => {
+      if (wsConnectTimeoutRef.current) {
+        clearTimeout(wsConnectTimeoutRef.current);
+        wsConnectTimeoutRef.current = null;
+      }
+      reconnectDelayRef.current = 2000;
+      setWsConnectionState('connected');
       console.log("✅ WebSocket connected:", sid);
-      // Start pinging only for the active session
       startPingForActiveSession();
     };
 
@@ -763,23 +780,32 @@ export default function Home() {
       } catch { /* non-JSON frame — ignore */ }
     };
 
-    // ── Connection dropped → auto-reconnect after 2 s ─────────────────────
-   ws.onclose = (event) => {
-  console.warn("⚠️ WebSocket closed:", sid);
-  socketsRef.current.delete(sid);
+    ws.onclose = (event) => {
+      if (wsConnectTimeoutRef.current) {
+        clearTimeout(wsConnectTimeoutRef.current);
+        wsConnectTimeoutRef.current = null;
+      }
+      setWsConnectionState('failed');
+      console.warn("⚠️ WebSocket closed:", sid);
+      socketsRef.current.delete(sid);
 
-  // If this was the active session socket, stop pinging and reconnect if user is active
-  if (sid === sessionIdRef.current) {
-    if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
-    setIsLoading(false);
-    // Auto-reconnect active session only if user is active and it wasn't a clean close
-    if (!event.wasClean && userActiveRef.current) {
-      setTimeout(() => connectWS(), 2000);
-    }
-  }
-};
+      if (sid === sessionIdRef.current) {
+        if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
+        setIsLoading(false);
+        if (!event.wasClean && userActiveRef.current) {
+          const delay = reconnectDelayRef.current;
+          reconnectDelayRef.current = Math.min(15000, delay * 2);
+          setTimeout(() => connectWS(), delay);
+        }
+      }
+    };
 
     ws.onerror = () => {
+      if (wsConnectTimeoutRef.current) {
+        clearTimeout(wsConnectTimeoutRef.current);
+        wsConnectTimeoutRef.current = null;
+      }
+      setWsConnectionState('failed');
       console.error("❌ WebSocket error");
       setMessages(prev => [...prev, { role: "error", text: "❌ Connection failed. Retrying…" }]);
       setIsLoading(false);
@@ -806,6 +832,7 @@ useEffect(() => {
   return () => {
     if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
     if (idleTimerRef.current) { clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
+    if (wsConnectTimeoutRef.current) { clearTimeout(wsConnectTimeoutRef.current); wsConnectTimeoutRef.current = null; }
     sockets.forEach(ws => ws.close());
     sockets.clear();
   };
@@ -1010,7 +1037,7 @@ useEffect(() => {
     router.replace("/login");
   };
 
-  /**const toggleRecording = async () => {
+  const toggleRecording = async () => {
     if (isRecording) {
       mediaRecorderRef.current?.stop();
       setIsRecording(false);
@@ -1023,28 +1050,7 @@ useEffect(() => {
         setIsRecording(true);
       } catch { alert("Please allow microphone access."); }
     }
-   };**/
-
-  // ── Save chat history to Supabase ──────────────────────────────────────────
-  const saveChatHistory = async (sid: string, msgs: Message[]) => {
-    const valid = msgs.filter(m => m.role !== "error");
-    if (valid.length === 0) return;
-    try {
-      await fetch(`${baseUrl}/sessions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId: loggedInUser,
-          sessionId: sid,
-          chatHistory: valid.map(m => ({ role: m.role, text: m.text })),
-        }),
-      });
-    } catch (err) {
-      console.warn("Failed to save chat history:", err);
-    }
-  };
-  const saveChatHistoryRef = useRef(saveChatHistory);
-  useEffect(() => { saveChatHistoryRef.current = saveChatHistory; });
+   }; 
 
   // ── Send message over the persistent WebSocket ────────────────────────────
   const sendMessage = () => {
@@ -1055,6 +1061,7 @@ useEffect(() => {
 
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     console.warn("Socket not ready for session:", sessionId);
+    setMessages(prev => [...prev, { role: "error", text: "Still connecting. Please wait." }]);
     return;
   }
 
@@ -1300,24 +1307,6 @@ useEffect(() => {
           </div>
         )}
 
-        {/* History loading spinner */}
-        {historyLoading && (
-          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <div style={{ textAlign: "center" }}>
-              <div style={{ display: "flex", gap: 6, justifyContent: "center", marginBottom: 8 }}>
-                {[0, 1, 2].map(i => (
-                  <span key={i} style={{
-                    display: "inline-block", width: 8, height: 8,
-                    borderRadius: "50%", background: "#4a8f3a",
-                    animation: `bounce 1.2s ease-in-out ${i * 0.2}s infinite`,
-                  }}/>
-                ))}
-              </div>
-              <span style={{ fontSize: 13, color: "#4b5f45" }}>Loading chat history…</span>
-            </div>
-          </div>
-        )}
-
         {/* Landing */}
         {!historyLoading && isLanding && (
           <div className="landing-container">
@@ -1384,7 +1373,7 @@ useEffect(() => {
                     </div>
                   </div>
                 );
-                })}
+              })}
 
               {isLoading && (
                 <div className="loading-indicator">
@@ -1418,7 +1407,7 @@ useEffect(() => {
               placeholder={wsConnectionState === 'connected' ? "Ask Anything..." : "Waiting for connection…"}
               rows={1}
             />
-            <button className="send-btn" onClick={sendMessage} disabled={isLoading || !input.trim()}>
+            <button className="send-btn" onClick={sendMessage} disabled={isLoading || wsConnectionState !== 'connected' || !input.trim()}>
               <IconSend/>
             </button>
           </div>
