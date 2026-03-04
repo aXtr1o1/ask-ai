@@ -13,8 +13,8 @@ class AssetsInput(BaseModel):
     """Schema for ASSETS tool. Covers physical equipment and master records."""
     user_id: Optional[str] = Field(None, description="Internal system-set ID; strictly mandatory for all queries. Never request this from the user.")
     user_name: Optional[str] = Field(None, description="Internal system-set user name; strictly mandatory for all queries. Never request this from the user.")
-    status: Optional[str] = Field(None, description="Maps if user mentions 'Status' or 'Status Name'. Mandatory fallback for offline/online states.")
     asset_tag_no: Optional[str] = Field(None, description="Unique identification number for equipment. Use for tag-based searches. Do not guess value.")
+    status: Optional[str] = Field(None, description="Maps if user mentions 'Status' or 'Status Name'. Mandatory fallback for offline/online states.")
     condition: Optional[str] = Field(None, description="Physical state of asset. Map here if user mentions 'Condition' or 'State'.")
     priority: Optional[str] = Field(None, description="Criticality level of equipment. Map here if user mentions 'Priority' or 'Urgency'.")
     asset_type: Optional[str] = Field(None, description="Category of equipment. Maps if user mentions 'Asset Type', 'Type', or 'AssetTypeName'.")
@@ -28,12 +28,13 @@ class AssetsInput(BaseModel):
     model: Optional[str] = Field(None, description="Specific model designation. Map here if user mentions 'Model' or 'Model Name'.")
     service_area: Optional[str] = Field(None, description="Functional area served. Map here if user mentions 'Service Area' or 'Zone'.")
     trade_group: Optional[str] = Field(None, description="Maintenance team group. Map here if user mentions 'Trade Group' or 'Team'.")
+    spot_name: Optional[str] = Field(None, description="Filter by spot name. Map if user mentions 'Spot', 'Spot Name', or 'Location Spot'.")
+    serial_no: Optional[str] = Field(None, description="Filter by serial number. Map if user mentions 'Serial', 'Serial No', 'Serial Number', or 'S/N'.")
     on_hold: Optional[bool] = Field(None, description="Boolean flag for frozen assets. Set true if user mentions 'On Hold'.")
     is_snagged: Optional[bool] = Field(None, description="Boolean flag for defects. Set true if user mentions 'Snagged' or 'Defects'.")
     is_scraped: Optional[bool] = Field(None, description="Boolean flag for decommissioned assets. Set true if user mentions 'Scraped' or 'Disposed'.")
     enable_ppm: Optional[bool] = Field(None, description="Filter for scheduled maintenance assets. Set true if user mentions 'PPM Enabled' or 'Planned'.")
     enable_bdm: Optional[bool] = Field(None, description="Filter for breakdown-ready assets. Set true if user mentions 'BDM Enabled' or 'Reactive'.")
-    barcode: Optional[str] = Field(None, description="Physical scan code. Map here if user mentions 'Barcode' or 'Scan ID'.")
     keyword: Optional[str] = Field(None, description="Mandatory fallback for any terms not labeled as a field. Use for general searches.")
     date_from: Optional[str] = Field(None, description="Installation start range. Use YYYY-MM-DD. Map if user mentions 'From Date' or 'Installed'.")
     date_to: Optional[str] = Field(None, description="Installation end range. Use YYYY-MM-DD. Map if user mentions 'To Date' or 'Installed'.")
@@ -45,6 +46,8 @@ class PPMInput(BaseModel):
     """Schema for PPM tool. Covers planned preventive maintenance schedules."""
     user_id: Optional[str] = Field(None, description="Internal system-set ID; strictly mandatory for all queries. Never request this from the user.")
     user_name: Optional[str] = Field(None, description="Internal system-set user name; strictly mandatory for all queries. Never request this from the user.")
+    work_order: Optional[str] = Field(None, description="Work order number. Map if user mentions 'Work Order' or 'WO Number'.")
+    asset_tag_no: Optional[str] = Field(None, description="Asset tag number. Map if user mentions a specific asset tag.")
     status: Optional[str] = Field(None, description="Maps if user mentions 'PPM Status' or 'Status Name'. Mandatory for filtering schedule states.")
     stage: Optional[str] = Field(None, description="Maintenance workflow step. Map here if user mentions 'Stage' or 'Workflow Step'.")
     frequency: Optional[str] = Field(None, description="Interval of maintenance. Map here if user mentions 'Frequency', 'Daily', 'Weekly', or 'Monthly'.")
@@ -55,6 +58,8 @@ class PPMInput(BaseModel):
     floor: Optional[str] = Field(None, description="Level designation. Map here if user mentions 'Floor' or 'PPM Floor'.")
     contract: Optional[str] = Field(None, description="Service agreement name. Map here if user mentions 'Contract' or 'Agreement'.")
     tech: Optional[str] = Field(None, description="Maintenance worker name. Map here if user mentions 'Technician' or 'Assigned Staff'.")
+    equipment: Optional[str] = Field(None, description="Equipment name. Map if user mentions specific equipment.")
+    spot_name: Optional[str] = Field(None, description="Filter by spot name. Map if user mentions 'Spot', 'Spot Name', or 'Location Spot'.")
     keyword: Optional[str] = Field(None, description="Mandatory fallback for any terms not labeled as a field. Use for general searches.")
     date_from: Optional[str] = Field(None, description="Planned start range. Use YYYY-MM-DD. Map if user mentions 'Start Date' or 'Planned'.")
     date_to: Optional[str] = Field(None, description="Planned end range. Use YYYY-MM-DD. Map if user mentions 'End Date' or 'Planned'.")
@@ -70,6 +75,7 @@ class BDMInput(BaseModel):
     """Schema for BDM tool. Covers breakdown complaints and reactive work orders."""
     user_id: Optional[str] = Field(None, description="Internal system-set ID; strictly mandatory for all queries. Never request this from the user.")
     user_name: Optional[str] = Field(None, description="Internal system-set user name; strictly mandatory for all queries. Never request this from the user.")
+    complaint_no: Optional[str] = Field(None, description="Complaint number. Map if user mentions a specific complaint number.")
     status: Optional[str] = Field(None, description="Maps if user mentions 'Status' or 'Status Name'. Mandatory for filtering complaint lifecycle states.")
     priority: Optional[str] = Field(None, description="Urgency level. Map here if user mentions 'Priority' or 'Urgency Level'.")
     stage: Optional[str] = Field(None, description="Workflow step. Map here if user mentions 'Stage' or 'Complaint Stage'.")
@@ -86,7 +92,8 @@ class BDMInput(BaseModel):
     contract: Optional[str] = Field(None, description="Service agreement. Map here if user mentions 'Contract' or 'Service Provider'.")
     analysis_tech: Optional[str] = Field(None, description="Assigned analyst. Map here if user mentions 'Analysis Technician' or 'Inspector'.")
     execution_tech: Optional[str] = Field(None, description="Repair technician. Map here if user mentions 'Execution Technician' or 'Repairer'.")
-    complainer: Optional[str] = Field(None, description="Reporting person. Map here if user mentions 'Complainer' or 'Raised By'.")
+    complainer: Optional[str] = Field(None, description="Name of the person who raised the complaint. Map here if user mentions 'Complainer'. ")
+    spot_name: Optional[str] = Field(None, description="Filter by spot name. Map if user mentions 'Spot', 'Spot Name', or 'Location Spot'.")
     keyword: Optional[str] = Field(None, description="Mandatory fallback for any terms not labeled as a field. Use for general searches.")
     date_from: Optional[str] = Field(None, description="Reported start range. Use YYYY-MM-DD. Map if user mentions 'Date From' or 'Raised'.")
     date_to: Optional[str] = Field(None, description="Reported end range. Use YYYY-MM-DD. Map if user mentions 'Date To' or 'Raised'.")
@@ -99,11 +106,11 @@ class BDMInput(BaseModel):
 class ChatRequest(BaseModel):
     """Request schema for chat endpoint"""
     query: str
-    userId: str
+    userName: str
     sessionId: str
 
 
 class SessionRequest(BaseModel):
     """Request schema for fetching sessions or chat history"""
-    userId:    str
-    sessionId: str = ""  # empty string = fetch all sessions, non-empty = fetch chat history
+    userName: str
+    sessionId: str = ""

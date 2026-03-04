@@ -48,12 +48,12 @@ class LangChainService:
             return content
         return str(content)
 
-    async def process_query(self, messages: list, user_id: str = None, session_id: str = None) -> tuple[str, list]:
+    async def process_query(self, messages: list, user_name: str = None, session_id: str = None) -> tuple[str, list]:
         try:
-            # user_id is always from the frontend request; use it for all tool calls
-            if not user_id:
-                raise ValueError("user_id is required (from frontend request)")
-            logger.info(f"💬 Processing query for user_id: {user_id}")
+            # user_name is always from the frontend request; use it for all tool calls
+            if not user_name:
+                raise ValueError("user_name is required (from frontend request)")
+            logger.info(f"💬 Processing query for user_name: {user_name}")
             ai_msg = self.model.invoke(messages)
             logger.info("🤖 First model call | tool_calls=%s", bool(ai_msg.tool_calls))
             
@@ -69,7 +69,8 @@ class LangChainService:
                     if tool_call.get("args") is None:
                         tool_call["args"] = {}
                     args = dict(tool_call["args"])
-                    args["user_id"] = user_id
+                    args.pop("user_id", None)
+                    args["user_name"] = user_name
 
                     # Override limit for count queries — LLM often passes limit=1 incorrectly
                     user_query = ""
@@ -133,6 +134,27 @@ class LangChainService:
                     # Use total_for_count for message when it differs (SP pagination with total in rows)
                     display_count = total_for_count if total_for_count > len(p_list) else p_count
                     
+                    #checking model whether it is a count or list needs to return. 
+                    intent_msg = self.model.invoke([
+                        HumanMessage(content=f"""
+                        Classify this user query into one of two intents:
+                        - "count" → user wants ONLY a number/total (e.g. "how many assets exist?, how many complaints exits")
+                        - "list" → user wants records/data shown (e.g. "how many can you show me?", "list assets")
+                        
+                        Query: "{user_query}"
+                        
+                        Reply with ONLY one word: count or list
+                        """)
+                    ])
+                    is_count_query = intent_msg.content.strip().lower() == "count"
+                    if is_count_query:
+                        logger.info("🔢 Intent=COUNT — sending count only to model | query='%s'", user_query)
+                    else:
+                        logger.info("📋 Intent=LIST — sending full records to model | query='%s'", user_query)
+                    
+                    MAX_DISPLAY = 100
+                    p_list_for_model = p_list if len(p_list) <= MAX_DISPLAY else p_list[:MAX_DISPLAY]
+                    is_large_result = len(p_list) > MAX_DISPLAY
 
                     messages.append(
                         ToolMessage(
@@ -140,7 +162,9 @@ class LangChainService:
                                 "message": f"{display_count} records found",
                                 "records_returned": len(p_list),
                                 "total_count": display_count,
-                                "records": p_list
+                                "is_large_result": is_large_result,
+                                "displayed_count": len(p_list_for_model),
+                                "records": [] if is_count_query else p_list_for_model   #If it's a count query → records: [] (empty list, no data)  or if If it's a list/show query → records: p_list full  records what it got
                             }),
                             tool_call_id=tool_call["id"]
                         )
@@ -180,8 +204,8 @@ class LangChainService:
                     tool_name = "BDM" if needs_bdm else ("ASSETS" if needs_assets else "PPM")
                     logger.warning("⚠️ Model skipped tool for data query — forcing %s", tool_name)
                     tool_fn = self.tool_map[tool_name]
-                    args = {"user_id": user_id, "limit": None}
-                    logger.info("🔍 Calling forced tool directly | tool=%s | user_id=%s", tool_name, user_id)
+                    args = {"user_name": user_name, "limit": None}
+                    logger.info("🔍 Calling forced tool directly | tool=%s | user_name=%s", tool_name, user_name)
                     tool_result = tool_fn.invoke(dict(args))
                     
                     
@@ -216,12 +240,48 @@ class LangChainService:
 
                     # Inject synthetic tool call + result so model formats from live data
                     fake_tool_id = "forced-" + tool_name.lower() + "-1"
-                    synthetic_ai = AIMessage(content="", tool_calls=[{"name": tool_name, "id": fake_tool_id, "args": {"user_id": user_id}}])
+                    synthetic_ai = AIMessage(content="", tool_calls=[{"name": tool_name, "id": fake_tool_id, "args": {"user_name": user_name}}])
                     messages.append(synthetic_ai)
-                    messages.append(ToolMessage(
-                        content=json.dumps({"message": f"{display_count} records found", "total_count": display_count, "records": p_list}),
-                        tool_call_id=fake_tool_id
-                    ))
+                    
+                    #checking model whether it is a count or list needs to return. 
+                    intent_msg = self.model.invoke([
+                        HumanMessage(content=f"""
+                        Classify this user query into one of two intents:
+                        - "count" → user wants ONLY a number/total (e.g. "how many assets exist?, how many complaints exits")
+                        - "list" → user wants records/data shown (e.g. "how many can you show me?", "list assets")
+                        
+                        Query: "{user_query}"
+                        
+                        Reply with ONLY one word: count or list
+                        """)
+                    ])
+                    is_count_query = intent_msg.content.strip().lower() == "count"
+                    
+                    if is_count_query:
+                        logger.info("🔢 Intent=COUNT — sending count only to model | query='%s'", user_query)
+                    else:
+                        logger.info("📋 Intent=LIST — sending full records to model | query='%s'", user_query)
+                    
+
+                    MAX_DISPLAY = 100
+                    p_list_for_model = p_list if len(p_list) <= MAX_DISPLAY else p_list[:MAX_DISPLAY]
+                    is_large_result = len(p_list) > MAX_DISPLAY
+
+                    messages.append(
+                        ToolMessage(
+                            content=json.dumps({
+                                "message": f"{display_count} records found",
+                                "records_returned": len(p_list),
+                                "total_count": display_count,
+                                "is_large_result": is_large_result,
+                                "displayed_count": len(p_list_for_model),
+                                "records": [] if is_count_query else p_list_for_model ##If it's a count query → records: [] (empty list, no data)  or if If it's a list/show query → records: p_list full  records what it got
+                                
+                            }),
+                            tool_call_id=fake_tool_id
+                        )
+                    )
+                    
                     final_ai_msg = self.model.invoke(messages)
                     content = final_ai_msg.content or "No results found for the given query."
                     logger.info("✅ Response after forced tool call")

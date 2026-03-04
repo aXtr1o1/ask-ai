@@ -49,8 +49,8 @@ def format_response(data):
 @router.post("/get-bdm")
 def get_bdm(req: BDMRequest):
     logger.info(
-        "[GET-BDM] Incoming | user_id=%s | status=%s | limit=%s | offset=%s",
-        req.user_id, req.status, req.limit, req.offset
+        "[GET-BDM] Incoming | user_name=%s | status=%s | limit=%s | offset=%s",
+        req.user_name, req.status, req.limit, req.offset
     )
     logger.debug("[GET-BDM] Full payload: %s", req.model_dump())
 
@@ -60,35 +60,35 @@ def get_bdm(req: BDMRequest):
 
         logger.info("[GET-BDM] Calling sp_bdm_query")
 
-        # callproc avoids the "not all arguments converted" %s conflict
+        # sp_bdm_query — 27 params matching DB function exactly
         cursor.callproc("sp_bdm_query", [
-            req.user_id,
-            req.user_name,
-            req.complaint_no,
-            req.status,
-            req.priority,
-            req.stage,
-            req.complaint_type,
-            req.complaint_mode,
-            req.complaint_nature,
-            req.wo_type,
-            req.service_type,
-            req.division,
-            req.discipline,
-            req.locality,
-            req.building,
-            req.floor,
-            req.contract,
-            req.analysis_tech,
-            req.execution_tech,
-            req.complainer,
-            req.keyword,
-            req.date_from,
-            req.date_to,
-            req.completed_from,
-            req.completed_to,
-            req.limit,
-            req.offset,
+            req.user_name,         # p_user_name          text
+            req.complaint_no,      # p_complaint_no       varchar
+            req.status,            # p_status             varchar
+            req.priority,          # p_priority           varchar
+            req.stage,             # p_stage              varchar
+            req.complaint_type,    # p_complaint_type     varchar
+            req.complaint_mode,    # p_complaint_mode     varchar
+            req.complaint_nature,  # p_complaint_nature   varchar
+            req.wo_type,           # p_wo_type            varchar
+            req.service_type,      # p_service_type       varchar
+            req.division,          # p_division           varchar
+            req.discipline,        # p_discipline         varchar
+            req.locality,          # p_locality           varchar
+            req.building,          # p_building           varchar
+            req.floor,             # p_floor              varchar
+            req.contract,          # p_contract           varchar
+            req.analysis_tech,     # p_analysis_tech      varchar
+            req.execution_tech,    # p_execution_tech     varchar
+            req.complainer,        # p_complainer         varchar
+            req.spot_name,         # p_spot_name          varchar 
+            req.keyword,           # p_keyword            varchar
+            req.date_from,         # p_date_from          date
+            req.date_to,           # p_date_to            date
+            req.completed_from,    # p_completed_from     date
+            req.completed_to,      # p_completed_to       date
+            req.limit,             # p_limit              integer
+            req.offset,            # p_offset             integer
         ])
 
         row = cursor.fetchone()
@@ -100,12 +100,14 @@ def get_bdm(req: BDMRequest):
 
         formatted = format_response(raw)
         p_list = formatted.get("p_list", [])
+
         if p_list:
             fields = list(p_list[0].keys()) if isinstance(p_list[0], dict) else []
-            sample = [r.get("complaint_no") or r.get("id") or str(r)[:50] for r in p_list[:3]]
+            sample = [r.get("ComplaintNo") or r.get("id") or str(r)[:50] for r in p_list[:3]]
             logger.info("[GET-BDM] Fetched | count=%s | fields=%s | sample_ids=%s", formatted["p_count"], fields[:8], sample)
         else:
             logger.info("[GET-BDM] Success | count=0")
+
         return formatted
 
     except Exception as e:

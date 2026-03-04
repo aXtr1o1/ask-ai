@@ -550,7 +550,7 @@ export default function Home() {
   useEffect(() => {
   if (typeof window !== "undefined") {
     const params = new URLSearchParams(window.location.search);
-    setUserIdFromUrl(params.get("userId"));
+    setUserIdFromUrl(params.get("userName") ?? params.get("userId"));
   }
   }, []);
 
@@ -618,11 +618,11 @@ export default function Home() {
   const getWsUrl = () =>
     baseUrl
       .replace(/^http:/, "ws:")
-      .replace(/^https:/, "wss:") + "/ws/chat";
+      .replace(/^https:/, "wss:") + "/api/chat";
   // const getWsUrl = () =>
   //   process.env.NEXT_PUBLIC_API_BASE_URL
   //     .replace(/^http:/,  "ws:")
-  //     .replace(/^https:/, "wss:") + "/ws/chat";
+  //     .replace(/^https:/, "wss:") + "/api/chat";
 
   // ── Start pinging only the ACTIVE session socket ──────────────────────────
   const connectWSRef = useRef<() => void>(() => {});  // forward ref for connectWS
@@ -646,11 +646,11 @@ export default function Home() {
     const valid = msgs.filter(m => m.role !== "error");
     if (valid.length === 0) return;
     try {
-      await fetch(`${baseUrl}/sessions`, {
+      await fetch(`${baseUrl}/api/session`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          userId: loggedInUser,
+          userName: loggedInUser,
           sessionId: sid,
           chatHistory: valid.map(m => ({ role: m.role, text: m.text })),
         }),
@@ -844,10 +844,10 @@ useEffect(() => {
 
     const fetchSessions = async () => {
       try {
-        const res = await fetch(`${baseUrl}/sessions`, {
+        const res = await fetch(`${baseUrl}/api/session`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId: loggedInUser, historyOnClick: false }),
+          body: JSON.stringify({ userName: loggedInUser, historyOnClick: false }),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
@@ -901,10 +901,10 @@ useEffect(() => {
     // Give backend a moment to persist on disconnect, then refetch session list for sidebar
     const refetchSessions = async () => {
       try {
-        const res = await fetch(`${baseUrl}/sessions`, {
+        const res = await fetch(`${baseUrl}/api/session`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId: loggedInUser, historyOnClick: false }),
+          body: JSON.stringify({ userName: loggedInUser, historyOnClick: false }),
         });
         if (!res.ok) return;
         const data = await res.json();
@@ -950,10 +950,10 @@ useEffect(() => {
     const refreshSessions = async () => {
       if (!loggedInUser) return;
       try {
-        const res = await fetch(`${baseUrl}/sessions`, {
+        const res = await fetch(`${baseUrl}/api/session`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId: loggedInUser, historyOnClick: false }),
+          body: JSON.stringify({ userName: loggedInUser, historyOnClick: false }),
         });
         if (!res.ok) return;
         const data = await res.json();
@@ -986,10 +986,10 @@ useEffect(() => {
       setHistoryLoading(true);
       setMessages([]);
       try {
-        const res = await fetch(`${baseUrl}/sessions`, {
+        const res = await fetch(`${baseUrl}/api/session`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId: loggedInUser, sessionId: targetSid, historyOnClick: true }),
+          body: JSON.stringify({ userName: loggedInUser, sessionId: targetSid, historyOnClick: true }),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
@@ -1090,7 +1090,7 @@ useEffect(() => {
 
   ws.send(JSON.stringify({
     query: userText,
-    userId: loggedInUser,
+    userName: loggedInUser,
     sessionId
   }));
 };

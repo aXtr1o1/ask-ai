@@ -11,6 +11,8 @@ from app.api.models.schemas import AssetRequest, PPMRequest, BDMRequest
 from app.api.routes.assets import get_assets
 from app.api.routes.ppm import get_ppm
 from app.api.routes.bdm import get_bdm
+from datetime import date, timedelta
+
 
 
 logger = logging.getLogger("facility_tools")
@@ -19,6 +21,37 @@ ch = logging.StreamHandler()
 ch.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 if not logger.handlers:
     logger.addHandler(ch)
+
+
+def getTime(date_from, date_to):
+    today = date.today()
+
+    # Case 1: both dates missing → last 7 days
+    if date_from is None and date_to is None:
+        resolved_date_from = (today - timedelta(days=6)).isoformat()
+        resolved_date_to = today.isoformat()
+        logger.info(
+            "📅 ASSETS: no dates provided → defaulting to last 7 days: %s to %s",
+            resolved_date_from,
+            resolved_date_to
+        )
+
+    # Case 2: only from date missing
+    elif date_from is None:
+        resolved_date_from = (today - timedelta(days=6)).isoformat()
+        resolved_date_to = date_to
+
+    # Case 3: only to date missing
+    elif date_to is None:
+        resolved_date_from = date_from
+        resolved_date_to = today.isoformat()
+
+    # Case 4: both dates provided
+    else:
+        resolved_date_from = date_from
+        resolved_date_to = date_to
+
+    return resolved_date_from, resolved_date_to
 
 
 # =====================================================
@@ -33,32 +66,35 @@ categories of equipment or locations. Do not use PPM or BDM tools unless the use
 explicitly mentions maintenance schedules, service complaints, or breakdowns.
 
 MAPPING DIRECTIVES:
-- division: Map if user mentions "Division", "Division Name", or "DivisionName". Matches p_division.
-- discipline: Map if user mentions "Discipline", "Discipline Name", or "DisciplineName". Matches p_discipline.
+- division: Map if user mentions "Division", "Division Name", or "DivisionName".
+- discipline: Map if user mentions "Discipline", "Discipline Name", or "DisciplineName".
 - status: Map if user mentions "Status" or "Status Name".
-- keyword: Mandatory fallback for terms, equipment types, or manufacturers not explicitly labeled. Matches p_keyword.
+- spot_name: Map if user mentions "Spot", "Spot Name", or "Location Spot".
+- serial_no: Map if user mentions "Serial", "Serial No", "Serial Number", or "S/N".
+- keyword: Mandatory fallback for any terms not labeled as a field.
 
 FULL PARAMETER CAPABILITIES:
-- user_id: Required for user isolation and ownership.
+- user_name: Required for user isolation and ownership.
 - status, condition, priority: Filter by current operational state.
 - asset_type, division, discipline, trade_group: Filter by asset classification.
 - locality, building, floor, service_area: Filter by physical location hierarchy.
+- spot_name, serial_no: Filter by spot or serial number.
 - on_hold, is_snagged, is_scraped: Filter by asset lifecycle flags.
 - enable_ppm, enable_bdm: Filter by maintenance eligibility configuration.
-- asset_tag_no, barcode, keyword: Filter by specific identification or search terms.
+- asset_tag_no, keyword: Filter by specific identification or search terms.
 - date_from, date_to: Filter by asset creation or update timestamps.
 - limit, offset: Control data pagination.
 """,
     args_schema=AssetsInput
 )
 def ASSETS(
-    user_id=None,
     user_name=None,
+    user_id=None,
+    asset_tag_no=None,
     status=None,
     condition=None,
     priority=None,
     asset_type=None,
-    asset_tag_no=None,
     division=None,
     discipline=None,
     locality=None,
@@ -69,31 +105,33 @@ def ASSETS(
     model=None,
     service_area=None,
     trade_group=None,
+    spot_name=None,
+    serial_no=None,
     on_hold=None,
     is_snagged=None,
     is_scraped=None,
     enable_ppm=None,
     enable_bdm=None,
-    barcode=None,
     keyword=None,
     date_from=None,
     date_to=None,
     limit=None,
     offset=None
 ) -> str:
-    if not user_id:
-        logger.error("❌ ASSETS called without user_id")
-        return "Error: user_id is required. It is set from the authenticated request."
+    if not user_name:
+        logger.error("❌ ASSETS called without user_name")
+        return "Error: user_name is required. It is set from the authenticated request."
 
-    logger.info(f"📦 ASSETS TOOL TRIGGERED for user_id: {user_id} | user_name: {user_name}")
-
+    logger.info(f"📦 ASSETS TOOL TRIGGERED for user_name: {user_name}")
+    
+    resolved_date_from,resolved_date_to = getTime(date_from,date_to)
+    
     payload = {
-        "user_id":      user_id,
         "user_name":    user_name,
+        "asset_tag_no": asset_tag_no,
         "status":       status,
         "condition":    condition,
         "priority":     priority,
-        "asset_tag_no": asset_tag_no,
         "asset_type":   asset_type,
         "division":     division,
         "discipline":   discipline,
@@ -105,15 +143,16 @@ def ASSETS(
         "model":        model,
         "service_area": service_area,
         "trade_group":  trade_group,
+        "spot_name":    spot_name,
+        "serial_no":    serial_no,
         "on_hold":      on_hold,
         "is_snagged":   is_snagged,
         "is_scraped":   is_scraped,
         "enable_ppm":   enable_ppm,
         "enable_bdm":   enable_bdm,
-        "barcode":      barcode,
         "keyword":      keyword,
-        "date_from":    date_from,
-        "date_to":      date_to,
+        "date_from":    resolved_date_from,
+        "date_to":      resolved_date_to,
         "limit":        limit,
         "offset":       0,
     }
@@ -148,18 +187,20 @@ ROUTING RULE: Trigger this tool only if the user explicitly mentions maintenance
 preventive tasks, PPM, or maintenance SLA compliance. Do not use for generic equipment lists.
 
 MAPPING DIRECTIVES:
-- division: Map if user mentions "Division", "Division Name", or "DivisionName". Matches p_division.
-- discipline: Map if user mentions "Discipline", "Discipline Name", or "DisciplineName". Matches p_discipline.
+- division: Map if user mentions "Division", "Division Name", or "DivisionName".
+- discipline: Map if user mentions "Discipline", "Discipline Name", or "DisciplineName".
 - status: Map if user mentions "Status" or "Status Name".
-- keyword: Mandatory fallback for terms, equipment types, or manufacturers not explicitly labeled. Matches p_keyword.
+- spot_name: Map if user mentions "Spot", "Spot Name", or "Location Spot".
+- keyword: Mandatory fallback for any terms not labeled as a field.
 
 FULL PARAMETER CAPABILITIES:
-- user_id: Required for user isolation and ownership.
+- user_name: Required for user isolation and ownership.
+- work_order, asset_tag_no: Filter by specific work order or asset.
 - status, stage: Filter by maintenance workflow or execution state.
 - frequency: Filter by schedule intervals (e.g., daily, weekly, monthly).
 - division, discipline: Filter by organizational structure.
-- locality, building, floor: Filter by location hierarchy.
-- contract, tech: Filter by service provider or assigned technician.
+- locality, building, floor, spot_name: Filter by location hierarchy.
+- contract, tech, equipment: Filter by service provider, technician, or equipment.
 - keyword: General search for maintenance tasks or asset types.
 - date_from, date_to: Filter by planned or actual maintenance start dates.
 - comp_from, comp_to: Filter by maintenance completion date ranges.
@@ -169,8 +210,8 @@ FULL PARAMETER CAPABILITIES:
     args_schema=PPMInput
 )
 def PPM(
-    user_id=None,
     user_name=None,
+    user_id=None,
     work_order=None,
     asset_tag_no=None,
     status=None,
@@ -184,6 +225,7 @@ def PPM(
     contract=None,
     tech=None,
     equipment=None,
+    spot_name=None,
     keyword=None,
     date_from=None,
     date_to=None,
@@ -194,14 +236,14 @@ def PPM(
     limit=None,
     offset=None
 ) -> str:
-    if not user_id:
-        logger.error("❌ PPM called without user_id")
-        return "Error: user_id is required. It is set from the authenticated request."
+    if not user_name:
+        logger.error("❌ PPM called without user_name")
+        return "Error: user_name is required. It is set from the authenticated request."
 
-    logger.info(f"🛠️ PPM TOOL TRIGGERED for user_id: {user_id} | user_name: {user_name}")
+    logger.info(f"🛠️ PPM TOOL TRIGGERED for user_name: {user_name}")
+    resolved_date_from,resolved_date_to = getTime(date_from=date_from,date_to=date_to)
 
     payload = {
-        "user_id":      user_id,
         "user_name":    user_name,
         "work_order":   work_order,
         "asset_tag_no": asset_tag_no,
@@ -216,9 +258,10 @@ def PPM(
         "contract":     contract,
         "tech":         tech,
         "equipment":    equipment,
+        "spot_name":    spot_name,
         "keyword":      keyword,
-        "date_from":    date_from,
-        "date_to":      date_to,
+        "date_from":    resolved_date_from,
+        "date_to":      resolved_date_to,
         "comp_from":    comp_from,
         "comp_to":      comp_to,
         "sla_min":      sla_min,
@@ -257,18 +300,20 @@ ROUTING RULE: Trigger this tool only if the user explicitly mentions breakdowns,
 failures, reactive maintenance, or breakdown SLA compliance. Do not use for general equipment lists.
 
 MAPPING DIRECTIVES:
-- division: Map if user mentions "Division", "Division Name", or "DivisionName". Matches p_division.
-- discipline: Map if user mentions "Discipline", "Discipline Name", or "DisciplineName". Matches p_discipline.
+- division: Map if user mentions "Division", "Division Name", or "DivisionName".
+- discipline: Map if user mentions "Discipline", "Discipline Name", or "DisciplineName".
 - status: Map if user mentions "Status" or "Status Name".
-- keyword: Mandatory fallback for terms, equipment types, or manufacturers not explicitly labeled. Matches p_keyword.
+- spot_name: Map if user mentions "Spot", "Spot Name", or "Location Spot".
+- keyword: Mandatory fallback for any terms not labeled as a field.
 
 FULL PARAMETER CAPABILITIES:
-- user_id: Required for user isolation and ownership.
+- user_name: Required for user isolation and ownership.
+- complaint_no: Filter by specific complaint number.
 - status, stage, priority: Filter by complaint lifecycle and urgency.
 - complaint_type, complaint_mode, complaint_nature: Filter by classification.
 - wo_type, service_type: Filter by work order or service category.
 - division, discipline: Filter by organizational structure.
-- locality, building, floor: Filter by location hierarchy.
+- locality, building, floor, spot_name: Filter by location hierarchy.
 - contract, analysis_tech, execution_tech: Filter by service provider or assigned staff.
 - complainer: Filter by the individual who raised the complaint.
 - keyword: General search for complaints or equipment issues.
@@ -279,8 +324,8 @@ FULL PARAMETER CAPABILITIES:
     args_schema=BDMInput
 )
 def BDM(
-    user_id=None,
     user_name=None,
+    user_id=None,
     complaint_no=None,
     status=None,
     priority=None,
@@ -299,6 +344,7 @@ def BDM(
     analysis_tech=None,
     execution_tech=None,
     complainer=None,
+    spot_name=None,
     keyword=None,
     date_from=None,
     date_to=None,
@@ -307,14 +353,14 @@ def BDM(
     limit=None,
     offset=None
 ) -> str:
-    if not user_id:
-        logger.error("❌ BDM called without user_id")
-        return "Error: user_id is required. It is set from the authenticated request."
+    if not user_name:
+        logger.error("❌ BDM called without user_name")
+        return "Error: user_name is required. It is set from the authenticated request."
 
-    logger.info(f"🔧 BDM TOOL TRIGGERED for user_id: {user_id} | user_name: {user_name}")
+    logger.info(f"🔧 BDM TOOL TRIGGERED for user_name: {user_name}")
+    resolved_date_from,resolved_date_to = getTime(date_from,date_to)
 
     payload = {
-        "user_id":          user_id,
         "user_name":        user_name,
         "complaint_no":     complaint_no,
         "status":           status,
@@ -334,9 +380,10 @@ def BDM(
         "analysis_tech":    analysis_tech,
         "execution_tech":   execution_tech,
         "complainer":       complainer,
+        "spot_name":        spot_name,
         "keyword":          keyword,
-        "date_from":        date_from,
-        "date_to":          date_to,
+        "date_from":        resolved_date_from,
+        "date_to":          resolved_date_to,
         "completed_from":   completed_from,
         "completed_to":     completed_to,
         "limit":            limit,

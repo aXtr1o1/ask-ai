@@ -6,7 +6,7 @@ import psycopg2.extras
 import requests
 from requests.exceptions import RequestException, Timeout
 
-from app.api.database.postgres_client import get_db_connection , get_pool
+from app.api.database.postgres_client import get_pool
 from app.config import settings
 
 # ─────────────────────────────────────────────────────────────
@@ -23,12 +23,13 @@ MAX_RETRIES     = 3
 PAGE_SIZE       = settings.SYNC_PAGE_SIZE
 
 
-# ─────────────────────────────────────────────────────────────
+
 # DB HELPERS
-# ─────────────────────────────────────────────────────────────
+# user_name fetched from client_sync_config 
+
 def get_clients(cursor):
     cursor.execute("""
-        SELECT client_name, base_url, user_id, jwt_token, last_synced_at
+        SELECT client_name, base_url, user_id, user_name, jwt_token, last_synced_at
         FROM client_sync_config
         ORDER BY client_name
     """)
@@ -44,9 +45,8 @@ def update_sync_timestamp(cursor, client_name):
     log.info(f"[{client_name}] ✅ last_synced_at updated to NOW()")
 
 
-# ─────────────────────────────────────────────────────────────
 # FETCH — single page only (called per page to avoid memory spike)
-# ─────────────────────────────────────────────────────────────
+
 def fetch_single_page(base_url: str, jwt_token: str, user_id: int,
                       endpoint: str, last_synced_at, page_index: int) -> list:
 
@@ -58,7 +58,7 @@ def fetch_single_page(base_url: str, jwt_token: str, user_id: int,
         else:
             synced_ts = str(last_synced_at)
     else:
-        synced_ts = None  # first-ever sync → API returns everything
+        synced_ts = None
 
     headers = {
         "x-auth":       f"Bearer {jwt_token}",
@@ -131,47 +131,24 @@ def _extract_records(resp_json: dict, endpoint: str, page: int) -> list:
     return records
 
 
-# ─────────────────────────────────────────────────────────────
+
 # UPSERT — assets
-# ─────────────────────────────────────────────────────────────
-def upsert_assets(cursor, records: list, user_id: int):
+# BATCH insert using execute_values → 1000 records in ONE SQL call
+# No memory spike — records freed immediately after insert
+
+def upsert_assets(cursor, records: list, user_id: int, user_name: str):
     inserted = updated = errors = 0
-    for r in records:
-        try:
-            cursor.execute("""
-                INSERT INTO asset (
-                    user_id, "AssetTagNo", "AssetBarcode", "EquipmentName", "EquipmentRefNo",
-                    "SerialNo", "StatusName", "ConditionName", "PriorityName",
-                    "OnHold", "IsSnagged", "IsScraped",
-                    "LocalityName", "BuildingName", "FloorName", "SpotName",
-                    "Longitude", "Latitude", "AssetTypeName",
-                    "DivisionName", "DisciplineName", "Owner",
-                    "IsEnablePPM", "IsEnableBDM", "IsEnableBMS", "IsEnableDSM",
-                    "MakeName", "ModelName", "YearOfManuf", "LifeInYear",
-                    "PurDate", "PurValue", "InstalledDate", "ScrapDate", "ScrapValue",
-                    "ServiceAreaName", "TradeGroupName", "DrawingNo", "Remarks"
-                ) VALUES (
-                    %s,%s,%s,%s,%s, %s,%s,%s,%s, %s,%s,%s,
-                    %s,%s,%s,%s, %s,%s,%s, %s,%s,%s,
-                    %s,%s,%s,%s, %s,%s,%s,%s,
-                    %s,%s,%s,%s,%s, %s,%s,%s,%s
-                )
-                ON CONFLICT ("AssetTagNo") DO UPDATE SET
-                    "StatusName"    = EXCLUDED."StatusName",
-                    "ConditionName" = EXCLUDED."ConditionName",
-                    "PriorityName"  = EXCLUDED."PriorityName",
-                    "OnHold"        = EXCLUDED."OnHold",
-                    "IsSnagged"     = EXCLUDED."IsSnagged",
-                    "IsScraped"     = EXCLUDED."IsScraped",
-                    "FloorName"     = EXCLUDED."FloorName",
-                    "SpotName"      = EXCLUDED."SpotName",
-                    "IsEnablePPM"   = EXCLUDED."IsEnablePPM",
-                    "IsEnableBDM"   = EXCLUDED."IsEnableBDM",
-                    "IsEnableBMS"   = EXCLUDED."IsEnableBMS",
-                    "IsEnableDSM"   = EXCLUDED."IsEnableDSM",
-                    "Remarks"       = EXCLUDED."Remarks"
-            """, (
-                user_id,
+    try:
+        # deduplicate by AssetTagNo — keep last occurrence
+        seen = {}
+        for r in records:
+            key = r.get("AssetTagNo") or ""
+            seen[key] = r
+        records = list(seen.values())
+
+        rows = [
+            (
+                user_id, user_name,
                 r.get("AssetTagNo") or "",        r.get("AssetBarcode") or "",
                 r.get("EquipmentName") or "",     r.get("EquipmentRefNo"),
                 r.get("SerialNo"),                r.get("StatusName") or "",
@@ -191,51 +168,68 @@ def upsert_assets(cursor, records: list, user_id: int):
                 r.get("ScrapDate"),               r.get("ScrapValue"),
                 r.get("ServiceAreaName"),         r.get("TradeGroupName"),
                 r.get("DrawingNo"),               r.get("Remarks"),
-            ))
-            if cursor.rowcount == 1:
-                inserted += 1
-            else:
-                updated += 1
-        except Exception as e:
-            log.error(f"    ⚠️  Asset [{r.get('AssetTagNo')}]: {e}")
-            errors += 1
-    log.info(f"    Assets → Inserted: {inserted} | Updated: {updated} | Errors: {errors}")
+            )
+            for r in records
+        ]
+
+        psycopg2.extras.execute_values(cursor, """
+            INSERT INTO "Asset" (
+                user_id, user_name,
+                "AssetTagNo", "AssetBarcode", "EquipmentName", "EquipmentRefNo",
+                "SerialNo", "StatusName", "ConditionName", "PriorityName",
+                "OnHold", "IsSnagged", "IsScraped",
+                "LocalityName", "BuildingName", "FloorName", "SpotName",
+                "Longitude", "Latitude", "AssetTypeName",
+                "DivisionName", "DisciplineName", "Owner",
+                "IsEnablePPM", "IsEnableBDM", "IsEnableBMS", "IsEnableDSM",
+                "MakeName", "ModelName", "YearOfManuf", "LifeInYear",
+                "PurDate", "PurValue", "InstalledDate", "ScrapDate", "ScrapValue",
+                "ServiceAreaName", "TradeGroupName", "DrawingNo", "Remarks"
+            ) VALUES %s
+            ON CONFLICT ("AssetTagNo") DO UPDATE SET
+                user_name       = EXCLUDED.user_name,
+                "StatusName"    = EXCLUDED."StatusName",
+                "ConditionName" = EXCLUDED."ConditionName",
+                "PriorityName"  = EXCLUDED."PriorityName",
+                "OnHold"        = EXCLUDED."OnHold",
+                "IsSnagged"     = EXCLUDED."IsSnagged",
+                "IsScraped"     = EXCLUDED."IsScraped",
+                "FloorName"     = EXCLUDED."FloorName",
+                "SpotName"      = EXCLUDED."SpotName",
+                "IsEnablePPM"   = EXCLUDED."IsEnablePPM",
+                "IsEnableBDM"   = EXCLUDED."IsEnableBDM",
+                "IsEnableBMS"   = EXCLUDED."IsEnableBMS",
+                "IsEnableDSM"   = EXCLUDED."IsEnableDSM",
+                "Remarks"       = EXCLUDED."Remarks",
+                updated_at      = NOW()
+        """, rows, page_size=1000)
+
+        inserted = len(records)
+
+    except Exception as e:
+        log.error(f"    ⚠️  Asset batch upsert failed: {e}")
+        errors = len(records)
+
+    log.info(f"    Assets → Upserted: {inserted} | Errors: {errors}")
     return inserted, updated, errors
 
 
-# ─────────────────────────────────────────────────────────────
+
 # UPSERT — ppm
-# ─────────────────────────────────────────────────────────────
-def upsert_ppm(cursor, records: list, user_id: int):
+# BATCH insert using execute_values → fast + no memory spike
+
+def upsert_ppm(cursor, records: list, user_id: int, user_name: str):
     inserted = updated = errors = 0
-    for r in records:
-        try:
-            cursor.execute("""
-                INSERT INTO ppm (
-                    user_id, "WorkOrder", "AssetTagNo", "EquipmentRefNo",
-                    "PPMStatus", "PPMStageName", "FrequencyName",
-                    "WoDateTime", "WoCompletedDate",
-                    "LocalityName", "LocalityCode", "BuildingName", "FloorName", "SpotName",
-                    "EquipmentName", "DivisionName", "DisciplineName", "ContractName",
-                    "PMTechName", "PMTechStartDateTime", "PMTechEndDateTime", "PMTechRemarks",
-                    "LastStandByRemarks", "PPMPendingPeriod", "SLADuration"
-                ) VALUES (
-                    %s,%s,%s,%s, %s,%s,%s, %s,%s,
-                    %s,%s,%s,%s,%s, %s,%s,%s,%s,
-                    %s,%s,%s,%s, %s,%s,%s
-                )
-                ON CONFLICT ("WorkOrder") DO UPDATE SET
-                    "PPMStatus"           = EXCLUDED."PPMStatus",
-                    "PPMStageName"        = EXCLUDED."PPMStageName",
-                    "WoCompletedDate"     = EXCLUDED."WoCompletedDate",
-                    "PMTechName"          = EXCLUDED."PMTechName",
-                    "PMTechStartDateTime" = EXCLUDED."PMTechStartDateTime",
-                    "PMTechEndDateTime"   = EXCLUDED."PMTechEndDateTime",
-                    "PMTechRemarks"       = EXCLUDED."PMTechRemarks",
-                    "PPMPendingPeriod"    = EXCLUDED."PPMPendingPeriod",
-                    "LastStandByRemarks"  = EXCLUDED."LastStandByRemarks"
-            """, (
-                user_id,
+    try:
+        seen = {}
+        for r in records:
+            key = r.get("WorkOrder") or ""
+            seen[key] = r
+        records = list(seen.values())
+
+        rows = [
+            (
+                user_id, user_name,
                 r.get("WorkOrder") or "",         r.get("AssetTagNo") or "",
                 r.get("EquipmentRefNo") or "",    r.get("PPMStatus") or "",
                 r.get("PPMStageName") or "",      r.get("FrequencyName") or "",
@@ -248,63 +242,61 @@ def upsert_ppm(cursor, records: list, user_id: int):
                 r.get("PMTechStartDateTime"),     r.get("PMTechEndDateTime"),
                 r.get("PMTechRemarks"),           r.get("LastStandByRemarks"),
                 r.get("PPMPendingPeriod"),        r.get("SLADuration") or 0,
-            ))
-            if cursor.rowcount == 1:
-                inserted += 1
-            else:
-                updated += 1
-        except Exception as e:
-            log.error(f"    ⚠️  PPM [{r.get('WorkOrder')}]: {e}")
-            errors += 1
-    log.info(f"    PPM → Inserted: {inserted} | Updated: {updated} | Errors: {errors}")
+            )
+            for r in records
+        ]
+
+        psycopg2.extras.execute_values(cursor, """
+            INSERT INTO ppm (
+                user_id, user_name,
+                "WorkOrder", "AssetTagNo", "EquipmentRefNo",
+                "PPMStatus", "PPMStageName", "FrequencyName",
+                "WoDateTime", "WoCompletedDate",
+                "LocalityName", "LocalityCode", "BuildingName", "FloorName", "SpotName",
+                "EquipmentName", "DivisionName", "DisciplineName", "ContractName",
+                "PMTechName", "PMTechStartDateTime", "PMTechEndDateTime", "PMTechRemarks",
+                "LastStandByRemarks", "PPMPendingPeriod", "SLADuration"
+            ) VALUES %s
+            ON CONFLICT ("WorkOrder") DO UPDATE SET
+                user_name             = EXCLUDED.user_name,
+                "PPMStatus"           = EXCLUDED."PPMStatus",
+                "PPMStageName"        = EXCLUDED."PPMStageName",
+                "WoCompletedDate"     = EXCLUDED."WoCompletedDate",
+                "PMTechName"          = EXCLUDED."PMTechName",
+                "PMTechStartDateTime" = EXCLUDED."PMTechStartDateTime",
+                "PMTechEndDateTime"   = EXCLUDED."PMTechEndDateTime",
+                "PMTechRemarks"       = EXCLUDED."PMTechRemarks",
+                "PPMPendingPeriod"    = EXCLUDED."PPMPendingPeriod",
+                "LastStandByRemarks"  = EXCLUDED."LastStandByRemarks",
+                updated_at            = NOW()
+        """, rows, page_size=1000)
+
+        inserted = len(records)
+
+    except Exception as e:
+        log.error(f"    ⚠️  PPM batch upsert failed: {e}")
+        errors = len(records)
+
+    log.info(f"    PPM → Upserted: {inserted} | Errors: {errors}")
     return inserted, updated, errors
 
 
 # ─────────────────────────────────────────────────────────────
 # UPSERT — bdm
+# BATCH insert using execute_values → fast + no memory spike
 # ─────────────────────────────────────────────────────────────
-def upsert_bdm(cursor, records: list, user_id: int):
+def upsert_bdm(cursor, records: list, user_id: int, user_name: str):
     inserted = updated = errors = 0
-    for r in records:
-        try:
-            cursor.execute("""
-                INSERT INTO bdm (
-                    user_id, "ComplaintNo", "AssetTagNo", "AssetBarcode", "ClientWoNo",
-                    "WoStatus", "PriorityName", "StageName",
-                    "ComplainedDateTime", "BDMWOCompletedDate",
-                    "LocalityName", "LocalityCode", "BuildingName", "FloorName", "SpotName",
-                    "ComplaintTypeName", "ComplaintHeaderName",
-                    "ComplaintModeName", "ComplaintNatureName",
-                    "WoTypeName", "ServiceTypeName", "DivisionName", "DisciplineName", "ContractName",
-                    "Description", "ComplainerName", "RegisterBy",
-                    "AnalysisTechName", "ExecutionTechName",
-                    "ResponseTAT", "ResolutionTAT",
-                    "SLACCMStartDateTime", "SLACCMEndDateTime",
-                    "SLABDMStartDateTime", "SLABDMEndDateTime",
-                    "AnalysisStartTime", "AnalysisEndTime",
-                    "ExecutionStartTime", "ExecutionEndTime",
-                    "StandByRemarks"
-                ) VALUES (
-                    %s,%s,%s,%s,%s, %s,%s,%s, %s,%s,
-                    %s,%s,%s,%s,%s, %s,%s, %s,%s,
-                    %s,%s,%s,%s,%s, %s,%s,%s, %s,%s,
-                    %s,%s, %s,%s, %s,%s, %s,%s, %s,%s, %s
-                )
-                ON CONFLICT ("ComplaintNo") DO UPDATE SET
-                    "WoStatus"           = EXCLUDED."WoStatus",
-                    "StageName"          = EXCLUDED."StageName",
-                    "BDMWOCompletedDate" = EXCLUDED."BDMWOCompletedDate",
-                    "AnalysisTechName"   = EXCLUDED."AnalysisTechName",
-                    "ExecutionTechName"  = EXCLUDED."ExecutionTechName",
-                    "ResponseTAT"        = EXCLUDED."ResponseTAT",
-                    "ResolutionTAT"      = EXCLUDED."ResolutionTAT",
-                    "StandByRemarks"     = EXCLUDED."StandByRemarks",
-                    "AnalysisStartTime"  = EXCLUDED."AnalysisStartTime",
-                    "AnalysisEndTime"    = EXCLUDED."AnalysisEndTime",
-                    "ExecutionStartTime" = EXCLUDED."ExecutionStartTime",
-                    "ExecutionEndTime"   = EXCLUDED."ExecutionEndTime"
-            """, (
-                user_id,
+    try:
+        seen = {}
+        for r in records:
+            key = r.get("ComplaintNo") or ""
+            seen[key] = r
+        records = list(seen.values())
+
+        rows = [
+            (
+                user_id, user_name,
                 r.get("ComplaintNo") or "",       r.get("AssetTagNo"),
                 r.get("AssetBarcode"),            r.get("ClientWoNo"),
                 r.get("WoStatus") or "",          r.get("PriorityName") or "",
@@ -325,21 +317,59 @@ def upsert_bdm(cursor, records: list, user_id: int):
                 r.get("AnalysisStartTime"),       r.get("AnalysisEndTime"),
                 r.get("ExecutionStartTime"),      r.get("ExecutionEndTime"),
                 r.get("StandByRemarks"),
-            ))
-            if cursor.rowcount == 1:
-                inserted += 1
-            else:
-                updated += 1
-        except Exception as e:
-            log.error(f"    ⚠️  BDM [{r.get('ComplaintNo')}]: {e}")
-            errors += 1
-    log.info(f"    BDM → Inserted: {inserted} | Updated: {updated} | Errors: {errors}")
+            )
+            for r in records
+        ]
+
+        psycopg2.extras.execute_values(cursor, """
+            INSERT INTO bdm (
+                user_id, user_name,
+                "ComplaintNo", "AssetTagNo", "AssetBarcode", "ClientWoNo",
+                "WoStatus", "PriorityName", "StageName",
+                "ComplainedDateTime", "BDMWOCompletedDate",
+                "LocalityName", "LocalityCode", "BuildingName", "FloorName", "SpotName",
+                "ComplaintTypeName", "ComplaintHeaderName",
+                "ComplaintModeName", "ComplaintNatureName",
+                "WoTypeName", "ServiceTypeName", "DivisionName", "DisciplineName", "ContractName",
+                "Description", "ComplainerName", "RegisterBy",
+                "AnalysisTechName", "ExecutionTechName",
+                "ResponseTAT", "ResolutionTAT",
+                "SLACCMStartDateTime", "SLACCMEndDateTime",
+                "SLABDMStartDateTime", "SLABDMEndDateTime",
+                "AnalysisStartTime", "AnalysisEndTime",
+                "ExecutionStartTime", "ExecutionEndTime",
+                "StandByRemarks"
+            ) VALUES %s
+            ON CONFLICT ("ComplaintNo") DO UPDATE SET
+                user_name            = EXCLUDED.user_name,
+                "WoStatus"           = EXCLUDED."WoStatus",
+                "StageName"          = EXCLUDED."StageName",
+                "BDMWOCompletedDate" = EXCLUDED."BDMWOCompletedDate",
+                "AnalysisTechName"   = EXCLUDED."AnalysisTechName",
+                "ExecutionTechName"  = EXCLUDED."ExecutionTechName",
+                "ResponseTAT"        = EXCLUDED."ResponseTAT",
+                "ResolutionTAT"      = EXCLUDED."ResolutionTAT",
+                "StandByRemarks"     = EXCLUDED."StandByRemarks",
+                "AnalysisStartTime"  = EXCLUDED."AnalysisStartTime",
+                "AnalysisEndTime"    = EXCLUDED."AnalysisEndTime",
+                "ExecutionStartTime" = EXCLUDED."ExecutionStartTime",
+                "ExecutionEndTime"   = EXCLUDED."ExecutionEndTime",
+                updated_at           = NOW()
+        """, rows, page_size=1000)
+
+        inserted = len(records)
+
+    except Exception as e:
+        log.error(f"    ⚠️  BDM batch upsert failed: {e}")
+        errors = len(records)
+
+    log.info(f"    BDM → Upserted: {inserted} | Errors: {errors}")
     return inserted, updated, errors
 
 
 # ─────────────────────────────────────────────────────────────
 # CORE SYNC LOGIC
-# page-by-page → upsert → free memory → next page
+# page-by-page → batch upsert → free memory → next page
 # never loads all records at once → no memory spike
 # ─────────────────────────────────────────────────────────────
 def run_sync() -> dict:
@@ -360,9 +390,10 @@ def run_sync() -> dict:
     clients = get_clients(cursor)
     log.info(f"📋 Found {len(clients)} client(s) in client_sync_config")
 
-    for (client_name, base_url, user_id, jwt_token, last_synced_at) in clients:
+    # user_name unpacked directly from DB row — zero hardcoding
+    for (client_name, base_url, user_id, user_name, jwt_token, last_synced_at) in clients:
         log.info(f"\n{'─'*55}")
-        log.info(f"👤 Client: {client_name} | user_id={user_id} | {base_url}")
+        log.info(f"👤 Client: {client_name} | user_id={user_id} | user_name={user_name} | {base_url}")
 
         if last_synced_at is None:
             log.info("   ℹ️  First-ever sync — fetching ALL records from API.")
@@ -372,6 +403,7 @@ def run_sync() -> dict:
         client_summary = {
             "client":    client_name,
             "user_id":   user_id,
+            "user_name": user_name,
             "status":    "ok",
             "endpoints": {},
             "synced_at": None,
@@ -411,14 +443,14 @@ def run_sync() -> dict:
                 total_fetched += len(records)
                 log.info(f"  [{endpoint}] Page {page_index} → {len(records)} records (total so far: {total_fetched})")
 
-                # ── upsert this page immediately ─────────────────────
+                # ── batch upsert this page immediately ───────────────
                 try:
                     if endpoint == "/getAssets":
-                        ins, upd, err = upsert_assets(cursor, records, user_id)
+                        ins, upd, err = upsert_assets(cursor, records, user_id, user_name)
                     elif endpoint == "/getPPM":
-                        ins, upd, err = upsert_ppm(cursor, records, user_id)
+                        ins, upd, err = upsert_ppm(cursor, records, user_id, user_name)
                     elif endpoint == "/getBDM":
-                        ins, upd, err = upsert_bdm(cursor, records, user_id)
+                        ins, upd, err = upsert_bdm(cursor, records, user_id, user_name)
                     else:
                         log.warning(f"  Unknown endpoint {endpoint} — skipping.")
                         break
@@ -426,6 +458,8 @@ def run_sync() -> dict:
                     total_ins += ins
                     total_upd += upd
                     total_err += err
+                    if err > 0:
+                        conn.rollback()
                     synced_any = True
 
                 except Exception as e:
@@ -437,8 +471,7 @@ def run_sync() -> dict:
                 # ── free page memory immediately ─────────────────────
                 del records
 
-                # ── if page was less than PAGE_SIZE → last page done ──
-                # re-fetch to check is handled by next iteration returning []
+                # ── next page ────────────────────────────────────────
                 page_index += 1
 
             # ── endpoint summary ─────────────────────────────────────
