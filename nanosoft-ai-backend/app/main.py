@@ -244,6 +244,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
 async def sessions_endpoint(request: SessionRequest):
     user_name  = request.userName.strip()
     session_id = request.sessionId.strip()
+    incoming_history = request.chatHistory or []
 
     if not user_name:
         logger.info("invalid user name")
@@ -252,7 +253,48 @@ async def sessions_endpoint(request: SessionRequest):
     if user_name not in VALID_USERNAMES:
         raise HTTPException(status_code=403, detail=f"Invalid user name '{user_name}'. Access denied.")
 
-    # ── Case 1: session_id is empty → return all sessions for user ──
+    # ── Case 1: chatHistory present → save session to PostgreSQL ──
+    if incoming_history:
+        logger.info(f"💾 Saving chat history | user_name={user_name} | session_id={session_id} | messages={len(incoming_history)}")
+
+        # Convert flat message list [{role,user/ai,text}] → [{query, assistant}] pairs
+        history_pairs = []
+        pending_query = None
+
+        for msg in incoming_history:
+            role = (msg.role or "").lower()
+            if role == "user":
+                pending_query = msg.text or ""
+            elif role == "ai":
+                if pending_query is not None:
+                    history_pairs.append({
+                        "query": pending_query,
+                        "assistant": msg.text or ""
+                    })
+                    pending_query = None
+
+        # If conversation ended with a user message but no assistant reply,
+        # still persist it with empty assistant text so it's not lost.
+        if pending_query:
+            history_pairs.append({
+                "query": pending_query,
+                "assistant": ""
+            })
+
+        await save_session_to_postgres_service(
+            session_id = session_id,
+            user_name  = user_name,
+            history    = history_pairs
+        )
+
+        return {
+            "user_name":  user_name,
+            "session_id": session_id,
+            "type":       "saved",
+            "messages":   len(history_pairs)
+        }
+
+    # ── Case 2: session_id is empty → return all sessions for user ──
     if not session_id:
         logger.info(f"📋 Fetching all sessions | user_name={user_name}")
         sessions = await get_sessions_for_user(user_name)
@@ -262,7 +304,7 @@ async def sessions_endpoint(request: SessionRequest):
             "sessions":  sessions
         }
 
-    # ── Case 2: session_id is provided → return chat history ──
+    # ── Case 3: session_id is provided → return chat history ──
     logger.info(f"💬 Fetching chat history | user_name={user_name} | session_id={session_id}")
     history = await get_chat_history_for_session(user_name, session_id)
     return {

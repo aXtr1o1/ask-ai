@@ -2,7 +2,7 @@
 Pydantic Schemas for LangChain Tools and API Requests
 """
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, List
 
 
 # ==========================================
@@ -110,7 +110,20 @@ class ChatRequest(BaseModel):
     sessionId: str
 
 
+class FrontendChatMessage(BaseModel):
+    """Shape of a single chat message sent from frontend when saving history."""
+    role: str
+    text: str
+
+
 class SessionRequest(BaseModel):
-    """Request schema for fetching sessions or chat history"""
+    """
+    Request schema for:
+    - fetching all sessions (no sessionId)
+    - fetching chat history for a session (sessionId present)
+    - saving chat history for a session (chatHistory present)
+    """
     userName: str
     sessionId: str = ""
+    chatHistory: Optional[List[FrontendChatMessage]] = None
+    historyOnClick: bool = False
