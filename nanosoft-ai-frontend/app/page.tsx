@@ -14,7 +14,7 @@ interface Message {
   streaming?: boolean;
 }
 interface FolderItem { id: string; name: string; }
-interface ChatSession { id: string; title: string; createdAt: number; }
+interface ChatSession { id: string; title: string; createdAt: number; updatedAt?: number; }
 
 // ─── Extract text from any backend response shape ─────────────────────────────
 // Improved: handles JSON strings without spaces, array join, and reply/content/text fields
@@ -540,7 +540,7 @@ export default function Home() {
   const inputRef         = useRef<HTMLTextAreaElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const menuRef          = useRef<HTMLDivElement>(null);
-  const socketsRef = useRef<Map<string, WebSocket>>(new Map());
+  const wsRef            = useRef<WebSocket | null>(null);  // single WebSocket for the whole tab
   const sessionIdRef = useRef<string>(sessionId);
   const wsConnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectDelayRef = useRef(2000);
@@ -627,14 +627,12 @@ export default function Home() {
   // ── Start pinging only the ACTIVE session socket ──────────────────────────
   const connectWSRef = useRef<() => void>(() => {});  // forward ref for connectWS
 
-  const startPingForActiveSession = () => {
+  const startPing = () => {
     // Clear any previous ping interval
     if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
 
     pingRef.current = setInterval(() => {
-      if (!userActiveRef.current) return; // user idle → don't ping anything
-      const activeSid = sessionIdRef.current;
-      const ws = socketsRef.current.get(activeSid);
+      const ws = wsRef.current;
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send("ping");
       }
@@ -664,34 +662,20 @@ export default function Home() {
 
   // ── User activity detection ───────────────────────────────────────────────
   const markUserActive = () => {
-    const wasIdle = !userActiveRef.current;
     userActiveRef.current = true;
 
     // Reset idle timer
     if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
     idleTimerRef.current = setTimeout(() => {
       userActiveRef.current = false;
-      // Stop pinging — backend will close idle sockets after its timeout
-      if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
-      // Save current session to backend before going idle
+      // Save current session to backend before going idle (keep WebSocket alive)
       const idleSid = sessionIdRef.current;
       const idleMsgs = sessionMessagesRef.current.get(idleSid);
       if (idleMsgs && idleMsgs.filter(m => m.role !== "error").length > 0) {
         saveChatHistoryRef.current(idleSid, idleMsgs);
       }
-      console.log("💤 User idle — stopped pinging, saved session, sockets will auto-close");
+      console.log("💤 User idle — saved session, keeping WebSocket connection open");
     }, IDLE_TIMEOUT);
-
-    // If user was idle and came back, reconnect the active session if needed
-    if (wasIdle) {
-      const activeSid = sessionIdRef.current;
-      const ws = socketsRef.current.get(activeSid);
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        console.log("🔄 User active again — reconnecting...");
-        connectWSRef.current();
-      }
-      startPingForActiveSession();
-    }
   };
 
   useEffect(() => {
@@ -708,10 +692,14 @@ export default function Home() {
   const WS_CONNECT_TIMEOUT_MS = 15000; // 15s: fail fast in production if proxy/backend is slow
 
   const connectWS = () => {
-    const sid = sessionIdRef.current;
+    // If there's already an open or connecting socket, reuse it
+    if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
+
     setWsConnectionState('connecting');
     const ws = new WebSocket(getWsUrl());
-    socketsRef.current.set(sid, ws);
+    wsRef.current = ws;
 
     wsConnectTimeoutRef.current = setTimeout(() => {
       if (ws.readyState === WebSocket.CONNECTING) {
@@ -729,8 +717,8 @@ export default function Home() {
       }
       reconnectDelayRef.current = 2000;
       setWsConnectionState('connected');
-      console.log("✅ WebSocket connected:", sid);
-      startPingForActiveSession();
+      console.log("✅ WebSocket connected");
+      startPing();
     };
 
     // ── Every message from backend ────────────────────────────────────────
@@ -751,7 +739,8 @@ export default function Home() {
             const l = u.length - 1;
             if (u[l]?.role === "ai") u[l] = { role: "ai", text: finalText, streaming: false };
             // Persist to per-session store so switching sessions keeps history
-            sessionMessagesRef.current.set(sid, u);
+            const activeSid = sessionIdRef.current;
+            sessionMessagesRef.current.set(activeSid, u);
             return u;
           });
           accRef.current = "";          // reset for next message
@@ -785,11 +774,11 @@ export default function Home() {
         clearTimeout(wsConnectTimeoutRef.current);
         wsConnectTimeoutRef.current = null;
       }
-      setWsConnectionState('failed');
-      console.warn("⚠️ WebSocket closed:", sid);
-      socketsRef.current.delete(sid);
-
-      if (sid === sessionIdRef.current) {
+      // Only react if this is the active socket
+      if (wsRef.current === ws) {
+        wsRef.current = null;
+        setWsConnectionState('failed');
+        console.warn("⚠️ WebSocket closed");
         if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
         setIsLoading(false);
         if (!event.wasClean && userActiveRef.current) {
@@ -822,10 +811,6 @@ export default function Home() {
 useEffect(() => {
   if (!authChecked) return;
 
-  // Capture ref value for cleanup
-
-  // Capture ref value for cleanup
-  const sockets = socketsRef.current;
   connectWS();
 
 
@@ -833,12 +818,18 @@ useEffect(() => {
     if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
     if (idleTimerRef.current) { clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
     if (wsConnectTimeoutRef.current) { clearTimeout(wsConnectTimeoutRef.current); wsConnectTimeoutRef.current = null; }
-    sockets.forEach(ws => ws.close());
-    sockets.clear();
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
   };
 },[authChecked]);
 
-  // Fetch chat sessions list for sidebar
+  // Helper: sort sessions newest-first (by updatedAt or createdAt)
+  const sortSessionsNewestFirst = (list: ChatSession[]): ChatSession[] =>
+    [...list].sort((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt));
+
+  // Fetch chat sessions list for sidebar (new at top, old at bottom)
   useEffect(() => {
     if (!authChecked || !loggedInUser) return;
 
@@ -852,13 +843,14 @@ useEffect(() => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         const fetched: ChatSession[] = (data?.sessions ?? []).map(
-          (s: { session_id: string; title?: string; created_at?: string }) => ({
+          (s: { session_id: string; title?: string; created_at?: string; updated_at?: string }) => ({
             id: s.session_id,
             title: s.title || "Chat",
             createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
+            updatedAt: s.updated_at ? new Date(s.updated_at).getTime() : undefined,
           })
         );
-        setChatSessions([...fetched]);
+        setChatSessions(sortSessionsNewestFirst(fetched));
       } catch (err) {
         console.warn("Failed to fetch chat sessions:", err);
         setChatSessions([]);
@@ -878,16 +870,13 @@ useEffect(() => {
   };
 
   const handleNewChat = async () => {
-    // Persist current session messages to ref before leaving
-    sessionMessagesRef.current.set(sessionId, messages);
-
-    // Stop pinging and disconnect current session's socket so backend saves on disconnect
-    if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
-    const currentWs = socketsRef.current.get(sessionId);
-    if (currentWs && currentWs.readyState === WebSocket.OPEN) {
-      currentWs.close();
-      socketsRef.current.delete(sessionId);
+    if (isLoading) {
+      setMessages(prev => [...prev, { role: "error", text: "Please wait for the current response to finish before starting a new chat." }]);
+      return;
     }
+    // Persist current session messages to ref before leaving
+    const previousSid = sessionId; // chat we're leaving (may have been typed in, so keep it near top after refetch)
+    sessionMessagesRef.current.set(previousSid, messages);
 
     setShowFeaturePlaceholder(false);
     setMessages([]);
@@ -898,7 +887,19 @@ useEffect(() => {
     setSessionId(newSessionId);
     sessionIdRef.current = newSessionId;
 
-    // Give backend a moment to persist on disconnect, then refetch session list for sidebar
+    // Immediately show this new chat at the top of the history list
+    setChatSessions(prev => {
+      const existing = prev.filter(s => s.id !== newSessionId);
+      const newCapsule: ChatSession = {
+        id: newSessionId,
+        title: "New Chat",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      return [newCapsule, ...existing];
+    });
+
+    // Refetch session list; new chat at top, previous chat (just left) second, rest by updated_at
     const refetchSessions = async () => {
       try {
         const res = await fetch(`${baseUrl}/api/session`, {
@@ -909,26 +910,46 @@ useEffect(() => {
         if (!res.ok) return;
         const data = await res.json();
         const fetched: ChatSession[] = (data?.sessions ?? []).map(
-          (s: { session_id: string; title?: string; created_at?: string }) => ({
+          (s: { session_id: string; title?: string; created_at?: string; updated_at?: string }) => ({
             id: s.session_id,
             title: s.title || "Chat",
             createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
+            updatedAt: s.updated_at ? new Date(s.updated_at).getTime() : undefined,
           })
         );
-        setChatSessions([...fetched]);
+        setChatSessions(prev => {
+          const newCapsule: ChatSession = {
+            id: newSessionId,
+            title: "New Chat",
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          };
+          // Previous chat stays second (just left, not yet saved so backend may have old order)
+          const previousSession = prev.find(s => s.id === previousSid) ?? fetched.find(s => s.id === previousSid);
+          const rest = sortSessionsNewestFirst(
+            fetched.filter(s => s.id !== newSessionId && s.id !== previousSid)
+          );
+          if (previousSession) {
+            const fromApi = fetched.find(s => s.id === previousSid);
+            const title = fromApi?.title ?? previousSession.title;
+            return [newCapsule, { ...previousSession, title }, ...rest];
+          }
+          return [newCapsule, ...rest];
+        });
       } catch (err) {
         console.warn("Failed to refetch sessions:", err);
       }
     };
     setTimeout(() => refetchSessions(), 400);
-
-    // Open a fresh socket for the new session
-    connectWS();
   };
 
   // ── Switch to an existing session ─────────────────────────────────────────
   const switchSession = async (targetSid: string) => {
     if (targetSid === sessionId) return; // already active
+    if (isLoading) {
+      setMessages(prev => [...prev, { role: "error", text: "Please wait for the current response to finish before switching chats." }]);
+      return;
+    }
 
     // Capture the currently active session ID
     const currentSid = sessionIdRef.current;
@@ -936,17 +957,7 @@ useEffect(() => {
     // Save current messages
     sessionMessagesRef.current.set(currentSid, messages);
 
-    // Stop pinging old session
-    if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
-
-    // Disconnect WebSocket for the old session so backend can persist and clean up
-    const currentWs = socketsRef.current.get(currentSid);
-    if (currentWs && currentWs.readyState === WebSocket.OPEN) {
-      currentWs.close();
-      socketsRef.current.delete(currentSid);
-    }
-
-    // After closing the socket, refresh sessions so updated display names from backend are shown
+    // Refresh from backend to get latest titles; do not move clicked chat to top (just highlight)
     const refreshSessions = async () => {
       if (!loggedInUser) return;
       try {
@@ -958,13 +969,19 @@ useEffect(() => {
         if (!res.ok) return;
         const data = await res.json();
         const fetched: ChatSession[] = (data?.sessions ?? []).map(
-          (s: { session_id: string; title?: string; created_at?: string }) => ({
+          (s: { session_id: string; title?: string; created_at?: string; updated_at?: string }) => ({
             id: s.session_id,
             title: s.title || "Chat",
             createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
+            updatedAt: s.updated_at ? new Date(s.updated_at).getTime() : undefined,
           })
         );
-        setChatSessions([...fetched]);
+        setChatSessions(prev => {
+          const merged = sortSessionsNewestFirst(fetched);
+          // If current list has a session not in fetched (e.g. new unsaved), prepend it
+          const onlyInPrev = prev.filter(s => !fetched.some(f => f.id === s.id));
+          return sortSessionsNewestFirst([...onlyInPrev, ...merged]);
+        });
       } catch (err) {
         console.warn("Failed to refresh sessions:", err);
       }
@@ -1008,12 +1025,11 @@ useEffect(() => {
       }
     }
 
-    // Reconnect WS for the target session if not already open
-    const ws = socketsRef.current.get(targetSid);
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
+    // Ensure WebSocket connection is available for the target session
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
       connectWS();
     } else {
-      startPingForActiveSession();
+      startPing();
     }
   };
 
@@ -1030,8 +1046,10 @@ useEffect(() => {
 
     if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
     if (idleTimerRef.current) { clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
-    socketsRef.current.forEach(ws => ws.close());
-    socketsRef.current.clear();
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
 
     localStorage.removeItem("loggedInUser");
     router.replace("/login");
@@ -1057,7 +1075,7 @@ useEffect(() => {
   if (!input.trim() || isLoading) return;
   const userText = input.trim();
 
-  const ws = socketsRef.current.get(sessionId);
+  const ws = wsRef.current;
 
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     console.warn("Socket not ready for session:", sessionId);
@@ -1065,16 +1083,21 @@ useEffect(() => {
     return;
   }
 
-  // Ensure a chat history capsule exists for this session
+  // Ensure capsule exists and move this session to top when user types (content changed)
+  const now = Date.now();
   setChatSessions(prev => {
-    if (prev.some(s => s.id === sessionId)) return prev;
+    const existing = prev.find(s => s.id === sessionId);
+    const rest = prev.filter(s => s.id !== sessionId);
+    if (existing) {
+      return [{ ...existing, updatedAt: now }, ...rest];
+    }
     const newCapsule: ChatSession = {
       id: sessionId,
-      title: "New Chat",        // common name for all sessions
-      createdAt: Date.now()
+      title: "New Chat",
+      createdAt: now,
+      updatedAt: now,
     };
-    // Put newest at the top
-    return [newCapsule, ...prev];
+    return [newCapsule, ...rest];
   });
 
   setShowFeaturePlaceholder(false);

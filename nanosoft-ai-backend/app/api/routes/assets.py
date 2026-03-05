@@ -51,61 +51,62 @@ def get_assets(req: AssetRequest):
         req.user_name, req.limit, req.offset
     )
     logger.debug("[GET-ASSETS] Full payload: %s", req.model_dump())
-
     logger.info("[GET-ASSETS] Calling sp_asset_query")
 
     try:
-       conn = get_pool()
-       cursor = conn.cursor()
+        conn = get_pool()
+        cursor = conn.cursor()
 
-       # callproc: sp_asset_query(p_user_name, p_asset_tag_no, ...) — no user_id
-       cursor.callproc("sp_asset_query", [
-           req.user_name,
-           req.asset_tag_no,
-           req.status,
-           req.condition,
-           req.priority,
-           req.asset_type,
-           req.division,
-           req.discipline,
-           req.locality,
-           req.building,
-           req.floor,
-           req.owner,
-           req.make,
-           req.model,
-           req.service_area,
-           req.trade_group,
-           req.on_hold,
-           req.is_snagged,
-           req.is_scraped,
-           req.enable_ppm,
-           req.enable_bdm,
-           req.keyword,
-           req.date_from,
-           req.date_to,
-           req.limit,
-           req.offset,
-       ])
+        # sp_asset_query — 28 params matching DB function exactly
+        cursor.callproc("sp_asset_query", [
+            req.user_name,       # p_user_name      text
+            req.asset_tag_no,    # p_asset_tag_no   varchar
+            req.status,          # p_status         varchar
+            req.condition,       # p_condition      varchar
+            req.priority,        # p_priority       varchar
+            req.asset_type,      # p_asset_type     varchar
+            req.division,        # p_division       varchar
+            req.discipline,      # p_discipline     varchar
+            req.locality,        # p_locality       varchar
+            req.building,        # p_building       varchar
+            req.floor,           # p_floor          varchar
+            req.owner,           # p_owner          varchar
+            req.make,            # p_make           varchar
+            req.model,           # p_model          varchar
+            req.service_area,    # p_service_area   varchar
+            req.trade_group,     # p_trade_group    varchar
+            req.spot_name,       # p_spot_name      varchar 
+            req.serial_no,       # p_serial_no      varchar 
+            req.on_hold,         # p_on_hold        boolean
+            req.is_snagged,      # p_is_snagged     boolean
+            req.is_scraped,      # p_is_scraped     boolean
+            req.enable_ppm,      # p_enable_ppm     boolean
+            req.enable_bdm,      # p_enable_bdm     boolean
+            req.keyword,         # p_keyword        varchar
+            req.date_from,       # p_date_from      date
+            req.date_to,         # p_date_to        date
+            req.limit,           # p_limit          integer
+            req.offset,          # p_offset         integer
+        ])
 
-       row = cursor.fetchone()
-       cursor.close()
+        row = cursor.fetchone()
+        cursor.close()
 
-       raw = row[0] if row else {}
-       if isinstance(raw, str):
-           raw = json.loads(raw)
+        raw = row[0] if row else {}
+        if isinstance(raw, str):
+            raw = json.loads(raw)
 
-       formatted = format_response(raw)
-       p_list = formatted.get("p_list", [])
+        formatted = format_response(raw)
+        p_list = formatted.get("p_list", [])
 
-       if p_list:
-           fields = list(p_list[0].keys()) if isinstance(p_list[0], dict) else []
-           sample = [r.get("AssetTagNo") or r.get("id") or str(r)[:50] for r in p_list[:3]]
-           logger.info("[GET-ASSETS] Fetched | count=%s | fields=%s | sample_ids=%s", formatted["p_count"], fields[:8], sample)
-       else:
-           logger.info("[GET-ASSETS] Success | count=0")
+        if p_list:
+            fields = list(p_list[0].keys()) if isinstance(p_list[0], dict) else []
+            sample = [r.get("AssetTagNo") or r.get("id") or str(r)[:50] for r in p_list[:3]]
+            logger.info("[GET-ASSETS] Fetched | count=%s | fields=%s | sample_ids=%s", formatted["p_count"], fields[:8], sample)
+        else:
+            logger.info("[GET-ASSETS] Success | count=0")
 
-       return formatted
+        return formatted
 
     except Exception as e:
         err_msg = str(e)
