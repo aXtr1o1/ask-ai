@@ -11,10 +11,10 @@ class AssetRequest(BaseModel):
     """Request schema for assets endpoint"""
     user_id: Optional[int] = None
     user_name: Optional[str] = None
+    asset_tag_no: Optional[str] = None
     status: Optional[str] = None
     condition: Optional[str] = None
     priority: Optional[str] = None
-    asset_tag_no: Optional[str] = None
     asset_type: Optional[str] = None
     division: Optional[str] = None
     discipline: Optional[str] = None
@@ -26,6 +26,8 @@ class AssetRequest(BaseModel):
     model: Optional[str] = None
     service_area: Optional[str] = None
     trade_group: Optional[str] = None
+    spot_name: Optional[str] = None       
+    serial_no: Optional[str] = None       
     on_hold: Optional[bool] = None
     is_snagged: Optional[bool] = None
     is_scraped: Optional[bool] = None
@@ -39,7 +41,7 @@ class AssetRequest(BaseModel):
 
 
 class PPMRequest(BaseModel):
-    """Request schema for PPM (work orders) endpoint"""
+    """Request schema for PPM (planned preventive maintenance) endpoint"""
     user_id: Optional[int] = None
     user_name: Optional[str] = None
     work_order: Optional[str] = None
@@ -55,6 +57,7 @@ class PPMRequest(BaseModel):
     contract: Optional[str] = None
     tech: Optional[str] = None
     equipment: Optional[str] = None
+    spot_name: Optional[str] = None       
     keyword: Optional[str] = None
     date_from: Optional[str] = None
     date_to: Optional[str] = None
@@ -67,7 +70,7 @@ class PPMRequest(BaseModel):
 
 
 class BDMRequest(BaseModel):
-    """Request schema for BDM (complaints) endpoint"""
+    """Request schema for BDM (breakdown maintenance / complaints) endpoint"""
     user_id: Optional[int] = None
     user_name: Optional[str] = None
     complaint_no: Optional[str] = None
@@ -88,6 +91,7 @@ class BDMRequest(BaseModel):
     analysis_tech: Optional[str] = None
     execution_tech: Optional[str] = None
     complainer: Optional[str] = None
+    spot_name: Optional[str] = None       
     keyword: Optional[str] = None
     date_from: Optional[str] = None
     date_to: Optional[str] = None

@@ -10,7 +10,7 @@ import tracemalloc
 # ── so imports like 'app.services...' work ──
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.services.sync_service import run_sync
+from app.services.sync.engine import run_sync
 
 # ─────────────────────────────────────────────────────────────
 # LOGGING SETUP
