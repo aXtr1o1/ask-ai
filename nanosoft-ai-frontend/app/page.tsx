@@ -15,7 +15,7 @@ interface Message {
   isLargeDataset?: boolean;
 }
 interface FolderItem { id: string; name: string; }
-interface ChatSession { id: string; title: string; createdAt: number; }
+interface ChatSession { id: string; title: string; createdAt: number; updatedAt?: number; }
 
 // ─── Extract text from any backend response shape ─────────────────────────────
 // Improved: handles JSON strings without spaces, array join, and reply/content/text fields
@@ -1230,7 +1230,11 @@ useEffect(() => {
   };
 },[authChecked]);
 
-  // Fetch chat sessions list for sidebar
+  // Helper: sort sessions newest-first (by updatedAt or createdAt)
+  const sortSessionsNewestFirst = (list: ChatSession[]): ChatSession[] =>
+    [...list].sort((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt));
+
+  // Fetch chat sessions list for sidebar (new at top, old at bottom)
   useEffect(() => {
     if (!authChecked || !loggedInUser) return;
 
@@ -1244,13 +1248,14 @@ useEffect(() => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         const fetched: ChatSession[] = (data?.sessions ?? []).map(
-          (s: { session_id: string; title?: string; created_at?: string }) => ({
+          (s: { session_id: string; title?: string; created_at?: string; updated_at?: string }) => ({
             id: s.session_id,
             title: s.title || "Chat",
             createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
+            updatedAt: s.updated_at ? new Date(s.updated_at).getTime() : undefined,
           })
         );
-        setChatSessions([...fetched]);
+        setChatSessions(sortSessionsNewestFirst(fetched));
       } catch (err) {
         console.warn("Failed to fetch chat sessions:", err);
         setChatSessions([]);
@@ -1294,11 +1299,12 @@ useEffect(() => {
         id: newSessionId,
         title: "New Chat",
         createdAt: Date.now(),
+        updatedAt: Date.now(),
       };
       return [newCapsule, ...existing];
     });
 
-    // Refetch session list; new chat at top, previous chat (just left) second, rest by created_at
+    // Refetch session list; new chat at top, previous chat (just left) second, rest by updated_at
     const refetchSessions = async () => {
       try {
         const res = await fetch(`${baseUrl}/api/session`, {
@@ -1309,13 +1315,32 @@ useEffect(() => {
         if (!res.ok) return;
         const data = await res.json();
         const fetched: ChatSession[] = (data?.sessions ?? []).map(
-          (s: { session_id: string; title?: string; created_at?: string }) => ({
+          (s: { session_id: string; title?: string; created_at?: string; updated_at?: string }) => ({
             id: s.session_id,
             title: s.title || "Chat",
             createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
+            updatedAt: s.updated_at ? new Date(s.updated_at).getTime() : undefined,
           })
         );
-        setChatSessions([...fetched]);
+        setChatSessions(prev => {
+          const newCapsule: ChatSession = {
+            id: newSessionId,
+            title: "New Chat",
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          };
+          // Previous chat stays second (just left, not yet saved so backend may have old order)
+          const previousSession = prev.find(s => s.id === previousSid) ?? fetched.find(s => s.id === previousSid);
+          const rest = sortSessionsNewestFirst(
+            fetched.filter(s => s.id !== newSessionId && s.id !== previousSid)
+          );
+          if (previousSession) {
+            const fromApi = fetched.find(s => s.id === previousSid);
+            const title = fromApi?.title ?? previousSession.title;
+            return [newCapsule, { ...previousSession, title }, ...rest];
+          }
+          return [newCapsule, ...rest];
+        });
       } catch (err) {
         console.warn("Failed to refetch sessions:", err);
       }
@@ -1385,17 +1410,18 @@ useEffect(() => {
         if (!res.ok) return;
         const data = await res.json();
         const fetched: ChatSession[] = (data?.sessions ?? []).map(
-          (s: { session_id: string; title?: string; created_at?: string }) => ({
+          (s: { session_id: string; title?: string; created_at?: string; updated_at?: string }) => ({
             id: s.session_id,
             title: s.title || "Chat",
             createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
+            updatedAt: s.updated_at ? new Date(s.updated_at).getTime() : undefined,
           })
         );
         setChatSessions(prev => {
-          const merged = fetched;
+          const merged = sortSessionsNewestFirst(fetched);
           // If current list has a session not in fetched (e.g. new unsaved), prepend it
           const onlyInPrev = prev.filter(s => !fetched.some(f => f.id === s.id));
-          return [...onlyInPrev, ...merged];
+          return sortSessionsNewestFirst([...onlyInPrev, ...merged]);
         });
       } catch (err) {
         console.warn("Failed to refresh sessions:", err);
@@ -1506,12 +1532,13 @@ useEffect(() => {
     const existing = prev.find(s => s.id === sessionId);
     const rest = prev.filter(s => s.id !== sessionId);
     if (existing) {
-      return [{ ...existing, createdAt: now }, ...rest];
+      return [{ ...existing, updatedAt: now }, ...rest];
     }
     const newCapsule: ChatSession = {
       id: sessionId,
       title: "New Chat",
       createdAt: now,
+      updatedAt: now,
     };
     return [newCapsule, ...rest];
   });
