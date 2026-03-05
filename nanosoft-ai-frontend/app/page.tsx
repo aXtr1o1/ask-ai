@@ -12,6 +12,7 @@ interface Message {
   role: "user" | "ai" | "error";
   text: string;
   streaming?: boolean;
+  isLargeDataset?: boolean;
 }
 interface FolderItem { id: string; name: string; }
 interface ChatSession { id: string; title: string; createdAt: number; }
@@ -90,6 +91,23 @@ const KV_LINE_RE   = /^\*{0,2}([A-Za-z][A-Za-z ]{1,28})\*{0,2}:[ \t]+(.+)$/;
 // Multi-KV on one line: "Key: Val, Key: Val"
 const KV_BOUND_SRC = String.raw`(?:^|(?:,\s+))([A-Za-z][A-Za-z ]{0,25}?):\s*`;
 
+// ── Columns to hide from large dataset display (sensitive data) ──
+const HIDDEN_COLUMNS = new Set([
+  'id',
+  'user_id',
+  'userid',
+  'user_name',
+  'username',
+  'createdat',
+  'created_at',
+  'updatedat',
+  'updated_at',
+]);
+
+function isHiddenColumn(col: string): boolean {
+  return HIDDEN_COLUMNS.has(col.toLowerCase().replace(/[\s_]/g, ""));
+}
+
 // ── Status badge renderer ─────────────────────────────────────────────────────
 function badge(val: string): string {
   const v   = val.toLowerCase();
@@ -107,6 +125,7 @@ function isBadgeCol(col: string): boolean {
 }
 
 // ── Build HTML <table> from rows ──────────────────────────────────────────────
+// ── Build HTML <table> from rows - SMALL DATA TABLES ──
 function buildTable(rows: Record<string, string>[], cols?: string[]): string {
   if (!rows.length) return "";
 
@@ -120,16 +139,343 @@ function buildTable(rows: Record<string, string>[], cols?: string[]): string {
   const thead = `<thead><tr>${allCols.map(c => `<th>${esc(c)}</th>`).join("")}</tr></thead>`;
 
   const tbody = `<tbody>${rows.map((row, ri) =>
-    `<tr${ri % 2 === 1 ? ' class="row-even"' : ""}>${allCols.map(col => {
+    `<tr>${allCols.map(col => {
       const val  = row[col] ?? "—";
       const cell = isBadgeCol(col) ? badge(val) : esc(val);
       return `<td>${cell}</td>`;
     }).join("")}</tr>`
   ).join("")}</tbody>`;
 
-  const tfoot = `<tfoot><tr><td colspan="${allCols.length}" class="table-footer">${rows.length} row${rows.length !== 1 ? "s" : ""}</td></tr></tfoot>`;
+  const tfoot = `<tfoot><tr><td colspan="${allCols.length}" style="text-align:left;padding-left:12px;padding-right:12px;display:flex;justify-content:space-between;align-items:center;gap:20px"><span>Columns: ${allCols.length}</span><span>Total: ${rows.length} records</span></td></tr></tfoot>`;
 
   return `<div class="table-wrapper"><table class="ai-table">${thead}${tbody}${tfoot}</table></div>`;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  EXTRACT RESPONSE CONTENT (Remove session_id wrapper)
+// ══════════════════════════════════════════════════════════════════════════════
+
+function extractResponseContent(text: string): string {
+  try {
+    const parsed = JSON.parse(text);
+    
+    // If wrapper has session_id + response, extract just the response
+    if (parsed.session_id && parsed.response) {
+      return String(parsed.response);
+    }
+    
+    // If it has a response field, use it
+    if (parsed.response) {
+      return String(parsed.response);
+    }
+    
+    // Otherwise return original text
+    return text;
+  } catch {
+    // Not JSON, return as-is
+    return text;
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  LARGE DATASET HANDLER (SEPARATE FUNCTION)
+//  Handles >100 records: Converts to table + displays context summary
+// ══════════════════════════════════════════════════════════════════════════════
+
+function renderLargeDataset(text: string): string | null {
+  // ─────────────────────────────────────────
+  // Hidden columns
+  // ─────────────────────────────────────────
+  const HIDDEN_COLUMNS = new Set([
+    "id",
+    "user_id",
+    "userid",
+    "user_name",
+    "username",
+    "createdat",
+    "created_at",
+    "updatedat",
+    "updated_at",
+  ]);
+
+  function isHiddenColumn(col: string) {
+    return HIDDEN_COLUMNS.has(col.toLowerCase().replace(/[\s_]/g, ""));
+  }
+
+  // ─────────────────────────────────────────
+  // Status badge columns
+  // ─────────────────────────────────────────
+  const BADGE_COLS = new Set([
+    "status",
+    "condition",
+    "state",
+    "wostatus",
+    "ppstatus",
+    "ppmstatus",
+  ]);
+
+  function isBadgeCol(col: string) {
+    return BADGE_COLS.has(col.toLowerCase().replace(/[\s_]/g, ""));
+  }
+
+  function badge(val: string) {
+    const v = val.toLowerCase();
+    const cls =
+      ["online", "open", "good", "active", "operational", "serviceable", "completed"].includes(v)
+        ? "status-online"
+        : ["offline", "closed", "inactive", "fault", "immobilized", "cancelled"].includes(v)
+        ? "status-offline"
+        : "status-neutral";
+    return `<span class="status-badge ${cls}">${escapeHTML(val)}</span>`;
+  }
+
+  // ─────────────────────────────────────────
+  // Escape HTML
+  // ─────────────────────────────────────────
+  function escapeHTML(s: string) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
+
+  // ─────────────────────────────────────────
+  // Parse response JSON
+  // ─────────────────────────────────────────
+  let parsed: any;
+
+  try {
+    parsed = JSON.parse(text);
+    if (parsed.response && typeof parsed.response === "string") {
+      parsed = JSON.parse(parsed.response);
+    }
+  } catch {
+    return null;
+  }
+
+  // ─────────────────────────────────────────
+  // Detect large dataset
+  // ─────────────────────────────────────────
+  let records = [];
+
+  if (parsed.type === "large_dataset" && Array.isArray(parsed.records)) {
+    records = parsed.records;
+  } else if (Array.isArray(parsed.records) && parsed.records.length > 100) {
+    records = parsed.records;
+  } else if (Array.isArray(parsed.p_list) && parsed.p_list.length > 100) {
+    records = parsed.p_list;
+  } else if (Array.isArray(parsed.data) && parsed.data.length > 100) {
+    records = parsed.data;
+  } else {
+    return null;
+  }
+
+  const context = parsed.context_summary || `Dataset contains ${records.length} records`;
+
+  if (!records.length) {
+    return `<div class="large-dataset-context">${escapeHTML(context)}</div>`;
+  }
+
+  // ─────────────────────────────────────────
+  // Collect columns dynamically
+  // ─────────────────────────────────────────
+  const columns = new Set<string>();
+
+  records.forEach((r: any) => {
+    if (!r || typeof r !== "object") return;
+    Object.keys(r).forEach(k => {
+      if (!isHiddenColumn(k)) columns.add(k);
+    });
+  });
+
+  const cols = Array.from(columns);
+
+  // ─────────────────────────────────────────
+  // Build table header
+  // ─────────────────────────────────────────
+  let head = "<thead><tr>";
+  cols.forEach(c => {
+    head += `<th>${escapeHTML(c)}</th>`;
+  });
+  head += "</tr></thead>";
+
+  // ─────────────────────────────────────────
+  // Build rows
+  // ─────────────────────────────────────────
+  let body = "<tbody>";
+
+  records.forEach((record: any) => {
+    body += "<tr>";
+    cols.forEach(col => {
+      const val = record[col];
+      let cell = "—";
+
+      if (val === null || val === undefined) {
+        cell = "—";
+      } else if (typeof val === "boolean") {
+        cell = `<span style="font-weight:600;color:${val ? "#22c55e" : "#ef44440"}">
+                ${val ? "✓" : "✗"}
+                </span>`;
+      } else if (typeof val === "object") {
+        const str = JSON.stringify(val);
+        cell = escapeHTML(str.length > 50 ? str.slice(0, 50) + "…" : str);
+      } else {
+        const str = String(val);
+        const display = str.length > 100 ? str.slice(0, 100) + "…" : str;
+
+        if (isBadgeCol(col)) {
+          cell = badge(str);
+        } else {
+          cell = escapeHTML(display);
+        }
+      }
+
+      body += `<td>${cell}</td>`;
+    });
+    body += "</tr>";
+  });
+
+  body += "</tbody>";
+
+  // ─────────────────────────────────────────
+  // Footer summary
+  // ─────────────────────────────────────────
+  const footer = `
+  <tfoot>
+    <tr>
+      <td colspan="${cols.length}" style="text-align:left;padding-left:12px;padding-right:12px;display:flex;justify-content:space-between;align-items:center;gap:20px">
+        <span>Columns: ${cols.length}</span>
+        <span>Total: ${records.length} records</span>
+      </td>
+    </tr>
+  </tfoot>
+  `;
+
+  // ─────────────────────────────────────────
+  // Final HTML
+  // ─────────────────────────────────────────
+  const table = `
+  <div class="large-dataset-wrapper">
+    <div class="large-dataset-context">
+      ${escapeHTML(context)}
+    </div>
+    <table class="large-dataset-table">
+      ${head}
+      ${body}
+      ${footer}
+    </table>
+  </div>
+  `;
+
+  return table;
+}
+
+function formatLargeDatasetTable(largeDataData: any): string {
+  let records = largeDataData.records || [];
+  const context = largeDataData.context_summary || "";
+  
+  // Handle case where records might not be an array
+  if (!Array.isArray(records)) {
+    console.warn("⚠️ Large dataset records is not an array:", typeof records);
+    records = [];
+  }
+  
+  if (records.length === 0) {
+    return `<div class="large-dataset-context"><strong>Summary:</strong> ${esc(context)}</div>`;
+  }
+  
+  console.log(`✅ Formatting large dataset: ${records.length} records, context length: ${context.length}`);
+  
+  // ═══════════════════════════════════════════════════════════════════
+  // DYNAMICALLY COLLECT ALL COLUMNS FROM RECORDS (EXCLUDING HIDDEN)
+  // ═══════════════════════════════════════════════════════════════════
+  
+  const allKeys = new Set<string>();
+  records.forEach((r: any) => {
+    if (r && typeof r === 'object') {
+      Object.keys(r).forEach(k => {
+        // Skip hidden/sensitive columns
+        if (!isHiddenColumn(k)) {
+          allKeys.add(k);
+        }
+      });
+    }
+  });
+  
+  // Convert Set to array while preserving order
+  const colsToShow: string[] = Array.from(allKeys);
+  
+  console.log(`📊 Dynamic columns detected: ${colsToShow.length} columns (hidden: ${records[0] ? Object.keys(records[0]).filter(k => isHiddenColumn(k)).length : 0}):`, colsToShow.slice(0, 10));
+  
+  // ═══════════════════════════════════════════════════════════════════
+  // BUILD HTML TABLE STRUCTURE DYNAMICALLY - USING CSS CLASSES
+  // ═══════════════════════════════════════════════════════════════════
+  
+  // 1. Create table header with ALL columns (excluding hidden)
+  let tableHeadHTML = "<thead><tr>";
+  colsToShow.forEach(col => {
+    tableHeadHTML += `<th>${esc(col)}</th>`;
+  });
+  tableHeadHTML += "</tr></thead>";
+  
+  // 2. Create table body rows dynamically
+  let tableBodyHTML = "<tbody>";
+  records.forEach((record: any, rowIndex: number) => {
+    if (!record || typeof record !== 'object') return;
+    
+    tableBodyHTML += `<tr>`;
+    
+    // Populate visible columns for each row (skip hidden columns)
+    colsToShow.forEach(col => {
+      const val = record[col];
+      let cellContent = "—";
+      
+      if (val === null || val === undefined) {
+        cellContent = "—";
+      } else if (typeof val === "boolean") {
+        cellContent = `<span style="font-weight:600;color:${val ? '#22c55e' : '#ef4444'};">${val ? '✓' : '✗'}</span>`;
+      } else if (typeof val === "object") {
+        const str = JSON.stringify(val);
+        cellContent = esc(str.length > 50 ? str.substring(0, 50) + "…" : str);
+      } else {
+        const strVal = String(val);
+        const displayVal = strVal.length > 100 ? strVal.substring(0, 100) + "…" : strVal;
+        
+        // Apply status badge styling for status-like columns
+        if (isBadgeCol(col) && val) {
+          cellContent = badge(strVal);
+        } else {
+          cellContent = esc(displayVal);
+        }
+      }
+      
+      tableBodyHTML += `<td>${cellContent}</td>`;
+    });
+    
+    tableBodyHTML += "</tr>";
+  });
+  tableBodyHTML += "</tbody>";
+  
+  // 3. Create table footer with summary - ALIGN RIGHT
+  const tfoot = `<tfoot><tr><td colspan="${colsToShow.length}" style="text-align: right; padding-right: 14px;">Total: ${records.length} record${records.length !== 1 ? "s" : ""} | ${colsToShow.length} column${colsToShow.length !== 1 ? "s" : ""}</td></tr></tfoot>`;
+  
+  // 4. Complete table HTML with CSS classes for styling
+  const tableHTML = `<div class="large-dataset-wrapper">
+    <table class="large-dataset-table">
+      ${tableHeadHTML}
+      ${tableBodyHTML}
+      ${tfoot}
+    </table>
+  </div>`;
+  
+  // 5. Add context summary above table - JUST THE CONTEXT ONLY
+  const contextHTML = context 
+    ? `<div class="large-dataset-context">${esc(context)}</div>` 
+    : "";
+  
+  const fullHTML = contextHTML + tableHTML;
+  console.log(` HTML generated - length: ${fullHTML.length}, has table-wrapper: ${fullHTML.includes('large-dataset-wrapper')}`);
+  return fullHTML;
 }
 
 // ── Render plain bullet list ──────────────────────────────────────────────────
@@ -241,11 +587,28 @@ function parsePipeTable(lines: string[]): { cols: string[]; rows: Record<string,
 //    Numbered list         → ORDERED LIST
 //    Prose                 → paragraph
 // ══════════════════════════════════════════════════════════════════════════════
+
+// Remove emoji from text (especially from "Found X records..." message)
+function removeEmoji(text: string): string {
+  // Only remove emoji from the FIRST line (Found X records message)
+  const lines = text.split("\n");
+  if (lines.length > 0) {
+    // Remove emoji from first line only
+    const firstLine = lines[0].replace(/[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{27BF}]|[\u{1F600}-\u{1F64F}]|[\u{1F680}-\u{1F6FF}]/gu, '').trim();
+    lines[0] = firstLine;
+  }
+  return lines.join("\n");
+}
+
 function formatOutput(text: string): string {
   if (!text.trim()) return "";
 
+  // Remove emojis from the first line only (Found X records message)
+  text = removeEmoji(text);
+  
   const allLines = text.split("\n");
   let   html     = "";
+
   let   i        = 0;
 
   while (i < allLines.length) {
@@ -259,10 +622,19 @@ function formatOutput(text: string): string {
     }
 
     // ── A: Pipe table | col | col | ────────────────────────────────────────
-    if (/^\|.+\|$/.test(trimmed)) {
+    // Also match col | col | col (without leading/trailing pipes) → convert to markdown table
+    if (/^\|.+\|$/.test(trimmed) || /^[^|]*\|[^|]*\|/.test(trimmed)) {
       const block: string[] = [];
-      while (i < allLines.length && /^\|.+\|$/.test(allLines[i].trim())) {
-        block.push(allLines[i].trim()); i++;
+      while (i < allLines.length) {
+        const t = allLines[i].trim();
+        if (/^\|.+\|$/.test(t) || /^[^|]*\|[^|]*\|/.test(t)) {
+          // Convert "col | col | col" to "| col | col | col |" format
+          const normalized = t.startsWith('|') ? t : '| ' + t.split('|').map(c => c.trim()).join(' | ') + ' |';
+          block.push(normalized);
+          i++;
+        } else {
+          break;
+        }
       }
       const parsed = parsePipeTable(block);
       html += parsed
@@ -540,7 +912,7 @@ export default function Home() {
   const inputRef         = useRef<HTMLTextAreaElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const menuRef          = useRef<HTMLDivElement>(null);
-  const socketsRef = useRef<Map<string, WebSocket>>(new Map());
+  const wsRef            = useRef<WebSocket | null>(null);  // single WebSocket for the whole tab
   const sessionIdRef = useRef<string>(sessionId);
   const wsConnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectDelayRef = useRef(2000);
@@ -627,14 +999,12 @@ export default function Home() {
   // ── Start pinging only the ACTIVE session socket ──────────────────────────
   const connectWSRef = useRef<() => void>(() => {});  // forward ref for connectWS
 
-  const startPingForActiveSession = () => {
+  const startPing = () => {
     // Clear any previous ping interval
     if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
 
     pingRef.current = setInterval(() => {
-      if (!userActiveRef.current) return; // user idle → don't ping anything
-      const activeSid = sessionIdRef.current;
-      const ws = socketsRef.current.get(activeSid);
+      const ws = wsRef.current;
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send("ping");
       }
@@ -664,34 +1034,20 @@ export default function Home() {
 
   // ── User activity detection ───────────────────────────────────────────────
   const markUserActive = () => {
-    const wasIdle = !userActiveRef.current;
     userActiveRef.current = true;
 
     // Reset idle timer
     if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
     idleTimerRef.current = setTimeout(() => {
       userActiveRef.current = false;
-      // Stop pinging — backend will close idle sockets after its timeout
-      if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
-      // Save current session to backend before going idle
+      // Save current session to backend before going idle (keep WebSocket alive)
       const idleSid = sessionIdRef.current;
       const idleMsgs = sessionMessagesRef.current.get(idleSid);
       if (idleMsgs && idleMsgs.filter(m => m.role !== "error").length > 0) {
         saveChatHistoryRef.current(idleSid, idleMsgs);
       }
-      console.log("💤 User idle — stopped pinging, saved session, sockets will auto-close");
+      console.log("💤 User idle — saved session, keeping WebSocket connection open");
     }, IDLE_TIMEOUT);
-
-    // If user was idle and came back, reconnect the active session if needed
-    if (wasIdle) {
-      const activeSid = sessionIdRef.current;
-      const ws = socketsRef.current.get(activeSid);
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        console.log("🔄 User active again — reconnecting...");
-        connectWSRef.current();
-      }
-      startPingForActiveSession();
-    }
   };
 
   useEffect(() => {
@@ -708,10 +1064,14 @@ export default function Home() {
   const WS_CONNECT_TIMEOUT_MS = 15000; // 15s: fail fast in production if proxy/backend is slow
 
   const connectWS = () => {
-    const sid = sessionIdRef.current;
+    // If there's already an open or connecting socket, reuse it
+    if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
+
     setWsConnectionState('connecting');
     const ws = new WebSocket(getWsUrl());
-    socketsRef.current.set(sid, ws);
+    wsRef.current = ws;
 
     wsConnectTimeoutRef.current = setTimeout(() => {
       if (ws.readyState === WebSocket.CONNECTING) {
@@ -729,8 +1089,8 @@ export default function Home() {
       }
       reconnectDelayRef.current = 2000;
       setWsConnectionState('connected');
-      console.log("✅ WebSocket connected:", sid);
-      startPingForActiveSession();
+      console.log("✅ WebSocket connected");
+      startPing();
     };
 
     // ── Every message from backend ────────────────────────────────────────
@@ -746,12 +1106,36 @@ export default function Home() {
         // "[DONE]" = end of this response → finalize bubble, stay connected
         if (jsonStr.trim() === "[DONE]" || jsonStr.trim() === "__END__") {
           const finalText = accRef.current;
+          let processedText = finalText;
+          
+          // 🔑 FIRST: Extract response content (removes session_id wrapper)
+          const cleanedText = extractResponseContent(finalText);
+          
+          // 🔑 SECOND: TRY RENDERING AS LARGE DATASET TABLE FIRST
+          const largeDatasetHTML = renderLargeDataset(cleanedText);
+          
+          if (largeDatasetHTML) {
+            // Successfully rendered as large dataset table
+            processedText = largeDatasetHTML;
+            console.log("✅ [DONE] Rendered as large dataset table");
+          } else {
+            // Not a large dataset → try to format as text/table
+            try {
+              processedText = formatOutput(cleanedText);
+              console.log("📝 [DONE] Formatted as text output");
+            } catch (err) {
+              console.log("📝 [DONE] Using raw text", err);
+              processedText = finalText;
+            }
+          }
+          
           setMessages(prev => {
             const u = [...prev];
             const l = u.length - 1;
-            if (u[l]?.role === "ai") u[l] = { role: "ai", text: finalText, streaming: false };
+            if (u[l]?.role === "ai") u[l] = { role: "ai", text: processedText, streaming: false };
             // Persist to per-session store so switching sessions keeps history
-            sessionMessagesRef.current.set(sid, u);
+            const activeSid = sessionIdRef.current;
+            sessionMessagesRef.current.set(activeSid, u);
             return u;
           });
           accRef.current = "";          // reset for next message
@@ -760,19 +1144,29 @@ export default function Home() {
           return;
         }
 
-        const part = extractText(JSON.parse(jsonStr));
+        const part = jsonStr;
         if (part) {
           accRef.current += part;
           const snap = accRef.current;
+          
+          // Extract text for display during streaming
+          let displayText = snap;
+          try {
+            displayText = extractText(JSON.parse(snap));
+          } catch {
+            // If can't parse yet (incomplete JSON), show what we have
+            displayText = snap;
+          }
+          
           setMessages(prev => {
             const u = [...prev];
             const l = u.length - 1;
             // If last message is already our streaming AI bubble → update it
             if (u[l]?.role === "ai" && u[l]?.streaming === true) {
-              u[l] = { role: "ai", text: snap, streaming: true };
+              u[l] = { role: "ai", text: displayText, streaming: true };
             } else {
               // First chunk → create the AI bubble now (only once)
-              u.push({ role: "ai", text: snap, streaming: true });
+              u.push({ role: "ai", text: displayText, streaming: true });
             }
             return u;
           });
@@ -785,11 +1179,11 @@ export default function Home() {
         clearTimeout(wsConnectTimeoutRef.current);
         wsConnectTimeoutRef.current = null;
       }
-      setWsConnectionState('failed');
-      console.warn("⚠️ WebSocket closed:", sid);
-      socketsRef.current.delete(sid);
-
-      if (sid === sessionIdRef.current) {
+      // Only react if this is the active socket
+      if (wsRef.current === ws) {
+        wsRef.current = null;
+        setWsConnectionState('failed');
+        console.warn("⚠️ WebSocket closed");
         if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
         setIsLoading(false);
         if (!event.wasClean && userActiveRef.current) {
@@ -822,10 +1216,6 @@ export default function Home() {
 useEffect(() => {
   if (!authChecked) return;
 
-  // Capture ref value for cleanup
-
-  // Capture ref value for cleanup
-  const sockets = socketsRef.current;
   connectWS();
 
 
@@ -833,8 +1223,10 @@ useEffect(() => {
     if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
     if (idleTimerRef.current) { clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
     if (wsConnectTimeoutRef.current) { clearTimeout(wsConnectTimeoutRef.current); wsConnectTimeoutRef.current = null; }
-    sockets.forEach(ws => ws.close());
-    sockets.clear();
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
   };
 },[authChecked]);
 
@@ -878,16 +1270,13 @@ useEffect(() => {
   };
 
   const handleNewChat = async () => {
-    // Persist current session messages to ref before leaving
-    sessionMessagesRef.current.set(sessionId, messages);
-
-    // Stop pinging and disconnect current session's socket so backend saves on disconnect
-    if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
-    const currentWs = socketsRef.current.get(sessionId);
-    if (currentWs && currentWs.readyState === WebSocket.OPEN) {
-      currentWs.close();
-      socketsRef.current.delete(sessionId);
+    if (isLoading) {
+      setMessages(prev => [...prev, { role: "error", text: "Please wait for the current response to finish before starting a new chat." }]);
+      return;
     }
+    // Persist current session messages to ref before leaving
+    const previousSid = sessionId; // chat we're leaving (may have been typed in, so keep it near top after refetch)
+    sessionMessagesRef.current.set(previousSid, messages);
 
     setShowFeaturePlaceholder(false);
     setMessages([]);
@@ -898,7 +1287,18 @@ useEffect(() => {
     setSessionId(newSessionId);
     sessionIdRef.current = newSessionId;
 
-    // Give backend a moment to persist on disconnect, then refetch session list for sidebar
+    // Immediately show this new chat at the top of the history list
+    setChatSessions(prev => {
+      const existing = prev.filter(s => s.id !== newSessionId);
+      const newCapsule: ChatSession = {
+        id: newSessionId,
+        title: "New Chat",
+        createdAt: Date.now(),
+      };
+      return [newCapsule, ...existing];
+    });
+
+    // Refetch session list; new chat at top, previous chat (just left) second, rest by created_at
     const refetchSessions = async () => {
       try {
         const res = await fetch(`${baseUrl}/api/session`, {
@@ -921,14 +1321,51 @@ useEffect(() => {
       }
     };
     setTimeout(() => refetchSessions(), 400);
+  };
 
-    // Open a fresh socket for the new session
-    connectWS();
+  // ── Process loaded messages: convert raw JSON to formatted tables ─────────
+  const processLoadedMessages = (msgs: Message[]): Message[] => {
+    return msgs.map(m => {
+      if (m.role !== "ai") return m;
+      
+      const text = m.text || "";
+      
+      // Check if already formatted (contains HTML tags)
+      if (text.includes('<table') || text.includes('<div') || text.includes('large-dataset')) {
+        console.log("✅ [HISTORY] Message already formatted - skipping");
+        return m;
+      }
+      
+      // Extract response content (removes session_id wrapper)
+      const cleanedText = extractResponseContent(text);
+      
+      // Try to render as large dataset table first
+      const largeDatasetHTML = renderLargeDataset(cleanedText);
+      if (largeDatasetHTML) {
+        console.log("✅ [HISTORY] Formatted as large dataset table");
+        return { ...m, text: largeDatasetHTML };
+      }
+      
+      // Try to parse as JSON and format as text
+      try {
+        const formattedText = formatOutput(cleanedText);
+        console.log("✅ [HISTORY] Formatted as text output");
+        return { ...m, text: formattedText };
+      } catch (err) {
+        // Not JSON → treat as already formatted or plain text
+        console.log("📝 [HISTORY] Not JSON - keeping as is");
+        return m;
+      }
+    });
   };
 
   // ── Switch to an existing session ─────────────────────────────────────────
   const switchSession = async (targetSid: string) => {
     if (targetSid === sessionId) return; // already active
+    if (isLoading) {
+      setMessages(prev => [...prev, { role: "error", text: "Please wait for the current response to finish before switching chats." }]);
+      return;
+    }
 
     // Capture the currently active session ID
     const currentSid = sessionIdRef.current;
@@ -936,17 +1373,7 @@ useEffect(() => {
     // Save current messages
     sessionMessagesRef.current.set(currentSid, messages);
 
-    // Stop pinging old session
-    if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
-
-    // Disconnect WebSocket for the old session so backend can persist and clean up
-    const currentWs = socketsRef.current.get(currentSid);
-    if (currentWs && currentWs.readyState === WebSocket.OPEN) {
-      currentWs.close();
-      socketsRef.current.delete(currentSid);
-    }
-
-    // After closing the socket, refresh sessions so updated display names from backend are shown
+    // Refresh from backend to get latest titles; do not move clicked chat to top (just highlight)
     const refreshSessions = async () => {
       if (!loggedInUser) return;
       try {
@@ -964,7 +1391,12 @@ useEffect(() => {
             createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
           })
         );
-        setChatSessions([...fetched]);
+        setChatSessions(prev => {
+          const merged = fetched;
+          // If current list has a session not in fetched (e.g. new unsaved), prepend it
+          const onlyInPrev = prev.filter(s => !fetched.some(f => f.id === s.id));
+          return [...onlyInPrev, ...merged];
+        });
       } catch (err) {
         console.warn("Failed to refresh sessions:", err);
       }
@@ -980,7 +1412,8 @@ useEffect(() => {
     // Check local cache first
     const cached = sessionMessagesRef.current.get(targetSid);
     if (cached && cached.length > 0) {
-      setMessages(cached);
+      const processed = processLoadedMessages(cached);
+      setMessages(processed);
     } else {
       // Fetch from backend
       setHistoryLoading(true);
@@ -998,8 +1431,9 @@ useEffect(() => {
           if (entry.query) history.push({ role: "user", text: entry.query });
           if (entry.assistant) history.push({ role: "ai", text: entry.assistant });
         }
-        sessionMessagesRef.current.set(targetSid, history);
-        setMessages(history);
+        const processed = processLoadedMessages(history);
+        sessionMessagesRef.current.set(targetSid, processed);
+        setMessages(processed);
       } catch (err) {
         console.warn("Failed to fetch session history:", err);
         setMessages([]);
@@ -1008,12 +1442,11 @@ useEffect(() => {
       }
     }
 
-    // Reconnect WS for the target session if not already open
-    const ws = socketsRef.current.get(targetSid);
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
+    // Ensure WebSocket connection is available for the target session
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
       connectWS();
     } else {
-      startPingForActiveSession();
+      startPing();
     }
   };
 
@@ -1030,8 +1463,10 @@ useEffect(() => {
 
     if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
     if (idleTimerRef.current) { clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
-    socketsRef.current.forEach(ws => ws.close());
-    socketsRef.current.clear();
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
 
     localStorage.removeItem("loggedInUser");
     router.replace("/login");
@@ -1057,7 +1492,7 @@ useEffect(() => {
   if (!input.trim() || isLoading) return;
   const userText = input.trim();
 
-  const ws = socketsRef.current.get(sessionId);
+  const ws = wsRef.current;
 
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     console.warn("Socket not ready for session:", sessionId);
@@ -1065,16 +1500,20 @@ useEffect(() => {
     return;
   }
 
-  // Ensure a chat history capsule exists for this session
+  // Ensure capsule exists and move this session to top when user types (content changed)
+  const now = Date.now();
   setChatSessions(prev => {
-    if (prev.some(s => s.id === sessionId)) return prev;
+    const existing = prev.find(s => s.id === sessionId);
+    const rest = prev.filter(s => s.id !== sessionId);
+    if (existing) {
+      return [{ ...existing, createdAt: now }, ...rest];
+    }
     const newCapsule: ChatSession = {
       id: sessionId,
-      title: "New Chat",        // common name for all sessions
-      createdAt: Date.now()
+      title: "New Chat",
+      createdAt: now,
     };
-    // Put newest at the top
-    return [newCapsule, ...prev];
+    return [newCapsule, ...rest];
   });
 
   setShowFeaturePlaceholder(false);
@@ -1364,9 +1803,9 @@ useEffect(() => {
                         </div>
 
                       ) : (
-                        /* ── Complete: run formatOutput() → HTML table ── */
+                        /* ── Complete: already formatted at [DONE] time ── */
                         <div className="ai-bubble">
-                         <div dangerouslySetInnerHTML={{ __html: formatOutput(msg.text) }} />
+                          <div dangerouslySetInnerHTML={{ __html: msg.text }} />
                         </div>
                       )}
 

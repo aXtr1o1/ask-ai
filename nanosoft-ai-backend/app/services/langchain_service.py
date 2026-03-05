@@ -73,15 +73,29 @@ class LangChainService:
                     args["user_name"] = user_name
 
                     # Override limit for count queries — LLM often passes limit=1 incorrectly
+                    # Also: for LIST queries, ALWAYS clear limit to get all records (so large_dataset detection works)
                     user_query = ""
                     for m in reversed(messages):
                         if isinstance(m, HumanMessage):
                             user_query = (m.content or "") if isinstance(m.content, str) else ""
                             break
                     count_patterns = ("how many", "total", "number of", "count of", "count ", "how many ")
-                    if any(p in user_query.lower() for p in count_patterns) and args.get("limit") is not None:
+                    list_patterns = ("list", "show me", "get ", "fetch ", "display", "all assets", "all complaints", "all bdm", "all ppm")
+                    
+                    is_count_query_check = any(p in user_query.lower() for p in count_patterns)
+                    is_list_query_check = any(p in user_query.lower() for p in list_patterns)
+                    
+                    # For list queries: ALWAYS clear limit to enable large_dataset detection
+                    # This ensures we get ALL records from DB, not just first 100
+                    if is_list_query_check:
+                        old_limit = args.get("limit")
+                        args["limit"] = None
+                        logger.info("📋 List query detected — %s limit=%s to enable large_dataset detection (>100 records)", 
+                                  "clearing" if old_limit else "ensuring no", old_limit)
+                    elif is_count_query_check and args.get("limit") is not None:
                         logger.info("📊 Count query detected — clearing limit=%s", args.get("limit"))
                         args["limit"] = None
+                    
                     tool_result = tool_fn.invoke(dict(args))
                     
                     # Parse tool result — tools return JSON string, not dict
@@ -156,6 +170,43 @@ class LangChainService:
                     p_list_for_model = p_list if len(p_list) <= MAX_DISPLAY else p_list[:MAX_DISPLAY]
                     is_large_result = len(p_list) > MAX_DISPLAY
 
+                    # ⭐ LARGE DATASET (>100): Send raw data to frontend + get context only from model
+                    if is_large_result:
+                        logger.info("📌 Large dataset (%d records) → Sending raw data to frontend + context from model only", len(p_list))
+                        
+                        messages.append(
+                            ToolMessage(
+                                content=json.dumps({
+                                    "message": f"{display_count} records found (dataset too large for full processing)",
+                                    "records_returned": len(p_list),
+                                    "total_count": display_count,
+                                    "is_large_result": True,
+                                    "records": []  # No records to model
+                                }),
+                                tool_call_id=tool_call["id"]
+                            )
+                        )
+                        
+                        # Get context/summary from model only
+                        messages.append(HumanMessage(content="Provide a brief context/summary of the above query result. Do NOT list individual records. Keep it concise."))
+                        context_ai_msg = self.model.invoke(messages)
+                        context_summary = context_ai_msg.content
+                        
+                        logger.info("✅ Context summary generated for large dataset")
+                        logger.info("🚀 [IMPORTANT] Returning large_dataset JSON directly to frontend - NO STEP 3 PROCESSING")
+                        # Return immediately with large_dataset JSON format
+                        large_dataset_response = json.dumps({
+                            "type": "large_dataset",
+                            "total_count": display_count,
+                            "records_count": len(p_list),
+                            "context_summary": context_summary,
+                            "records": p_list  # Raw data to frontend
+                        })
+                        logger.info("✅ Large dataset JSON prepared: %d records", len(p_list))
+                        return large_dataset_response, messages
+
+                    # ✅ SMALL DATASET (≤100): Process normally through model
+                    logger.info("📋 Small dataset (%d records) → Processing through AI model", len(p_list))
                     messages.append(
                         ToolMessage(
                             content=json.dumps({
@@ -267,6 +318,39 @@ class LangChainService:
                     p_list_for_model = p_list if len(p_list) <= MAX_DISPLAY else p_list[:MAX_DISPLAY]
                     is_large_result = len(p_list) > MAX_DISPLAY
 
+                    # ⭐ LARGE DATASET (>100): Send raw data to frontend + get context only from model
+                    if is_large_result:
+                        logger.info("📌 Large dataset (%d records) → Sending raw data to frontend + context from model only", len(p_list))
+                        
+                        messages.append(
+                            ToolMessage(
+                                content=json.dumps({
+                                    "message": f"{display_count} records found (dataset too large for full processing)",
+                                    "records_returned": len(p_list),
+                                    "total_count": display_count,
+                                    "is_large_result": True,
+                                    "records": []  # No records to model
+                                }),
+                                tool_call_id=fake_tool_id
+                            )
+                        )
+                        
+                        # Get context/summary from model only
+                        messages.append(HumanMessage(content="Provide a brief context/summary of the above query result. Do NOT list individual records. Keep it concise."))
+                        context_ai_msg = self.model.invoke(messages)
+                        context_summary = context_ai_msg.content
+                        
+                        logger.info("✅ Context summary generated for large dataset")
+                        return json.dumps({
+                            "type": "large_dataset",
+                            "total_count": display_count,
+                            "records_count": len(p_list),
+                            "context_summary": context_summary,
+                            "records": p_list  # Raw data to frontend
+                        }), messages
+
+                    # ✅ SMALL DATASET (≤100): Process normally through model
+                    logger.info("📋 Small dataset (%d records) → Processing through AI model [FORCED]", len(p_list))
                     messages.append(
                         ToolMessage(
                             content=json.dumps({

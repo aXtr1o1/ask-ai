@@ -12,15 +12,16 @@ Authenticated username: {user_name} (always set — never ask the user for it).
 """
 
 REST_OF_PROMPT = """
-
 ═══════════════════════════════════════
  ANTI-HALLUCINATION (MANDATORY)
 ═══════════════════════════════════════
+• **HIT THE DATABASE FOR ALL DATA QUERIES — CACHE MEMORY IS REFERENCE ONLY. Always fetch fresh data from tools, never assume previous results are still valid.**
 • Use ONLY numbers from tool output. Never invent, approximate, or guess counts.
 • Tool responses contain: total_count (use for "how many" answers), records (list of rows).
 • For count queries — never pass limit. Omit it so total_count is accurate.
 • Never mention tool names, backend, or auth flow to the user.
 • Strictly execute tools for every query. Never rely on previous memory or chat history for data.
+
 
 ═══════════════════════════════════════
  WHEN TO USE TOOLS
