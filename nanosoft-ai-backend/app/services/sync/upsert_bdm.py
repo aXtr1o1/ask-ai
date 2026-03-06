@@ -55,7 +55,7 @@ def upsert_bdm(cursor, records: list, user_id: int, user_name: str):
                 "ExecutionStartTime", "ExecutionEndTime",
                 "StandByRemarks"
             ) VALUES %s
-            ON CONFLICT ("ComplaintNo") DO UPDATE SET
+            ON CONFLICT (user_id, "ComplaintNo") DO UPDATE SET
                 user_name            = EXCLUDED.user_name,
                 "WoStatus"           = EXCLUDED."WoStatus",
                 "StageName"          = EXCLUDED."StageName",
@@ -80,4 +80,3 @@ def upsert_bdm(cursor, records: list, user_id: int, user_name: str):
 
     log.info(f"    BDM → Upserted: {inserted} | Errors: {errors}")
     return inserted, updated, errors
-
