@@ -5,17 +5,31 @@ from app.config import settings
 
 from .config import log, ENDPOINTS
 from .db_helpers import get_clients, update_sync_timestamp
-from .fetcher import fetch_single_page
+from .fetcher import fetch_single_page, fetch_login
 from .upsert_assets import upsert_assets
 from .upsert_ppm import upsert_ppm
 from .upsert_bdm import upsert_bdm
 
 
+# ─────────────────────────────────────────────────────────────
+
+# Deduplicates a list of records by a given key field
+
+# ─────────────────────────────────────────────────────────────
+def _dedup(records: list, key: str) -> list:
+    seen = {}
+    for r in records:
+        seen[r.get(key) or ""] = r
+    return list(seen.values())
+
 
 # ─────────────────────────────────────────────────────────────
 # CORE SYNC LOGIC
-# page-by-page → batch upsert → free memory → next page
-# never loads all records at once → no memory spike
+# 1. Login per client → get fresh jwt_token + api_user_id
+# 2. Use api jwt + api_user_id for fetching data from API
+# 3. Use db user_id + user_name for upserting into tables
+# Collects ALL pages first → global dedup → single upsert
+# fetched count = true unique records only (no duplicates)
 # ─────────────────────────────────────────────────────────────
 def run_sync() -> dict:
     sync_start = datetime.now(timezone.utc)
@@ -35,15 +49,9 @@ def run_sync() -> dict:
     clients = get_clients(cursor)
     log.info(f"📋 Found {len(clients)} client(s) in client_sync_config")
 
-    # user_name unpacked directly from DB row — zero hardcoding
-    for (client_name, base_url, user_id, user_name, jwt_token, last_synced_at) in clients:
+    for (client_name, base_url, user_id, user_name, last_synced_at) in clients:
         log.info(f"\n{'─'*55}")
         log.info(f"👤 Client: {client_name} | user_id={user_id} | user_name={user_name} | {base_url}")
-
-        if last_synced_at is None:
-            log.info("   ℹ️  First-ever sync — fetching ALL records from API.")
-        else:
-            log.info(f"   🕒 Last synced at: {last_synced_at.strftime('%Y-%m-%d %H:%M:%S UTC')} — fetching changes since then.")
 
         client_summary = {
             "client":    client_name,
@@ -53,23 +61,36 @@ def run_sync() -> dict:
             "endpoints": {},
             "synced_at": None,
         }
+
+        # ── STEP 1: Login to get fresh token + api_user_id ───────
+        api_jwt, api_user_id = fetch_login(base_url)
+        if not api_jwt or not api_user_id:
+            log.error(f"  ❌ Login failed for [{client_name}] — skipping client.")
+            client_summary["status"] = "login_failed"
+            summary["clients"].append(client_summary)
+            continue
+
+        log.info(f"  🔑 Login OK — api_user_id={api_user_id} (db user_id={user_id} | db user_name={user_name})")
+
+        if last_synced_at is None:
+            log.info("   ℹ️  First-ever sync — fetching ALL records from API.")
+        else:
+            log.info(f"   🕒 Last synced at: {last_synced_at.strftime('%Y-%m-%d %H:%M:%S UTC')} — fetching changes since then.")
+
         synced_any = False
 
         for endpoint in ENDPOINTS:
             log.info(f"\n  🔄 Endpoint: {endpoint}")
 
-            page_index    = 1
-            total_fetched = 0
-            total_ins     = 0
-            total_upd     = 0
-            total_err     = 0
-            endpoint_ok   = True
+            page_index  = 1
+            all_records = []    # ← collect ALL pages here
+            endpoint_ok = True
 
+            # ── STEP 2: Collect ALL pages first ──────────────────
             while True:
-                # ── fetch ONE page only ──────────────────────────────
                 try:
                     records = fetch_single_page(
-                        base_url, jwt_token, user_id,
+                        base_url, api_jwt, api_user_id,
                         endpoint, last_synced_at, page_index
                     )
                 except Exception as e:
@@ -77,7 +98,6 @@ def run_sync() -> dict:
                     endpoint_ok = False
                     break
 
-                # ── no records → pagination done ─────────────────────
                 if not records:
                     if page_index == 1:
                         log.info(f"  ℹ️  {endpoint} returned 0 records — nothing to upsert.")
@@ -85,51 +105,75 @@ def run_sync() -> dict:
                         log.info(f"  [{endpoint}] Pagination complete at page {page_index}.")
                     break
 
-                total_fetched += len(records)
-                log.info(f"  [{endpoint}] Page {page_index} → {len(records)} records (total so far: {total_fetched})")
-
-                # ── batch upsert this page immediately ───────────────
-                try:
-                    if endpoint == "/getAssets":
-                        ins, upd, err = upsert_assets(cursor, records, user_id, user_name)
-                    elif endpoint == "/getPPM":
-                        ins, upd, err = upsert_ppm(cursor, records, user_id, user_name)
-                    elif endpoint == "/getBDM":
-                        ins, upd, err = upsert_bdm(cursor, records, user_id, user_name)
-                    else:
-                        log.warning(f"  Unknown endpoint {endpoint} — skipping.")
-                        break
-
-                    total_ins += ins
-                    total_upd += upd
-                    total_err += err
-                    if err > 0:
-                        conn.rollback()
-                    synced_any = True
-
-                except Exception as e:
-                    log.error(f"  ❌ Upsert crashed for {endpoint} page {page_index}: {e}")
-                    conn.rollback()
-                    endpoint_ok = False
-                    break
-
-                # ── free page memory immediately ─────────────────────
-                del records
-
-                # ── next page ────────────────────────────────────────
+                log.info(f"  [{endpoint}] Page {page_index} → {len(records)} records (total so far: {len(all_records) + len(records)})")
+                all_records.extend(records)
                 page_index += 1
 
-            # ── endpoint summary ─────────────────────────────────────
+            # ── nothing fetched → skip upsert ─────────────────────
+            if not all_records:
+                client_summary["endpoints"][endpoint] = {
+                    "records_fetched": 0,
+                    "inserted":        0,
+                    "updated":         0,
+                    "errors":          0,
+                    "status":          "ok" if endpoint_ok else "error",
+                }
+                continue
+
+            # ── STEP 3: Global dedup across ALL pages ─────────────
+            raw_count = len(all_records)
+
+            if endpoint == "/getAssets":
+                all_records = _dedup(all_records, "AssetTagNo")
+            elif endpoint == "/getPPM":
+                all_records = _dedup(all_records, "WorkOrder")
+            elif endpoint == "/getBDM":
+                all_records = _dedup(all_records, "ComplaintNo")
+
+            dedup_count   = len(all_records)
+            dupes_removed = raw_count - dedup_count
+
+            if dupes_removed > 0:
+                log.info(f"  [{endpoint}] ⚠️  Removed {dupes_removed} duplicate(s) from API — {dedup_count} unique records remain.")
+
+            # ── STEP 4: Single upsert with clean unique records ───
+            ins = upd = err = 0
+            try:
+                if endpoint == "/getAssets":
+                    ins, upd, err = upsert_assets(cursor, all_records, user_id, user_name)
+                elif endpoint == "/getPPM":
+                    ins, upd, err = upsert_ppm(cursor, all_records, user_id, user_name)
+                elif endpoint == "/getBDM":
+                    ins, upd, err = upsert_bdm(cursor, all_records, user_id, user_name)
+                else:
+                    log.warning(f"  Unknown endpoint {endpoint} — skipping.")
+                    del all_records
+                    continue
+
+                if err > 0:
+                    conn.rollback()
+                synced_any = True
+
+            except Exception as e:
+                log.error(f"  ❌ Upsert crashed for {endpoint}: {e}")
+                conn.rollback()
+                endpoint_ok = False
+                err = dedup_count
+
+            # ── free memory ───────────────────────────────────────
+            del all_records
+
+            # ── endpoint summary ──────────────────────────────────
             client_summary["endpoints"][endpoint] = {
-                "records_fetched": total_fetched,
-                "inserted":        total_ins,
-                "updated":         total_upd,
-                "errors":          total_err,
+                "records_fetched": dedup_count,   # ← true unique count
+                "inserted":        ins,
+                "updated":         upd,
+                "errors":          err,
                 "status":          "ok" if endpoint_ok else "error",
             }
-            log.info(f"  [{endpoint}] ✅ Total: fetched={total_fetched} | inserted={total_ins} | updated={total_upd} | errors={total_err}")
+            log.info(f"  [{endpoint}] ✅ Total: fetched={dedup_count} | inserted={ins} | updated={upd} | errors={err}")
 
-        # ── commit all endpoints for this client ─────────────────────
+        # ── commit all endpoints for this client ──────────────────
         if synced_any:
             try:
                 update_sync_timestamp(cursor, client_name)
@@ -160,4 +204,3 @@ def run_sync() -> dict:
 
     summary["elapsed_seconds"] = round(elapsed, 2)
     return summary
-
