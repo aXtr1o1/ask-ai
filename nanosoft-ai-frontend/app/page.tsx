@@ -355,10 +355,10 @@ function renderLargeDataset(text: string): string | null {
   // Final HTML
   // ─────────────────────────────────────────
   const table = `
+  <div class="large-dataset-context">
+    ${escapeHTML(context)}
+  </div>
   <div class="large-dataset-wrapper">
-    <div class="large-dataset-context">
-      ${escapeHTML(context)}
-    </div>
     <table class="large-dataset-table">
       ${head}
       ${body}

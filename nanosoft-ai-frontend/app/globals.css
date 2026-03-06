@@ -2146,6 +2146,7 @@ textarea:focus-visible {
 
 .large-dataset-context {
   margin-bottom: 12px;
+  margin-top: 0;
   padding: 12px 14px;
   background: linear-gradient(135deg, rgba(14, 13, 12, 0.08) 0%, rgba(14, 13, 12, 0.08) 0%,);
   color: #d1d5db;
@@ -2201,8 +2202,14 @@ textarea:focus-visible {
 }
 
 :root[data-theme='light'] .message-bubble.ai .large-dataset-table th {
-  color: #f5c249 !important;
+  color: #92400e !important;
   background: #f9fafb !important;
+}
+
+:root[data-theme='dark'] .message-bubble.ai .large-dataset-table th,
+:root:not([data-theme]) .message-bubble.ai .large-dataset-table th {
+  color: #f5c249 !important;
+  background: rgba(26, 22, 12, 0.95) !important;
 }
 
 :root[data-theme='light'] .large-dataset-table tfoot tr {
@@ -2216,12 +2223,12 @@ textarea:focus-visible {
 }
 
 :root[data-theme='light'] .large-dataset-context {
-  background: linear-gradient(135deg, rgba(212, 175, 55, 0.1) 0%, rgba(212, 175, 55, 0.06) 100%);
-  color: #374151;
+  background: #ffffff;
+  color: #92400e;
   padding: 12px 14px;
   margin-bottom: 12px;
+  margin-top: 0;
   font-weight: 500;
-  border-left: 3px solid #D2AC47;
   border-radius: 6px;
   letter-spacing: 0.3px;
 }
