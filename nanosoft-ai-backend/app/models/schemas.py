@@ -38,7 +38,7 @@ class AssetsInput(BaseModel):
     keyword: Optional[str] = Field(None, description="Mandatory fallback for any terms not labeled as a field. Use for general searches.")
     date_from: Optional[str] = Field(None, description="Installation start range. Use YYYY-MM-DD. Map if user mentions 'From Date' or 'Installed'.")
     date_to: Optional[str] = Field(None, description="Installation end range. Use YYYY-MM-DD. Map if user mentions 'To Date' or 'Installed'.")
-    limit: Optional[int] = Field(default=None, description="Max number of results. Only set if user explicitly asks for a specific number (e.g. 'show 10'). For count/total queries (how many, total), MUST omit — do not set.")
+    limit: Optional[int] = Field(default=None, description="Max number of results. Only set if user asks for a specific number (e.g. 'show 10'). For count/total queries (how many, total), MUST omit — do not set.")
     offset: Optional[int] = Field(default=None, description="Pagination offset. Omit unless requested.")
 
 
@@ -67,7 +67,7 @@ class PPMInput(BaseModel):
     comp_to: Optional[str] = Field(None, description="Completion end range. Use YYYY-MM-DD. Map if user mentions 'Completed To' or 'Finished'.")
     sla_min: Optional[int] = Field(None, description="Minimum resolution minutes. Map here if user mentions 'SLA Min' or 'Duration'.")
     sla_max: Optional[int] = Field(None, description="Maximum resolution minutes. Map here if user mentions 'SLA Max' or 'Duration'.")
-    limit: Optional[int] = Field(default=None, description="Max number of results. Only set if user explicitly asks for a specific number (e.g. 'show 10'). For count/total queries (how many, total), MUST omit — do not set.")
+    limit: Optional[int] = Field(default=None, description="Max number of results. Only set if user asks for a specific number (e.g. 'show 10'). For count/total queries (how many, total), MUST omit — do not set.")
     offset: Optional[int] = Field(default=None, description="Pagination offset. Omit unless requested.")
 
 
@@ -99,9 +99,8 @@ class BDMInput(BaseModel):
     date_to: Optional[str] = Field(None, description="Reported end range. Use YYYY-MM-DD. Map if user mentions 'Date To' or 'Raised'.")
     completed_from: Optional[str] = Field(None, description="Resolution start range. Use YYYY-MM-DD. Map if user mentions 'Resolved From' or 'Closed'.")
     completed_to: Optional[str] = Field(None, description="Resolution end range. Use YYYY-MM-DD. Map if user mentions 'Resolved To' or 'Closed'.")
-    limit: Optional[int] = Field(default=None, description="Max number of results. Only set if user explicitly asks for a specific number (e.g. 'show 10'). For count/total queries (how many, total), MUST omit — do not set.")
+    limit: Optional[int] = Field(default=None, description="Max number of results. Only set if user asks for a specific number (e.g. 'show 10'). For count/total queries (how many, total), MUST omit — do not set.")
     offset: Optional[int] = Field(default=None, description="Pagination offset. Omit unless requested.")
-
 
 class ChatRequest(BaseModel):
     """Request schema for chat endpoint"""
@@ -127,3 +126,10 @@ class SessionRequest(BaseModel):
     sessionId: str = ""
     chatHistory: Optional[List[FrontendChatMessage]] = None
     historyOnClick: bool = False
+
+class ClientInsertionRequest(BaseModel):
+    """Request schema for client insertion"""
+    userId: str
+    userName: str
+    service: str
+    token: str
