@@ -127,3 +127,10 @@ class SessionRequest(BaseModel):
     sessionId: str = ""
     chatHistory: Optional[List[FrontendChatMessage]] = None
     historyOnClick: bool = False
+
+class ClientInsertionRequest(BaseModel):
+    """Request schema for client insertion"""
+    userId: str
+    userName: str
+    service: str
+    token: str

@@ -1,37 +1,81 @@
 "use client";
 
 import { useState, FormEvent } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
-const VALID_USERS = ["v4demo", "poc"];
-const VALID_PASSWORD = "password";
+const apiBaseUrl =
+  process.env.NEXT_PUBLIC_SMARTFM_API_BASE_URL ||
+  "https://v4demo.smartfm.cloud";
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const p1 = searchParams.get("p1") ?? "";
+
   const [userId, setUserId] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
 
     const trimmedUser = userId.trim();
 
-    if (!VALID_USERS.includes(trimmedUser) || password !== VALID_PASSWORD) {
-      setError("Invalid user ID or password.");
+    if (!trimmedUser || !password) {
+      setError("Please enter username and password.");
       return;
     }
 
     setIsSubmitting(true);
 
-    // Very basic "auth": store the logged-in user in localStorage
-    if (typeof window !== "undefined") {
-      localStorage.setItem("loggedInUser", trimmedUser);
-    }
+    try {
+      // const apiUrl = `${apiBaseUrl}/askmeapi/login${
+      //   p1 ? `?p1=${encodeURIComponent(p1)}` : ""
+      // }`;
+      const apiUrl = "/api/login";
 
-    router.push(`/?userName=${encodeURIComponent(trimmedUser)}`);
+      const response = await fetch(apiUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          username: trimmedUser,
+          password: password,
+        }),
+        cache: "no-store",
+      });
+
+      if (!response.ok) {
+        setError("Invalid user ID or password.");
+        return;
+      }
+
+      
+      const data = await response.json() as { token?: string; userId?: number };
+      const token = data?.token;
+      const userIdFromApi = data?.userId;
+
+      if (!token || userIdFromApi == null) {
+        setError("Invalid login response.");
+        return;
+      }
+
+      // Pass token, userId, and p1 to autologin; it will redirect to main chat
+      const autologinParams = new URLSearchParams({
+        token,
+        userId: String(userIdFromApi),
+        ...(p1 ? { p1 } : {}),
+      });
+      router.push(`/autologin?${autologinParams.toString()}`);
+    } catch (err) {
+      console.error("Login error:", err);
+      setError("Unable to contact login service. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -95,4 +139,3 @@ export default function LoginPage() {
     </div>
   );
 }
-
