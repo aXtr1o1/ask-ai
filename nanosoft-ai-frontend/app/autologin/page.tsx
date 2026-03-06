@@ -109,9 +109,12 @@ export default async function AutoLoginPage({ searchParams }: AutoLoginPageProps
   }
 
   if (userNameFromApi) {
-    redirect(`/?userName=${encodeURIComponent(userNameFromApi)}`);
+    const target = `/?userName=${encodeURIComponent(userNameFromApi)}`;
+    console.log("AutoLogin redirecting to:", target);
+    redirect(target);
   }
 
-  redirect(`/login?p1=${encodeURIComponent(p1 || "")}`);
-  console.log("redirecting to login page");
+  const target = `/login?p1=${encodeURIComponent(p1 || "")}`;
+  console.log("AutoLogin redirecting to:", target);
+  redirect(target);
 }
