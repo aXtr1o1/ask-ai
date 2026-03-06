@@ -1,9 +1,9 @@
-# DB HELPERS
-# user_name fetched from client_sync_config
 from .config import log
+
+
 def get_clients(cursor):
     cursor.execute("""
-        SELECT client_name, base_url, user_id, user_name, jwt_token, last_synced_at
+        SELECT client_name, base_url, user_id, user_name, last_synced_at
         FROM client_sync_config
         ORDER BY client_name
     """)

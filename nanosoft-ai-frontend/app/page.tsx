@@ -1511,7 +1511,7 @@ useEffect(() => {
         setIsRecording(true);
       } catch { alert("Please allow microphone access."); }
     }
-   }; 
+   };
 
   // ── Send message over the persistent WebSocket ────────────────────────────
   const sendMessage = () => {
@@ -1570,7 +1570,7 @@ useEffect(() => {
   if (!authChecked) {
     return (
       <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center",
-        background: ` 
+        background: `
             linear-gradient(135deg, #0A0A0A 0%, #111111 50%, #0A0A0A 100%)`}}>
         <span style={{ fontSize: 14, color: "#A0AEC0" }}>Checking authentication…</span>
       </div>
@@ -1591,9 +1591,9 @@ useEffect(() => {
             <div className="brand-box">
               <Image src="/icon.png" alt="Nanosoft Ask AI" width={20} height={20} style={{ borderRadius: 0 }}/>
             </div>
-            <span style={{ 
-              fontSize: 14, 
-              fontWeight: 600, 
+            <span style={{
+              fontSize: 14,
+              fontWeight: 600,
               background: "linear-gradient(180deg, #AE8625 0%, #F7EF8A 35%, #D2AC47 65%, #EDC967 100%)",
               backgroundSize: "200% 200%",
               WebkitBackgroundClip: "text",
@@ -1645,7 +1645,7 @@ useEffect(() => {
 
         </div>
         {/* <div className={`sidebar-profile-card ${menuOpen ? "open" : ""}`} ref={menuRef}> */}
-          
+         
            
         {/* </div> */}
 
@@ -1737,7 +1737,7 @@ useEffect(() => {
         </div>
 
         {/* Profile Card - Toggle on Hamburger Click */}
-        
+       
 
         {/* Beta Version Disclaimer */}
         <div className="sidebar-disclaimer">
@@ -1781,9 +1781,9 @@ useEffect(() => {
                 style={{ width: "auto", height: "auto", maxWidth: "min(600px,90vw)", maxHeight: 200, objectFit: "contain" }}/>
             </div> */}
             <div className="landing-card">
-              <h1 style={{ 
-                fontSize: 32, 
-                fontWeight: 700, 
+              <h1 style={{
+                fontSize: 32,
+                fontWeight: 700,
                 marginBottom: 16,
                 background: "linear-gradient(180deg, #AE8625 0%, #F7EF8A 35%, #D2AC47 65%, #EDC967 100%)",
                 backgroundSize: "200% 200%",

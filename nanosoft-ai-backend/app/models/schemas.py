@@ -102,7 +102,6 @@ class BDMInput(BaseModel):
     limit: Optional[int] = Field(default=None, description="Max number of results. Only set if user asks for a specific number (e.g. 'show 10'). For count/total queries (how many, total), MUST omit — do not set.")
     offset: Optional[int] = Field(default=None, description="Pagination offset. Omit unless requested.")
 
-
 class ChatRequest(BaseModel):
     """Request schema for chat endpoint"""
     query: str

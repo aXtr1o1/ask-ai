@@ -96,6 +96,14 @@ class LangChainService:
                         logger.info("📊 Count query detected — clearing limit=%s", args.get("limit"))
                         args["limit"] = None
                     
+                    #previously limit was only cleared for count queries now i cleared for the list queries also. 
+                    list_patterns = ("list", "show me", "get ", "fetch ", "display",
+                                     "all assets", "all complaints", "all bdm", "all ppm")
+                    if any(p in user_query.lower() for p in list_patterns):
+                        old_limit = args.get("limit")
+                        args["limit"] = None
+                        logger.info("📋 List query detected — clearing limit=%s to enable large_dataset detection", old_limit)
+
                     tool_result = tool_fn.invoke(dict(args))
                     
                     # Parse tool result — tools return JSON string, not dict
@@ -169,6 +177,44 @@ class LangChainService:
                     MAX_DISPLAY = 100
                     p_list_for_model = p_list if len(p_list) <= MAX_DISPLAY else p_list[:MAX_DISPLAY]
                     is_large_result = len(p_list) > MAX_DISPLAY
+                    
+                    
+                    # If it is list query AND records > MAX_DISPLAY(100):
+                    #   - send empty records to model, get context summary only
+                    #   - return raw JSON directly to frontend (bypasses Step 3 model call)
+                    if is_large_result and not is_count_query:
+                        logger.info("📌 Large dataset (%d records) → sending raw JSON to frontend + context from model only", len(p_list))
+
+                        messages.append(
+                            ToolMessage(
+                                content=json.dumps({
+                                    "message": f"{display_count} records found (large dataset)",
+                                    "total_count": display_count,
+                                    "records": []   # no records sent to model
+                                }),
+                                tool_call_id=tool_call["id"]
+                            )
+                        )
+                        messages.append(
+                            HumanMessage(content=(
+                                "Provide a brief context/summary of the above query result. "
+                                "Do NOT list individual records. Keep it concise."
+                            ))
+                        )
+                        context_ai_msg = self.model.invoke(messages)
+                        context_summary = context_ai_msg.content or ""
+                        logger.info("✅ Context summary generated for large dataset")
+
+                        large_dataset_response = json.dumps({
+                            "type": "large_dataset",
+                            "total_count": display_count,
+                            "records_count": len(p_list),
+                            "context_summary": context_summary,
+                            "records": p_list   # full raw data sent directly to frontend
+                        })
+                        logger.info("✅ Large dataset JSON prepared: %d records", len(p_list))
+                        return large_dataset_response, messages
+                                        
 
                     # ⭐ LARGE DATASET (>100): Send raw data to frontend + get context only from model
                     if is_large_result:
@@ -213,16 +259,23 @@ class LangChainService:
                                 "message": f"{display_count} records found",
                                 "records_returned": len(p_list),
                                 "total_count": display_count,
-                                "is_large_result": is_large_result,
                                 "displayed_count": len(p_list_for_model),
-                                "records": [] if is_count_query else p_list_for_model   #If it's a count query → records: [] (empty list, no data)  or if If it's a list/show query → records: p_list full  records what it got
+                                "records": [] if is_count_query else p_list_for_model
                             }),
                             tool_call_id=tool_call["id"]
                         )
                     )
 
+
                 # STEP 3 — Call model again to generate final answer
-                messages.append(HumanMessage(content="Use the above tool results and give the final answer. give some context when generating the table"))
+                # to display on the good output to tht user .
+                if is_count_query:
+                    logger.info("🔢 Sending count-only prompt to model")
+                    messages.append(HumanMessage(content="Use the above tool results and give the final answer. Reply in one crisp and friendly sentence using the total_count. Include what was asked (e.g. 'There are X open complaints.'). Do not render any table."))
+                else:
+                    logger.info("📋 Sending table prompt to model")
+                    messages.append(HumanMessage(content="Use the above tool results and give the final answer. Render all records as a Markdown table with context."))
+                    
                 final_ai_msg = self.model.invoke(messages)
                 final_content = final_ai_msg.content
                  # ✅ FINAL SAFETY NET (NO EMPTY STRING EVER)
@@ -317,6 +370,39 @@ class LangChainService:
                     MAX_DISPLAY = 100
                     p_list_for_model = p_list if len(p_list) <= MAX_DISPLAY else p_list[:MAX_DISPLAY]
                     is_large_result = len(p_list) > MAX_DISPLAY
+                    
+                     # Large dataset.
+                    # Same logic as in the up  but for the forced path.
+                    if is_large_result and not is_count_query:
+                        logger.info("📌 Large dataset (%d records) [FORCED] → sending raw JSON to frontend + context from model only", len(p_list))
+
+                        messages.append(
+                            ToolMessage(
+                                content=json.dumps({
+                                    "message": f"{display_count} records found (large dataset)",
+                                    "total_count": display_count,
+                                    "records": []   # no records sent to model
+                                }),
+                                tool_call_id=fake_tool_id
+                            )
+                        )
+                        messages.append(
+                            HumanMessage(content=(
+                                "Provide a brief context/summary of the above query result. "
+                                "Do NOT list individual records. Keep it concise."
+                            ))
+                        )
+                        context_ai_msg = self.model.invoke(messages)
+                        context_summary = context_ai_msg.content or ""
+                        logger.info("✅ Context summary generated for large dataset [FORCED]")
+
+                        return json.dumps({
+                            "type": "large_dataset",
+                            "total_count": display_count,
+                            "records_count": len(p_list),
+                            "context_summary": context_summary,
+                            "records": p_list   # full raw data sent directly to frontend
+                        }), messages
 
                     # ⭐ LARGE DATASET (>100): Send raw data to frontend + get context only from model
                     if is_large_result:
@@ -357,7 +443,6 @@ class LangChainService:
                                 "message": f"{display_count} records found",
                                 "records_returned": len(p_list),
                                 "total_count": display_count,
-                                "is_large_result": is_large_result,
                                 "displayed_count": len(p_list_for_model),
                                 "records": [] if is_count_query else p_list_for_model ##If it's a count query → records: [] (empty list, no data)  or if If it's a list/show query → records: p_list full  records what it got
                                 
