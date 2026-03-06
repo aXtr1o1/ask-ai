@@ -1,6 +1,5 @@
 import psycopg2.extras
 from .config import log
-
 def upsert_bdm(cursor, records: list, user_id: int, user_name: str):
     inserted = updated = errors = 0
     try:
