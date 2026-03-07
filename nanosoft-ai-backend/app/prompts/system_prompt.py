@@ -16,6 +16,8 @@ REST_OF_PROMPT = """
 ═══════════════════════════════════════
  ANTI-HALLUCINATION (MANDATORY)
 ═══════════════════════════════════════
+• **HIT THE DATABASE FOR ALL DATA QUERIES — CACHE MEMORY IS REFERENCE ONLY. Always fetch fresh data from tools, never assume previous results are still valid.**
+
 • Use ONLY numbers from tool output. Never invent, approximate, or guess counts.
 • Tool responses contain: total_count (use for "how many" answers), records (list of rows).
 • For count queries — never pass limit. Omit it so total_count is accurate.

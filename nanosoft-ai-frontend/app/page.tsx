@@ -12,6 +12,7 @@ interface Message {
   role: "user" | "ai" | "error";
   text: string;
   streaming?: boolean;
+  isLargeDataset?: boolean;
 }
 interface FolderItem { id: string; name: string; }
 interface ChatSession { id: string; title: string; createdAt: number; updatedAt?: number; }
@@ -90,6 +91,23 @@ const KV_LINE_RE   = /^\*{0,2}([A-Za-z][A-Za-z ]{1,28})\*{0,2}:[ \t]+(.+)$/;
 // Multi-KV on one line: "Key: Val, Key: Val"
 const KV_BOUND_SRC = String.raw`(?:^|(?:,\s+))([A-Za-z][A-Za-z ]{0,25}?):\s*`;
 
+// ── Columns to hide from large dataset display (sensitive data) ──
+const HIDDEN_COLUMNS = new Set([
+  'id',
+  'user_id',
+  'userid',
+  'user_name',
+  'username',
+  'createdat',
+  'created_at',
+  'updatedat',
+  'updated_at',
+]);
+
+function isHiddenColumn(col: string): boolean {
+  return HIDDEN_COLUMNS.has(col.toLowerCase().replace(/[\s_]/g, ""));
+}
+
 // ── Status badge renderer ─────────────────────────────────────────────────────
 function badge(val: string): string {
   const v   = val.toLowerCase();
@@ -107,6 +125,7 @@ function isBadgeCol(col: string): boolean {
 }
 
 // ── Build HTML <table> from rows ──────────────────────────────────────────────
+// ── Build HTML <table> from rows - SMALL DATA TABLES ──
 function buildTable(rows: Record<string, string>[], cols?: string[]): string {
   if (!rows.length) return "";
 
@@ -120,16 +139,343 @@ function buildTable(rows: Record<string, string>[], cols?: string[]): string {
   const thead = `<thead><tr>${allCols.map(c => `<th>${esc(c)}</th>`).join("")}</tr></thead>`;
 
   const tbody = `<tbody>${rows.map((row, ri) =>
-    `<tr${ri % 2 === 1 ? ' class="row-even"' : ""}>${allCols.map(col => {
+    `<tr>${allCols.map(col => {
       const val  = row[col] ?? "—";
       const cell = isBadgeCol(col) ? badge(val) : esc(val);
       return `<td>${cell}</td>`;
     }).join("")}</tr>`
   ).join("")}</tbody>`;
 
-  const tfoot = `<tfoot><tr><td colspan="${allCols.length}" class="table-footer">${rows.length} row${rows.length !== 1 ? "s" : ""}</td></tr></tfoot>`;
+  const tfoot = `<tfoot><tr><td colspan="${allCols.length}" style="text-align:left;padding-left:12px;padding-right:12px;display:flex;justify-content:space-between;align-items:center;gap:20px"><span>Columns: ${allCols.length}</span><span>Total: ${rows.length} records</span></td></tr></tfoot>`;
 
   return `<div class="table-wrapper"><table class="ai-table">${thead}${tbody}${tfoot}</table></div>`;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  EXTRACT RESPONSE CONTENT (Remove session_id wrapper)
+// ══════════════════════════════════════════════════════════════════════════════
+
+function extractResponseContent(text: string): string {
+  try {
+    const parsed = JSON.parse(text);
+   
+    // If wrapper has session_id + response, extract just the response
+    if (parsed.session_id && parsed.response) {
+      return String(parsed.response);
+    }
+   
+    // If it has a response field, use it
+    if (parsed.response) {
+      return String(parsed.response);
+    }
+   
+    // Otherwise return original text
+    return text;
+  } catch {
+    // Not JSON, return as-is
+    return text;
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  LARGE DATASET HANDLER (SEPARATE FUNCTION)
+//  Handles >100 records: Converts to table + displays context summary
+// ══════════════════════════════════════════════════════════════════════════════
+
+function renderLargeDataset(text: string): string | null {
+  // ─────────────────────────────────────────
+  // Hidden columns
+  // ─────────────────────────────────────────
+  const HIDDEN_COLUMNS = new Set([
+    "id",
+    "user_id",
+    "userid",
+    "user_name",
+    "username",
+    "createdat",
+    "created_at",
+    "updatedat",
+    "updated_at",
+  ]);
+
+  function isHiddenColumn(col: string) {
+    return HIDDEN_COLUMNS.has(col.toLowerCase().replace(/[\s_]/g, ""));
+  }
+
+  // ─────────────────────────────────────────
+  // Status badge columns
+  // ─────────────────────────────────────────
+  const BADGE_COLS = new Set([
+    "status",
+    "condition",
+    "state",
+    "wostatus",
+    "ppstatus",
+    "ppmstatus",
+  ]);
+
+  function isBadgeCol(col: string) {
+    return BADGE_COLS.has(col.toLowerCase().replace(/[\s_]/g, ""));
+  }
+
+  function badge(val: string) {
+    const v = val.toLowerCase();
+    const cls =
+      ["online", "open", "good", "active", "operational", "serviceable", "completed"].includes(v)
+        ? "status-online"
+        : ["offline", "closed", "inactive", "fault", "immobilized", "cancelled"].includes(v)
+        ? "status-offline"
+        : "status-neutral";
+    return `<span class="status-badge ${cls}">${escapeHTML(val)}</span>`;
+  }
+
+  // ─────────────────────────────────────────
+  // Escape HTML
+  // ─────────────────────────────────────────
+  function escapeHTML(s: string) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
+
+  // ─────────────────────────────────────────
+  // Parse response JSON
+  // ─────────────────────────────────────────
+  let parsed: any;
+
+  try {
+    parsed = JSON.parse(text);
+    if (parsed.response && typeof parsed.response === "string") {
+      parsed = JSON.parse(parsed.response);
+    }
+  } catch {
+    return null;
+  }
+
+  // ─────────────────────────────────────────
+  // Detect large dataset
+  // ─────────────────────────────────────────
+  let records = [];
+
+  if (parsed.type === "large_dataset" && Array.isArray(parsed.records)) {
+    records = parsed.records;
+  } else if (Array.isArray(parsed.records) && parsed.records.length > 100) {
+    records = parsed.records;
+  } else if (Array.isArray(parsed.p_list) && parsed.p_list.length > 100) {
+    records = parsed.p_list;
+  } else if (Array.isArray(parsed.data) && parsed.data.length > 100) {
+    records = parsed.data;
+  } else {
+    return null;
+  }
+
+  const context = parsed.context_summary || `Dataset contains ${records.length} records`;
+
+  if (!records.length) {
+    return `<div class="large-dataset-context">${escapeHTML(context)}</div>`;
+  }
+
+  // ─────────────────────────────────────────
+  // Collect columns dynamically
+  // ─────────────────────────────────────────
+  const columns = new Set<string>();
+
+  records.forEach((r: any) => {
+    if (!r || typeof r !== "object") return;
+    Object.keys(r).forEach(k => {
+      if (!isHiddenColumn(k)) columns.add(k);
+    });
+  });
+
+  const cols = Array.from(columns);
+
+  // ─────────────────────────────────────────
+  // Build table header
+  // ─────────────────────────────────────────
+  let head = "<thead><tr>";
+  cols.forEach(c => {
+    head += `<th>${escapeHTML(c)}</th>`;
+  });
+  head += "</tr></thead>";
+
+  // ─────────────────────────────────────────
+  // Build rows
+  // ─────────────────────────────────────────
+  let body = "<tbody>";
+
+  records.forEach((record: any) => {
+    body += "<tr>";
+    cols.forEach(col => {
+      const val = record[col];
+      let cell = "—";
+
+      if (val === null || val === undefined) {
+        cell = "—";
+      } else if (typeof val === "boolean") {
+        cell = `<span style="font-weight:600;color:${val ? "#22c55e" : "#ef44440"}">
+                ${val ? "✓" : "✗"}
+                </span>`;
+      } else if (typeof val === "object") {
+        const str = JSON.stringify(val);
+        cell = escapeHTML(str.length > 50 ? str.slice(0, 50) + "…" : str);
+      } else {
+        const str = String(val);
+        const display = str.length > 100 ? str.slice(0, 100) + "…" : str;
+
+        if (isBadgeCol(col)) {
+          cell = badge(str);
+        } else {
+          cell = escapeHTML(display);
+        }
+      }
+
+      body += `<td>${cell}</td>`;
+    });
+    body += "</tr>";
+  });
+
+  body += "</tbody>";
+
+  // ─────────────────────────────────────────
+  // Footer summary
+  // ─────────────────────────────────────────
+  const footer = `
+  <tfoot>
+    <tr>
+      <td colspan="${cols.length}" style="text-align:left;padding-left:12px;padding-right:12px;display:flex;justify-content:space-between;align-items:center;gap:20px">
+        <span>Columns: ${cols.length}</span>
+        <span>Total: ${records.length} records</span>
+      </td>
+    </tr>
+  </tfoot>
+  `;
+
+  // ─────────────────────────────────────────
+  // Final HTML
+  // ─────────────────────────────────────────
+  const table = `
+  <div class="large-dataset-wrapper">
+    <div class="large-dataset-context">
+      ${escapeHTML(context)}
+    </div>
+    <table class="large-dataset-table">
+      ${head}
+      ${body}
+      ${footer}
+    </table>
+  </div>
+  `;
+
+  return table;
+}
+
+function formatLargeDatasetTable(largeDataData: any): string {
+  let records = largeDataData.records || [];
+  const context = largeDataData.context_summary || "";
+ 
+  // Handle case where records might not be an array
+  if (!Array.isArray(records)) {
+    console.warn("⚠️ Large dataset records is not an array:", typeof records);
+    records = [];
+  }
+ 
+  if (records.length === 0) {
+    return `<div class="large-dataset-context"><strong>Summary:</strong> ${esc(context)}</div>`;
+  }
+ 
+  console.log(`✅ Formatting large dataset: ${records.length} records, context length: ${context.length}`);
+ 
+  // ═══════════════════════════════════════════════════════════════════
+  // DYNAMICALLY COLLECT ALL COLUMNS FROM RECORDS (EXCLUDING HIDDEN)
+  // ═══════════════════════════════════════════════════════════════════
+ 
+  const allKeys = new Set<string>();
+  records.forEach((r: any) => {
+    if (r && typeof r === 'object') {
+      Object.keys(r).forEach(k => {
+        // Skip hidden/sensitive columns
+        if (!isHiddenColumn(k)) {
+          allKeys.add(k);
+        }
+      });
+    }
+  });
+ 
+  // Convert Set to array while preserving order
+  const colsToShow: string[] = Array.from(allKeys);
+ 
+  console.log(`📊 Dynamic columns detected: ${colsToShow.length} columns (hidden: ${records[0] ? Object.keys(records[0]).filter(k => isHiddenColumn(k)).length : 0}):`, colsToShow.slice(0, 10));
+ 
+  // ═══════════════════════════════════════════════════════════════════
+  // BUILD HTML TABLE STRUCTURE DYNAMICALLY - USING CSS CLASSES
+  // ═══════════════════════════════════════════════════════════════════
+ 
+  // 1. Create table header with ALL columns (excluding hidden)
+  let tableHeadHTML = "<thead><tr>";
+  colsToShow.forEach(col => {
+    tableHeadHTML += `<th>${esc(col)}</th>`;
+  });
+  tableHeadHTML += "</tr></thead>";
+ 
+  // 2. Create table body rows dynamically
+  let tableBodyHTML = "<tbody>";
+  records.forEach((record: any, rowIndex: number) => {
+    if (!record || typeof record !== 'object') return;
+   
+    tableBodyHTML += `<tr>`;
+   
+    // Populate visible columns for each row (skip hidden columns)
+    colsToShow.forEach(col => {
+      const val = record[col];
+      let cellContent = "—";
+     
+      if (val === null || val === undefined) {
+        cellContent = "—";
+      } else if (typeof val === "boolean") {
+        cellContent = `<span style="font-weight:600;color:${val ? '#22c55e' : '#ef4444'};">${val ? '✓' : '✗'}</span>`;
+      } else if (typeof val === "object") {
+        const str = JSON.stringify(val);
+        cellContent = esc(str.length > 50 ? str.substring(0, 50) + "…" : str);
+      } else {
+        const strVal = String(val);
+        const displayVal = strVal.length > 100 ? strVal.substring(0, 100) + "…" : strVal;
+       
+        // Apply status badge styling for status-like columns
+        if (isBadgeCol(col) && val) {
+          cellContent = badge(strVal);
+        } else {
+          cellContent = esc(displayVal);
+        }
+      }
+     
+      tableBodyHTML += `<td>${cellContent}</td>`;
+    });
+   
+    tableBodyHTML += "</tr>";
+  });
+  tableBodyHTML += "</tbody>";
+ 
+  // 3. Create table footer with summary - ALIGN RIGHT
+  const tfoot = `<tfoot><tr><td colspan="${colsToShow.length}" style="text-align: right; padding-right: 14px;">Total: ${records.length} record${records.length !== 1 ? "s" : ""} | ${colsToShow.length} column${colsToShow.length !== 1 ? "s" : ""}</td></tr></tfoot>`;
+ 
+  // 4. Complete table HTML with CSS classes for styling
+  const tableHTML = `<div class="large-dataset-wrapper">
+    <table class="large-dataset-table">
+      ${tableHeadHTML}
+      ${tableBodyHTML}
+      ${tfoot}
+    </table>
+  </div>`;
+ 
+  // 5. Add context summary above table - JUST THE CONTEXT ONLY
+  const contextHTML = context
+    ? `<div class="large-dataset-context">${esc(context)}</div>`
+    : "";
+ 
+  const fullHTML = contextHTML + tableHTML;
+  console.log(` HTML generated - length: ${fullHTML.length}, has table-wrapper: ${fullHTML.includes('large-dataset-wrapper')}`);
+  return fullHTML;
 }
 
 // ── Render plain bullet list ──────────────────────────────────────────────────
@@ -241,11 +587,28 @@ function parsePipeTable(lines: string[]): { cols: string[]; rows: Record<string,
 //    Numbered list         → ORDERED LIST
 //    Prose                 → paragraph
 // ══════════════════════════════════════════════════════════════════════════════
+
+// Remove emoji from text (especially from "Found X records..." message)
+function removeEmoji(text: string): string {
+  // Only remove emoji from the FIRST line (Found X records message)
+  const lines = text.split("\n");
+  if (lines.length > 0) {
+    // Remove emoji from first line only
+    const firstLine = lines[0].replace(/[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{27BF}]|[\u{1F600}-\u{1F64F}]|[\u{1F680}-\u{1F6FF}]/gu, '').trim();
+    lines[0] = firstLine;
+  }
+  return lines.join("\n");
+}
+
 function formatOutput(text: string): string {
   if (!text.trim()) return "";
 
+  // Remove emojis from the first line only (Found X records message)
+  text = removeEmoji(text);
+ 
   const allLines = text.split("\n");
   let   html     = "";
+
   let   i        = 0;
 
   while (i < allLines.length) {
@@ -259,10 +622,19 @@ function formatOutput(text: string): string {
     }
 
     // ── A: Pipe table | col | col | ────────────────────────────────────────
-    if (/^\|.+\|$/.test(trimmed)) {
+    // Also match col | col | col (without leading/trailing pipes) → convert to markdown table
+    if (/^\|.+\|$/.test(trimmed) || /^[^|]*\|[^|]*\|/.test(trimmed)) {
       const block: string[] = [];
-      while (i < allLines.length && /^\|.+\|$/.test(allLines[i].trim())) {
-        block.push(allLines[i].trim()); i++;
+      while (i < allLines.length) {
+        const t = allLines[i].trim();
+        if (/^\|.+\|$/.test(t) || /^[^|]*\|[^|]*\|/.test(t)) {
+          // Convert "col | col | col" to "| col | col | col |" format
+          const normalized = t.startsWith('|') ? t : '| ' + t.split('|').map(c => c.trim()).join(' | ') + ' |';
+          block.push(normalized);
+          i++;
+        } else {
+          break;
+        }
       }
       const parsed = parsePipeTable(block);
       html += parsed
@@ -535,6 +907,8 @@ export default function Home() {
   const [showFeaturePlaceholder, setShowFeaturePlaceholder] = useState<boolean>(false);
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [loginPageClientLogoPath, setLoginPageClientLogoPath] = useState<string | null>(null);
+  const [loginFooterLogoPath, setLoginFooterLogoPath] = useState<string | null>(null);
 
   const messagesEndRef   = useRef<HTMLDivElement | null>(null);
   const inputRef         = useRef<HTMLTextAreaElement>(null);
@@ -546,12 +920,27 @@ export default function Home() {
   const reconnectDelayRef = useRef(2000);
   const sessionMessagesRef = useRef<Map<string, Message[]>>(new Map());
 
-  // Close dropdown on outside click
+  // Read userName and branding logos from URL (e.g. from autologin redirect); persist logos to localStorage
   useEffect(() => {
-  if (typeof window !== "undefined") {
-    const params = new URLSearchParams(window.location.search);
-    setUserIdFromUrl(params.get("userName") ?? params.get("userId"));
-  }
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const userName = params.get("userName") ?? params.get("userId");
+      const clientLogo = params.get("loginPageClientLogoPath");
+      const footerLogo = params.get("loginFooterLogoPath");
+      setUserIdFromUrl(userName);
+      if (clientLogo) {
+        setLoginPageClientLogoPath(clientLogo);
+        localStorage.setItem("loginPageClientLogoPath", clientLogo);
+      } else {
+        setLoginPageClientLogoPath(localStorage.getItem("loginPageClientLogoPath"));
+      }
+      if (footerLogo) {
+        setLoginFooterLogoPath(footerLogo);
+        localStorage.setItem("loginFooterLogoPath", footerLogo);
+      } else {
+        setLoginFooterLogoPath(localStorage.getItem("loginFooterLogoPath"));
+      }
+    }
   }, []);
 
   useEffect(() => {
@@ -734,10 +1123,33 @@ export default function Home() {
         // "[DONE]" = end of this response → finalize bubble, stay connected
         if (jsonStr.trim() === "[DONE]" || jsonStr.trim() === "__END__") {
           const finalText = accRef.current;
+          let processedText = finalText;
+         
+          // 🔑 FIRST: Extract response content (removes session_id wrapper)
+          const cleanedText = extractResponseContent(finalText);
+         
+          // 🔑 SECOND: TRY RENDERING AS LARGE DATASET TABLE FIRST
+          const largeDatasetHTML = renderLargeDataset(cleanedText);
+         
+          if (largeDatasetHTML) {
+            // Successfully rendered as large dataset table
+            processedText = largeDatasetHTML;
+            console.log("✅ [DONE] Rendered as large dataset table");
+          } else {
+            // Not a large dataset → try to format as text/table
+            try {
+              processedText = formatOutput(cleanedText);
+              console.log("📝 [DONE] Formatted as text output");
+            } catch (err) {
+              console.log("📝 [DONE] Using raw text", err);
+              processedText = finalText;
+            }
+          }
+         
           setMessages(prev => {
             const u = [...prev];
             const l = u.length - 1;
-            if (u[l]?.role === "ai") u[l] = { role: "ai", text: finalText, streaming: false };
+            if (u[l]?.role === "ai") u[l] = { role: "ai", text: processedText, streaming: false };
             // Persist to per-session store so switching sessions keeps history
             const activeSid = sessionIdRef.current;
             sessionMessagesRef.current.set(activeSid, u);
@@ -749,19 +1161,29 @@ export default function Home() {
           return;
         }
 
-        const part = extractText(JSON.parse(jsonStr));
+        const part = jsonStr;
         if (part) {
           accRef.current += part;
           const snap = accRef.current;
+         
+          // Extract text for display during streaming
+          let displayText = snap;
+          try {
+            displayText = extractText(JSON.parse(snap));
+          } catch {
+            // If can't parse yet (incomplete JSON), show what we have
+            displayText = snap;
+          }
+         
           setMessages(prev => {
             const u = [...prev];
             const l = u.length - 1;
             // If last message is already our streaming AI bubble → update it
             if (u[l]?.role === "ai" && u[l]?.streaming === true) {
-              u[l] = { role: "ai", text: snap, streaming: true };
+              u[l] = { role: "ai", text: displayText, streaming: true };
             } else {
               // First chunk → create the AI bubble now (only once)
-              u.push({ role: "ai", text: snap, streaming: true });
+              u.push({ role: "ai", text: displayText, streaming: true });
             }
             return u;
           });
@@ -943,6 +1365,42 @@ useEffect(() => {
     setTimeout(() => refetchSessions(), 400);
   };
 
+  // ── Process loaded messages: convert raw JSON to formatted tables ─────────
+  const processLoadedMessages = (msgs: Message[]): Message[] => {
+    return msgs.map(m => {
+      if (m.role !== "ai") return m;
+     
+      const text = m.text || "";
+     
+      // Check if already formatted (contains HTML tags)
+      if (text.includes('<table') || text.includes('<div') || text.includes('large-dataset')) {
+        console.log("✅ [HISTORY] Message already formatted - skipping");
+        return m;
+      }
+     
+      // Extract response content (removes session_id wrapper)
+      const cleanedText = extractResponseContent(text);
+     
+      // Try to render as large dataset table first
+      const largeDatasetHTML = renderLargeDataset(cleanedText);
+      if (largeDatasetHTML) {
+        console.log("✅ [HISTORY] Formatted as large dataset table");
+        return { ...m, text: largeDatasetHTML };
+      }
+     
+      // Try to parse as JSON and format as text
+      try {
+        const formattedText = formatOutput(cleanedText);
+        console.log("✅ [HISTORY] Formatted as text output");
+        return { ...m, text: formattedText };
+      } catch (err) {
+        // Not JSON → treat as already formatted or plain text
+        console.log("📝 [HISTORY] Not JSON - keeping as is");
+        return m;
+      }
+    });
+  };
+
   // ── Switch to an existing session ─────────────────────────────────────────
   const switchSession = async (targetSid: string) => {
     if (targetSid === sessionId) return; // already active
@@ -997,7 +1455,8 @@ useEffect(() => {
     // Check local cache first
     const cached = sessionMessagesRef.current.get(targetSid);
     if (cached && cached.length > 0) {
-      setMessages(cached);
+      const processed = processLoadedMessages(cached);
+      setMessages(processed);
     } else {
       // Fetch from backend
       setHistoryLoading(true);
@@ -1015,8 +1474,9 @@ useEffect(() => {
           if (entry.query) history.push({ role: "user", text: entry.query });
           if (entry.assistant) history.push({ role: "ai", text: entry.assistant });
         }
-        sessionMessagesRef.current.set(targetSid, history);
-        setMessages(history);
+        const processed = processLoadedMessages(history);
+        sessionMessagesRef.current.set(targetSid, processed);
+        setMessages(processed);
       } catch (err) {
         console.warn("Failed to fetch session history:", err);
         setMessages([]);
@@ -1068,7 +1528,7 @@ useEffect(() => {
         setIsRecording(true);
       } catch { alert("Please allow microphone access."); }
     }
-   }; 
+   };
 
   // ── Send message over the persistent WebSocket ────────────────────────────
   const sendMessage = () => {
@@ -1127,7 +1587,7 @@ useEffect(() => {
   if (!authChecked) {
     return (
       <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center",
-        background: ` 
+        background: `
             linear-gradient(135deg, #0A0A0A 0%, #111111 50%, #0A0A0A 100%)`}}>
         <span style={{ fontSize: 14, color: "#A0AEC0" }}>Checking authentication…</span>
       </div>
@@ -1144,20 +1604,17 @@ useEffect(() => {
       <aside className="sidebar">
         {/* Sidebar Header with Logo */}
         <div className="sidebar-header">
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div className="brand-box">
-              <Image src="/icon.png" alt="Nanosoft Ask AI" width={20} height={20} style={{ borderRadius: 0 }}/>
+          <div style={{ display: "flex", alignItems: "center" }}>
+            <div
+              className="brand-box"
+              style={loginPageClientLogoPath ? { width: "100%", maxWidth: 220, height: "auto", minHeight: 56, maxHeight: 72, padding: 0, border: "none", borderRadius: 0 } : undefined}
+            >
+              {loginPageClientLogoPath ? (
+                <img src={loginPageClientLogoPath} alt="Client logo" style={{ width: "100%", maxWidth: 220, height: "auto", maxHeight: 72, objectFit: "contain", display: "block" }} />
+              ) : (
+                <Image src="/icon.png" alt="Nanosoft Ask AI" width={20} height={20} style={{ borderRadius: 0 }}/>
+              )}
             </div>
-            <span style={{ 
-              fontSize: 14, 
-              fontWeight: 600, 
-              background: "linear-gradient(180deg, #AE8625 0%, #F7EF8A 35%, #D2AC47 65%, #EDC967 100%)",
-              backgroundSize: "200% 200%",
-              WebkitBackgroundClip: "text",
-              backgroundClip: "text",
-              WebkitTextFillColor: "transparent",
-              animation: "goldShine 3s ease-in-out infinite"
-            }}>ASK AI</span>
           </div>
           <div />
           <div className="hamburger-wrapper" ref={menuRef}>
@@ -1202,7 +1659,7 @@ useEffect(() => {
 
         </div>
         {/* <div className={`sidebar-profile-card ${menuOpen ? "open" : ""}`} ref={menuRef}> */}
-          
+         
            
         {/* </div> */}
 
@@ -1264,8 +1721,7 @@ useEffect(() => {
 
           {/* Chat History – only visible when Chat feature is active */}
           {activeFeature === 'chat' && (
-            <div style={{ marginTop: 24, display: "flex", flexDirection: "column", minHeight: 0 }}>
-              {/* <div className="section-title">Chat History</div> */}
+            <div className="chat-history-box" style={{ marginTop: 24, display: "flex", flexDirection: "column", minHeight: 0 }}>
               <div className="chat-history-scroll">
                 {chatSessions.map(s => (
                   <div
@@ -1294,7 +1750,7 @@ useEffect(() => {
         </div>
 
         {/* Profile Card - Toggle on Hamburger Click */}
-        
+       
 
         {/* Beta Version Disclaimer */}
         <div className="sidebar-disclaimer">
@@ -1338,9 +1794,9 @@ useEffect(() => {
                 style={{ width: "auto", height: "auto", maxWidth: "min(600px,90vw)", maxHeight: 200, objectFit: "contain" }}/>
             </div> */}
             <div className="landing-card">
-              <h1 style={{ 
-                fontSize: 32, 
-                fontWeight: 700, 
+              <h1 style={{
+                fontSize: 32,
+                fontWeight: 700,
                 marginBottom: 16,
                 background: "linear-gradient(180deg, #AE8625 0%, #F7EF8A 35%, #D2AC47 65%, #EDC967 100%)",
                 backgroundSize: "200% 200%",
@@ -1387,9 +1843,9 @@ useEffect(() => {
                         </div>
 
                       ) : (
-                        /* ── Complete: run formatOutput() → HTML table ── */
+                        /* ── Complete: already formatted at [DONE] time ── */
                         <div className="ai-bubble">
-                         <div dangerouslySetInnerHTML={{ __html: formatOutput(msg.text) }} />
+                          <div dangerouslySetInnerHTML={{ __html: msg.text }} />
                         </div>
                       )}
 
@@ -1434,6 +1890,11 @@ useEffect(() => {
               <IconSend/>
             </button>
           </div>
+          {loginFooterLogoPath && (
+            <div style={{ display: "flex", justifyContent: "center", marginTop: 8 }}>
+              <img src={loginFooterLogoPath} alt="Footer logo" style={{ maxHeight: 40, objectFit: "contain" }} />
+            </div>
+          )}
           <p className="footer-disclaimer">NanoSoft Ask AI can make mistakes. Verify important legal information.</p>
         </div>
 
