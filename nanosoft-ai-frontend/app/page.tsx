@@ -907,6 +907,8 @@ export default function Home() {
   const [showFeaturePlaceholder, setShowFeaturePlaceholder] = useState<boolean>(false);
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [loginPageClientLogoPath, setLoginPageClientLogoPath] = useState<string | null>(null);
+  const [loginFooterLogoPath, setLoginFooterLogoPath] = useState<string | null>(null);
 
   const messagesEndRef   = useRef<HTMLDivElement | null>(null);
   const inputRef         = useRef<HTMLTextAreaElement>(null);
@@ -918,12 +920,27 @@ export default function Home() {
   const reconnectDelayRef = useRef(2000);
   const sessionMessagesRef = useRef<Map<string, Message[]>>(new Map());
 
-  // Close dropdown on outside click
+  // Read userName and branding logos from URL (e.g. from autologin redirect); persist logos to localStorage
   useEffect(() => {
-  if (typeof window !== "undefined") {
-    const params = new URLSearchParams(window.location.search);
-    setUserIdFromUrl(params.get("userName") ?? params.get("userId"));
-  }
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const userName = params.get("userName") ?? params.get("userId");
+      const clientLogo = params.get("loginPageClientLogoPath");
+      const footerLogo = params.get("loginFooterLogoPath");
+      setUserIdFromUrl(userName);
+      if (clientLogo) {
+        setLoginPageClientLogoPath(clientLogo);
+        localStorage.setItem("loginPageClientLogoPath", clientLogo);
+      } else {
+        setLoginPageClientLogoPath(localStorage.getItem("loginPageClientLogoPath"));
+      }
+      if (footerLogo) {
+        setLoginFooterLogoPath(footerLogo);
+        localStorage.setItem("loginFooterLogoPath", footerLogo);
+      } else {
+        setLoginFooterLogoPath(localStorage.getItem("loginFooterLogoPath"));
+      }
+    }
   }, []);
 
   useEffect(() => {
@@ -1587,20 +1604,17 @@ useEffect(() => {
       <aside className="sidebar">
         {/* Sidebar Header with Logo */}
         <div className="sidebar-header">
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div className="brand-box">
-              <Image src="/icon.png" alt="Nanosoft Ask AI" width={20} height={20} style={{ borderRadius: 0 }}/>
+          <div style={{ display: "flex", alignItems: "center" }}>
+            <div
+              className="brand-box"
+              style={loginPageClientLogoPath ? { width: "100%", maxWidth: 220, height: "auto", minHeight: 56, maxHeight: 72, padding: 0, border: "none", borderRadius: 0 } : undefined}
+            >
+              {loginPageClientLogoPath ? (
+                <img src={loginPageClientLogoPath} alt="Client logo" style={{ width: "100%", maxWidth: 220, height: "auto", maxHeight: 72, objectFit: "contain", display: "block" }} />
+              ) : (
+                <Image src="/icon.png" alt="Nanosoft Ask AI" width={20} height={20} style={{ borderRadius: 0 }}/>
+              )}
             </div>
-            <span style={{
-              fontSize: 14,
-              fontWeight: 600,
-              background: "linear-gradient(180deg, #AE8625 0%, #F7EF8A 35%, #D2AC47 65%, #EDC967 100%)",
-              backgroundSize: "200% 200%",
-              WebkitBackgroundClip: "text",
-              backgroundClip: "text",
-              WebkitTextFillColor: "transparent",
-              animation: "goldShine 3s ease-in-out infinite"
-            }}>ASK AI</span>
           </div>
           <div />
           <div className="hamburger-wrapper" ref={menuRef}>
@@ -1707,8 +1721,7 @@ useEffect(() => {
 
           {/* Chat History – only visible when Chat feature is active */}
           {activeFeature === 'chat' && (
-            <div style={{ marginTop: 24, display: "flex", flexDirection: "column", minHeight: 0 }}>
-              {/* <div className="section-title">Chat History</div> */}
+            <div className="chat-history-box" style={{ marginTop: 24, display: "flex", flexDirection: "column", minHeight: 0 }}>
               <div className="chat-history-scroll">
                 {chatSessions.map(s => (
                   <div
@@ -1877,6 +1890,11 @@ useEffect(() => {
               <IconSend/>
             </button>
           </div>
+          {loginFooterLogoPath && (
+            <div style={{ display: "flex", justifyContent: "center", marginTop: 8 }}>
+              <img src={loginFooterLogoPath} alt="Footer logo" style={{ maxHeight: 40, objectFit: "contain" }} />
+            </div>
+          )}
           <p className="footer-disclaimer">NanoSoft Ask AI can make mistakes. Verify important legal information.</p>
         </div>
 
