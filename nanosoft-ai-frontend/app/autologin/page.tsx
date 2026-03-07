@@ -18,103 +18,189 @@ function getParam(
 }
 
 export const dynamic = "force-dynamic";
+// get headers and params
 
 export default async function AutoLoginPage({ searchParams }: AutoLoginPageProps) {
-  const hdrs = await headers();
+  const reqHeaders = await headers();
   const params = await searchParams;
+  const p1 = getParam(params, "p1");
+  const xAuth = reqHeaders.get("x-auth") ?? undefined;
+  const userId = reqHeaders.get("userid") ?? undefined;
 
-  // Support token/userId from URL (e.g. from login page redirect) or from headers
-  const tokenFromUrl = getParam(params, "token");
-  const userIdFromUrl = getParam(params, "userId");
-  const xAuth = tokenFromUrl
-    ? `Bearer ${tokenFromUrl}`
-    : (hdrs.get("x-auth") ?? "");
-  const userId = userIdFromUrl ?? hdrs.get("userid") ?? "";
-  const rawToken = xAuth?.startsWith("Bearer ") ? xAuth.slice(7) : xAuth ?? "";
-  const authHeader = xAuth?.startsWith("Bearer ") ? xAuth : `Bearer ${rawToken}`;
+  console.log("[autologin] entry", {
+    hasP1: !!p1,
+    p1Length: p1?.length,
+    hasXAuth: !!xAuth,
+    hasUserId: !!userId,
+  });
 
-  const rawP1 = params?.p1;
-  const p1 =
-    typeof rawP1 === "string"
-      ? rawP1
-      : Array.isArray(rawP1)
-      ? rawP1[0]
-      : undefined;
-
-  let userNameFromApi: string | undefined;
-
-  if ((tokenFromUrl && userIdFromUrl) || (xAuth && userId)) {
-    const apiBaseUrl =
-      process.env.NEXT_PUBLIC_SMARTFM_API_BASE_URL ||
-      "https://v4demo.smartfm.cloud";
-    const apiUrl = `${apiBaseUrl}/askmeapi/autoLogin?p1=${encodeURIComponent(
-      p1 || ""
-    )}`;
-
-    try {
-      const response = await fetch(apiUrl, {
-        method: "GET",
-        headers: {
-          accept: "*/*",
-          "x-auth": authHeader,
-          userid: userId,
-        },
-        cache: "no-store",
-      });
-
-      const apiResult = await response.json();
-      const service = apiResult?.Output?.service;
-      const userName = apiResult?.Output?.userName as string | undefined;
-      const userIdFromApi = apiResult?.Output?.userID as number | undefined;
-      console.log("API status:", response.status);
-      console.log("API response:", apiResult);
-      console.log("service", service);
-
-      if (response.ok && userName) {
-        console.log("AutoLogin API success");
-        userNameFromApi = userName;
-
-        // Call backend to check/store client data (best-effort)
-        try {
-          const backendBaseUrl =
-            process.env.NEXT_PUBLIC_API_BASE_URL || "";
-          const clientInsertionUrl = `${backendBaseUrl}/api/client_insertion`;
-
-          const clientResponse = await fetch(clientInsertionUrl, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              userId: String(userIdFromApi),
-              userName: userNameFromApi,
-              service,
-              token: rawToken,
-            }),
-            cache: "no-store",
-          });
-
-          
-          const clientResult = await clientResponse.json();
-          console.log("client_insertion result:", clientResult);
-        } catch (err) {
-          console.error("client_insertion error:", err);
-        }
-      } else {
-        console.log("AutoLogin API failed");
-      }
-    } catch (err) {
-      console.error("AutoLogin API error:", err);
-    }
+  if (!p1) {
+    console.log("[autologin] missing p1, redirecting to /login");
+    redirect("/login");
   }
 
-  if (userNameFromApi) {
-    const target = `/?userName=${encodeURIComponent(userNameFromApi)}`;
-    console.log("AutoLogin redirecting to:", target);
+  let email: string;
+  let service: string;
+
+  // decode p1 and parse payload
+  try {
+    const decoded = Buffer.from(p1, "base64").toString("utf-8");
+    console.log("[autologin] decoded p1 (raw)", decoded);
+
+    const payload = JSON.parse(decoded) as {
+      email?: string;
+      service?: string;
+      domain?: string;
+    };
+    console.log("[autologin] parsed payload", payload);
+
+    if (!payload.email) {
+      console.log("[autologin] missing email in payload");
+      redirect("/login");
+    }
+    email = payload.email;
+
+    if (payload.service) {service = payload.service.replace(/\/$/, "");}
+    else if (payload.domain) {service = `https://${payload.domain}.smartfm.cloud`;}
+    else {console.log("[autologin] missing service or domain in payload");
+      redirect("/login");
+    }
+    console.log("[autologin] using", { email, service });
+  } catch (err) {
+    console.error("[autologin] decode/parse error", err);
+    redirect("/login");
+  }
+// encoding :
+  const encodedEmail = Buffer.from(email, "utf-8").toString("base64");   ////////////////////////////////
+  const autoLoginUrl = `${service}/askmeapi/autoLogin?p1=${encodeURIComponent(encodedEmail)}`;
+  //const autoLoginUrl = `${service}/askmeapi/autoLogin?p1=eyJlbWFpbCI6ImFobWVkLmZAYmNnLXVhZS5jb20iLCJkb21haW4iOiJ2NGRlbW8ifQ`;     ////////////////// REMAINDER REMOVE THIS !!!!!
+  console.log("[encoding] calling endpoint", { encodedEmail, autoLoginUrl });
+
+  let autoLoginOutput: {
+    userID?: number;
+    userName?: string;
+    service?: string;
+  } | null = null;
+
+  // call autoLogin FRONTEND API
+  try {
+    const response = await fetch(autoLoginUrl, { cache: "no-store" });
+    const result = (await response.json().catch(() => ({}))) as {
+      Output?: { userID?: number; userName?: string; service?: string };
+    };
+    console.log("[autologin] autoLogin result", {
+      status: response.status,
+      statusText: response.statusText,
+      ok: response.ok,
+      result,
+    });
+    if (response.ok && result?.Output) {
+      autoLoginOutput = {
+        userID: result.Output.userID,
+        userName: result.Output.userName,
+        service: result.Output.service,
+      };
+    }
+  } catch (err) {
+    console.error("[autologin] autoLogin request failed", err);
+  }
+
+
+// check if userID, userName, and service are present
+
+
+  if (autoLoginOutput?.userID != null && autoLoginOutput?.userName && autoLoginOutput?.service) {
+    const backendBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
+    const clientInsertionUrl = `${backendBaseUrl}/api/client_insertion`;
+    const token = xAuth?.startsWith("Bearer ") ? xAuth : xAuth ? `Bearer ${xAuth}` : "";
+    console.log("[autologin] calling client_insertion", {
+      userId: String(autoLoginOutput.userID),
+      userName: autoLoginOutput.userName,
+      service: autoLoginOutput.service,
+      hasToken: !!token,
+    });
+
+
+
+
+    // call client_insertion BACKEND API
+
+    try {
+      const clientRes = await fetch(clientInsertionUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: String(autoLoginOutput.userID),
+          userName: autoLoginOutput.userName,
+          service: autoLoginOutput.service,
+          token,
+        }),
+        cache: "no-store",
+      });
+      const clientResult = await clientRes.json().catch(() => ({}));
+      console.log("[autologin] client_insertion result", {
+        status: clientRes.status,
+        ok: clientRes.ok,
+        result: clientResult,
+      });
+    } catch (err) {
+      console.error("[autologin] client_insertion error", err);
+    }
+
+    
+    // getBranding: POST with x-auth, userid, body { data: { service } }
+    const getBrandingUrl = `${autoLoginOutput.service}/getBranding`;
+    //const serviceName = new URL(autoLoginOutput.service).hostname.split(".")[0] ?? "";
+    const serviceName = "v4demo";
+    const authHeader = xAuth?.startsWith("Bearer ") ? xAuth : xAuth ? `Bearer ${xAuth}` : "";
+
+    let LoginPageClientLogoPath: string | undefined;
+    let LoginFooterLogoPath: string | undefined;
+    console.log("[branding] getBrandingUrl", getBrandingUrl);
+    console.log("[branding] authHeader", authHeader);
+    console.log("[branding] serviceName", serviceName);
+    console.log("[branding] userId", userId);
+    if (authHeader && serviceName) {
+      try {
+        const brandingResponse = await fetch(getBrandingUrl, {
+          method: "POST",
+          headers: {
+            accept: "*/*",
+            "Content-Type": "application/json",
+            "x-auth": authHeader,
+            userid: String(autoLoginOutput.userID),
+          },
+          body: JSON.stringify({ data: { service: serviceName } }),
+          cache: "no-store",
+        });
+        const brandingResult = await brandingResponse.json().catch(() => ({}));
+        console.log("[autologin] getBranding result", {
+          status: brandingResponse.status,
+          statusmessage: brandingResult?.Output?.status?.message,
+          ok: brandingResponse.ok,
+          result: brandingResult,
+        });
+
+        LoginPageClientLogoPath = brandingResult?.Output?.data?.[0]?.LoginPageClientLogoPath;
+        LoginFooterLogoPath = brandingResult?.Output?.data?.[0]?.LoginFooterLogoPath;
+        console.log("[autologin] LoginPageClientLogoPath", LoginPageClientLogoPath);
+        console.log("[autologin] LoginFooterLogoPath", LoginFooterLogoPath);
+
+      } catch (err) {
+        console.error("[autologin] getBranding error", err);
+      }
+    }
+
+    // Pass username and logo paths to main chat page via query params
+    const search = new URLSearchParams();
+    search.set("userName", autoLoginOutput.userName);
+    if (LoginPageClientLogoPath) search.set("loginPageClientLogoPath", LoginPageClientLogoPath);
+    if (LoginFooterLogoPath) search.set("loginFooterLogoPath", LoginFooterLogoPath);
+    const target = `/?${search.toString()}`;
+    console.log("[autologin] redirecting to main chat", { target });
     redirect(target);
   }
 
-  const target = `/login?p1=${encodeURIComponent(p1 || "")}`;
-  console.log("AutoLogin redirecting to:", target);
-  redirect(target);
+
+  redirect("/login");
 }
