@@ -344,46 +344,6 @@ class LangChainService:
                         self._log_query_summary(current_user_query)
                         return large_dataset_response, context_summary, messages
 
-                    
-                    # aggregate is excluded from large dataset path
-                    # because grouped summary rows are always small (just a few rows)
-                    if is_large_result and not is_count_query and not is_aggregate_query:
-                        logger.info("📌 Large dataset (%d records) → sending raw JSON to frontend", len(p_list))
-
-                        messages.append(
-                            ToolMessage(
-                                content=json.dumps({
-                                    "message": f"{display_count} records found (large dataset)",
-                                    "total_count": display_count,
-                                    "records": []  # no records sent to model
-
-                                }),
-                                tool_call_id=tool_call["id"]
-                            )
-                        )
-                        messages.append(
-                            HumanMessage(content=(
-                                f"The user asked: '{user_query}'. "
-                                f"The system found {display_count} records. "
-                                "Write 1 friendly sentence confirming what was found and the total count. "
-                                "Do NOT list individual records. Keep it concise."
-                            ))
-                        )
-                         # CALL 3 — Large dataset context call (records=[] so should be small)
-                        context_ai_msg = self.model.invoke(messages)
-                        self._accumulate_tokens(context_ai_msg)
-                        context_summary = context_ai_msg.content or f"Found {display_count} records for your request."
-                        logger.info("✅ Context summary generated for large dataset | context='%s'", context_summary[:80])
-
-                        large_dataset_response = json.dumps({
-                            "context_summary": context_summary,
-                            "records": p_list # full raw data sent directly to frontend
-                        })
-                        logger.info("✅ Large dataset JSON prepared: %d records", len(p_list))
-
-                        self._log_query_summary(current_user_query)
-                        return large_dataset_response, context_summary, messages
-
                     messages.append(
                         ToolMessage(
                             content=json.dumps({
@@ -625,48 +585,12 @@ class LangChainService:
                         context_ai_msg = self.model.invoke(messages)
                         self._accumulate_tokens(context_ai_msg)
                         context_summary = context_ai_msg.content or f"Found {display_count} records for your request."
-
+                        
                         large_dataset_response = json.dumps({
                             "context_summary": context_summary,
                             "records": p_list
                         })
-
-                        self._log_query_summary(current_user_query)
-                        return large_dataset_response, context_summary, messages
-
-                    
-                    #— aggregate excluded from large dataset path
-                    if is_large_result and not is_count_query and not is_aggregate_query:
-                        logger.info("📌 Large dataset (%d records) [FORCED]", len(p_list))
-
-                        messages.append(
-                            ToolMessage(
-                                content=json.dumps({
-                                    "message": f"{display_count} records found (large dataset)",
-                                    "total_count": display_count,
-                                    "records": []
-                                }),
-                                tool_call_id=fake_tool_id
-                            )
-                        )
-                        messages.append(
-                            HumanMessage(content=(
-                                f"The user asked: '{user_query}'. "
-                                f"The system found {display_count} records. "
-                                "Write 1 friendly sentence confirming what was found and the total count. "
-                                "Do NOT list individual records. Keep it concise."
-                            ))
-                        )
-                        # CALL 6  Large dataset context call FORCED path
-                        context_ai_msg = self.model.invoke(messages)
-                        self._accumulate_tokens(context_ai_msg)
-                        context_summary = context_ai_msg.content or f"Found {display_count} records for your request."
-
-                        large_dataset_response = json.dumps({
-                            "context_summary": context_summary,
-                            "records": p_list
-                        })
-
+                        
                         self._log_query_summary(current_user_query)
                         return large_dataset_response, context_summary, messages
 
