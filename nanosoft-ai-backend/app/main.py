@@ -18,6 +18,7 @@ from app.api.database.postgres_client import get_pool
 
 from app.services.session_service import get_sessions_for_user, get_chat_history_for_session
 from app.models.schemas import SessionRequest
+from app.services.audio_service import convert_audio_to_text
 
 
 
@@ -63,24 +64,26 @@ VALID_USERNAMES = {"v4demo", "poc"}
 MAX_HISTORY =  settings.MAX_HISTORY
 memory_store = {}
 
-
+#chat memory for debugging purpose. 
 def print_memory(session_id: str):
-    print("\n" + "=" * 50)
-    print(f"🧠 IN-MEMORY STORE — session_id: {session_id}")
-    print("=" * 50)
     session_data = memory_store.get(session_id, {})
-    history = session_data.get("history", [])
-    user_name = session_data.get("user_name", "N/A")
-    print(f"  User name : {user_name}")
-    if not history:
-        print("  (empty)")
-    else:
-        for i, item in enumerate(history, 1):
-            print(f"  [{i}] Query    : {item['query']}")
-            print(f"      Assistant : {item['assistant'][:100]}{'...' if len(item['assistant']) > 100 else ''}")
-            print()
-    print("=" * 50 + "\n")
+    history      = session_data.get("history", [])
+    lc_memory    = session_data.get("lc_memory", [])
 
+    print(f"\n🧠 SESSION: {session_id} | user: {session_data.get('user_name', 'N/A')}")
+
+    print(f"\n💾 HISTORY ({len(history)} entries)")
+    for i, item in enumerate(history, 1):
+        print(f"  [{i}] Query: {item['query']}")
+        print(f"       Assitant: {item['assistant'][:100]}{'...' if len(item['assistant']) > 100 else ''}")
+
+    print(f"\n🤖 LC_MEMORY ({len(lc_memory) // 2} pairs | last {settings.MAX_HISTORY} sent to model)")
+    pairs = list(zip(lc_memory[0::2], lc_memory[1::2]))
+    for i, (h, a) in enumerate(pairs, 1):
+        print(f"  [{i}] Query: {(h.content or '')[:100]}")
+        print(f"       Assitant: {(a.content or '')[:100]}")
+
+    print()
 
 # @chatbot_app.post("/chat")
 # async def chat_endpoint(request: ChatRequest):
@@ -162,22 +165,21 @@ async def ws_chat_endpoint(websocket: WebSocket):
             except json.JSONDecodeError:
                 await websocket.send_text(json.dumps({"error": "Invalid JSON"}))
                 continue
-
-            user_query = data.get("query", "").strip()
+            
             user_name  = str(data.get("userName", ""))
             session_id = str(data.get("sessionId", ""))
+            is_audio   = bool(data.get("isAudio", False))  # ── NEW: audio flag
+            logger.info(f"📊 isAudio flag received: {is_audio}")
+            is_graph = bool(data.get("isGraph", False))
+            logger.info(f"📊 isGraph flag received: {is_graph}")
 
-            logger.info(f"WS Request | user_name={user_name} | session_id={session_id} | query={user_query}")
+            
 
             if user_name not in VALID_USERNAMES:
                 logger.info("invalid user name")
                 await websocket.send_text(json.dumps({"error": "Invalid user name"}))
                 continue
-
-            if not user_query:
-                logger.info("invalid user query")
-                await websocket.send_text(json.dumps({"error": "Empty query"}))
-                continue
+            
 
             if not session_id:
                 logger.info("invalid session id")
@@ -186,7 +188,48 @@ async def ws_chat_endpoint(websocket: WebSocket):
 
             #  Track current session_id for disconnect save
             current_session_id = session_id
+            #----------------- audio integration by mega-----------------
+            
+            # ── NEW: AUDIO PATH — isAudio = true then convert it into the text and send to  process query function
+            if is_audio:
+                logger.info(f" Audio message received | user={user_name} | session={session_id}")
 
+                try:
+                    # ── Receive raw binary OGG audio bytes ───────────────────
+                    audio_bytes = await asyncio.wait_for(
+                        websocket.receive_bytes(),
+                        timeout=settings.WS_SESSION_TIMEOUT
+                    )
+                    logger.info(f"📦 Audio bytes received: {len(audio_bytes)} bytes")
+
+                    # ── Convert audio → text via Gemini ─────────────────────
+                    user_query = await convert_audio_to_text(audio_bytes)
+                    logger.info(f"📝 Audio transcribed: {user_query}")
+
+                except asyncio.TimeoutError:
+                    logger.warning("⏰ Timed out waiting for audio bytes")
+                    await websocket.send_text(json.dumps({"error": "Timed out waiting for audio data"}))
+                    continue
+
+                except Exception as e:
+                    logger.error(f"❌ Audio processing failed: {e}", exc_info=True)
+                    await websocket.send_text(json.dumps({"error": "Audio processing failed. Please try again."}))
+                    continue
+
+            # ==================================================================
+            # ── NORMAL TEXT PATH — isAudio = false
+            # ==================================================================
+            else:
+                user_query = data.get("query", "").strip()
+                logger.info(f"💬 Text message | user={user_name} | session={session_id} | query={user_query}")
+
+                if not user_query:
+                    logger.info("empty user query")
+                    await websocket.send_text(json.dumps({"error": "Empty query"}))
+                    continue
+            
+            logger.info(f"WS Request | user_name={user_name} | session_id={session_id} | query={user_query}")
+                
             if session_id not in memory_store:
                 memory_store[session_id] = {
                     "lc_memory": [],
@@ -200,16 +243,28 @@ async def ws_chat_endpoint(websocket: WebSocket):
             messages.append(HumanMessage(content=user_query))
 
             try:
-                final_response_text, _ = await langchain_service.process_query(
+                # ── CHANGED: process_query now returns 3-tuple (final_response_text, context_summary, messages)
+                # ── final_response_text → full data (sent to frontend + stored in history for DB)
+                # ── context_summary     → short sentence (stored in lc_memory for model — no token error)
+                # langchain_service will use this flag to decide:
+                # if is_graph=True AND aggregate query → return graph JSON
+                # if is_graph=False → return normal markdown table (unchanged)
+
+                final_response_text, context_summary, _ = await langchain_service.process_query(
                     messages,
                     user_name=user_name,
-                    session_id=session_id
+                    session_id=session_id,
+                     is_graph   = is_graph  # graph flag passed here
+
                 )
                 logger.info(f"✅ Response generated for session_id: {session_id}")
+                logger.info(f"🧠 context_summary for lc_memory: {context_summary[:80]}")
 
             except Exception as e:
                 logger.error(f"❌ LangChain error: {e}", exc_info=True)
                 final_response_text = "Sorry, something went wrong."
+                # ── CHANGED: fallback context_summary on error
+                context_summary = final_response_text
 
             await websocket.send_text(json.dumps({
                 "session_id": session_id,
@@ -217,12 +272,20 @@ async def ws_chat_endpoint(websocket: WebSocket):
             }))
             await websocket.send_text("[DONE]")
 
+            # ── CHANGED: TWO SEPARATE MEMORIES
+            # ── lc_memory → stores context_summary ONLY (sent to model as past context)
+            # ──             prevents token limit errors for large datasets / markdown tables
+            # ── history   → stores final_response_text (full data: markdown table / large JSON)
+            # ──             saved to DB on session end, loaded by frontend for display
             memory_store[session_id]["lc_memory"].append(HumanMessage(content=user_query))
-            memory_store[session_id]["lc_memory"].append(AIMessage(content=final_response_text))
+            memory_store[session_id]["lc_memory"].append(AIMessage(content=context_summary))
+            logger.info(f"🧠 lc_memory updated with context_summary | session={session_id}")
+
             memory_store[session_id]["history"].append({
                 "query":     user_query,
-                "assistant": final_response_text
+                "assistant": final_response_text  # full data → DB → frontend display
             })
+            logger.info(f"💾 history updated with full response | session={session_id}")
 
             if len(memory_store[session_id]["history"]) > MAX_HISTORY:
                 memory_store[session_id]["history"]   = memory_store[session_id]["history"][-MAX_HISTORY:]

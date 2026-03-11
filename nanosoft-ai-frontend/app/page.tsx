@@ -6,13 +6,22 @@ import Image from "next/image";
 import { ThemeToggle } from "./components/ThemeToggle";
 import BackgroundLayer from "./components/BackgroundLayer";
 import { useTheme } from "./components/useTheme";
-import { IconUser } from "@tabler/icons-react";
+import { useVoiceRecorder, RecordingInterface, VoicePreviewBar, VoiceMicButton } from "./components/VoiceRecorder";
+import { parseGraphData, BarChartRenderer, HorizontalBarChartRenderer, LineChartRenderer, PieChartRenderer, ChartType } from "./components/GraphRenderer";
+import { IconUser, IconMicrophone, IconPlayerPlay, IconPlayerPause, IconTrash, IconArrowUp, IconChartBar, IconChartArea, IconChartLine, IconChartPie } from "@tabler/icons-react";
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface Message {
   role: "user" | "ai" | "error";
   text: string;
   streaming?: boolean;
   isLargeDataset?: boolean;
+  isAudio?: boolean;
+  audioDuration?: number;
+  audioUrl?: string;
+  sendStatus?: "sent" | "failed" | "sending";
+  isGraphResponse?: boolean;  // ← Set to true if response is type="graph"
+  chartType?: ChartType;  // ← Chart type for this specific response
+  isGraphMode?: boolean;  // ← Per-message graph mode toggle (true = show chart, false = show text)
 }
 interface FolderItem { id: string; name: string; }
 interface ChatSession { id: string; title: string; createdAt: number; updatedAt?: number; }
@@ -801,12 +810,6 @@ const IconSearch = () => (
     <line x1="15" y1="15" x2="20" y2="20" />
   </svg>
 );
-const IconSend = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-    <line x1="12" y1="19" x2="12" y2="5"/>
-    <polyline points="5 12 12 5 19 12"/>
-  </svg>
-);
 const IconHamburger = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
     <line x1="3" y1="6"  x2="21" y2="6"/>
@@ -899,24 +902,71 @@ export default function Home() {
   const [sessionId,    setSessionId]    = useState<string>(() => generateSessionId());
   const [searchVal,    setSearchVal]    = useState("");
   const [isRecording,  setIsRecording]  = useState<boolean>(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const [isLocked, setIsLocked] = useState(false);
+  const [recordedAudioBlob, setRecordedAudioBlob] = useState<Blob | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [playbackTime, setPlaybackTime] = useState(0);
+  const [slideGestureActive, setSlideGestureActive] = useState(false);
   const [loggedInUser, setLoggedInUser] = useState<string | null>(null);
   const [authChecked,  setAuthChecked]  = useState<boolean>(false);
   const [menuOpen,     setMenuOpen]     = useState(false);
   const [wsConnectionState, setWsConnectionState] = useState<'connecting'|'connected'|'failed'>('connecting');
+  const [isGraphMode, setIsGraphMode] = useState<boolean>(false);
+  const [chartType, setChartType] = useState<ChartType>('vertical-bar');
   const [activeFeature, setActiveFeature] = useState<'chat' | 'archived' | 'library'>('chat');
   const [showFeaturePlaceholder, setShowFeaturePlaceholder] = useState<boolean>(false);
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [audioPlayingIndex, setAudioPlayingIndex] = useState<number | null>(null);
+  const [audioProgressMap, setAudioProgressMap] = useState<Record<number, number>>({});
 
+  // ─── Refs (declare early for use in hooks) ────────────────────────────────
   const messagesEndRef   = useRef<HTMLDivElement | null>(null);
   const inputRef         = useRef<HTMLTextAreaElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const menuRef          = useRef<HTMLDivElement>(null);
-  const wsRef            = useRef<WebSocket | null>(null);  // single WebSocket for the whole tab
+  const wsRef            = useRef<WebSocket | null>(null);
   const sessionIdRef = useRef<string>(sessionId);
   const wsConnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectDelayRef = useRef(2000);
   const sessionMessagesRef = useRef<Map<string, Message[]>>(new Map());
+  const streamRef = useRef<MediaStream | null>(null);
+  const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const audioPlaybackRef = useRef<HTMLAudioElement | null>(null);
+  const recordingStartTimeRef = useRef<number>(0);
+  const touchStartYRef = useRef<number>(0);
+  const touchStartXRef = useRef<number>(0);
+  const audioPlayersRef = useRef<Record<number, HTMLAudioElement>>({});
+  const accRef = useRef<string>("");
+  const pingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const userActiveRef = useRef<boolean>(true);
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ─── Voice Recorder Hook ──────────────────────────────────────────────────
+  const voiceRecorder = useVoiceRecorder(
+    isLoading,
+    wsConnectionState,
+    loggedInUser || "anonymous",
+    sessionId,
+    wsRef,
+    (duration: number, audioUrl: string) => {
+      setMessages(prev => {
+        const updated = [...prev, {
+          role: "user" as const,
+          text: "Voice message",
+          isAudio: true,
+          audioDuration: duration,
+          audioUrl: audioUrl
+        }];
+        sessionMessagesRef.current.set(sessionId, updated);
+        return updated;
+      });
+      setIsLoading(true);
+      accRef.current = "";
+      setTimeout(() => inputRef.current?.focus(), 100);
+    }
+  );
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -976,10 +1026,6 @@ export default function Home() {
   useEffect(() => { resizeTA(); }, [input]);
 
   // ── Persistent WebSocket: connect once on mount, stay open all session ───────
-  const accRef = useRef<string>("");   // accumulates current response text
-  const pingRef = useRef<ReturnType<typeof setInterval> | null>(null);   // ping for ACTIVE session only
-  const userActiveRef = useRef<boolean>(true);  // is user actively using the page?
-  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const IDLE_TIMEOUT = 2 * 60 * 1000;  // 2 minutes
   const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
 
@@ -1107,32 +1153,54 @@ export default function Home() {
         if (jsonStr.trim() === "[DONE]" || jsonStr.trim() === "__END__") {
           const finalText = accRef.current;
           let processedText = finalText;
+          let isGraphResponse = false;
+          let messageChartType: typeof chartType = chartType;  // Capture current chart type for this message
           
-          // 🔑 FIRST: Extract response content (removes session_id wrapper)
-          const cleanedText = extractResponseContent(finalText);
-          
-          // 🔑 SECOND: TRY RENDERING AS LARGE DATASET TABLE FIRST
-          const largeDatasetHTML = renderLargeDataset(cleanedText);
-          
-          if (largeDatasetHTML) {
-            // Successfully rendered as large dataset table
-            processedText = largeDatasetHTML;
-            console.log("✅ [DONE] Rendered as large dataset table");
+          // 🔑 FIRST: Check if this is a GRAPH response (type="graph")
+          const graphData = parseGraphData(finalText);
+          if (graphData) {
+            console.log("📊 [DONE] Graph response detected — will render with", chartType);
+            processedText = finalText;  // ← Keep raw JSON for parseGraphData() in render
+            isGraphResponse = true;
+            messageChartType = chartType;  // Store the chart type for THIS message
           } else {
-            // Not a large dataset → try to format as text/table
-            try {
-              processedText = formatOutput(cleanedText);
-              console.log("📝 [DONE] Formatted as text output");
-            } catch (err) {
-              console.log("📝 [DONE] Using raw text", err);
-              processedText = finalText;
+            // Not a graph → continue with normal processing
+            // 🔑 SECOND: Extract response content (removes session_id wrapper)
+            const cleanedText = extractResponseContent(finalText);
+            
+            // 🔑 THIRD: TRY RENDERING AS LARGE DATASET TABLE FIRST
+            const largeDatasetHTML = renderLargeDataset(cleanedText);
+            
+            if (largeDatasetHTML) {
+              // Successfully rendered as large dataset table
+              processedText = largeDatasetHTML;
+              console.log("✅ [DONE] Rendered as large dataset table");
+            } else {
+              // Not a large dataset → try to format as text/table
+              try {
+                processedText = formatOutput(cleanedText);
+                console.log("📝 [DONE] Formatted as text output");
+              } catch (err) {
+                console.log("📝 [DONE] Using raw text", err);
+                processedText = finalText;
+              }
             }
           }
           
           setMessages(prev => {
             const u = [...prev];
             const l = u.length - 1;
-            if (u[l]?.role === "ai") u[l] = { role: "ai", text: processedText, streaming: false };
+            if (u[l]?.role === "ai") {
+              u[l] = {
+                ...u[l],  // ← Preserve other fields like chartType
+                role: "ai",
+                text: processedText,
+                streaming: false,
+                isGraphResponse: isGraphResponse,  // ← Set graph flag
+                chartType: messageChartType,  // ← Store chart type for this message
+                isGraphMode: isGraphResponse  // ← Enable graph mode if it's a graph response
+              };
+            }
             // Persist to per-session store so switching sessions keeps history
             const activeSid = sessionIdRef.current;
             sessionMessagesRef.current.set(activeSid, u);
@@ -1163,10 +1231,10 @@ export default function Home() {
             const l = u.length - 1;
             // If last message is already our streaming AI bubble → update it
             if (u[l]?.role === "ai" && u[l]?.streaming === true) {
-              u[l] = { role: "ai", text: displayText, streaming: true };
+              u[l] = { ...u[l], text: displayText, streaming: true };  // ← Preserve chartType
             } else {
-              // First chunk → create the AI bubble now (only once)
-              u.push({ role: "ai", text: displayText, streaming: true });
+              // First chunk → create the AI bubble now (only once) with current chartType
+              u.push({ role: "ai", text: displayText, streaming: true, chartType: chartType });
             }
             return u;
           });
@@ -1214,7 +1282,7 @@ export default function Home() {
 
   // Connect when component mounts (after auth is confirmed)
 useEffect(() => {
-  if (!authChecked) return;
+  if (!authChecked || !loggedInUser) return;
 
   connectWS();
 
@@ -1354,6 +1422,13 @@ useEffect(() => {
       if (m.role !== "ai") return m;
       
       const text = m.text || "";
+      
+      // 🔑 FIRST: Check if this is a GRAPH response
+      const graphData = parseGraphData(text);
+      if (graphData) {
+        console.log("📊 [HISTORY] Graph response detected — keeping as raw JSON for chart");
+        return { ...m, text, isGraphResponse: true, chartType: m.chartType || 'vertical-bar' };  // ← Mark as graph with stored chart type
+      }
       
       // Check if already formatted (contains HTML tags)
       if (text.includes('<table') || text.includes('<div') || text.includes('large-dataset')) {
@@ -1513,6 +1588,91 @@ useEffect(() => {
     }
    };
 
+  // ── Handle Audio Playback ─────────────────────────────────────────────────
+  const handleAudioPlayback = (idx: number, audioUrl?: string, duration: number = 0) => {
+    if (!audioUrl || duration <= 0) return;
+
+    const isCurrentlyPlaying = audioPlayingIndex === idx;
+
+    if (isCurrentlyPlaying) {
+      // Pause current audio
+      const audio = audioPlayersRef.current[idx];
+      if (audio) {
+        audio.pause();
+        setAudioPlayingIndex(null);
+      }
+    } else {
+      // Pause any other playing audio
+      if (audioPlayingIndex !== null) {
+        const otherAudio = audioPlayersRef.current[audioPlayingIndex];
+        if (otherAudio) otherAudio.pause();
+      }
+
+      // Play new audio
+      if (!audioPlayersRef.current[idx]) {
+        const audio = new Audio(audioUrl);
+        let animationFrameId: number | null = null;
+
+        // Continuous frame-based progress updates for smooth bar movement
+        const updateProgressFrame = () => {
+          if (!audio.paused && duration > 0) {
+            const progress = (audio.currentTime / duration) * 100;
+            setAudioProgressMap(prev => ({
+              ...prev,
+              [idx]: progress
+            }));
+            animationFrameId = requestAnimationFrame(updateProgressFrame);
+          }
+        };
+
+        audio.onplay = () => {
+          setAudioPlayingIndex(idx);
+          // Start smooth frame updates on play
+          if (animationFrameId !== null) cancelAnimationFrame(animationFrameId);
+          animationFrameId = requestAnimationFrame(updateProgressFrame);
+        };
+
+        audio.onpause = () => {
+          // Stop frame updates when paused
+          if (animationFrameId !== null) {
+            cancelAnimationFrame(animationFrameId);
+            animationFrameId = null;
+          }
+        };
+
+        audio.onended = () => {
+          if (animationFrameId !== null) {
+            cancelAnimationFrame(animationFrameId);
+            animationFrameId = null;
+          }
+          setAudioPlayingIndex(null);
+          setAudioProgressMap(prev => ({ ...prev, [idx]: 0 }));
+        };
+
+        audioPlayersRef.current[idx] = audio;
+      }
+
+      // Play audio with proper error handling
+      const audioElement = audioPlayersRef.current[idx];
+      if (audioElement) {
+        const playPromise = audioElement.play();
+        
+        if (playPromise !== undefined) {
+          playPromise
+            .then(() => {
+              // Audio started playing successfully
+              console.log("✅ Audio playing:", idx);
+            })
+            .catch(err => {
+              console.error("❌ Audio play failed:", err.message);
+              setAudioPlayingIndex(null);
+            });
+        }
+      }
+      // NOTE: Don't set setAudioPlayingIndex here - audio.onplay will handle it
+    }
+  };
+
   // ── Send message over the persistent WebSocket ────────────────────────────
   const sendMessage = () => {
   if (!input.trim() || isLoading) return;
@@ -1545,7 +1705,10 @@ useEffect(() => {
 
   setShowFeaturePlaceholder(false);
   setMessages(prev => {
-    const updated = [...prev, { role: "user" as const, text: userText }];
+    const updated = [...prev, { 
+      role: "user" as const, 
+      text: userText
+    }];
     // Save to per-session store
     sessionMessagesRef.current.set(sessionId, updated);
     return updated;
@@ -1555,9 +1718,15 @@ useEffect(() => {
   accRef.current = "";
 
   ws.send(JSON.stringify({
+    type: "message",
+    messageType: "text",
+    isAudio: false,
+    isText: true,
+    isGraph: isGraphMode,
     query: userText,
     userName: loggedInUser,
-    sessionId
+    sessionId,
+    timestamp: Date.now()
   }));
 };
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -1809,6 +1978,36 @@ useEffect(() => {
                 const isUser      = msg.role === "user";
                 const isError     = msg.role === "error";
                 const isStreaming = msg.streaming === true;
+                const isAudio     = msg.isAudio === true;
+                const isGraphMsg  = msg.isGraphResponse === true;  // ← Use explicit flag
+                
+                // ✅ Parse graph data ONLY if message is marked as graph response
+                const graphData = isGraphMsg
+                  ? parseGraphData(msg.text)
+                  : null;
+
+                if (isGraphMsg) {
+                  console.log(`📊 [MSG ${idx}] isGraphMsg=true, graphData=${graphData ? '✓' : '❌'}, chartType="${msg.chartType || 'vertical-bar'}"`);
+                }
+
+                // DEBUG: Log rendering decision
+                if (isGraphMsg) {
+                  console.log("✅ [RENDER] Marked as graph message → will render BarChartRenderer", {
+                    parsed: graphData !== null,
+                    type: graphData?.type,
+                  });
+                } else if (!isUser && !isError && !isStreaming) {
+                  console.log("📨 [RENDER] Regular message → will render as HTML", {
+                    textLength: msg.text?.length || 0,
+                  });
+                }
+
+                // Format duration as MM:SS
+                const formatDuration = (seconds: number): string => {
+                  const mins = Math.floor(seconds / 60);
+                  const secs = seconds % 60;
+                  return `${mins}:${secs.toString().padStart(2, "0")}`;
+                };
 
                 return (
                   <div key={idx} className={`message-row ${msg.role}`}>
@@ -1818,7 +2017,27 @@ useEffect(() => {
 
                     <div className={`message-bubble ${msg.role}`}>
 
-                      {isUser || isError ? (
+                      {isAudio ? (
+                        /* ── Audio Message: Show player UI ── */
+                        <div className="voice-message-container">
+                          <button 
+                            className="voice-message-play-btn" 
+                            onClick={() => handleAudioPlayback(idx, msg.audioUrl, msg.audioDuration || 0)}
+                            disabled={!isUser}
+                          >
+                            {audioPlayingIndex === idx ? <IconPlayerPause size={20} /> : <IconPlayerPlay size={20} />}
+                          </button>
+                          <div style={{ display: "flex", flexDirection: "column", flex: 1, gap: "6px" }}>
+                            <div className="voice-message-progress-wrapper">
+                              <div className="voice-message-progress-bar" style={{ width: `${audioProgressMap[idx] || 0}%` }} />
+                            </div>
+                            <div className="voice-message-duration">
+                              {formatDuration(msg.audioDuration || 0)}
+                            </div>
+                          </div>
+                        </div>
+
+                      ) : isUser || isError ? (
                         /* ── User / Error: plain text ── */
                         <>{msg.text}</>
 
@@ -1827,6 +2046,86 @@ useEffect(() => {
                         <div className="ai-bubble streaming-text">
                           {msg.text}
                           <span className="stream-cursor"/>
+                        </div>
+
+                      ) : isGraphMsg && graphData ? (
+                        /* ── Graph: Render chart with per-message type switcher ── */
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                          {/* Chart Rendering */}
+                          {(() => {
+                            const msgChartType = msg.chartType || chartType;  // ← Use global chartType as default
+                            console.log(`🎨 [CHART RENDER] Message ${idx}: chartType="${msgChartType}" (global="${chartType}")`);
+                            
+                            const handleChartTypeChange = (newType: 'vertical-bar' | 'horizontal-bar' | 'pie' | 'line') => {
+                              console.log(`📊 [CHART SELECT] User clicked ${newType}, message index: ${idx}`);
+                              setChartType(newType);  // ← Update global default for future messages
+                              setMessages(prev => {
+                                const updated = [...prev];
+                                const oldType = updated[idx]?.chartType || chartType;
+                                updated[idx] = { ...updated[idx], chartType: newType };
+                                console.log(`📊 [CHART SELECT] Changed from "${oldType}" to "${newType}", message ${idx}`);
+                                console.log(`📊 [CHART SELECT] Updated message:`, updated[idx]);
+                                return updated;
+                              });
+                            };
+                            
+                            // Use key with chartType to force React to destroy/recreate component
+                            // This ensures the chart instance is properly destroyed and recreated
+                            if (msgChartType === 'horizontal-bar') {
+                              console.log(`✓ Rendering HorizontalBarChartRenderer with key hbar-${idx}-${graphData.records.length}`);
+                              return <HorizontalBarChartRenderer key={`hbar-${idx}-${graphData.records.length}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
+                            } else if (msgChartType === 'pie') {
+                              console.log(`✓ Rendering PieChartRenderer with key pie-${idx}-${graphData.records.length}`);
+                              return <PieChartRenderer key={`pie-${idx}-${graphData.records.length}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
+                            } else if (msgChartType === 'line') {
+                              console.log(`✓ Rendering LineChartRenderer with key line-${idx}-${graphData.records.length}`);
+                              return <LineChartRenderer key={`line-${idx}-${graphData.records.length}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
+                            } else {
+                              console.log(`✓ Rendering BarChartRenderer with key bar-${idx}-${graphData.records.length}`);
+                              return <BarChartRenderer key={`bar-${idx}-${graphData.records.length}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
+                            }
+                          })()}
+                        </div>
+
+                      ) : isGraphMsg && graphData ? (
+                        /* ── Graph Disabled: Show text response instead with toggle button ── */
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                          <button
+                            onClick={() => {
+                              setMessages(prev => {
+                                const updated = [...prev];
+                                updated[idx] = { ...updated[idx], isGraphMode: true };
+                                return updated;
+                              });
+                            }}
+                            style={{
+                              padding: '8px 12px',
+                              background: 'transparent',
+                              border: '1.5px solid #d4af37',
+                              borderRadius: '6px',
+                              color: '#d4af37',
+                              cursor: 'pointer',
+                              fontSize: '12px',
+                              fontWeight: '600',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              width: 'fit-content',
+                              transition: 'all 0.2s ease',
+                            }}
+                            title="Show graph"
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.background = 'rgba(212,175,55,0.2)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.background = 'transparent';
+                            }}
+                          >
+                            📊 Show Graph
+                          </button>
+                          <div className="ai-bubble">
+                            <div dangerouslySetInnerHTML={{ __html: msg.text }} />
+                          </div>
                         </div>
 
                       ) : (
@@ -1862,21 +2161,88 @@ useEffect(() => {
 
         {/* Input footer */}
         <div className="input-footer">
-          <div className="input-wrapper">
-            <textarea
-              ref={inputRef}
-              className="main-input"
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              disabled={isLoading || wsConnectionState !== 'connected'}
-              placeholder={wsConnectionState === 'connected' ? "Ask Anything..." : "Waiting for connection…"}
-              rows={1}
+          {voiceRecorder.isRecording && (
+            <div className={`voice-recording-overlay${voiceRecorder.closingRecording ? ' closing' : ''}`}>
+              <RecordingInterface
+                recordingTime={voiceRecorder.recordingTime}
+                onCancel={voiceRecorder.cancelRecording}
+                formatTime={voiceRecorder.formatTime}
+              />
+            </div>
+          )}
+          
+          {voiceRecorder.recordedAudioBlob ? (
+            <VoicePreviewBar
+              isPlaying={voiceRecorder.isPlaying}
+              playbackTime={voiceRecorder.playbackTime}
+              totalDuration={voiceRecorder.totalDuration}
+              displayTimeText={voiceRecorder.displayTimeText}
+              onTogglePlayback={voiceRecorder.togglePlayback}
+              onDelete={voiceRecorder.deleteRecording}
+              onSend={voiceRecorder.sendVoiceMessage}
+              isLoading={isLoading}
+              wsConnectionState={wsConnectionState}
             />
-            <button className="send-btn" onClick={sendMessage} disabled={isLoading || wsConnectionState !== 'connected' || !input.trim()}>
-              <IconSend/>
-            </button>
-          </div>
+          ) : (
+            <div className="input-wrapper">
+              <textarea
+                ref={inputRef}
+                className="main-input"
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                disabled={isLoading || wsConnectionState !== 'connected'}
+                placeholder={wsConnectionState === 'connected' ? "Ask Anything..." : "Waiting for connection…"}
+                rows={1}
+              />
+              <VoiceMicButton
+                forwardedRef={voiceRecorder.micButtonRef}
+                onClick={voiceRecorder.toggleRecording}
+                disabled={isLoading || wsConnectionState !== 'connected' || voiceRecorder.recordedAudioBlob !== null}
+              />
+              {/* Graph Toggle Button */}
+              <button
+                onClick={() => {
+                  setIsGraphMode(!isGraphMode);
+                }}
+                title={isGraphMode ? "Disable graphs" : "Enable graphs"}
+                style={{
+                  background: isGraphMode
+                    ? "linear-gradient(135deg, #d4af37, #f5c249)"
+                    : "transparent",
+                  border: isGraphMode
+                    ? "1.5px solid #d4af37"
+                    : "1.5px solid rgba(212,175,55,0.3)",
+                  borderRadius: 8,
+                  padding: "7px 9px",
+                  cursor: "pointer",
+                  color: isGraphMode ? "#000" : "#d4af37",
+                  transition: "all 0.2s ease",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  boxShadow: isGraphMode ? "0 0 12px rgba(212,175,55,0.4)" : "none",
+                }}
+                onMouseEnter={(e) => {
+                  if (!isGraphMode) {
+                    e.currentTarget.style.boxShadow = "0 0 8px rgba(212,175,55,0.3)";
+                    e.currentTarget.style.borderColor = "#d4af37";
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!isGraphMode) {
+                    e.currentTarget.style.boxShadow = "none";
+                    e.currentTarget.style.borderColor = "rgba(212,175,55,0.3)";
+                  }
+                }}
+              >
+                <IconChartBar size={18} stroke={2} />
+              </button>
+              <button className="send-btn" onClick={sendMessage} disabled={isLoading || wsConnectionState !== 'connected' || !input.trim()}>
+                <IconArrowUp size={16} color="white" stroke={2}/>
+              </button>
+            </div>
+          )}
           <p className="footer-disclaimer">NanoSoft Ask AI can make mistakes. Verify important legal information.</p>
         </div>
 
