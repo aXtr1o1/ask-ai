@@ -497,8 +497,8 @@ function formatLargeDatasetTable(largeDataData: any): string {
   
   
   // 5. Add context summary above table - JUST THE CONTEXT ONLY
-  const contextHTML = context 
-    ? `<div class="large-dataset-context">${esc(context)}</div>` 
+  // const contextHTML = context 
+  //   ? `<div class="large-dataset-context">${esc(context)}</div>` 
   const contextHTML = context 
     ? `<div class="large-dataset-context">${esc(context)}</div>` 
     : "";
@@ -943,8 +943,6 @@ export default function Home() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [audioPlayingIndex, setAudioPlayingIndex] = useState<number | null>(null);
   const [audioProgressMap, setAudioProgressMap] = useState<Record<number, number>>({});
-  const [loginPageClientLogoPath, setLoginPageClientLogoPath] = useState<string | null>(null);
-  const [loginFooterLogoPath, setLoginFooterLogoPath] = useState<string | null>(null);
   const [loginPageClientLogoPath, setLoginPageClientLogoPath] = useState<string | null>(null);
   const [loginFooterLogoPath, setLoginFooterLogoPath] = useState<string | null>(null);
 
@@ -2300,16 +2298,6 @@ export default function Home() {
               <button className="send-btn" onClick={sendMessage} disabled={isLoading || wsConnectionState !== 'connected' || !input.trim()}>
                 <IconArrowUp size={16} color="white" stroke={2}/>
               </button>
-            {/* <button className="send-btn" onClick={sendMessage} disabled={isLoading || wsConnectionState !== 'connected' || !input.trim()}>
-              <IconSend/>
-            </button> */}
-            </div>
-          )}
-
-          {/* Footer */}
-          {loginFooterLogoPath && (
-            <div style={{ display: "flex", justifyContent: "center", marginTop: 8 }}>
-              <img src={loginFooterLogoPath} alt="Footer logo" style={{ maxHeight: 40, objectFit: "contain" }} />
             {/* <button className="send-btn" onClick={sendMessage} disabled={isLoading || wsConnectionState !== 'connected' || !input.trim()}>
               <IconSend/>
             </button> */}

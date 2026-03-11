@@ -256,8 +256,6 @@ async def sessions_endpoint(request: SessionRequest):
         logger.info("invalid user name")
         raise HTTPException(status_code=400, detail="userName is required")
 
-    if user_name not in VALID_USERNAMES:
-        raise HTTPException(status_code=403, detail=f"Invalid user name '{user_name}'. Access denied.")
 
     # ── Case 1: chatHistory present → save session to PostgreSQL ──
     if incoming_history:
