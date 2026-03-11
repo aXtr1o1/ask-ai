@@ -117,6 +117,23 @@ function isHiddenColumn(col: string): boolean {
   return HIDDEN_COLUMNS.has(col.toLowerCase().replace(/[\s_]/g, ""));
 }
 
+// ── Columns to hide from large dataset display (sensitive data) ──
+const HIDDEN_COLUMNS = new Set([
+  'id',
+  'user_id',
+  'userid',
+  'user_name',
+  'username',
+  'createdat',
+  'created_at',
+  'updatedat',
+  'updated_at',
+]);
+
+function isHiddenColumn(col: string): boolean {
+  return HIDDEN_COLUMNS.has(col.toLowerCase().replace(/[\s_]/g, ""));
+}
+
 // ── Status badge renderer ─────────────────────────────────────────────────────
 function badge(val: string): string {
   const v   = val.toLowerCase();
@@ -135,6 +152,7 @@ function isBadgeCol(col: string): boolean {
 
 // ── Build HTML <table> from rows ──────────────────────────────────────────────
 // ── Build HTML <table> from rows - SMALL DATA TABLES ──
+// ── Build HTML <table> from rows - SMALL DATA TABLES ──
 function buildTable(rows: Record<string, string>[], cols?: string[]): string {
   if (!rows.length) return "";
 
@@ -149,12 +167,14 @@ function buildTable(rows: Record<string, string>[], cols?: string[]): string {
 
   const tbody = `<tbody>${rows.map((row, ri) =>
     `<tr>${allCols.map(col => {
+    `<tr>${allCols.map(col => {
       const val  = row[col] ?? "—";
       const cell = isBadgeCol(col) ? badge(val) : esc(val);
       return `<td>${cell}</td>`;
     }).join("")}</tr>`
   ).join("")}</tbody>`;
 
+  const tfoot = `<tfoot><tr><td colspan="${allCols.length}" style="text-align:left;padding-left:12px;padding-right:12px;display:flex;justify-content:space-between;align-items:center;gap:20px"><span>Columns: ${allCols.length}</span><span>Total: ${rows.length} records</span></td></tr></tfoot>`;
   const tfoot = `<tfoot><tr><td colspan="${allCols.length}" style="text-align:left;padding-left:12px;padding-right:12px;display:flex;justify-content:space-between;align-items:center;gap:20px"><span>Columns: ${allCols.length}</span><span>Total: ${rows.length} records</span></td></tr></tfoot>`;
 
   return `<div class="table-wrapper"><table class="ai-table">${thead}${tbody}${tfoot}</table></div>`;
@@ -609,6 +629,19 @@ function removeEmoji(text: string): string {
   return lines.join("\n");
 }
 
+
+// Remove emoji from text (especially from "Found X records..." message)
+function removeEmoji(text: string): string {
+  // Only remove emoji from the FIRST line (Found X records message)
+  const lines = text.split("\n");
+  if (lines.length > 0) {
+    // Remove emoji from first line only
+    const firstLine = lines[0].replace(/[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{27BF}]|[\u{1F600}-\u{1F64F}]|[\u{1F680}-\u{1F6FF}]/gu, '').trim();
+    lines[0] = firstLine;
+  }
+  return lines.join("\n");
+}
+
 function formatOutput(text: string): string {
   if (!text.trim()) return "";
 
@@ -633,7 +666,19 @@ function formatOutput(text: string): string {
     // ── A: Pipe table | col | col | ────────────────────────────────────────
     // Also match col | col | col (without leading/trailing pipes) → convert to markdown table
     if (/^\|.+\|$/.test(trimmed) || /^[^|]*\|[^|]*\|/.test(trimmed)) {
+    // Also match col | col | col (without leading/trailing pipes) → convert to markdown table
+    if (/^\|.+\|$/.test(trimmed) || /^[^|]*\|[^|]*\|/.test(trimmed)) {
       const block: string[] = [];
+      while (i < allLines.length) {
+        const t = allLines[i].trim();
+        if (/^\|.+\|$/.test(t) || /^[^|]*\|[^|]*\|/.test(t)) {
+          // Convert "col | col | col" to "| col | col | col |" format
+          const normalized = t.startsWith('|') ? t : '| ' + t.split('|').map(c => c.trim()).join(' | ') + ' |';
+          block.push(normalized);
+          i++;
+        } else {
+          break;
+        }
       while (i < allLines.length) {
         const t = allLines[i].trim();
         if (/^\|.+\|$/.test(t) || /^[^|]*\|[^|]*\|/.test(t)) {
@@ -972,6 +1017,25 @@ export default function Home() {
 
   // Read userName and branding logos from URL (e.g. from autologin redirect); persist logos to localStorage
   useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const userName = params.get("userName") ?? params.get("userId");
+      const clientLogo = params.get("loginPageClientLogoPath");
+      const footerLogo = params.get("loginFooterLogoPath");
+      setUserIdFromUrl(userName);
+      if (clientLogo) {
+        setLoginPageClientLogoPath(clientLogo);
+        localStorage.setItem("loginPageClientLogoPath", clientLogo);
+      } else {
+        setLoginPageClientLogoPath(localStorage.getItem("loginPageClientLogoPath"));
+      }
+      if (footerLogo) {
+        setLoginFooterLogoPath(footerLogo);
+        localStorage.setItem("loginFooterLogoPath", footerLogo);
+      } else {
+        setLoginFooterLogoPath(localStorage.getItem("loginFooterLogoPath"));
+      }
+    }
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
       const userName = params.get("userName") ?? params.get("userId");
@@ -1532,6 +1596,8 @@ useEffect(() => {
     if (cached && cached.length > 0) {
       const processed = processLoadedMessages(cached);
       setMessages(processed);
+      const processed = processLoadedMessages(cached);
+      setMessages(processed);
     } else {
       // Fetch from backend
       setHistoryLoading(true);
@@ -1549,6 +1615,9 @@ useEffect(() => {
           if (entry.query) history.push({ role: "user", text: entry.query });
           if (entry.assistant) history.push({ role: "ai", text: entry.assistant });
         }
+        const processed = processLoadedMessages(history);
+        sessionMessagesRef.current.set(targetSid, processed);
+        setMessages(processed);
         const processed = processLoadedMessages(history);
         sessionMessagesRef.current.set(targetSid, processed);
         setMessages(processed);
@@ -1757,6 +1826,7 @@ useEffect(() => {
     return (
       <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center",
         background: `
+        background: `
             linear-gradient(135deg, #0A0A0A 0%, #111111 50%, #0A0A0A 100%)`}}>
         <span style={{ fontSize: 14, color: "#A0AEC0" }}>Checking authentication…</span>
       </div>
@@ -1773,6 +1843,16 @@ useEffect(() => {
       <aside className="sidebar">
         {/* Sidebar Header with Logo */}
         <div className="sidebar-header">
+          <div style={{ display: "flex", alignItems: "center" }}>
+            <div
+              className="brand-box"
+              style={loginPageClientLogoPath ? { width: "100%", maxWidth: 220, height: "auto", minHeight: 56, maxHeight: 72, padding: 0, border: "none", borderRadius: 0 } : undefined}
+            >
+              {loginPageClientLogoPath ? (
+                <img src={loginPageClientLogoPath} alt="Client logo" style={{ width: "100%", maxWidth: 220, height: "auto", maxHeight: 72, objectFit: "contain", display: "block" }} />
+              ) : (
+                <Image src="/icon.png" alt="Nanosoft Ask AI" width={20} height={20} style={{ borderRadius: 0 }}/>
+              )}
           <div style={{ display: "flex", alignItems: "center" }}>
             <div
               className="brand-box"
@@ -1839,6 +1919,7 @@ useEffect(() => {
         </div>
         {/* <div className={`sidebar-profile-card ${menuOpen ? "open" : ""}`} ref={menuRef}> */}
          
+         
            
         {/* </div> */}
 
@@ -1901,6 +1982,7 @@ useEffect(() => {
           {/* Chat History – only visible when Chat feature is active */}
           {activeFeature === 'chat' && (
             <div className="chat-history-box" style={{ marginTop: 24, display: "flex", flexDirection: "column", minHeight: 0 }}>
+            <div className="chat-history-box" style={{ marginTop: 24, display: "flex", flexDirection: "column", minHeight: 0 }}>
               <div className="chat-history-scroll">
                 {chatSessions.map(s => (
                   <div
@@ -1929,6 +2011,7 @@ useEffect(() => {
         </div>
 
         {/* Profile Card - Toggle on Hamburger Click */}
+       
        
 
         {/* Beta Version Disclaimer */}
@@ -1973,6 +2056,9 @@ useEffect(() => {
                 style={{ width: "auto", height: "auto", maxWidth: "min(600px,90vw)", maxHeight: 200, objectFit: "contain" }}/>
             </div> */}
             <div className="landing-card">
+              <h1 style={{
+                fontSize: 32,
+                fontWeight: 700,
               <h1 style={{
                 fontSize: 32,
                 fontWeight: 700,
