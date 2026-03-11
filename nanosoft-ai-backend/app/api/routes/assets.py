@@ -38,6 +38,8 @@ def get_assets(req: AssetRequest):
         req.user_name, req.limit, req.offset
     )
     logger.debug("[GET-ASSETS] Full payload: %s", req.model_dump())
+    
+    logger.info("[GET-ASSETS] Calling sp_asset_query")
 
     #Check if this is an aggregate query
     # If is_aggregate is True → run GROUP BY path

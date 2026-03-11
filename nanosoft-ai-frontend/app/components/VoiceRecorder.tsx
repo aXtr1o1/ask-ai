@@ -168,19 +168,26 @@ export function useVoiceRecorder(
       if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
       if (closeTimeoutRef.current) clearTimeout(closeTimeoutRef.current);
     },
+
+    // ─── FIXED: deleteRecording ───────────────────────────────────────
+    // Previously, audioPlaybackRef was paused but NOT nulled.
+    // This caused togglePlayback() to reuse the stale Audio object
+    // (pointing to the old blob URL) on the next recording.
+    // Fix: fully destroy the Audio object so togglePlayback() creates
+    // a fresh one bound to the new blob on next use.
     deleteRecording: () => {
       setRecordedAudioBlob(null);
       setPlaybackTime(0);
       setIsPlaying(false);
       setAudioDuration(0);
-      setRecordingTime(0); // reset timer display
+      setRecordingTime(0);          // ← reset timer display to 0:00
       if (audioPlaybackRef.current) {
         audioPlaybackRef.current.pause();
-        audioPlaybackRef.current.src = ""; // free resource
-        audioPlaybackRef.current = null; // ✅ destroy ref
-        // togglePlayback will create a fresh Audio next time
+        audioPlaybackRef.current.src = "";   // ← free old blob URL from memory
+        audioPlaybackRef.current = null;     // ← destroy ref so togglePlayback() creates fresh Audio next time
       }
     },
+
     togglePlayback: () => {
       if (!recordedAudioBlob) return;
       if (!audioPlaybackRef.current) {
