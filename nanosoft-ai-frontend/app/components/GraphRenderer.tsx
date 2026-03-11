@@ -25,7 +25,7 @@ export interface GraphData {
   context_summary: string;    // ← shown above the chart as title/summary
   label_key: string;          // ← X axis column name (e.g. "DivisionName")
   value_key: string;          // ← Y axis column name (e.g. "result")
-  records: Record<string, any>[];  // ← raw grouped data for all chart types
+  records: Record<string, number | string>[];  // ← raw grouped data for all chart types
 }
 
 // ─── Parse Graph Response ────────────────────────────────────────────────────
@@ -245,7 +245,12 @@ export function BarChartRenderer({ graphData, currentChartType, onChartTypeChang
                   padding: "8px 12px"
                 }}
                 cursor={{ fill: "rgba(212,175,55,0.08)" }}
-                formatter={(value: any) => [value ? value.toLocaleString() : "0", graphData.value_key]}
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                formatter={(value: any) => {
+                  if (typeof value === 'number') return [value.toLocaleString(), graphData.value_key];
+                  if (typeof value === 'string') return [value, graphData.value_key];
+                  return ["0", graphData.value_key];
+                }}
                 labelFormatter={(label) => `${graphData.label_key}: ${label}`}
               />
 
@@ -261,27 +266,18 @@ export function BarChartRenderer({ graphData, currentChartType, onChartTypeChang
             </BarChart>
           </ResponsiveContainer>
         </div>
-
-        {/* Chart Type Dropdown — Bottom-Left Overlay */}
-        {currentChartType && onChartTypeChange && (
-          <div
-            style={{
-              position: 'absolute',
-              bottom: '16px',
-              left: '20px',
-              zIndex: 9998,
-              overflow: 'visible',
-              pointerEvents: 'auto',
-            }}
-          >
-            <ChartTypeDropdown currentType={currentChartType} onTypeChange={onChartTypeChange} />
-          </div>
-        )}
       </div>
 
-      {/* Footer showing group count */}
-      <div className="graph-footer">
-        {graphData.records.length} group{graphData.records.length !== 1 ? "s" : ""}
+      {/* Footer Control Row — Dropdown Left + Group Count Right */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '10px' }}>
+        {/* Chart Type Dropdown — Left Side */}
+        {currentChartType && onChartTypeChange && (
+          <ChartTypeDropdown currentType={currentChartType} onTypeChange={onChartTypeChange} />
+        )}
+        {/* Group Count — Right Side */}
+        <div className="graph-footer">
+          {graphData.records.length} group{graphData.records.length !== 1 ? "s" : ""}
+        </div>
       </div>
     </div>
   );
@@ -308,8 +304,8 @@ export function HorizontalBarChartRenderer({ graphData, currentChartType, onChar
           <ResponsiveContainer width="100%" height="100%">
             <BarChart
               data={graphData.records.slice(0, 50)}
-              margin={{ top: 15, right: 20, left: 150, bottom: 5 }}
-              barCategoryGap="15%"
+              margin={{ top: 15, right: 20, left: 180, bottom: 5 }}
+              barCategoryGap="20%"
               layout="vertical"
             >
               {/* Subtle grid lines matching dark theme */}
@@ -320,7 +316,7 @@ export function HorizontalBarChartRenderer({ graphData, currentChartType, onChar
                 dataKey={graphData.label_key}
                 type="category"
                 tick={{ fill: "#9CA3AF", fontSize: 11 }}
-                width={140}
+                width={160}
               />
 
               {/* X Axis — value_key column */}
@@ -339,12 +335,16 @@ export function HorizontalBarChartRenderer({ graphData, currentChartType, onChar
                   padding: "8px 12px"
                 }}
                 cursor={{ fill: "rgba(212,175,55,0.08)" }}
-                formatter={(value: any) => [value ? value.toLocaleString() : "0", graphData.value_key]}
+                formatter={(value: any) => {
+                  if (typeof value === 'number') return [value.toLocaleString(), graphData.value_key];
+                  if (typeof value === 'string') return [value, graphData.value_key];
+                  return ["0", graphData.value_key];
+                }}
                 labelFormatter={(label) => `${graphData.label_key}: ${label}`}
               />
 
               {/* Bars — alternating gold colors */}
-              <Bar dataKey={graphData.value_key} radius={[0, 6, 6, 0]} barSize="75%" maxBarSize={40} strokeWidth={3} stroke="#8b6914">
+              <Bar dataKey={graphData.value_key} radius={[0, 6, 6, 0]} barSize="60%" maxBarSize={25} strokeWidth={3} stroke="#8b6914">
                 {graphData.records.map((_, index) => (
                   <Cell
                     key={`cell-${index}`}
@@ -355,27 +355,18 @@ export function HorizontalBarChartRenderer({ graphData, currentChartType, onChar
             </BarChart>
           </ResponsiveContainer>
         </div>
-
-        {/* Chart Type Dropdown — Bottom-Left Overlay */}
-        {currentChartType && onChartTypeChange && (
-          <div
-            style={{
-              position: 'absolute',
-              bottom: '16px',
-              left: '20px',
-              zIndex: 9998,
-              overflow: 'visible',
-              pointerEvents: 'auto',
-            }}
-          >
-            <ChartTypeDropdown currentType={currentChartType} onTypeChange={onChartTypeChange} />
-          </div>
-        )}
       </div>
 
-      {/* Footer showing group count */}
-      <div className="graph-footer">
-        {graphData.records.length} group{graphData.records.length !== 1 ? "s" : ""}
+      {/* Footer Control Row — Dropdown Left + Group Count Right */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '10px' }}>
+        {/* Chart Type Dropdown — Left Side */}
+        {currentChartType && onChartTypeChange && (
+          <ChartTypeDropdown currentType={currentChartType} onTypeChange={onChartTypeChange} />
+        )}
+        {/* Group Count — Right Side */}
+        <div className="graph-footer">
+          {graphData.records.length} group{graphData.records.length !== 1 ? "s" : ""}
+        </div>
       </div>
     </div>
   );
@@ -429,7 +420,11 @@ export function LineChartRenderer({ graphData, currentChartType, onChartTypeChan
                   padding: "8px 12px"
                 }}
                 cursor={{ fill: "rgba(212,175,55,0.08)" }}
-                formatter={(value: any) => [value ? value.toLocaleString() : "0", graphData.value_key]}
+                formatter={(value: any) => {
+                  if (typeof value === 'number') return [value.toLocaleString(), graphData.value_key];
+                  if (typeof value === 'string') return [value, graphData.value_key];
+                  return ["0", graphData.value_key];
+                }}
                 labelFormatter={(label) => `${graphData.label_key}: ${label}`}
               />
 
@@ -445,27 +440,18 @@ export function LineChartRenderer({ graphData, currentChartType, onChartTypeChan
             </LineChart>
           </ResponsiveContainer>
         </div>
-
-        {/* Chart Type Dropdown — Bottom-Left Overlay */}
-        {currentChartType && onChartTypeChange && (
-          <div
-            style={{
-              position: 'absolute',
-              bottom: '16px',
-              left: '20px',
-              zIndex: 9998,
-              overflow: 'visible',
-              pointerEvents: 'auto',
-            }}
-          >
-            <ChartTypeDropdown currentType={currentChartType} onTypeChange={onChartTypeChange} />
-          </div>
-        )}
       </div>
 
-      {/* Footer showing group count */}
-      <div className="graph-footer">
-        {graphData.records.length} group{graphData.records.length !== 1 ? "s" : ""}
+      {/* Footer Control Row — Dropdown Left + Group Count Right */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '10px' }}>
+        {/* Chart Type Dropdown — Left Side */}
+        {currentChartType && onChartTypeChange && (
+          <ChartTypeDropdown currentType={currentChartType} onTypeChange={onChartTypeChange} />
+        )}
+        {/* Group Count — Right Side */}
+        <div className="graph-footer">
+          {graphData.records.length} group{graphData.records.length !== 1 ? "s" : ""}
+        </div>
       </div>
     </div>
   );
@@ -478,7 +464,7 @@ export function PieChartRenderer({ graphData, currentChartType, onChartTypeChang
     ? { background: "#ffffff", border: "1px solid #e8e4dc", color: "#1f2937" }
     : { background: "#1a1a1a", border: "1px solid rgba(212,175,55,0.4)", color: "#F3F4F6" };
     // Prepare pie chart data — limit to top 8 slices for readability
-  const pieData = graphData.records.slice(0, 8).map((record, index) => ({
+  const pieData = graphData.records.slice(0, 8).map((record) => ({
     name: record[graphData.label_key],
     value: record[graphData.value_key] || 0,
   }));
@@ -497,12 +483,12 @@ export function PieChartRenderer({ graphData, currentChartType, onChartTypeChang
 
       {/* Pie chart container */}
       <div className="graph-chart-container" style={{ position: 'relative' }}>
-        <div style={{ width: "100%", minWidth: "900px", height: "100%" }}>
+        <div style={{ width: "100%", minWidth: "900px", height: "100%", display: 'flex', justifyContent: 'flex-start', alignItems: 'center', paddingLeft: '20px' }}>
           <ResponsiveContainer width="100%" height="100%">
-            <PieChart>
+            <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
               <Pie
                 data={pieData}
-                cx="50%"
+                cx="20%"
                 cy="50%"
                 labelLine={false}
                 label={({ name, value }) => `${name}: ${value?.toLocaleString() || 0}`}
@@ -521,33 +507,28 @@ export function PieChartRenderer({ graphData, currentChartType, onChartTypeChang
                   fontSize: 13,
                   padding: "8px 12px"
                 }}
-                formatter={(value: any) => [value ? value.toLocaleString() : "0", graphData.value_key]}
+                formatter={(value: any) => {
+                  if (typeof value === 'number') return [value.toLocaleString(), graphData.value_key];
+                  if (typeof value === 'string') return [value, graphData.value_key];
+                  return ["0", graphData.value_key];
+                }}
                 labelFormatter={(label) => `${graphData.label_key}: ${label}`}
               />
             </PieChart>
           </ResponsiveContainer>
         </div>
-
-        {/* Chart Type Dropdown — Bottom-Left Overlay */}
-        {currentChartType && onChartTypeChange && (
-          <div
-            style={{
-              position: 'absolute',
-              bottom: '16px',
-              left: '20px',
-              zIndex: 9998,
-              overflow: 'visible',
-              pointerEvents: 'auto',
-            }}
-          >
-            <ChartTypeDropdown currentType={currentChartType} onTypeChange={onChartTypeChange} />
-          </div>
-        )}
       </div>
 
-      {/* Footer showing group count */}
-      <div className="graph-footer">
-        {graphData.records.length} group{graphData.records.length !== 1 ? "s" : ""} (showing top {Math.min(8, graphData.records.length)})
+      {/* Footer Control Row — Dropdown Left + Group Count Right */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '10px' }}>
+        {/* Chart Type Dropdown — Left Side */}
+        {currentChartType && onChartTypeChange && (
+          <ChartTypeDropdown currentType={currentChartType} onTypeChange={onChartTypeChange} />
+        )}
+        {/* Group Count — Right Side */}
+        <div className="graph-footer">
+          {graphData.records.length} group{graphData.records.length !== 1 ? "s" : ""} (showing top {Math.min(8, graphData.records.length)})
+        </div>
       </div>
     </div>
   );

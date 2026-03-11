@@ -2267,16 +2267,17 @@ useEffect(() => {
             {/* <button className="send-btn" onClick={sendMessage} disabled={isLoading || wsConnectionState !== 'connected' || !input.trim()}>
               <IconSend/>
             </button> */}
-          {/* </div> */}
+            </div>
+          )}
+
+          {/* Footer */}
           {loginFooterLogoPath && (
             <div style={{ display: "flex", justifyContent: "center", marginTop: 8 }}>
               <img src={loginFooterLogoPath} alt="Footer logo" style={{ maxHeight: 40, objectFit: "contain" }} />
             </div>
           )}
           <p className="footer-disclaimer">NanoSoft Ask AI can make mistakes. Verify important legal information.</p>
-          </div>
-
-
+        </div>
       </div>
       </div>
     </div>

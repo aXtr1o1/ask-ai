@@ -2738,12 +2738,13 @@ textarea:focus-visible {
   align-items: center;
   justify-content: flex-start;
   overflow-x: auto;          /* Enable horizontal scrolling */
-  overflow-y: hidden;
+  overflow: visible;         /* Allow dropdown menu to open upward */
   margin: 12px 0;
   background: rgba(0, 0, 0, 0.2);
   border-radius: 8px;
   padding: 8px;              /* Reduced from 16px to minimize whitespace */
   scroll-behavior: smooth;   /* Smooth scrolling */
+  position: relative;        /* Enable absolute positioning for dropdown */
 }
 
 /* Scrollbar styling for the chart container */
