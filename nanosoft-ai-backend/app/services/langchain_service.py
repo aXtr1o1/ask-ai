@@ -265,44 +265,6 @@ class LangChainService:
                     MAX_DISPLAY = 100
                     p_list_for_model = p_list if len(p_list) <= MAX_DISPLAY else p_list[:MAX_DISPLAY]
                     is_large_result = len(p_list) > MAX_DISPLAY
-                    
-                    
-                    # If it is list query AND records > MAX_DISPLAY(100):
-                    #   - send empty records to model, get context summary only
-                    #   - return raw JSON directly to frontend (bypasses Step 3 model call)
-                    if is_large_result and not is_count_query:
-                        logger.info("📌 Large dataset (%d records) → sending raw JSON to frontend + context from model only", len(p_list))
-
-                        messages.append(
-                            ToolMessage(
-                                content=json.dumps({
-                                    "message": f"{display_count} records found (large dataset)",
-                                    "total_count": display_count,
-                                    "records": []   # no records sent to model
-                                }),
-                                tool_call_id=tool_call["id"]
-                            )
-                        )
-                        messages.append(
-                            HumanMessage(content=(
-                                "Provide a brief context/summary of the above query result. "
-                                "Do NOT list individual records. Keep it concise."
-                            ))
-                        )
-                        context_ai_msg = self.model.invoke(messages)
-                        context_summary = context_ai_msg.content or ""
-                        logger.info("✅ Context summary generated for large dataset")
-
-                        large_dataset_response = json.dumps({
-                            "type": "large_dataset",
-                            "total_count": display_count,
-                            "records_count": len(p_list),
-                            "context_summary": context_summary,
-                            "records": p_list   # full raw data sent directly to frontend
-                        })
-                        logger.info("✅ Large dataset JSON prepared: %d records", len(p_list))
-                        return large_dataset_response, messages
-                                        
 
                     
                     # aggregate is excluded from large dataset path
@@ -524,39 +486,6 @@ class LangChainService:
                     MAX_DISPLAY = 100
                     p_list_for_model = p_list if len(p_list) <= MAX_DISPLAY else p_list[:MAX_DISPLAY]
                     is_large_result = len(p_list) > MAX_DISPLAY
-                    
-                     # Large dataset.
-                    # Same logic as in the up  but for the forced path.
-                    if is_large_result and not is_count_query:
-                        logger.info("📌 Large dataset (%d records) [FORCED] → sending raw JSON to frontend + context from model only", len(p_list))
-
-                        messages.append(
-                            ToolMessage(
-                                content=json.dumps({
-                                    "message": f"{display_count} records found (large dataset)",
-                                    "total_count": display_count,
-                                    "records": []   # no records sent to model
-                                }),
-                                tool_call_id=fake_tool_id
-                            )
-                        )
-                        messages.append(
-                            HumanMessage(content=(
-                                "Provide a brief context/summary of the above query result. "
-                                "Do NOT list individual records. Keep it concise."
-                            ))
-                        )
-                        context_ai_msg = self.model.invoke(messages)
-                        context_summary = context_ai_msg.content or ""
-                        logger.info("✅ Context summary generated for large dataset [FORCED]")
-
-                        return json.dumps({
-                            "type": "large_dataset",
-                            "total_count": display_count,
-                            "records_count": len(p_list),
-                            "context_summary": context_summary,
-                            "records": p_list   # full raw data sent directly to frontend
-                        }), messages
 
                     
                     #— aggregate excluded from large dataset path

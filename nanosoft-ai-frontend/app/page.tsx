@@ -390,15 +390,19 @@ function formatLargeDatasetTable(largeDataData: any): string {
     records = [];
   }
   
+  
   if (records.length === 0) {
     return `<div class="large-dataset-context"><strong>Summary:</strong> ${esc(context)}</div>`;
   }
   
+  
   console.log(`✅ Formatting large dataset: ${records.length} records, context length: ${context.length}`);
+  
   
   // ═══════════════════════════════════════════════════════════════════
   // DYNAMICALLY COLLECT ALL COLUMNS FROM RECORDS (EXCLUDING HIDDEN)
   // ═══════════════════════════════════════════════════════════════════
+  
   
   const allKeys = new Set<string>();
   records.forEach((r: any) => {
@@ -412,14 +416,18 @@ function formatLargeDatasetTable(largeDataData: any): string {
     }
   });
   
+  
   // Convert Set to array while preserving order
   const colsToShow: string[] = Array.from(allKeys);
   
+  
   console.log(`📊 Dynamic columns detected: ${colsToShow.length} columns (hidden: ${records[0] ? Object.keys(records[0]).filter(k => isHiddenColumn(k)).length : 0}):`, colsToShow.slice(0, 10));
+  
   
   // ═══════════════════════════════════════════════════════════════════
   // BUILD HTML TABLE STRUCTURE DYNAMICALLY - USING CSS CLASSES
   // ═══════════════════════════════════════════════════════════════════
+  
   
   // 1. Create table header with ALL columns (excluding hidden)
   let tableHeadHTML = "<thead><tr>";
@@ -428,17 +436,21 @@ function formatLargeDatasetTable(largeDataData: any): string {
   });
   tableHeadHTML += "</tr></thead>";
   
+  
   // 2. Create table body rows dynamically
   let tableBodyHTML = "<tbody>";
   records.forEach((record: any, rowIndex: number) => {
     if (!record || typeof record !== 'object') return;
     
+    
     tableBodyHTML += `<tr>`;
+    
     
     // Populate visible columns for each row (skip hidden columns)
     colsToShow.forEach(col => {
       const val = record[col];
       let cellContent = "—";
+      
       
       if (val === null || val === undefined) {
         cellContent = "—";
@@ -451,6 +463,7 @@ function formatLargeDatasetTable(largeDataData: any): string {
         const strVal = String(val);
         const displayVal = strVal.length > 100 ? strVal.substring(0, 100) + "…" : strVal;
         
+        
         // Apply status badge styling for status-like columns
         if (isBadgeCol(col) && val) {
           cellContent = badge(strVal);
@@ -459,15 +472,19 @@ function formatLargeDatasetTable(largeDataData: any): string {
         }
       }
       
+      
       tableBodyHTML += `<td>${cellContent}</td>`;
     });
+    
     
     tableBodyHTML += "</tr>";
   });
   tableBodyHTML += "</tbody>";
   
+  
   // 3. Create table footer with summary - ALIGN RIGHT
   const tfoot = `<tfoot><tr><td colspan="${colsToShow.length}" style="text-align: right; padding-right: 14px;">Total: ${records.length} record${records.length !== 1 ? "s" : ""} | ${colsToShow.length} column${colsToShow.length !== 1 ? "s" : ""}</td></tr></tfoot>`;
+  
   
   // 4. Complete table HTML with CSS classes for styling
   const tableHTML = `<div class="large-dataset-wrapper">
@@ -478,10 +495,14 @@ function formatLargeDatasetTable(largeDataData: any): string {
     </table>
   </div>`;
   
+  
   // 5. Add context summary above table - JUST THE CONTEXT ONLY
   const contextHTML = context 
     ? `<div class="large-dataset-context">${esc(context)}</div>` 
+  const contextHTML = context 
+    ? `<div class="large-dataset-context">${esc(context)}</div>` 
     : "";
+  
   
   const fullHTML = contextHTML + tableHTML;
   console.log(` HTML generated - length: ${fullHTML.length}, has table-wrapper: ${fullHTML.includes('large-dataset-wrapper')}`);
@@ -615,6 +636,7 @@ function formatOutput(text: string): string {
 
   // Remove emojis from the first line only (Found X records message)
   text = removeEmoji(text);
+  
   
   const allLines = text.split("\n");
   let   html     = "";
@@ -921,6 +943,8 @@ export default function Home() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [audioPlayingIndex, setAudioPlayingIndex] = useState<number | null>(null);
   const [audioProgressMap, setAudioProgressMap] = useState<Record<number, number>>({});
+  const [loginPageClientLogoPath, setLoginPageClientLogoPath] = useState<string | null>(null);
+  const [loginFooterLogoPath, setLoginFooterLogoPath] = useState<string | null>(null);
   const [loginPageClientLogoPath, setLoginPageClientLogoPath] = useState<string | null>(null);
   const [loginFooterLogoPath, setLoginFooterLogoPath] = useState<string | null>(null);
 
@@ -1230,6 +1254,7 @@ export default function Home() {
           accRef.current += part;
           const snap = accRef.current;
           
+          
           // Extract text for display during streaming
           let displayText = snap;
           try {
@@ -1238,6 +1263,7 @@ export default function Home() {
             // If can't parse yet (incomplete JSON), show what we have
             displayText = snap;
           }
+          
           
           setMessages(prev => {
             const u = [...prev];
@@ -1445,8 +1471,10 @@ export default function Home() {
         return m;
       }
       
+      
       // Extract response content (removes session_id wrapper)
       const cleanedText = extractResponseContent(text);
+      
       
       // Try to render as large dataset table first
       const largeDatasetHTML = renderLargeDataset(cleanedText);
@@ -1454,6 +1482,7 @@ export default function Home() {
         console.log("✅ [HISTORY] Formatted as large dataset table");
         return { ...m, text: largeDatasetHTML };
       }
+      
       
       // Try to parse as JSON and format as text
       try {
@@ -2271,6 +2300,16 @@ export default function Home() {
               <button className="send-btn" onClick={sendMessage} disabled={isLoading || wsConnectionState !== 'connected' || !input.trim()}>
                 <IconArrowUp size={16} color="white" stroke={2}/>
               </button>
+            {/* <button className="send-btn" onClick={sendMessage} disabled={isLoading || wsConnectionState !== 'connected' || !input.trim()}>
+              <IconSend/>
+            </button> */}
+            </div>
+          )}
+
+          {/* Footer */}
+          {loginFooterLogoPath && (
+            <div style={{ display: "flex", justifyContent: "center", marginTop: 8 }}>
+              <img src={loginFooterLogoPath} alt="Footer logo" style={{ maxHeight: 40, objectFit: "contain" }} />
             {/* <button className="send-btn" onClick={sendMessage} disabled={isLoading || wsConnectionState !== 'connected' || !input.trim()}>
               <IconSend/>
             </button> */}
