@@ -1004,6 +1004,25 @@ export default function Home() {
         setLoginFooterLogoPath(localStorage.getItem("loginFooterLogoPath"));
       }
     }
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const userName = params.get("userName") ?? params.get("userId");
+      const clientLogo = params.get("loginPageClientLogoPath");
+      const footerLogo = params.get("loginFooterLogoPath");
+      setUserIdFromUrl(userName);
+      if (clientLogo) {
+        setLoginPageClientLogoPath(clientLogo);
+        localStorage.setItem("loginPageClientLogoPath", clientLogo);
+      } else {
+        setLoginPageClientLogoPath(localStorage.getItem("loginPageClientLogoPath"));
+      }
+      if (footerLogo) {
+        setLoginFooterLogoPath(footerLogo);
+        localStorage.setItem("loginFooterLogoPath", footerLogo);
+      } else {
+        setLoginFooterLogoPath(localStorage.getItem("loginFooterLogoPath"));
+      }
+    }
   }, []);
 
   useEffect(() => {
@@ -1837,17 +1856,17 @@ useEffect(() => {
               ) : (
                 <Image src="/icon.png" alt="Nanosoft Ask AI" width={20} height={20} style={{ borderRadius: 0 }}/>
               )}
+          <div style={{ display: "flex", alignItems: "center" }}>
+            <div
+              className="brand-box"
+              style={loginPageClientLogoPath ? { width: "100%", maxWidth: 220, height: "auto", minHeight: 56, maxHeight: 72, padding: 0, border: "none", borderRadius: 0 } : undefined}
+            >
+              {loginPageClientLogoPath ? (
+                <img src={loginPageClientLogoPath} alt="Client logo" style={{ width: "100%", maxWidth: 220, height: "auto", maxHeight: 72, objectFit: "contain", display: "block" }} />
+              ) : (
+                <Image src="/icon.png" alt="Nanosoft Ask AI" width={20} height={20} style={{ borderRadius: 0 }}/>
+              )}
             </div>
-            <span style={{
-              fontSize: 14,
-              fontWeight: 600,
-              background: "linear-gradient(180deg, #AE8625 0%, #F7EF8A 35%, #D2AC47 65%, #EDC967 100%)",
-              backgroundSize: "200% 200%",
-              WebkitBackgroundClip: "text",
-              backgroundClip: "text",
-              WebkitTextFillColor: "transparent",
-              animation: "goldShine 3s ease-in-out infinite"
-            }}>ASK AI</span>
           </div>
           <div />
           <div className="hamburger-wrapper" ref={menuRef}>
@@ -1954,6 +1973,7 @@ useEffect(() => {
 
           {/* Chat History – only visible when Chat feature is active */}
           {activeFeature === 'chat' && (
+            <div className="chat-history-box" style={{ marginTop: 24, display: "flex", flexDirection: "column", minHeight: 0 }}>
             <div className="chat-history-box" style={{ marginTop: 24, display: "flex", flexDirection: "column", minHeight: 0 }}>
               <div className="chat-history-scroll">
                 {chatSessions.map(s => (

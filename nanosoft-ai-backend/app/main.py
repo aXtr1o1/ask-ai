@@ -49,6 +49,7 @@ chatbot_app.add_middleware(
 api_router = APIRouter(prefix="/api", tags=["api"])
 
 # VALID_USERNAMES = {"v4demo", "poc"}
+# VALID_USERNAMES = {"v4demo", "poc"}
 
 # =====================================================
 # In-Memory Store
@@ -417,6 +418,93 @@ async def sessions_endpoint(request: SessionRequest):
         "session_id":    session_id,
         "type":          "history",
         "chat_history":  history
+    }
+    
+from app.services.sync.engine import run_sync
+@api_router.post("/client_insertion")
+async def client_insertion(request: ClientInsertionRequest):
+    userId = request.userId.strip()
+    userName = request.userName.strip()
+    service = request.service.strip()
+    token = request.token.strip()
+    if not userId or not userName:
+        logger.info("invalid client insertion payload")
+        raise HTTPException(status_code=400, detail="userId and userName are required")
+
+    conn = None
+    try:
+        conn = get_pool()
+        conn.rollback()  # clear any previous failed transaction
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT client_name, base_url, user_id, user_name, jwt_token, last_synced_at
+            FROM client_sync_config
+            WHERE user_id = %s AND user_name = %s
+            LIMIT 1
+            """,
+            (userId, userName),
+        )
+
+        row = cursor.fetchone()
+
+    except Exception as e:
+        logger.error(
+            f"❌ Failed to check client_sync_config | user_id={userId} | user_name={userName} | error={e}",
+            exc_info=True,
+        )
+        try:
+            if conn is not None and not getattr(conn, "closed", True):
+                conn.rollback()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail="Database error while checking client configuration")
+
+    if row:
+        client_name, base_url, db_user_id, db_user_name, db_jwt_token, last_synced_at = row
+        cursor.close()
+        return {
+            "client_type": "old",
+            "exists": True,
+            "client": {
+                "client_name": client_name,
+                "base_url": base_url,
+                "user_id": db_user_id,
+                "user_name": db_user_name,
+                "token": db_jwt_token,
+            },
+        }
+
+    # No existing client — insert new row into client_sync_config
+    cursor.execute(
+        """
+        INSERT INTO client_sync_config
+        (client_name, base_url, user_id, user_name, jwt_token, last_synced_at)
+        VALUES (%s, %s, %s, %s, %s, NOW())
+        RETURNING id, client_name, base_url, user_id, user_name, jwt_token, last_synced_at
+        """,
+        (userName, service, userId, userName, token),
+    )
+
+    new_row = cursor.fetchone()
+    conn.commit()
+    cursor.close()
+
+    new_id, client_name, base_url, db_user_id, db_user_name, db_jwt_token, last_synced_at = new_row
+
+    return {
+        "client_type": "new",
+        "exists": False,
+        "client": {
+            "id": new_id,
+            "client_name": client_name,
+            "base_url": base_url,
+            "user_id": db_user_id,
+            "user_name": db_user_name,
+            "service": service,
+            "token": db_jwt_token,
+        },
     }
     
 from app.services.sync.engine import run_sync
