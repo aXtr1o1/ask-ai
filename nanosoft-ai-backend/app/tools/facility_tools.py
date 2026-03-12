@@ -84,6 +84,40 @@ FULL PARAMETER CAPABILITIES:
 - asset_tag_no, keyword: Filter by specific identification or search terms.
 - date_from, date_to: Filter by asset creation or update timestamps.
 - limit, offset: Control data pagination.
+
+AGGREGATE / GROUP BY GUIDANCE:
+═══════════════════════════════════════
+When the user asks questions like:
+- "how many assets per division?"
+- "total assets by building and floor?"
+- "breakdown of assets by condition?"
+- "summarize assets by discipline?"
+- "how many assets are in each status?"
+- "compare assets by make or model?"
+- "group assets by building and floor"
+
+→ Set is_aggregate = True
+→ Fill group_by_columns with the columns the user mentioned
+   for example ["DivisionName"] or ["BuildingName", "FloorName"]
+→ Set aggregate_function based on what user wants
+   COUNT for how many, SUM for total of a value, AVG for average
+
+IMPORTANT: Only set is_aggregate=True when user mentions a grouping column
+like "per division", "by building", "each status". If user asks "how many total"
+or "how many assets exist" with NO grouping column → set is_aggregate=False.
+
+For all normal filter and list queries:
+→ is_aggregate = False (default — do not set)
+→ group_by_columns = None
+→ aggregate_function = None
+
+Columns you can use in group_by_columns for ASSETS:
+DivisionName, DisciplineName, BuildingName, FloorName,
+LocalityName, StatusName, ConditionName, PriorityName,
+AssetTypeName, MakeName, ModelName, SpotName,
+TradeGroupName, ServiceAreaName, YearOfManuf
+
+
 """,
     args_schema=AssetsInput
 )
@@ -116,7 +150,12 @@ def ASSETS(
     date_from=None,
     date_to=None,
     limit=None,
-    offset=None
+    offset=None,
+    is_aggregate=False,
+    group_by_columns=None,
+    aggregate_function=None,
+
+    
 ) -> str:
     if not user_name:
         logger.error("❌ ASSETS called without user_name")
@@ -155,11 +194,21 @@ def ASSETS(
         "date_to":      resolved_date_to,
         "limit":        limit,
         "offset":       0,
+        "is_aggregate":       is_aggregate,
+        "group_by_columns":   group_by_columns,
+        "aggregate_function": aggregate_function,
+
+        
     }
 
     clean_payload = {k: v for k, v in payload.items() if v is not None}
     if "offset" not in clean_payload:
         clean_payload["offset"] = 0
+    #log when aggregate mode is triggered so you can debug easily
+    if is_aggregate:
+        logger.info("📊 AGGREGATE MODE | group_by=%s | function=%s", group_by_columns, aggregate_function)
+    
+
     logger.info("📋 [ASSETS PAYLOAD FROM AI]:\n%s", json.dumps(clean_payload, indent=2, default=str))
 
     try:
@@ -206,6 +255,35 @@ FULL PARAMETER CAPABILITIES:
 - comp_from, comp_to: Filter by maintenance completion date ranges.
 - sla_min, sla_max: Filter by SLA duration (in minutes).
 - limit, offset: Control data pagination.
+
+AGGREGATE / GROUP BY GUIDANCE:
+
+When the user asks questions like:
+- "how many PPM tasks per division?"
+- "breakdown of PPM by frequency?"
+- "summarize PPM by status?"
+- "how many planned tasks per building?"
+- "group PPM by discipline and stage?"
+
+→ Set is_aggregate = True
+→ Fill group_by_columns with the columns the user mentioned
+→ Set aggregate_function based on what user wants
+   COUNT for how many, SUM for total, AVG for average
+   
+IMPORTANT: Only set is_aggregate=True when user mentions a grouping column
+like "per division", "by frequency", "each stage". If user asks "how many total"
+or "how many PPM tasks exist" with NO grouping column → set is_aggregate=False
+
+For all normal filter and list queries:
+→ is_aggregate = False (default — do not set)
+→ group_by_columns = None
+→ aggregate_function = None
+
+Columns you can use in group_by_columns for PPM:
+DivisionName, DisciplineName, BuildingName, FloorName,
+LocalityName, FrequencyName, PPMStatus, PPMStageName,
+ContractName, SpotName
+
 """,
     args_schema=PPMInput
 )
@@ -234,7 +312,12 @@ def PPM(
     sla_min=None,
     sla_max=None,
     limit=None,
-    offset=None
+    offset=None,
+    is_aggregate=False,
+    group_by_columns=None,
+    aggregate_function=None,
+
+    
 ) -> str:
     if not user_name:
         logger.error("❌ PPM called without user_name")
@@ -268,11 +351,19 @@ def PPM(
         "sla_max":      sla_max,
         "limit":        limit,
         "offset":       0,
+        "is_aggregate": is_aggregate,
+        "group_by_columns":group_by_columns,
+        "aggregate_function":aggregate_function,
+
     }
 
     clean_payload = {k: v for k, v in payload.items() if v is not None}
     if "offset" not in clean_payload:
         clean_payload["offset"] = 0
+    
+    if is_aggregate:
+        logger.info("📊 AGGREGATE MODE | group_by=%s | function=%s", group_by_columns, aggregate_function)
+
     logger.info("📋 [PPM PAYLOAD FROM AI]:\n%s", json.dumps(clean_payload, indent=2, default=str))
 
     try:
@@ -320,6 +411,35 @@ FULL PARAMETER CAPABILITIES:
 - date_from, date_to: Filter by complaint registration date range.
 - completed_from, completed_to: Filter by complaint resolution date range.
 - limit, offset: Control data pagination.
+
+AGGREGATE / GROUP BY GUIDANCE:
+When the user asks questions like:
+- "how many complaints per division?"
+- "breakdown of complaints by priority?"
+- "summarize BDM by status?"
+- "how many breakdowns per building?"
+- "group complaints by type and stage?"
+
+→ Set is_aggregate = True
+→ Fill group_by_columns with the columns the user mentioned
+→ Set aggregate_function based on what user wants
+   COUNT for how many, SUM for total, AVG for average
+   
+IMPORTANT: Only set is_aggregate=True when user mentions a grouping column
+like "per division", "by priority", "each status". If user asks "how many total"
+or "how many complaints exist" with NO grouping column → set is_aggregate=False.
+
+For all normal filter and list queries:
+→ is_aggregate = False (default — do not set)
+→ group_by_columns = None
+→ aggregate_function = None
+
+Columns you can use in group_by_columns for BDM:
+DivisionName, DisciplineName, BuildingName, FloorName,
+LocalityName, WoStatus, PriorityName, StageName,
+ComplaintTypeName, ComplaintModeName, SpotName, ContractName
+
+
 """,
     args_schema=BDMInput
 )
@@ -351,7 +471,10 @@ def BDM(
     completed_from=None,
     completed_to=None,
     limit=None,
-    offset=None
+    offset=None,
+    is_aggregate=False,
+    group_by_columns=None,
+    aggregate_function=None
 ) -> str:
     if not user_name:
         logger.error("❌ BDM called without user_name")
@@ -388,11 +511,19 @@ def BDM(
         "completed_to":     completed_to,
         "limit":            limit,
         "offset":           0,
+        "is_aggregate":       is_aggregate,
+        "group_by_columns":   group_by_columns,
+        "aggregate_function": aggregate_function,
+
     }
 
     clean_payload = {k: v for k, v in payload.items() if v is not None}
     if "offset" not in clean_payload:
         clean_payload["offset"] = 0
+        
+    if is_aggregate:
+        logger.info("📊 AGGREGATE MODE | group_by=%s | function=%s", group_by_columns, aggregate_function)
+
     logger.info("📋 [BDM PAYLOAD FROM AI]:\n%s", json.dumps(clean_payload, indent=2, default=str))
 
     try:

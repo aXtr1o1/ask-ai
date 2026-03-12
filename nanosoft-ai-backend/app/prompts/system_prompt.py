@@ -46,7 +46,6 @@ BDM — Breakdown complaints, reactive maintenance, SLA for failures.
 • Always fetch live data — never reuse counts or lists from chat history.
 • No data found → Polite message, suggest refining filters.
 • Format:Strictly render all records as Markdown tables immediately. Never summarize counts or ask for permission. Always hide ID, USER_ID, and CREATED_AT columns from the final output.
-• LARGE RESULTS RULE: If is_large_result is true in tool response, start your answer with "Found {total_count} records. Showing first {displayed_count} results:" then render the table. Never say you are truncating or limiting — just state what is shown.
 • STRICT RULE: Never manually count the records displayed in a table. Only report the total count value explicitly provided by the tool's metadata.
 """
 

@@ -69,7 +69,7 @@ async def get_chat_history_for_session(user_name: str, session_id: str) -> list:
     conn = None
     try:
         conn = get_pool()
-        conn.rollback()  # clear any previous failed transaction
+        conn.rollback()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -91,8 +91,21 @@ async def get_chat_history_for_session(user_name: str, session_id: str) -> list:
         if isinstance(history, str):
             history = json.loads(history) if history else []
 
-        logger.info(f"✅ Chat history fetched | session_id={session_id} | messages={len(history)}")
-        return history
+        # strip context field — frontend does not need it
+        # ──          query  → plain text OR base64 audio string
+        # ──          assistant → full AI response for display
+        # ──          is_audio  → bool flag for frontend rendering
+        filtered_history = [
+            {
+                "query":     item.get("query",     ""),
+                "assistant": item.get("assistant", ""),
+                "is_audio":  item.get("is_audio",  False)
+            }
+            for item in history
+        ]
+
+        logger.info(f"✅ Chat history fetched | session_id={session_id} | messages={len(filtered_history)}")
+        return filtered_history
 
     except Exception as e:
         logger.error(f"❌ Failed to fetch chat history | session_id={session_id} | error={e}", exc_info=True)
