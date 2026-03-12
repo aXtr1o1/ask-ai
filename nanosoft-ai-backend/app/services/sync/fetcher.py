@@ -3,64 +3,13 @@ import requests
 from datetime import timezone
 from requests.exceptions import RequestException, Timeout
 
-from .config import log, REQUEST_TIMEOUT, MAX_RETRIES, PAGE_SIZE, LOGIN_USERNAME, LOGIN_PASSWORD
-
-
-# ─────────────────────────────────────────────────────────────
-# LOGIN — call /login endpoint to get fresh jwt_token + user_id
-# Returns ("Bearer <token>", user_id) or (None, None) on failure
-# ─────────────────────────────────────────────────────────────
-def fetch_login(base_url: str):
-    url = f"{base_url}/askmeapi/login"
-
-    payload = {
-        "username":"SMARTFM",
-        "password":"n@n0@313",
-    }
-
-    headers = {"Content-Type": "application/json"}
-
-    log.info(f"  [/login] Calling {url} ...")
-
-    response = None
-    for attempt in range(1, MAX_RETRIES + 1):
-        try:
-            response = requests.post(url, json=payload, headers=headers, timeout=REQUEST_TIMEOUT)
-            break
-        except (Timeout, RequestException) as e:
-            if attempt == MAX_RETRIES:
-                log.error(f"  [/login] FAILED after {MAX_RETRIES} retries: {e}")
-                return None, None
-            log.warning(f"  [/login] Attempt {attempt}/{MAX_RETRIES} failed: {e} — retrying in 2s ...")
-            time.sleep(2)
-
-    if response is None:
-        return None, None
-
-    if response.status_code != 200:
-        log.error(f"  [/login] Unexpected status {response.status_code}: {response.text[:300]}")
-        return None, None
-
-    try:
-        data = response.json()
-        token   = data.get("token")
-        user_id = data.get("userId")
-
-        if not token or not user_id:
-            log.error(f"  [/login] Missing token or userId in response: {data}")
-            return None, None
-
-        jwt_token = f"Bearer {token}"
-        log.info(f"  [/login] ✅ Login successful — userId={user_id}")
-        return jwt_token, user_id
-
-    except Exception as e:
-        log.error(f"  [/login] Failed to parse login response: {e} | Body: {response.text[:300]}")
-        return None, None
+from .config import log, REQUEST_TIMEOUT, MAX_RETRIES, PAGE_SIZE
 
 
 # ─────────────────────────────────────────────────────────────
 # FETCH SINGLE PAGE — fetch one page from assets/ppm/bdm endpoint
+# jwt_token is read from DB (stored without Bearer prefix)
+# Bearer prefix is added here before sending to API
 # ─────────────────────────────────────────────────────────────
 def fetch_single_page(base_url: str, jwt_token: str, user_id: int,
                       endpoint: str, last_synced_at, page_index: int) -> list:
@@ -73,10 +22,13 @@ def fetch_single_page(base_url: str, jwt_token: str, user_id: int,
         else:
             synced_ts = str(last_synced_at)
     else:
-        synced_ts = "" 
+        synced_ts = ""
+
+    # ── Add Bearer prefix here — jwt stored in DB without it ──
+    bearer_token = f"Bearer {jwt_token}" if not jwt_token.startswith("Bearer ") else jwt_token
 
     headers = {
-        "x-auth":       jwt_token,
+        "x-auth":       bearer_token,
         "userid":       str(user_id),
         "Content-Type": "application/json",
     }

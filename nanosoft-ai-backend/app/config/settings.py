@@ -4,7 +4,7 @@ import os
 
 # .env is inside the app folder
 BASE_DIR = Path(__file__).resolve().parent.parent 
-load_dotenv(dotenv_path=BASE_DIR / ".env")
+load_dotenv(dotenv_path=BASE_DIR / ".env", override=True)
 
 
 # PostgreSQL (for chat_sessions)

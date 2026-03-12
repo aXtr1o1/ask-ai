@@ -40,6 +40,12 @@ class AssetsInput(BaseModel):
     date_to: Optional[str] = Field(None, description="Installation end range. Use YYYY-MM-DD. Map if user mentions 'To Date' or 'Installed'.")
     limit: Optional[int] = Field(default=None, description="Max number of results. Only set if user asks for a specific number (e.g. 'show 10'). For count/total queries (how many, total), MUST omit — do not set.")
     offset: Optional[int] = Field(default=None, description="Pagination offset. Omit unless requested.")
+  
+    is_aggregate: Optional[bool] = Field(default=False, description="Set True only when user asks grouping or summary questions like 'how many per division', 'breakdown by building'. For normal filter/list queries leave as False.")
+    group_by_columns: Optional[List[str]] = Field(default=None, description="List of columns to group by. Only fill when is_aggregate=True. Example: ['DivisionName'] or ['BuildingName', 'FloorName']. Valid columns: DivisionName, DisciplineName, BuildingName, FloorName, LocalityName, StatusName, ConditionName, PriorityName, AssetTypeName, MakeName, ModelName, SpotName, TradeGroupName, ServiceAreaName, YearOfManuf.")
+    aggregate_function: Optional[str] = Field(default=None, description="Aggregation function to apply. Only fill when is_aggregate=True. Use COUNT for 'how many', SUM for 'total of', AVG for 'average of'.")
+    
+
 
 
 class PPMInput(BaseModel):
@@ -69,6 +75,12 @@ class PPMInput(BaseModel):
     sla_max: Optional[int] = Field(None, description="Maximum resolution minutes. Map here if user mentions 'SLA Max' or 'Duration'.")
     limit: Optional[int] = Field(default=None, description="Max number of results. Only set if user asks for a specific number (e.g. 'show 10'). For count/total queries (how many, total), MUST omit — do not set.")
     offset: Optional[int] = Field(default=None, description="Pagination offset. Omit unless requested.")
+
+    is_aggregate: Optional[bool] = Field(default=False, description="Set True only when user asks grouping or summary questions like 'how many PPM per division', 'breakdown by frequency'. For normal filter/list queries leave as False.")
+    group_by_columns: Optional[List[str]] = Field(default=None, description="List of columns to group by. Only fill when is_aggregate=True. Valid columns: DivisionName, DisciplineName, BuildingName, FloorName, LocalityName, FrequencyName, PPMStatus, PPMStageName, ContractName, SpotName.")
+    aggregate_function: Optional[str] = Field(default=None, description="Aggregation function to apply. Only fill when is_aggregate=True. Use COUNT for 'how many', SUM for 'total of', AVG for 'average of'.")
+    
+
 
 
 class BDMInput(BaseModel):
@@ -101,6 +113,11 @@ class BDMInput(BaseModel):
     completed_to: Optional[str] = Field(None, description="Resolution end range. Use YYYY-MM-DD. Map if user mentions 'Resolved To' or 'Closed'.")
     limit: Optional[int] = Field(default=None, description="Max number of results. Only set if user asks for a specific number (e.g. 'show 10'). For count/total queries (how many, total), MUST omit — do not set.")
     offset: Optional[int] = Field(default=None, description="Pagination offset. Omit unless requested.")
+    
+    is_aggregate: Optional[bool] = Field(default=False, description="Set True only when user asks grouping or summary questions like 'how many complaints per division', 'breakdown by priority'. For normal filter/list queries leave as False.")
+    group_by_columns: Optional[List[str]] = Field(default=None, description="List of columns to group by. Only fill when is_aggregate=True. Valid columns: DivisionName, DisciplineName, BuildingName, FloorName, LocalityName, WoStatus, PriorityName, StageName, ComplaintTypeName, ComplaintModeName, SpotName, ContractName.")
+    aggregate_function: Optional[str] = Field(default=None, description="Aggregation function to apply. Only fill when is_aggregate=True. Use COUNT for 'how many', SUM for 'total of', AVG for 'average of'.")
+    
 
 class ChatRequest(BaseModel):
     """Request schema for chat endpoint"""
@@ -113,6 +130,7 @@ class FrontendChatMessage(BaseModel):
     """Shape of a single chat message sent from frontend when saving history."""
     role: str
     text: str
+    isAudio: bool = False
 
 
 class SessionRequest(BaseModel):

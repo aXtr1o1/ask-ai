@@ -18,30 +18,17 @@ if not logger.handlers:
     logger.addHandler(ch)
 
 
-def format_response(data):
 
-    logger.info("you can view the length of the p_list  and p_count value so that you can cross verify it")
+def format_response(data):
+    logger.info("you can view the length of the p_list and p_count value so that you can cross verify it")
     if isinstance(data, dict):
         p_list = data.get("p_list", [])
         p_count = data.get("p_count", 0)
-
-        logger.info(
-            "📊 format_response | p_list_length=%s | p_count=%s",
-            len(p_list),
-            p_count
-        )
+        logger.info("📊 format_response | p_list_length=%s | p_count=%s", len(p_list), p_count)
         return {"p_list": data.get("p_list", []), "p_count": data.get("p_count", 0)}
-
     safe_list = data if isinstance(data, list) else []
-    logger.info(
-        "📊 format_response | p_list_length=%s | p_count=%s",
-        len(safe_list),
-        len(safe_list)
-    )
-    return {
-        "p_list": safe_list,
-        "p_count": len(safe_list)
-    }
+    logger.info("📊 format_response | p_list_length=%s | p_count=%s", len(safe_list), len(safe_list))
+    return {"p_list": safe_list, "p_count": len(safe_list)}
 
 
 @router.post("/get-assets")
@@ -54,40 +41,94 @@ def get_assets(req: AssetRequest):
     
     logger.info("[GET-ASSETS] Calling sp_asset_query")
 
+    #Check if this is an aggregate query
+    # If is_aggregate is True → run GROUP BY path
+    # If is_aggregate is False or None → run existing normal path 
+    if getattr(req, "is_aggregate", False) and req.group_by_columns:
+        logger.info("📊 [GET-ASSETS] AGGREGATE MODE detected → calling sp_asset_aggregate")
+        try:
+            conn = get_pool()
+            cursor = conn.cursor()
+
+            # Convert group_by_columns list to comma separated string for SP
+            # Example: ["DivisionName", "BuildingName"] → "DivisionName,BuildingName"
+            group_by_str = ",".join(req.group_by_columns) if req.group_by_columns else None
+            agg_function = req.aggregate_function or "COUNT"
+
+            logger.info("📊 [GET-ASSETS] group_by=%s | function=%s", group_by_str, agg_function)
+
+            #Call the aggregate SP with filters + group by params
+            cursor.callproc("sp_asset_aggregate", [
+                req.user_name,    # p_user_name
+                req.division,     # p_division     — optional filter before grouping
+                req.discipline,   # p_discipline   — optional filter before grouping
+                req.building,     # p_building     — optional filter before grouping
+                req.floor,        # p_floor        — optional filter before grouping
+                req.locality,     # p_locality     — optional filter before grouping
+                req.status,       # p_status       — optional filter before grouping
+                req.condition,    # p_condition    — optional filter before grouping
+                req.date_from,    # p_date_from    — optional filter before grouping
+                req.date_to,      # p_date_to      — optional filter before grouping
+                group_by_str,     # p_group_by_columns  e.g. "DivisionName,BuildingName"
+                agg_function,     # p_aggregate_function e.g. COUNT / SUM / AVG
+            ])
+
+            row = cursor.fetchone()
+            cursor.close()
+
+            raw = row[0] if row else {}
+            if isinstance(raw, str):
+                raw = json.loads(raw)
+
+            # format_response works the same way
+            # SP returns same shape: { p_list: [...], p_count: N }
+            # p_list here contains grouped summary rows like:
+            # [{"DivisionName": "Electrical", "result": 45}, ...]
+            formatted = format_response(raw)
+            logger.info("✅ [GET-ASSETS] Aggregate result | count=%s", formatted["p_count"])
+            return formatted
+
+        except Exception as e:
+            err_msg = str(e)
+            logger.error("[GET-ASSETS] Aggregate RPC failed | error=%s", err_msg, exc_info=True)
+            raise HTTPException(status_code=500, detail=err_msg)
+   
+
+    # normal path runs exactly as before
+    logger.info("[GET-ASSETS] Calling sp_asset_query")
     try:
         conn = get_pool()
         cursor = conn.cursor()
 
-        # sp_asset_query — 28 params matching DB function exactly
         cursor.callproc("sp_asset_query", [
-            req.user_name,       # p_user_name      text
-            req.asset_tag_no,    # p_asset_tag_no   varchar
-            req.status,          # p_status         varchar
-            req.condition,       # p_condition      varchar
-            req.priority,        # p_priority       varchar
-            req.asset_type,      # p_asset_type     varchar
-            req.division,        # p_division       varchar
-            req.discipline,      # p_discipline     varchar
-            req.locality,        # p_locality       varchar
-            req.building,        # p_building       varchar
-            req.floor,           # p_floor          varchar
-            req.owner,           # p_owner          varchar
-            req.make,            # p_make           varchar
-            req.model,           # p_model          varchar
-            req.service_area,    # p_service_area   varchar
-            req.trade_group,     # p_trade_group    varchar
-            req.spot_name,       # p_spot_name      varchar 
-            req.serial_no,       # p_serial_no      varchar 
-            req.on_hold,         # p_on_hold        boolean
-            req.is_snagged,      # p_is_snagged     boolean
-            req.is_scraped,      # p_is_scraped     boolean
-            req.enable_ppm,      # p_enable_ppm     boolean
-            req.enable_bdm,      # p_enable_bdm     boolean
-            req.keyword,         # p_keyword        varchar
-            req.date_from,       # p_date_from      date
-            req.date_to,         # p_date_to        date
-            req.limit,           # p_limit          integer
-            req.offset,          # p_offset         integer
+            req.user_name,
+            req.asset_tag_no,
+            req.status,
+            req.condition,
+            req.priority,
+            req.asset_type,
+            req.division,
+            req.discipline,
+            req.locality,
+            req.building,
+            req.floor,
+            req.owner,
+            req.make,
+            req.model,
+            req.service_area,
+            req.trade_group,
+            req.spot_name,
+            req.serial_no,
+            req.on_hold,
+            req.is_snagged,
+            req.is_scraped,
+            req.enable_ppm,
+            req.enable_bdm,
+            req.keyword,
+            req.date_from,
+            req.date_to,
+            req.limit,
+            req.offset,
         ])
 
         row = cursor.fetchone()
