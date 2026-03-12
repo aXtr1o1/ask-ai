@@ -932,6 +932,8 @@ export default function Home() {
   const [audioPlayingIndex, setAudioPlayingIndex] = useState<number | null>(null);
   const [audioProgressMap,  setAudioProgressMap]  = useState<Record<number, number>>({});
   const [audioDurationMap,  setAudioDurationMap]  = useState<Record<number, number>>({});
+  const [loginPageClientLogoPath, setLoginPageClientLogoPath] = useState<string | null>(null);
+  const [loginFooterLogoPath, setLoginFooterLogoPath] = useState<string | null>(null);
 
   // ─── Refs (declare early for use in hooks) ────────────────────────────────
   const messagesEndRef   = useRef<HTMLDivElement | null>(null);
@@ -981,12 +983,27 @@ export default function Home() {
     }
   );
 
-  // Close dropdown on outside click
+  // Read userName and branding logos from URL (e.g. from autologin redirect); persist logos to localStorage
   useEffect(() => {
-  if (typeof window !== "undefined") {
-    const params = new URLSearchParams(window.location.search);
-    setUserIdFromUrl(params.get("userName") ?? params.get("userId"));
-  }
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const userName = params.get("userName") ?? params.get("userId");
+      const clientLogo = params.get("loginPageClientLogoPath");
+      const footerLogo = params.get("loginFooterLogoPath");
+      setUserIdFromUrl(userName);
+      if (clientLogo) {
+        setLoginPageClientLogoPath(clientLogo);
+        localStorage.setItem("loginPageClientLogoPath", clientLogo);
+      } else {
+        setLoginPageClientLogoPath(localStorage.getItem("loginPageClientLogoPath"));
+      }
+      if (footerLogo) {
+        setLoginFooterLogoPath(footerLogo);
+        localStorage.setItem("loginFooterLogoPath", footerLogo);
+      } else {
+        setLoginFooterLogoPath(localStorage.getItem("loginFooterLogoPath"));
+      }
+    }
   }, []);
 
   useEffect(() => {
@@ -1810,9 +1827,16 @@ useEffect(() => {
       <aside className="sidebar">
         {/* Sidebar Header with Logo */}
         <div className="sidebar-header">
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div className="brand-box">
-              <Image src="/icon.png" alt="Nanosoft Ask AI" width={20} height={20} style={{ borderRadius: 0 }}/>
+          <div style={{ display: "flex", alignItems: "center" }}>
+            <div
+              className="brand-box"
+              style={loginPageClientLogoPath ? { width: "100%", maxWidth: 220, height: "auto", minHeight: 56, maxHeight: 72, padding: 0, border: "none", borderRadius: 0 } : undefined}
+            >
+              {loginPageClientLogoPath ? (
+                <img src={loginPageClientLogoPath} alt="Client logo" style={{ width: "100%", maxWidth: 220, height: "auto", maxHeight: 72, objectFit: "contain", display: "block" }} />
+              ) : (
+                <Image src="/icon.png" alt="Nanosoft Ask AI" width={20} height={20} style={{ borderRadius: 0 }}/>
+              )}
             </div>
             <span style={{
               fontSize: 14,
@@ -1930,8 +1954,7 @@ useEffect(() => {
 
           {/* Chat History – only visible when Chat feature is active */}
           {activeFeature === 'chat' && (
-            <div style={{ marginTop: 24, display: "flex", flexDirection: "column", minHeight: 0 }}>
-              {/* <div className="section-title">Chat History</div> */}
+            <div className="chat-history-box" style={{ marginTop: 24, display: "flex", flexDirection: "column", minHeight: 0 }}>
               <div className="chat-history-scroll">
                 {chatSessions.map(s => (
                   <div

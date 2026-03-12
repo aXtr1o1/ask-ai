@@ -97,6 +97,8 @@ def get_assets(req: AssetRequest):
     try:
         conn = get_pool()
         cursor = conn.cursor()
+        conn = get_pool()
+        cursor = conn.cursor()
 
         cursor.callproc("sp_asset_query", [
             req.user_name,
@@ -131,11 +133,18 @@ def get_assets(req: AssetRequest):
 
         row = cursor.fetchone()
         cursor.close()
+        row = cursor.fetchone()
+        cursor.close()
 
         raw = row[0] if row else {}
         if isinstance(raw, str):
             raw = json.loads(raw)
+        raw = row[0] if row else {}
+        if isinstance(raw, str):
+            raw = json.loads(raw)
 
+        formatted = format_response(raw)
+        p_list = formatted.get("p_list", [])
         formatted = format_response(raw)
         p_list = formatted.get("p_list", [])
 
@@ -145,7 +154,14 @@ def get_assets(req: AssetRequest):
             logger.info("[GET-ASSETS] Fetched | count=%s | fields=%s | sample_ids=%s", formatted["p_count"], fields[:8], sample)
         else:
             logger.info("[GET-ASSETS] Success | count=0")
+        if p_list:
+            fields = list(p_list[0].keys()) if isinstance(p_list[0], dict) else []
+            sample = [r.get("AssetTagNo") or r.get("id") or str(r)[:50] for r in p_list[:3]]
+            logger.info("[GET-ASSETS] Fetched | count=%s | fields=%s | sample_ids=%s", formatted["p_count"], fields[:8], sample)
+        else:
+            logger.info("[GET-ASSETS] Success | count=0")
 
+        return formatted
         return formatted
 
     except Exception as e:

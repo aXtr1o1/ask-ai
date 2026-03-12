@@ -119,7 +119,6 @@ class BDMInput(BaseModel):
     aggregate_function: Optional[str] = Field(default=None, description="Aggregation function to apply. Only fill when is_aggregate=True. Use COUNT for 'how many', SUM for 'total of', AVG for 'average of'.")
     
 
-
 class ChatRequest(BaseModel):
     """Request schema for chat endpoint"""
     query: str
@@ -145,3 +144,10 @@ class SessionRequest(BaseModel):
     sessionId: str = ""
     chatHistory: Optional[List[FrontendChatMessage]] = None
     historyOnClick: bool = False
+
+class ClientInsertionRequest(BaseModel):
+    """Request schema for client insertion"""
+    userId: str
+    userName: str
+    service: str
+    token: str
