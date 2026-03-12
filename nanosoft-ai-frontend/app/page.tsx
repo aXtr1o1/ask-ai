@@ -1973,7 +1973,7 @@ useEffect(() => {
 
           {/* Chat History – only visible when Chat feature is active */}
           {activeFeature === 'chat' && (
-            <div className="chat-history-box" style={{ marginTop: 24, display: "flex", flexDirection: "column", minHeight: 0 }}>
+
             <div className="chat-history-box" style={{ marginTop: 24, display: "flex", flexDirection: "column", minHeight: 0 }}>
               <div className="chat-history-scroll">
                 {chatSessions.map(s => (
@@ -2288,6 +2288,13 @@ useEffect(() => {
               <button className="send-btn" onClick={sendMessage} disabled={isLoading || wsConnectionState !== 'connected' || !input.trim()}>
                 <IconArrowUp size={16} color="white" stroke={2}/>
               </button>
+            <button className="send-btn" onClick={sendMessage} disabled={isLoading || wsConnectionState !== 'connected' || !input.trim()}>
+              <IconSend/>
+            </button>
+          </div>
+          {loginFooterLogoPath && (
+            <div style={{ display: "flex", justifyContent: "center", marginTop: 8 }}>
+              <img src={loginFooterLogoPath} alt="Footer logo" style={{ maxHeight: 40, objectFit: "contain" }} />
             </div>
           )}
           <p className="footer-disclaimer">NanoSoft Ask AI can make mistakes. Verify important legal information.</p>
