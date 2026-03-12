@@ -985,25 +985,7 @@ export default function Home() {
 
   // Read userName and branding logos from URL (e.g. from autologin redirect); persist logos to localStorage
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      const params = new URLSearchParams(window.location.search);
-      const userName = params.get("userName") ?? params.get("userId");
-      const clientLogo = params.get("loginPageClientLogoPath");
-      const footerLogo = params.get("loginFooterLogoPath");
-      setUserIdFromUrl(userName);
-      if (clientLogo) {
-        setLoginPageClientLogoPath(clientLogo);
-        localStorage.setItem("loginPageClientLogoPath", clientLogo);
-      } else {
-        setLoginPageClientLogoPath(localStorage.getItem("loginPageClientLogoPath"));
-      }
-      if (footerLogo) {
-        setLoginFooterLogoPath(footerLogo);
-        localStorage.setItem("loginFooterLogoPath", footerLogo);
-      } else {
-        setLoginFooterLogoPath(localStorage.getItem("loginFooterLogoPath"));
-      }
-    }
+    
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
       const userName = params.get("userName") ?? params.get("userId");
@@ -1846,16 +1828,7 @@ useEffect(() => {
       <aside className="sidebar">
         {/* Sidebar Header with Logo */}
         <div className="sidebar-header">
-          <div style={{ display: "flex", alignItems: "center" }}>
-            <div
-              className="brand-box"
-              style={loginPageClientLogoPath ? { width: "100%", maxWidth: 220, height: "auto", minHeight: 56, maxHeight: 72, padding: 0, border: "none", borderRadius: 0 } : undefined}
-            >
-              {loginPageClientLogoPath ? (
-                <img src={loginPageClientLogoPath} alt="Client logo" style={{ width: "100%", maxWidth: 220, height: "auto", maxHeight: 72, objectFit: "contain", display: "block" }} />
-              ) : (
-                <Image src="/icon.png" alt="Nanosoft Ask AI" width={20} height={20} style={{ borderRadius: 0 }}/>
-              )}
+          
           <div style={{ display: "flex", alignItems: "center" }}>
             <div
               className="brand-box"
@@ -1973,7 +1946,7 @@ useEffect(() => {
 
           {/* Chat History – only visible when Chat feature is active */}
           {activeFeature === 'chat' && (
-            <div className="chat-history-box" style={{ marginTop: 24, display: "flex", flexDirection: "column", minHeight: 0 }}>
+            
             <div className="chat-history-box" style={{ marginTop: 24, display: "flex", flexDirection: "column", minHeight: 0 }}>
               <div className="chat-history-scroll">
                 {chatSessions.map(s => (
