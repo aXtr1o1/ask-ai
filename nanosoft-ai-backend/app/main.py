@@ -180,13 +180,6 @@ async def ws_chat_endpoint(websocket: WebSocket):
             is_graph = bool(data.get("isGraph", False))
             logger.info(f"📊 isGraph flag received: {is_graph}")
 
-            
-
-
-            if not user_query:
-                logger.info("invalid user query")
-                await websocket.send_text(json.dumps({"error": "Empty query"}))
-                continue
 
             if not session_id:
                 logger.info("invalid session id")

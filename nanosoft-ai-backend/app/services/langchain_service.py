@@ -127,7 +127,6 @@ class LangChainService:
                     break
 
              # CALL 1 — First model call
-            logger.info(settings.GOOGLE_API_KEY)
             ai_msg = self.model.invoke(messages)
             self._accumulate_tokens(ai_msg)
             logger.info("🤖 First model call | tool_calls=%s", bool(ai_msg.tool_calls))

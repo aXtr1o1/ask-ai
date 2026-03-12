@@ -34,7 +34,6 @@ def format_response(data):
 
 @router.post("/get-ppm")
 def get_ppm(req: PPMRequest):
-def get_ppm(req: PPMRequest):
     logger.info(
         "[GET-PPM] Incoming | user_name=%s | status=%s | limit=%s | offset=%s",
         req.user_name, req.status, req.limit, req.offset
