@@ -136,6 +136,7 @@ function isBadgeCol(col: string): boolean {
 
 // ── Build HTML <table> from rows ──────────────────────────────────────────────
 // ── Build HTML <table> from rows - SMALL DATA TABLES ──
+// ── Build HTML <table> from rows - SMALL DATA TABLES ──
 function buildTable(rows: Record<string, string>[], cols?: string[]): string {
   if (!rows.length) return "";
 
@@ -148,7 +149,7 @@ function buildTable(rows: Record<string, string>[], cols?: string[]): string {
 
   const thead = `<thead><tr>${allCols.map(c => `<th>${esc(c)}</th>`).join("")}</tr></thead>`;
 
-  const tbody = `<tbody>${rows.map((row, ri) =>
+  const tbody = `<tbody>${rows.map(row =>
     `<tr>${allCols.map(col => {
       const val  = row[col] ?? "—";
       const cell = isBadgeCol(col) ? badge(val) : esc(val);
@@ -390,15 +391,19 @@ function formatLargeDatasetTable(largeDataData: any): string {
     records = [];
   }
   
+  
   if (records.length === 0) {
     return `<div class="large-dataset-context"><strong>Summary:</strong> ${esc(context)}</div>`;
   }
   
+  
   console.log(`✅ Formatting large dataset: ${records.length} records, context length: ${context.length}`);
+  
   
   // ═══════════════════════════════════════════════════════════════════
   // DYNAMICALLY COLLECT ALL COLUMNS FROM RECORDS (EXCLUDING HIDDEN)
   // ═══════════════════════════════════════════════════════════════════
+  
   
   const allKeys = new Set<string>();
   records.forEach((r: any) => {
@@ -412,14 +417,18 @@ function formatLargeDatasetTable(largeDataData: any): string {
     }
   });
   
+  
   // Convert Set to array while preserving order
   const colsToShow: string[] = Array.from(allKeys);
   
+  
   console.log(`📊 Dynamic columns detected: ${colsToShow.length} columns (hidden: ${records[0] ? Object.keys(records[0]).filter(k => isHiddenColumn(k)).length : 0}):`, colsToShow.slice(0, 10));
+  
   
   // ═══════════════════════════════════════════════════════════════════
   // BUILD HTML TABLE STRUCTURE DYNAMICALLY - USING CSS CLASSES
   // ═══════════════════════════════════════════════════════════════════
+  
   
   // 1. Create table header with ALL columns (excluding hidden)
   let tableHeadHTML = "<thead><tr>";
@@ -428,17 +437,21 @@ function formatLargeDatasetTable(largeDataData: any): string {
   });
   tableHeadHTML += "</tr></thead>";
   
+  
   // 2. Create table body rows dynamically
   let tableBodyHTML = "<tbody>";
   records.forEach((record: any, rowIndex: number) => {
     if (!record || typeof record !== 'object') return;
     
+    
     tableBodyHTML += `<tr>`;
+    
     
     // Populate visible columns for each row (skip hidden columns)
     colsToShow.forEach(col => {
       const val = record[col];
       let cellContent = "—";
+      
       
       if (val === null || val === undefined) {
         cellContent = "—";
@@ -451,6 +464,7 @@ function formatLargeDatasetTable(largeDataData: any): string {
         const strVal = String(val);
         const displayVal = strVal.length > 100 ? strVal.substring(0, 100) + "…" : strVal;
         
+        
         // Apply status badge styling for status-like columns
         if (isBadgeCol(col) && val) {
           cellContent = badge(strVal);
@@ -459,15 +473,19 @@ function formatLargeDatasetTable(largeDataData: any): string {
         }
       }
       
+      
       tableBodyHTML += `<td>${cellContent}</td>`;
     });
+    
     
     tableBodyHTML += "</tr>";
   });
   tableBodyHTML += "</tbody>";
   
+  
   // 3. Create table footer with summary - ALIGN RIGHT
   const tfoot = `<tfoot><tr><td colspan="${colsToShow.length}" style="text-align: right; padding-right: 14px;">Total: ${records.length} record${records.length !== 1 ? "s" : ""} | ${colsToShow.length} column${colsToShow.length !== 1 ? "s" : ""}</td></tr></tfoot>`;
+  
   
   // 4. Complete table HTML with CSS classes for styling
   const tableHTML = `<div class="large-dataset-wrapper">
@@ -478,10 +496,14 @@ function formatLargeDatasetTable(largeDataData: any): string {
     </table>
   </div>`;
   
+  
   // 5. Add context summary above table - JUST THE CONTEXT ONLY
+  // const contextHTML = context 
+  //   ? `<div class="large-dataset-context">${esc(context)}</div>` 
   const contextHTML = context 
     ? `<div class="large-dataset-context">${esc(context)}</div>` 
     : "";
+  
   
   const fullHTML = contextHTML + tableHTML;
   console.log(` HTML generated - length: ${fullHTML.length}, has table-wrapper: ${fullHTML.includes('large-dataset-wrapper')}`);
@@ -615,6 +637,7 @@ function formatOutput(text: string): string {
 
   // Remove emojis from the first line only (Found X records message)
   text = removeEmoji(text);
+  
   
   const allLines = text.split("\n");
   let   html     = "";
@@ -1037,11 +1060,6 @@ export default function Home() {
     sessionIdRef.current = sessionId;
   }, [sessionId]);
 
-  // Keep sessionIdRef in sync with state
-  useEffect(() => {
-    sessionIdRef.current = sessionId;
-  }, [sessionId]);
-
   // Auto-scroll
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -1261,6 +1279,7 @@ export default function Home() {
           accRef.current += part;
           const snap = accRef.current;
           
+          
           // Extract text for display during streaming
           let displayText = snap;
           try {
@@ -1269,6 +1288,7 @@ export default function Home() {
             // If can't parse yet (incomplete JSON), show what we have
             displayText = snap;
           }
+          
           
           setMessages(prev => {
             const u = [...prev];
@@ -1321,26 +1341,22 @@ export default function Home() {
   // Keep ref in sync so markUserActive can call connectWS
   useEffect(() => { connectWSRef.current = connectWS; });
 
-  // Keep ref in sync so markUserActive can call connectWS
-  useEffect(() => { connectWSRef.current = connectWS; });
-
   // Connect when component mounts (after auth is confirmed)
-useEffect(() => {
-  if (!authChecked || !loggedInUser) return;
+  useEffect(() => {
+    if (!authChecked || !loggedInUser) return;
 
-  connectWS();
+    connectWS();
 
-
-  return () => {
-    if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
-    if (idleTimerRef.current) { clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
-    if (wsConnectTimeoutRef.current) { clearTimeout(wsConnectTimeoutRef.current); wsConnectTimeoutRef.current = null; }
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
-  };
-},[authChecked]);
+    return () => {
+      if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
+      if (idleTimerRef.current) { clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
+      if (wsConnectTimeoutRef.current) { clearTimeout(wsConnectTimeoutRef.current); wsConnectTimeoutRef.current = null; }
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+    };
+  }, [authChecked, loggedInUser]);
 
   // Helper: sort sessions newest-first (by updatedAt or createdAt)
   const sortSessionsNewestFirst = (list: ChatSession[]): ChatSession[] =>
@@ -1494,6 +1510,7 @@ useEffect(() => {
         console.log("✅ [HISTORY] Formatted as large dataset table");
         return { ...m, text: largeDatasetHTML };
       }
+      
       
       // Try to parse as JSON and format as text
       try {
@@ -1812,9 +1829,15 @@ useEffect(() => {
 
   if (!authChecked) {
     return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center",
-        background: `
-            linear-gradient(135deg, #0A0A0A 0%, #111111 50%, #0A0A0A 100%)`}}>
+      <div
+        style={{
+          minHeight: "100vh",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "linear-gradient(135deg, #0A0A0A 0%, #111111 50%, #0A0A0A 100%)",
+        }}
+      >
         <span style={{ fontSize: 14, color: "#A0AEC0" }}>Checking authentication…</span>
       </div>
     );
@@ -1837,9 +1860,13 @@ useEffect(() => {
               style={loginPageClientLogoPath ? { width: "100%", maxWidth: 220, height: "auto", minHeight: 56, maxHeight: 72, padding: 0, border: "none", borderRadius: 0 } : undefined}
             >
               {loginPageClientLogoPath ? (
-                <img src={loginPageClientLogoPath} alt="Client logo" style={{ width: "100%", maxWidth: 220, height: "auto", maxHeight: 72, objectFit: "contain", display: "block" }} />
+                <img
+                  src={loginPageClientLogoPath}
+                  alt="Client logo"
+                  style={{ width: "100%", maxWidth: 220, height: "auto", maxHeight: 72, objectFit: "contain", display: "block" }}
+                />
               ) : (
-                <Image src="/icon.png" alt="Nanosoft Ask AI" width={20} height={20} style={{ borderRadius: 0 }}/>
+                <Image src="/icon.png" alt="Nanosoft Ask AI" width={20} height={20} style={{ borderRadius: 0 }} />
               )}
             </div>
           </div>
@@ -1886,6 +1913,7 @@ useEffect(() => {
 
         </div>
         {/* <div className={`sidebar-profile-card ${menuOpen ? "open" : ""}`} ref={menuRef}> */}
+         
          
            
         {/* </div> */}
@@ -1979,6 +2007,7 @@ useEffect(() => {
 
         {/* Profile Card - Toggle on Hamburger Click */}
        
+       
 
         {/* Beta Version Disclaimer */}
         <div className="sidebar-disclaimer">
@@ -2017,27 +2046,23 @@ useEffect(() => {
         {/* Landing */}
         {!historyLoading && isLanding && (
           <div className="landing-container">
-            {/* <div style={{ marginBottom: 24, opacity: 0.5 }}>
-              <Image src="/nanosoft_logo.png" alt="" width={560} height={200}
-                style={{ width: "auto", height: "auto", maxWidth: "min(600px,90vw)", maxHeight: 200, objectFit: "contain" }}/>
-            </div> */}
             <div className="landing-card">
-              <h1 style={{
-                fontSize: 32,
-                fontWeight: 700,
-                marginBottom: 16,
-                background: "linear-gradient(180deg, #AE8625 0%, #F7EF8A 35%, #D2AC47 65%, #EDC967 100%)",
-                backgroundSize: "200% 200%",
-                WebkitBackgroundClip: "text",
-                backgroundClip: "text",
-                WebkitTextFillColor: "transparent",
-                animation: "goldShine 3s ease-in-out infinite"
-              }}>
+              <h1
+                style={{
+                  fontSize: 32,
+                  fontWeight: 700,
+                  marginBottom: 16,
+                  background: "linear-gradient(180deg, #AE8625 0%, #F7EF8A 35%, #D2AC47 65%, #EDC967 100%)",
+                  backgroundSize: "200% 200%",
+                  WebkitBackgroundClip: "text",
+                  backgroundClip: "text",
+                  WebkitTextFillColor: "transparent",
+                  animation: "goldShine 3s ease-in-out infinite",
+                }}
+              >
                 Welcome to Ask AI
               </h1>
-              <p className="landing-subtitle">
-                Let's work together buddy
-              </p>
+              <p className="landing-subtitle">Let's work together buddy</p>
             </div>
           </div>
         )}

@@ -556,12 +556,12 @@ class LangChainService:
                         context_ai_msg = self.model.invoke(messages)
                         self._accumulate_tokens(context_ai_msg)
                         context_summary = context_ai_msg.content or f"Found {display_count} records for your request."
-
+                        
                         large_dataset_response = json.dumps({
                             "context_summary": context_summary,
                             "records": p_list
                         })
-
+                        
                         self._log_query_summary(current_user_query)
                         return large_dataset_response, context_summary, messages
 

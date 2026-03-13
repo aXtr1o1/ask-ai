@@ -19,6 +19,7 @@ from app.api.database.postgres_client import get_pool
 
 from app.services.session_service import get_sessions_for_user, get_chat_history_for_session
 from app.models.schemas import SessionRequest, ClientInsertionRequest
+from app.models.schemas import SessionRequest, ClientInsertionRequest
 from app.services.audio_service import convert_audio_to_text
 
 
@@ -92,45 +93,6 @@ def print_memory(session_id: str):
 
     print()
 
-# @chatbot_app.post("/chat")
-# async def chat_endpoint(request: ChatRequest):
-#     user_query = request.query
-#     user_id = request.userId
-#     session_id = request.sessionId
-#     logger.info(f"Request | user_id={user_id} | session_id={session_id} | query={user_query}")
-
-#     if user_id not in VALID_USER_IDS:
-#         logger.warning(f"🚫 Invalid user_id attempted: '{user_id}'")
-#         raise HTTPException(status_code=403, detail=f"Invalid user ID '{user_id}'. Access denied.")
-
-#     logger.info(f"✅ Valid user: {user_id} | Session: {session_id}")
-
-#     if session_id not in memory_store:
-#         memory_store[session_id] = {"lc_memory": [], "history": [], "user_id": user_id}
-#         logger.info(f"🆕 Memory initialized for session_id: {session_id}")
-
-    # lc_memory = list(memory_store[session_id]["lc_memory"])
-    # messages = [get_system_prompt(user_id)] + lc_memory
-    # messages.append(HumanMessage(content=user_query))
-
-    # try:
-    #     final_response_text, _ = await langchain_service.process_query(messages, user_id=user_id,session_id=session_id)
-    #     logger.info(f"✅ Response generated for session_id: {session_id}")
-    # except Exception as e:
-    #     logger.error(f"❌ LangChain error: {e}", exc_info=True)
-    #     final_response_text = "Sorry, something went wrong while processing your request."
-
-    # memory_store[session_id]["lc_memory"].append(HumanMessage(content=user_query))
-    # memory_store[session_id]["lc_memory"].append(AIMessage(content=final_response_text))
-    # memory_store[session_id]["history"].append({"query": user_query, "assistant": final_response_text})
-
-    # if len(memory_store[session_id]["history"]) > MAX_HISTORY:
-    #     memory_store[session_id]["history"] = memory_store[session_id]["history"][-MAX_HISTORY:]
-    #     memory_store[session_id]["lc_memory"] = memory_store[session_id]["lc_memory"][-(MAX_HISTORY * 2):]
-
-    # print_memory(session_id)
-
-    # return {"user_id": user_id, "session_id": session_id, "response": final_response_text}
 
 
 # =====================================================
