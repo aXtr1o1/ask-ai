@@ -22,6 +22,7 @@ interface Message {
   sendStatus?: "sent" | "failed" | "sending";
    isGraphResponse?: boolean;  // ← Set to true if response is type="graph"
   chartType?: ChartType;      // ← chart type per message
+  originalText?: string;      // ← Store original raw response before HTML processing
 }
 interface FolderItem { id: string; name: string; }
 interface ChatSession { id: string; title: string; createdAt: number; updatedAt?: number; }
@@ -1109,7 +1110,7 @@ export default function Home() {
           text: m.isAudio
             ? (m.audioUrl || m.text)
             : m.role === "ai"
-              ? stripHtml(m.text)
+              ? (m.originalText || stripHtml(m.text))  // ← Use original raw response if available, fallback to stripHtml
               : m.text,
           isAudio: m.isAudio ?? false,
         })),
@@ -1240,7 +1241,8 @@ export default function Home() {
                 text: processedText,
                 streaming: false,
                 isGraphResponse: isGraphResponse,  // ← Set graph flag
-                chartType: chartType               // ← Store chart type
+                chartType: chartType,              // ← Store chart type
+                originalText: finalText            // ← Store original raw response before HTML processing
               };
             }
             // Persist to per-session store so switching sessions keeps history

@@ -2808,7 +2808,7 @@ textarea:focus-visible {
 
 :root[data-theme='light'] .graph-chart-container {
   background: rgba(245, 240, 230, 0.8);
-  border: 1px solid #e8e4dc;
+  border: none;
   box-shadow: 0 2px 8px rgba(212, 175, 55, 0.06);
 }
 
