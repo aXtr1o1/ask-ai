@@ -78,6 +78,8 @@ interface ChartTypeDropdownProps {
 function ChartTypeDropdown({ currentType, onTypeChange }: ChartTypeDropdownProps) {
   const { theme } = useTheme();
   const [isOpen, setIsOpen] = useState(false);
+  const [isButtonHovered, setIsButtonHovered] = useState(false);
+  const [hoveredChartType, setHoveredChartType] = useState<ChartType | null>(null);
 
   const chartTypes = [
     { type: 'vertical-bar' as ChartType, label: 'Bar Chart', icon: <IconChartBar size={16} /> },
@@ -93,46 +95,42 @@ function ChartTypeDropdown({ currentType, onTypeChange }: ChartTypeDropdownProps
     setIsOpen(false);
   };
 
-  // Theme-aware dropdown styles
-  const dropdownMenuStyle = theme === "light"
-    ? { background: "#ffffff", border: "1px solid #e8e4dc" }
-    : { background: "#1a1a1a", border: "1px solid rgba(212,175,55,0.5)" };
+  // ─── Theme-aware button styles (inherits from page theme) ───────────
+  const buttonBaseStyle = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    padding: '6px 10px',
+    background: isButtonHovered || isOpen ? 'var(--color-bg-active)' : 'var(--color-bg-alt)',
+    border: isButtonHovered || isOpen ? '1px solid var(--color-primary)' : '1px solid var(--color-border)',
+    borderRadius: '6px',
+    color: 'var(--color-text)',
+    fontSize: '12px',
+    fontWeight: '500',
+    cursor: 'pointer',
+    transition: 'all 0.2s ease',
+    zIndex: 9998,
+  } as const;
 
-  const menuItemTextColor = theme === "light" ? "#1f2937" : "#9CA3AF";
-  const menuItemActiveText = theme === "light" ? "#1f2937" : "#d4af37";
-  const menuItemActiveBackground = theme === "light" ? "rgba(212,175,55,0.1)" : "rgba(212,175,55,0.2)";
-  const menuItemHoverBackground = theme === "light" ? "rgba(212,175,55,0.08)" : "rgba(212,175,55,0.15)";
+  // ─── Theme-aware dropdown menu styles (inherits from page theme) ────
+  const dropdownMenuStyle = {
+    background: 'var(--color-bg-alt)',
+    border: '1px solid var(--color-border)'
+  };
+
+  const menuItemTextColor = 'var(--color-text)';
+  const menuItemActiveText = 'var(--color-primary)';
+  const menuItemActiveBackground = 'var(--color-bg-active)';
+  const menuItemHoverBackground = 'var(--color-bg-active)';
 
   return (
     <div style={{ position: 'relative', overflow: 'visible' }}>
-      {/* Dropdown Button */}
+      {/* Dropdown Button — Styling updated reactively from state & theme */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '6px',
-          padding: '6px 10px',
-          background: 'rgba(212,175,55,0.15)',
-          border: '1px solid rgba(212,175,55,0.5)',
-          borderRadius: '6px',
-          color: '#d4af37',
-          fontSize: '12px',
-          fontWeight: '500',
-          cursor: 'pointer',
-          transition: 'all 0.2s ease',
-          zIndex: 9998,
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.background = 'rgba(212,175,55,0.25)';
-          e.currentTarget.style.borderColor = '#d4af37';
-        }}
-        onMouseLeave={(e) => {
-          if (!isOpen) {
-            e.currentTarget.style.background = 'rgba(212,175,55,0.15)';
-            e.currentTarget.style.borderColor = 'rgba(212,175,55,0.5)';
-          }
-        }}
+        onMouseEnter={() => setIsButtonHovered(true)}
+        onMouseLeave={() => setIsButtonHovered(false)}
+        style={buttonBaseStyle}
         title="Chart Type Selector"
       >
         {selectedChart.icon}
@@ -140,7 +138,7 @@ function ChartTypeDropdown({ currentType, onTypeChange }: ChartTypeDropdownProps
         <IconChevronDown size={14} style={{ marginLeft: '2px', transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s ease' }} />
       </button>
 
-      {/* Dropdown Menu — Opens Upward */}
+      {/* Dropdown Menu — Opens Upward with page theme styling */}
       {isOpen && (
         <div
           style={{
@@ -168,7 +166,12 @@ function ChartTypeDropdown({ currentType, onTypeChange }: ChartTypeDropdownProps
                 gap: '8px',
                 width: '100%',
                 padding: '10px 12px',
-                background: currentType === chart.type ? menuItemActiveBackground : 'transparent',
+                background: 
+                  hoveredChartType === chart.type 
+                    ? menuItemHoverBackground
+                    : currentType === chart.type 
+                      ? menuItemActiveBackground 
+                      : 'transparent',
                 border: 'none',
                 color: currentType === chart.type ? menuItemActiveText : menuItemTextColor,
                 fontSize: '12px',
@@ -177,12 +180,8 @@ function ChartTypeDropdown({ currentType, onTypeChange }: ChartTypeDropdownProps
                 transition: 'all 0.15s ease',
                 textAlign: 'left',
               }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = menuItemHoverBackground;
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = currentType === chart.type ? menuItemActiveBackground : 'transparent';
-              }}
+              onMouseEnter={() => setHoveredChartType(chart.type)}
+              onMouseLeave={() => setHoveredChartType(null)}
             >
               {chart.icon}
               <span>{chart.label}</span>
@@ -196,11 +195,11 @@ function ChartTypeDropdown({ currentType, onTypeChange }: ChartTypeDropdownProps
 
 // ─── Vertical Bar Chart Component ────────────────────────────────────────────
 export function BarChartRenderer({ graphData, currentChartType, onChartTypeChange }: { graphData: GraphData; currentChartType?: ChartType; onChartTypeChange?: (type: ChartType) => void }) {
-  const { theme } = useTheme();
-  
-  const tooltipStyle = theme === "light" 
-    ? { background: "#ffffff", border: "1px solid #e8e4dc", color: "#1f2937" }
-    : { background: "#1a1a1a", border: "1px solid rgba(212,175,55,0.4)", color: "#F3F4F6" };
+  const tooltipStyle = { 
+    background: 'var(--color-bg-alt)', 
+    border: '1px solid var(--color-border)', 
+    color: 'var(--color-text)' 
+  };
   
   return (
     <div className="ai-bubble" style={{ overflow: 'visible' }}>
@@ -285,11 +284,11 @@ export function BarChartRenderer({ graphData, currentChartType, onChartTypeChang
 
 // ─── Horizontal Bar Chart Component ──────────────────────────────────────────
 export function HorizontalBarChartRenderer({ graphData, currentChartType, onChartTypeChange }: { graphData: GraphData; currentChartType?: ChartType; onChartTypeChange?: (type: ChartType) => void }) {
-  const { theme } = useTheme();
-  
-  const tooltipStyle = theme === "light" 
-    ? { background: "#ffffff", border: "1px solid #e8e4dc", color: "#1f2937" }
-    : { background: "#1a1a1a", border: "1px solid rgba(212,175,55,0.4)", color: "#F3F4F6" };
+  const tooltipStyle = { 
+    background: 'var(--color-bg-alt)', 
+    border: '1px solid var(--color-border)', 
+    color: 'var(--color-text)' 
+  };
   
   return (
     <div className="ai-bubble" style={{ overflow: 'visible' }}>
@@ -304,8 +303,8 @@ export function HorizontalBarChartRenderer({ graphData, currentChartType, onChar
           <ResponsiveContainer width="100%" height="100%">
             <BarChart
               data={graphData.records.slice(0, 50)}
-              margin={{ top: 15, right: 20, left: 180, bottom: 5 }}
-              barCategoryGap="20%"
+              margin={{ top: 15, right: 20, left: 130, bottom: 5 }}
+              barCategoryGap="15%"
               layout="vertical"
             >
               {/* Subtle grid lines matching dark theme */}
@@ -315,14 +314,15 @@ export function HorizontalBarChartRenderer({ graphData, currentChartType, onChar
               <YAxis
                 dataKey={graphData.label_key}
                 type="category"
-                tick={{ fill: "#9CA3AF", fontSize: 11 }}
-                width={160}
+                tick={{ fill: "#9CA3AF", fontSize: 9 }}
+                width={115}
+                interval={1}
               />
 
               {/* X Axis — value_key column */}
               <XAxis 
                 type="number"
-                tick={{ fill: "#9CA3AF", fontSize: 11 }}
+                tick={{ fill: "#9CA3AF", fontSize: 9 }}
                 domain={[0, "dataMax + 100"]}
               />
 
@@ -343,8 +343,8 @@ export function HorizontalBarChartRenderer({ graphData, currentChartType, onChar
                 labelFormatter={(label) => `${graphData.label_key}: ${label}`}
               />
 
-              {/* Bars — alternating gold colors */}
-              <Bar dataKey={graphData.value_key} radius={[0, 6, 6, 0]} barSize="60%" maxBarSize={25} strokeWidth={3} stroke="#8b6914">
+              {/* Bars — alternating gold colors with uniform height */}
+              <Bar dataKey={graphData.value_key} radius={[0, 6, 6, 0]} barSize={18} strokeWidth={3} stroke="#8b6914">
                 {graphData.records.map((_, index) => (
                   <Cell
                     key={`cell-${index}`}
@@ -373,11 +373,12 @@ export function HorizontalBarChartRenderer({ graphData, currentChartType, onChar
 }
 
 // ─── Line Chart Component ───────────────────────────────────────────────────
-export function LineChartRenderer({ graphData, currentChartType, onChartTypeChange }: { graphData: GraphData; currentChartType?: ChartType; onChartTypeChange?: (type: ChartType) => void }) {  const { theme } = useTheme();
-  
-  const tooltipStyle = theme === "light" 
-    ? { background: "#ffffff", border: "1px solid #e8e4dc", color: "#1f2937" }
-    : { background: "#1a1a1a", border: "1px solid rgba(212,175,55,0.4)", color: "#F3F4F6" };
+export function LineChartRenderer({ graphData, currentChartType, onChartTypeChange }: { graphData: GraphData; currentChartType?: ChartType; onChartTypeChange?: (type: ChartType) => void }) {
+  const tooltipStyle = { 
+    background: 'var(--color-bg-alt)', 
+    border: '1px solid var(--color-border)', 
+    color: 'var(--color-text)' 
+  };
     return (
     <div className="ai-bubble" style={{ overflow: 'visible' }}>
       {/* Context summary shown above chart — from backend */}
@@ -458,11 +459,12 @@ export function LineChartRenderer({ graphData, currentChartType, onChartTypeChan
 }
 
 // ─── Pie Chart Component ────────────────────────────────────────────────────
-export function PieChartRenderer({ graphData, currentChartType, onChartTypeChange }: { graphData: GraphData; currentChartType?: ChartType; onChartTypeChange?: (type: ChartType) => void }) {  const { theme } = useTheme();
-  
-  const tooltipStyle = theme === "light" 
-    ? { background: "#ffffff", border: "1px solid #e8e4dc", color: "#1f2937" }
-    : { background: "#1a1a1a", border: "1px solid rgba(212,175,55,0.4)", color: "#F3F4F6" };
+export function PieChartRenderer({ graphData, currentChartType, onChartTypeChange }: { graphData: GraphData; currentChartType?: ChartType; onChartTypeChange?: (type: ChartType) => void }) {
+  const tooltipStyle = { 
+    background: 'var(--color-bg-alt)', 
+    border: '1px solid var(--color-border)', 
+    color: 'var(--color-text)' 
+  };
     // Prepare pie chart data — limit to top 8 slices for readability
   const pieData = graphData.records.slice(0, 8).map((record) => ({
     name: record[graphData.label_key],
@@ -481,14 +483,14 @@ export function PieChartRenderer({ graphData, currentChartType, onChartTypeChang
         {graphData.context_summary}
       </div>
 
-      {/* Pie chart container */}
-      <div className="graph-chart-container" style={{ position: 'relative' }}>
-        <div style={{ width: "100%", minWidth: "900px", height: "100%", display: 'flex', justifyContent: 'flex-start', alignItems: 'center', paddingLeft: '20px' }}>
+      {/* Pie chart container — compact size for centered pie with visible labels */}
+      <div className="graph-chart-container" style={{ position: 'relative', maxWidth: '600px', margin: '0 auto' }}>
+        <div style={{ width: "100%", minWidth: "600px", height: "100%", display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
           <ResponsiveContainer width="100%" height="100%">
-            <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+            <PieChart margin={{ top: 10, right: 80, bottom: 10, left: 80 }}>
               <Pie
                 data={pieData}
-                cx="20%"
+                cx="50%"
                 cy="50%"
                 labelLine={false}
                 label={({ name, value }) => `${name}: ${value?.toLocaleString() || 0}`}

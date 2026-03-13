@@ -16,7 +16,7 @@ export interface UseVoiceRecorderReturn {
   // Handlers
   startRecording: () => Promise<void>;
   stopRecording: () => void;
-  toggleRecording: () => Promise<void>; // Click-to-start, click-to-stop
+  toggleRecording: () => Promise<void>;
   cancelRecording: () => void;
   deleteRecording: () => void;
   togglePlayback: () => void;
@@ -59,6 +59,18 @@ export function useVoiceRecorder(
   const recordingStartTimeRef = useRef<number>(0);
   const closeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  // ─── FIX 1: Track recordingTime in a ref so sendVoiceMessage always
+  //     reads the value AT send time, not after state resets ─────────────
+  const recordingTimeRef = useRef<number>(0);
+  useEffect(() => {
+    recordingTimeRef.current = recordingTime;
+  }, [recordingTime]);
+
+  // ─── Shared clean formatter: Math.floor prevents float bleed ──────────
+  //     e.g. 6.720001 → "0:06" never "0:6.720001"
+  const fmt = (s: number) =>
+    `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, "0")}`;
+
   return {
     isRecording,
     recordingTime,
@@ -67,17 +79,22 @@ export function useVoiceRecorder(
     playbackTime,
     audioDuration,
     closingRecording,
-    formatTime: (s: number) => {
-      const mins = Math.floor(s / 60);
-      const secs = Math.round(s % 60);
-      return `${mins}:${secs.toString().padStart(2, "0")}`;
-    },
+
+    // ─── FIX 2: Use fmt() — Math.floor on secs, never Math.round ─────────
+    formatTime: (s: number) => fmt(s),
+
     totalDuration: audioDuration > 0 ? audioDuration : recordingTime,
-    displayTimeText: isPlaying 
-      ? `${Math.floor(playbackTime / 60)}:${Math.round(playbackTime % 60).toString().padStart(2, "0")} / ${Math.floor((audioDuration > 0 ? audioDuration : recordingTime) / 60)}:${Math.round((audioDuration > 0 ? audioDuration : recordingTime) % 60).toString().padStart(2, "0")}`
-      : `${Math.floor((audioDuration > 0 ? audioDuration : recordingTime) / 60)}:${Math.round((audioDuration > 0 ? audioDuration : recordingTime) % 60).toString().padStart(2, "0")}`,
+
+    // ─── FIX 3: fmt() used everywhere — clean integers only ───────────────
+    displayTimeText: (() => {
+      const dur = audioDuration > 0 ? audioDuration : recordingTime;
+      return isPlaying ? `${fmt(playbackTime)} / ${fmt(dur)}` : fmt(dur);
+    })(),
+
     micButtonRef,
     audioPlaybackRef,
+
+    // ─── startRecording ───────────────────────────────────────────────────
     startRecording: async () => {
       setClosingRecording(false);
       if (closeTimeoutRef.current) clearTimeout(closeTimeoutRef.current);
@@ -109,27 +126,25 @@ export function useVoiceRecorder(
         alert("Microphone access denied");
       }
     },
+
+    // ─── stopRecording ────────────────────────────────────────────────────
     stopRecording: () => {
       if (mediaRecorderRef.current && isRecording) {
         mediaRecorderRef.current.stop();
         setIsRecording(false);
-        if (recordingTimerRef.current) {
-          clearInterval(recordingTimerRef.current);
-        }
+        if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
       }
     },
+
+    // ─── toggleRecording ──────────────────────────────────────────────────
     toggleRecording: async () => {
       if (isRecording) {
-        // Stop recording
         if (mediaRecorderRef.current) {
           mediaRecorderRef.current.stop();
           setIsRecording(false);
-          if (recordingTimerRef.current) {
-            clearInterval(recordingTimerRef.current);
-          }
+          if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
         }
       } else {
-        // Start recording
         setClosingRecording(false);
         if (closeTimeoutRef.current) clearTimeout(closeTimeoutRef.current);
         try {
@@ -161,6 +176,8 @@ export function useVoiceRecorder(
         }
       }
     },
+
+    // ─── cancelRecording ──────────────────────────────────────────────────
     cancelRecording: () => {
       setIsRecording(false);
       setRecordingTime(0);
@@ -169,34 +186,37 @@ export function useVoiceRecorder(
       if (closeTimeoutRef.current) clearTimeout(closeTimeoutRef.current);
     },
 
-    // ─── FIXED: deleteRecording ───────────────────────────────────────
-    // Previously, audioPlaybackRef was paused but NOT nulled.
-    // This caused togglePlayback() to reuse the stale Audio object
-    // (pointing to the old blob URL) on the next recording.
-    // Fix: fully destroy the Audio object so togglePlayback() creates
-    // a fresh one bound to the new blob on next use.
+    // ─── FIX 4: deleteRecording ───────────────────────────────────────────
+    // OLD: audioPlaybackRef was paused but NOT nulled → stale Audio object
+    //      (old blob URL) silently reused on next re-record.
+    // FIX: null the ref fully so togglePlayback() creates fresh Audio.
+    //      setRecordingTime(0) resets timer display to 0:00 after delete.
     deleteRecording: () => {
       setRecordedAudioBlob(null);
       setPlaybackTime(0);
       setIsPlaying(false);
       setAudioDuration(0);
-      setRecordingTime(0);          // ← reset timer display to 0:00
+      setRecordingTime(0);              // ← reset timer display to 0:00
       if (audioPlaybackRef.current) {
         audioPlaybackRef.current.pause();
         audioPlaybackRef.current.src = "";   // ← free old blob URL from memory
-        audioPlaybackRef.current = null;     // ← destroy ref so togglePlayback() creates fresh Audio next time
+        audioPlaybackRef.current = null;     // ← destroy ref → fresh Audio on next use
       }
     },
 
+    // ─── togglePlayback ───────────────────────────────────────────────────
     togglePlayback: () => {
       if (!recordedAudioBlob) return;
       if (!audioPlaybackRef.current) {
         const url = URL.createObjectURL(recordedAudioBlob);
         audioPlaybackRef.current = new Audio(url);
         let frameId: number | null = null;
-        audioPlaybackRef.current.addEventListener('loadedmetadata', () => {
-          setAudioDuration(audioPlaybackRef.current!.duration);
+
+        // ─── FIX 5: Math.floor on audio.duration → no float bleed ────────
+        audioPlaybackRef.current.addEventListener("loadedmetadata", () => {
+          setAudioDuration(Math.floor(audioPlaybackRef.current!.duration));
         });
+
         const update = () => {
           const audio = audioPlaybackRef.current;
           if (audio && !audio.paused) {
@@ -209,8 +229,14 @@ export function useVoiceRecorder(
           if (frameId) cancelAnimationFrame(frameId);
           frameId = requestAnimationFrame(update);
         };
-        audioPlaybackRef.current.onpause = () => { if (frameId) cancelAnimationFrame(frameId); };
-        audioPlaybackRef.current.onended = () => { if (frameId) cancelAnimationFrame(frameId); setIsPlaying(false); setPlaybackTime(0); };
+        audioPlaybackRef.current.onpause = () => {
+          if (frameId) cancelAnimationFrame(frameId);
+        };
+        audioPlaybackRef.current.onended = () => {
+          if (frameId) cancelAnimationFrame(frameId);
+          setIsPlaying(false);
+          setPlaybackTime(0);
+        };
       }
       if (isPlaying) {
         audioPlaybackRef.current.pause();
@@ -220,20 +246,38 @@ export function useVoiceRecorder(
         setIsPlaying(true);
       }
     },
+
+    // ─── FIX 6: sendVoiceMessage ──────────────────────────────────────────
+    // OLD: used live `recordingTime` state as fallback duration.
+    //      deleteRecording() sets recordingTime=0 BEFORE this runs →
+    //      if loadedmetadata doesn't fire in 500ms, actualDuration = 0
+    //      → onVoiceMessageSent(0) → chat bubble shows "0:00".
+    // FIX: capture duration from recordingTimeRef (always current value)
+    //      BEFORE any async operations or state resets can corrupt it.
+    //      Also Math.floor on audio.duration to prevent float display.
     sendVoiceMessage: async () => {
       if (!recordedAudioBlob || !wsRef.current) return;
+
+      // ─── Capture before any resets ────────────────────────────────────
+      const capturedDuration = recordingTimeRef.current;
+
       const audioUrl = URL.createObjectURL(recordedAudioBlob);
       const audio = new Audio(audioUrl);
-      let actualDuration = recordingTime;
+      let actualDuration = capturedDuration; // safe fallback — not live state
+
       await new Promise<void>((resolve) => {
         const onMeta = () => {
-          actualDuration = audio.duration;
+          actualDuration = Math.floor(audio.duration); // ← floor float duration
           audio.removeEventListener("loadedmetadata", onMeta);
           resolve();
         };
         audio.addEventListener("loadedmetadata", onMeta);
-        setTimeout(() => { audio.removeEventListener("loadedmetadata", onMeta); resolve(); }, 500);
+        setTimeout(() => {
+          audio.removeEventListener("loadedmetadata", onMeta);
+          resolve();
+        }, 500);
       });
+
       const metadata = {
         type: "message",
         messageType: "audio",
@@ -247,7 +291,9 @@ export function useVoiceRecorder(
         codec: "opus",
         timestamp: Date.now(),
       };
+
       wsRef.current.send(JSON.stringify(metadata));
+
       setTimeout(() => {
         if (wsRef.current) {
           wsRef.current.send(recordedAudioBlob);
