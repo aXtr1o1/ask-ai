@@ -225,7 +225,7 @@ export function useVoiceRecorder(
     }
 
     // Toggle play / pause
-    if (isPlaying) {
+    if (!audioPlaybackRef.current.paused) {
       audioPlaybackRef.current.pause();
     } else {
       audioPlaybackRef.current.play();
@@ -236,6 +236,7 @@ export function useVoiceRecorder(
   // FIX BUG 4: capture blob in a local const so the closure always holds the right blob
   const sendVoiceMessage = async () => {
     if (!recordedAudioBlob || !wsRef.current) return;
+    destroyPreviewAudio(); 
 
     // Capture the blob reference we want to send right now
     const blobToSend = recordedAudioBlob;
@@ -384,7 +385,7 @@ export function VoicePreviewBar({
             className="voice-progress-fill"
             style={{
               width: totalDuration > 0 ? `${(playbackTime / totalDuration) * 100}%` : "0%",
-              transition: "width 0.1s linear",   // ← smooth CSS transition
+              transition: "none",   // ← smooth CSS transition
             }}
           />
         </div>
