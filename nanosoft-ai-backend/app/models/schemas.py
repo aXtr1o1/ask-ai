@@ -130,6 +130,7 @@ class FrontendChatMessage(BaseModel):
     """Shape of a single chat message sent from frontend when saving history."""
     role: str
     text: str
+    isAudio: bool = False
 
 
 class SessionRequest(BaseModel):

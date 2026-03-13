@@ -41,7 +41,6 @@ export function useVoiceRecorder(
   wsRef: React.MutableRefObject<WebSocket | null>,
   onVoiceMessageSent?: (duration: number, audioUrl: string) => void
 ): UseVoiceRecorderReturn {
-  // ─── Recording State ─────────────────────────────────────────────────
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [recordedAudioBlob, setRecordedAudioBlob] = useState<Blob | null>(null);
@@ -50,26 +49,246 @@ export function useVoiceRecorder(
   const [audioDuration, setAudioDuration] = useState(0);
   const [closingRecording, setClosingRecording] = useState(false);
 
-  // ─── Refs ─────────────────────────────────────────────────────────────
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
   const micButtonRef = useRef<HTMLButtonElement>(null);
+
+  // ── FIX BUG 4: audioPlaybackRef is always wiped on new recording ──────────
+  // We keep ONE ref for the preview audio element.
+  // It is set to null whenever a new blob is ready, so togglePlayback creates a fresh Audio.
   const audioPlaybackRef = useRef<HTMLAudioElement | null>(null);
+  const animationFrameRef = useRef<number | null>(null);   // ← tracks rAF for cancel
+
   const recordingStartTimeRef = useRef<number>(0);
   const closeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // ─── FIX 1: Track recordingTime in a ref so sendVoiceMessage always
-  //     reads the value AT send time, not after state resets ─────────────
-  const recordingTimeRef = useRef<number>(0);
-  useEffect(() => {
-    recordingTimeRef.current = recordingTime;
-  }, [recordingTime]);
+  // ── Shared helper: stop any ongoing rAF loop ──────────────────────────────
+  const stopProgressLoop = () => {
+    if (animationFrameRef.current !== null) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+  };
 
-  // ─── Shared clean formatter: Math.floor prevents float bleed ──────────
-  //     e.g. 6.720001 → "0:06" never "0:6.720001"
-  const fmt = (s: number) =>
-    `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, "0")}`;
+  // ── Shared helper: destroy the current preview audio element ─────────────
+  const destroyPreviewAudio = () => {
+    stopProgressLoop();
+    if (audioPlaybackRef.current) {
+      audioPlaybackRef.current.pause();
+      audioPlaybackRef.current.src = "";   // release object-URL from memory
+      audioPlaybackRef.current = null;
+    }
+  };
+
+  const formatTime = (s: number) => {
+    const mins = Math.floor(s / 60);
+    const secs = Math.round(s % 60);
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  const totalDuration = audioDuration > 0 ? audioDuration : recordingTime;
+
+  const displayTimeText = isPlaying
+    ? `${formatTime(playbackTime)} / ${formatTime(totalDuration)}`
+    : formatTime(totalDuration);
+
+  // ── startRecording ────────────────────────────────────────────────────────
+  const startRecording = async () => {
+    setClosingRecording(false);
+    if (closeTimeoutRef.current) clearTimeout(closeTimeoutRef.current);
+
+    // FIX BUG 4: destroy any leftover preview audio before a new recording
+    destroyPreviewAudio();
+    setRecordedAudioBlob(null);
+    setPlaybackTime(0);
+    setIsPlaying(false);
+    setAudioDuration(0);
+    setRecordingTime(0);
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { channelCount: 1, sampleRate: 16000 },
+      });
+      streamRef.current = stream;
+      const mimeType = MediaRecorder.isTypeSupported("audio/ogg;codecs=opus")
+        ? "audio/ogg;codecs=opus"
+        : "audio/webm";
+      const recorder = new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 24000 });
+      mediaRecorderRef.current = recorder;
+      const chunks: BlobPart[] = [];
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+      recorder.onstop = () => {
+        const blob = new Blob(chunks, { type: mimeType.includes("ogg") ? "audio/ogg" : "audio/webm" });
+        // FIX BUG 4: null out old audio ref BEFORE setting new blob
+        // togglePlayback checks audioPlaybackRef and if null → creates fresh Audio from new blob
+        audioPlaybackRef.current = null;
+        setRecordedAudioBlob(blob);
+        stream.getTracks().forEach(t => t.stop());
+      };
+      recorder.start();
+      setIsRecording(true);
+      recordingStartTimeRef.current = Date.now();
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingTime(Math.floor((Date.now() - recordingStartTimeRef.current) / 1000));
+      }, 200);
+    } catch (err) {
+      console.error("Microphone access denied:", err);
+      alert("Microphone access denied");
+    }
+  };
+
+  // ── stopRecording ─────────────────────────────────────────────────────────
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+    }
+  };
+
+  // ── toggleRecording ───────────────────────────────────────────────────────
+  const toggleRecording = async () => {
+    if (isRecording) {
+      if (mediaRecorderRef.current) {
+        mediaRecorderRef.current.stop();
+        setIsRecording(false);
+        if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+      }
+    } else {
+      await startRecording();
+    }
+  };
+
+  // ── cancelRecording ───────────────────────────────────────────────────────
+  const cancelRecording = () => {
+    setIsRecording(false);
+    setRecordingTime(0);
+    if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+    if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+    if (closeTimeoutRef.current) clearTimeout(closeTimeoutRef.current);
+  };
+
+  // ── deleteRecording ───────────────────────────────────────────────────────
+  // FIX BUG 4: fully destroy the audio element so the next recording starts clean
+  const deleteRecording = () => {
+    destroyPreviewAudio();          // ← kills old Audio + rAF
+    setRecordedAudioBlob(null);
+    setPlaybackTime(0);
+    setIsPlaying(false);
+    setAudioDuration(0);
+    setRecordingTime(0);
+  };
+
+  // ── togglePlayback ────────────────────────────────────────────────────────
+  // FIX BUG 2: use requestAnimationFrame so progress is smooth and exactly follows audio.currentTime
+  const togglePlayback = () => {
+    if (!recordedAudioBlob) return;
+
+    // If no audio element exists yet → create one from the CURRENT blob
+    if (!audioPlaybackRef.current) {
+      const url = URL.createObjectURL(recordedAudioBlob);
+      const audio = new Audio(url);
+      audioPlaybackRef.current = audio;
+
+      // Get real duration once metadata is available
+      audio.addEventListener("loadedmetadata", () => {
+        if (isFinite(audio.duration) && audio.duration > 0) {
+          setAudioDuration(audio.duration);
+        }
+      });
+
+      // ── rAF-based smooth progress loop ──────────────────────────────────
+      const progressLoop = () => {
+        const a = audioPlaybackRef.current;
+        if (!a || a.paused) return;
+        setPlaybackTime(a.currentTime);
+        animationFrameRef.current = requestAnimationFrame(progressLoop);
+      };
+
+      audio.onplay = () => {
+        setIsPlaying(true);
+        stopProgressLoop();
+        animationFrameRef.current = requestAnimationFrame(progressLoop);
+      };
+
+      audio.onpause = () => {
+        stopProgressLoop();
+        setIsPlaying(false);
+      };
+
+      audio.onended = () => {
+        stopProgressLoop();
+        setIsPlaying(false);
+        setPlaybackTime(0);
+      };
+    }
+
+    // Toggle play / pause
+    if (isPlaying) {
+      audioPlaybackRef.current.pause();
+    } else {
+      audioPlaybackRef.current.play();
+    }
+  };
+
+  // ── sendVoiceMessage ──────────────────────────────────────────────────────
+  // FIX BUG 4: capture blob in a local const so the closure always holds the right blob
+  const sendVoiceMessage = async () => {
+    if (!recordedAudioBlob || !wsRef.current) return;
+
+    // Capture the blob reference we want to send right now
+    const blobToSend = recordedAudioBlob;
+    const audioUrl = URL.createObjectURL(blobToSend);
+
+    // Try to get real duration from the preview audio element (already loaded)
+    let actualDuration = audioDuration > 0 ? audioDuration : recordingTime;
+
+    // If preview audio element hasn't loaded metadata yet, do a quick load
+    if (actualDuration === 0) {
+      actualDuration = await new Promise<number>((resolve) => {
+        const tmp = new Audio(audioUrl);
+        const onMeta = () => {
+          tmp.removeEventListener("loadedmetadata", onMeta);
+          resolve(isFinite(tmp.duration) ? tmp.duration : recordingTime);
+        };
+        tmp.addEventListener("loadedmetadata", onMeta);
+        setTimeout(() => { tmp.removeEventListener("loadedmetadata", onMeta); resolve(recordingTime); }, 600);
+      });
+    }
+
+    const metadata = {
+      type: "message",
+      messageType: "audio",
+      isAudio: true,
+      audio: true,
+      text: false,
+      userName: loggedInUser,
+      sessionId,
+      duration: actualDuration,
+      fileFormat: "ogg",
+      codec: "opus",
+      timestamp: Date.now(),
+    };
+
+    wsRef.current.send(JSON.stringify(metadata));
+
+    setTimeout(() => {
+      if (wsRef.current && blobToSend) {
+        wsRef.current.send(blobToSend);   // ← send captured blob, not state
+
+        // FIX BUG 4: destroy preview audio BEFORE clearing state
+        destroyPreviewAudio();
+        setRecordedAudioBlob(null);
+        setPlaybackTime(0);
+        setIsPlaying(false);
+        setAudioDuration(0);
+        setRecordingTime(0);
+
+        if (onVoiceMessageSent) onVoiceMessageSent(actualDuration, audioUrl);
+      }
+    }, 100);
+  };
 
   return {
     isRecording,
@@ -79,231 +298,18 @@ export function useVoiceRecorder(
     playbackTime,
     audioDuration,
     closingRecording,
-
-    // ─── FIX 2: Use fmt() — Math.floor on secs, never Math.round ─────────
-    formatTime: (s: number) => fmt(s),
-
-    totalDuration: audioDuration > 0 ? audioDuration : recordingTime,
-
-    // ─── FIX 3: fmt() used everywhere — clean integers only ───────────────
-    displayTimeText: (() => {
-      const dur = audioDuration > 0 ? audioDuration : recordingTime;
-      return isPlaying ? `${fmt(playbackTime)} / ${fmt(dur)}` : fmt(dur);
-    })(),
-
+    formatTime,
+    totalDuration,
+    displayTimeText,
     micButtonRef,
     audioPlaybackRef,
-
-    // ─── startRecording ───────────────────────────────────────────────────
-    startRecording: async () => {
-      setClosingRecording(false);
-      if (closeTimeoutRef.current) clearTimeout(closeTimeoutRef.current);
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: { channelCount: 1, sampleRate: 16000 },
-        });
-        streamRef.current = stream;
-        const mimeType = MediaRecorder.isTypeSupported("audio/ogg;codecs=opus")
-          ? "audio/ogg;codecs=opus"
-          : "audio/webm";
-        const recorder = new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 24000 });
-        mediaRecorderRef.current = recorder;
-        const chunks: BlobPart[] = [];
-        recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
-        recorder.onstop = () => {
-          const blob = new Blob(chunks, { type: mimeType.includes("ogg") ? "audio/ogg" : "audio/webm" });
-          setRecordedAudioBlob(blob);
-          stream.getTracks().forEach(t => t.stop());
-        };
-        recorder.start();
-        setIsRecording(true);
-        recordingStartTimeRef.current = Date.now();
-        recordingTimerRef.current = setInterval(() => {
-          setRecordingTime(Math.floor((Date.now() - recordingStartTimeRef.current) / 1000));
-        }, 100);
-      } catch (err) {
-        console.error("Microphone access denied:", err);
-        alert("Microphone access denied");
-      }
-    },
-
-    // ─── stopRecording ────────────────────────────────────────────────────
-    stopRecording: () => {
-      if (mediaRecorderRef.current && isRecording) {
-        mediaRecorderRef.current.stop();
-        setIsRecording(false);
-        if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
-      }
-    },
-
-    // ─── toggleRecording ──────────────────────────────────────────────────
-    toggleRecording: async () => {
-      if (isRecording) {
-        if (mediaRecorderRef.current) {
-          mediaRecorderRef.current.stop();
-          setIsRecording(false);
-          if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
-        }
-      } else {
-        setClosingRecording(false);
-        if (closeTimeoutRef.current) clearTimeout(closeTimeoutRef.current);
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({
-            audio: { channelCount: 1, sampleRate: 16000 },
-          });
-          streamRef.current = stream;
-          const mimeType = MediaRecorder.isTypeSupported("audio/ogg;codecs=opus")
-            ? "audio/ogg;codecs=opus"
-            : "audio/webm";
-          const recorder = new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 24000 });
-          mediaRecorderRef.current = recorder;
-          const chunks: BlobPart[] = [];
-          recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
-          recorder.onstop = () => {
-            const blob = new Blob(chunks, { type: mimeType.includes("ogg") ? "audio/ogg" : "audio/webm" });
-            setRecordedAudioBlob(blob);
-            stream.getTracks().forEach(t => t.stop());
-          };
-          recorder.start();
-          setIsRecording(true);
-          recordingStartTimeRef.current = Date.now();
-          recordingTimerRef.current = setInterval(() => {
-            setRecordingTime(Math.floor((Date.now() - recordingStartTimeRef.current) / 1000));
-          }, 100);
-        } catch (err) {
-          console.error("Microphone access denied:", err);
-          alert("Microphone access denied");
-        }
-      }
-    },
-
-    // ─── cancelRecording ──────────────────────────────────────────────────
-    cancelRecording: () => {
-      setIsRecording(false);
-      setRecordingTime(0);
-      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
-      if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
-      if (closeTimeoutRef.current) clearTimeout(closeTimeoutRef.current);
-    },
-
-    // ─── FIX 4: deleteRecording ───────────────────────────────────────────
-    // OLD: audioPlaybackRef was paused but NOT nulled → stale Audio object
-    //      (old blob URL) silently reused on next re-record.
-    // FIX: null the ref fully so togglePlayback() creates fresh Audio.
-    //      setRecordingTime(0) resets timer display to 0:00 after delete.
-    deleteRecording: () => {
-      setRecordedAudioBlob(null);
-      setPlaybackTime(0);
-      setIsPlaying(false);
-      setAudioDuration(0);
-      setRecordingTime(0);              // ← reset timer display to 0:00
-      if (audioPlaybackRef.current) {
-        audioPlaybackRef.current.pause();
-        audioPlaybackRef.current.src = "";   // ← free old blob URL from memory
-        audioPlaybackRef.current = null;     // ← destroy ref → fresh Audio on next use
-      }
-    },
-
-    // ─── togglePlayback ───────────────────────────────────────────────────
-    togglePlayback: () => {
-      if (!recordedAudioBlob) return;
-      if (!audioPlaybackRef.current) {
-        const url = URL.createObjectURL(recordedAudioBlob);
-        audioPlaybackRef.current = new Audio(url);
-        let frameId: number | null = null;
-
-        // ─── FIX 5: Math.floor on audio.duration → no float bleed ────────
-        audioPlaybackRef.current.addEventListener("loadedmetadata", () => {
-          setAudioDuration(Math.floor(audioPlaybackRef.current!.duration));
-        });
-
-        const update = () => {
-          const audio = audioPlaybackRef.current;
-          if (audio && !audio.paused) {
-            setPlaybackTime(audio.currentTime);
-            frameId = requestAnimationFrame(update);
-          }
-        };
-        audioPlaybackRef.current.onplay = () => {
-          setIsPlaying(true);
-          if (frameId) cancelAnimationFrame(frameId);
-          frameId = requestAnimationFrame(update);
-        };
-        audioPlaybackRef.current.onpause = () => {
-          if (frameId) cancelAnimationFrame(frameId);
-        };
-        audioPlaybackRef.current.onended = () => {
-          if (frameId) cancelAnimationFrame(frameId);
-          setIsPlaying(false);
-          setPlaybackTime(0);
-        };
-      }
-      if (isPlaying) {
-        audioPlaybackRef.current.pause();
-        setIsPlaying(false);
-      } else {
-        audioPlaybackRef.current.play();
-        setIsPlaying(true);
-      }
-    },
-
-    // ─── FIX 6: sendVoiceMessage ──────────────────────────────────────────
-    // OLD: used live `recordingTime` state as fallback duration.
-    //      deleteRecording() sets recordingTime=0 BEFORE this runs →
-    //      if loadedmetadata doesn't fire in 500ms, actualDuration = 0
-    //      → onVoiceMessageSent(0) → chat bubble shows "0:00".
-    // FIX: capture duration from recordingTimeRef (always current value)
-    //      BEFORE any async operations or state resets can corrupt it.
-    //      Also Math.floor on audio.duration to prevent float display.
-    sendVoiceMessage: async () => {
-      if (!recordedAudioBlob || !wsRef.current) return;
-
-      // ─── Capture before any resets ────────────────────────────────────
-      const capturedDuration = recordingTimeRef.current;
-
-      const audioUrl = URL.createObjectURL(recordedAudioBlob);
-      const audio = new Audio(audioUrl);
-      let actualDuration = capturedDuration; // safe fallback — not live state
-
-      await new Promise<void>((resolve) => {
-        const onMeta = () => {
-          actualDuration = Math.floor(audio.duration); // ← floor float duration
-          audio.removeEventListener("loadedmetadata", onMeta);
-          resolve();
-        };
-        audio.addEventListener("loadedmetadata", onMeta);
-        setTimeout(() => {
-          audio.removeEventListener("loadedmetadata", onMeta);
-          resolve();
-        }, 500);
-      });
-
-      const metadata = {
-        type: "message",
-        messageType: "audio",
-        isAudio: true,
-        audio: true,
-        text: false,
-        userName: loggedInUser,
-        sessionId,
-        duration: actualDuration,
-        fileFormat: "ogg",
-        codec: "opus",
-        timestamp: Date.now(),
-      };
-
-      wsRef.current.send(JSON.stringify(metadata));
-
-      setTimeout(() => {
-        if (wsRef.current) {
-          wsRef.current.send(recordedAudioBlob);
-          setRecordedAudioBlob(null);
-          setPlaybackTime(0);
-          setIsPlaying(false);
-          if (onVoiceMessageSent) onVoiceMessageSent(actualDuration, audioUrl);
-        }
-      }, 100);
-    },
+    startRecording,
+    stopRecording,
+    toggleRecording,
+    cancelRecording,
+    deleteRecording,
+    togglePlayback,
+    sendVoiceMessage,
   };
 }
 
@@ -378,6 +384,7 @@ export function VoicePreviewBar({
             className="voice-progress-fill"
             style={{
               width: totalDuration > 0 ? `${(playbackTime / totalDuration) * 100}%` : "0%",
+              transition: "width 0.1s linear",   // ← smooth CSS transition
             }}
           />
         </div>
@@ -408,15 +415,11 @@ export function VoiceMicButton({
   onClick: () => void | Promise<void>;
   disabled: boolean;
 }) {
-  const handleClick = async () => {
-    await onClick();
-  };
-
   return (
     <button
       ref={forwardedRef}
       className="voice-mic-btn"
-      onClick={handleClick}
+      onClick={async () => { await onClick(); }}
       disabled={disabled}
       title="Click to record, click again to stop"
     >

@@ -131,12 +131,15 @@ def get_bdm(req: BDMRequest):
         formatted = format_response(raw)
         p_list = formatted.get("p_list", [])
 
+
         if p_list:
             fields = list(p_list[0].keys()) if isinstance(p_list[0], dict) else []
+            sample = [r.get("ComplaintNo") or r.get("id") or str(r)[:50] for r in p_list[:3]]
             sample = [r.get("ComplaintNo") or r.get("id") or str(r)[:50] for r in p_list[:3]]
             logger.info("[GET-BDM] Fetched | count=%s | fields=%s | sample_ids=%s", formatted["p_count"], fields[:8], sample)
         else:
             logger.info("[GET-BDM] Success | count=0")
+
 
         return formatted
 

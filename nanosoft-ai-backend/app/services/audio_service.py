@@ -7,6 +7,7 @@ import os
 # Using the modern SDK
 from google import genai
 from app.config import settings
+import asyncio 
 
 logger = logging.getLogger("audio_service")
 logger.setLevel(logging.INFO)
@@ -52,11 +53,17 @@ async def convert_audio_to_text(audio_bytes: bytes) -> str:
             GOAL: Provide the final 'intended' message of the speaker. If the audio is too noisy to be sure, use the [Unsure] tag.
             """
 
-        # 4. Generate Content using Gemini 2.0 Flash (Better noise handling)
-        response = client.models.generate_content(
-            model=settings.GOOGLE_AI_MODEL,
-            contents=[prompt, uploaded_file]
-        )
+        try:
+            response = await asyncio.wait_for(
+                asyncio.to_thread(
+                    client.models.generate_content,
+                    model=settings.GOOGLE_AI_MODEL,
+                    contents=[prompt, uploaded_file]
+                ),
+                timeout=10.0  # fail fast in this seconds
+            )
+        except asyncio.TimeoutError:
+            raise Exception("Audio transcription timed out")
 
         transcribed_text = response.text.strip()
 

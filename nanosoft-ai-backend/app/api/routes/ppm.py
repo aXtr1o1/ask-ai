@@ -6,6 +6,7 @@ import logging
 import json
 
 from app.api.models.schemas import PPMRequest
+from app.api.models.schemas import PPMRequest
 from app.api.database.postgres_client import get_pool
 
 router = APIRouter()
@@ -126,11 +127,16 @@ def get_ppm(req: PPMRequest):
         formatted = format_response(raw)
         p_list = formatted.get("p_list", [])
 
+
         if p_list:
             fields = list(p_list[0].keys()) if isinstance(p_list[0], dict) else []
             sample = [r.get("WorkOrder") or r.get("id") or str(r)[:50] for r in p_list[:3]]
             logger.info("[GET-PPM] Fetched | count=%s | fields=%s | sample_ids=%s", formatted["p_count"], fields[:8], sample)
+            sample = [r.get("WorkOrder") or r.get("id") or str(r)[:50] for r in p_list[:3]]
+            logger.info("[GET-PPM] Fetched | count=%s | fields=%s | sample_ids=%s", formatted["p_count"], fields[:8], sample)
         else:
+            logger.info("[GET-PPM] Success | count=0")
+
             logger.info("[GET-PPM] Success | count=0")
 
         return formatted
@@ -142,5 +148,6 @@ def get_ppm(req: PPMRequest):
             logger.error("[GET-PPM] RPC failed | code=%s | message=%s | hint=%s",
                 err_dict.get("code", "?"), err_dict.get("message", err_msg), err_dict.get("hint", ""), exc_info=True)
         else:
+            logger.error("[GET-PPM] RPC failed | error=%s", err_msg, exc_info=True)
             logger.error("[GET-PPM] RPC failed | error=%s", err_msg, exc_info=True)
         raise HTTPException(status_code=500, detail=err_msg)

@@ -3,10 +3,12 @@ Chat session persistence — Save and retrieve chat session history (PostgreSQL)
 """
 import logging
 import json
+import re
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from app.api.database.postgres_client import get_pool
 from app.config import settings
+import asyncio
 
 logger = logging.getLogger("postgres_service")
 logger.setLevel(logging.INFO)
@@ -15,14 +17,26 @@ ch.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(me
 if not logger.handlers:
     logger.addHandler(ch)
 
-# for Title generation  no tools needed 
+
 def _get_title_model():
     return ChatGoogleGenerativeAI(
         model=settings.GOOGLE_AI_MODEL,
         google_api_key=settings.GOOGLE_API_KEY
     )
 
-# Generate crisp title from first 3 interactions
+
+# Strip HTML tags from text before using for title generation
+def strip_html(text: str) -> str:
+    """Remove HTML tags and clean up whitespace."""
+    if not text:
+        return ""
+    # Remove HTML tags
+    clean = re.sub(r'<[^>]+>', '', text)
+    # Remove extra whitespace
+    clean = re.sub(r'\s+', ' ', clean).strip()
+    return clean
+
+
 async def generate_session_title(history: list) -> str:
     """
     Takes first 3 interactions from chat history and generates
@@ -32,32 +46,51 @@ async def generate_session_title(history: list) -> str:
         return "New Chat"
 
     try:
-        # Take only first 3 interactions
         first_3 = history[:3]
 
-        # Build a simple summary text from the interactions
         conversation_text = ""
         for item in first_3:
-            conversation_text += f"User: {item.get('query', '')}\n"
-            conversation_text += f"Assistant: {item.get('assistant', '')[:100]}\n\n"
+            # ── Audio query: show [voice query] placeholder
+            if item.get("is_audio", False):
+                user_part = "[voice query]"
+            else:
+                query_raw = item.get("query", "")
+                # ✅ FIX: Strip HTML from query just in case
+                user_part = strip_html(query_raw) if query_raw else ""
+
+            #  Strip HTML from assistant text before title generation
+            # assistant field may contain <div style="..."> HTML tags
+            assistant_raw = item.get("context", "") or item.get("assistant", "")
+            assistant_part = strip_html(assistant_raw)[:100]
+
+            conversation_text += f"User: {user_part}\n"
+            conversation_text += f"Assistant: {assistant_part}\n\n"
+
+        logger.info(f"📝 Title generation input:\n{conversation_text}")
 
         messages = [
             SystemMessage(content=(
                 "You are a title generator. "
                 "Given a chat conversation, generate a crisp, clear title of 4-6 words maximum. "
                 "The title should describe what the conversation is about. "
-                "Return ONLY the title text. No quotes, no punctuation, no explanation."
-                "you can refer examples like  PPM Schedule Status Check,General Greeting,Online Assets Count Query,Breakdown Complaint Overview"
+                "Return ONLY the title text. No quotes, no punctuation, no explanation. "
+                "You can refer to examples like: PPM Schedule Status Check, General Greeting, "
             )),
             HumanMessage(content=f"Generate a title for this conversation:\n\n{conversation_text}")
         ]
 
-        model    = _get_title_model()
-        response = model.invoke(messages)
-        title    = str(response.content).strip()
+        model = _get_title_model()
+        try:
+            response = await asyncio.wait_for(
+                asyncio.to_thread(model.invoke, messages),
+                timeout=20.0
+            )
+        except asyncio.TimeoutError:
+            logger.warning("⚠️ Title generation timed out — using fallback")
+            return "New Chat"
+        
+        title = str(response.content).strip()
 
-        # Safety: if title is too long or empty, fallback 
-        #setting 60 as of now comparing with the length of the title
         if not title or len(title) > 60:
             title = "New Chat"
 
@@ -69,11 +102,10 @@ async def generate_session_title(history: list) -> str:
         return "New Chat"
 
 
- # ── Save session to PostgreSQL ─────────────────────────────────────────────────
+# ── Save session to PostgreSQL ──────────────────────────────────────────────
 async def save_session_to_postgres_service(session_id: str, user_name: str, history: list):
     """
     Saves chat session history + generated title to PostgreSQL (chat_sessions).
-    Called on WebSocket disconnect (timeout or client disconnect).
     Uses upsert on session_id (insert or update).
     """
     logger.info("trying to store the data in the db")
@@ -82,30 +114,27 @@ async def save_session_to_postgres_service(session_id: str, user_name: str, hist
         return
 
     try:
-        title = await generate_session_title(history)
-        conn = get_pool()
-        # Clear any previous failed transaction so this request starts clean
+        title        = await generate_session_title(history)
+        conn         = get_pool()
         conn.rollback()
         history_json = json.dumps(history)
 
         with conn.cursor() as cur:
             try:
-                # Upsert: requires UNIQUE(session_id). Run scripts/add_session_id_unique.sql if missing.
                 cur.execute(
                     """
                     INSERT INTO chat_sessions (session_id, user_name, chat_history, title, updated_at)
                     VALUES (%s, %s, %s::jsonb, %s, NOW())
                     ON CONFLICT (session_id) DO UPDATE SET
-                        user_name = EXCLUDED.user_name,
+                        user_name    = EXCLUDED.user_name,
                         chat_history = EXCLUDED.chat_history,
-                        title = EXCLUDED.title,
-                        updated_at = NOW()
+                        title        = EXCLUDED.title,
+                        updated_at   = NOW()
                     """,
                     (session_id, user_name, history_json, title),
                 )
             except Exception as conflict_err:
                 if "unique or exclusion constraint" in str(conflict_err).lower() or "on_conflict" in str(conflict_err).lower():
-                    # Fallback: update if row exists, else insert
                     cur.execute(
                         "SELECT 1 FROM chat_sessions WHERE session_id = %s",
                         (session_id,),
@@ -142,5 +171,3 @@ async def save_session_to_postgres_service(session_id: str, user_name: str, hist
                 conn.rollback()
         except Exception:
             pass
-
-

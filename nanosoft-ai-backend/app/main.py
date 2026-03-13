@@ -10,6 +10,7 @@ import json
 from fastapi import WebSocket, WebSocketDisconnect
 
 from app.models.schemas import ChatRequest
+import base64 
 from app.config import settings
 from app.services.langchain_service import langchain_service
 from app.prompts.system_prompt import get_system_prompt
@@ -17,7 +18,7 @@ from app.services.postgres_service import save_session_to_postgres_service
 from app.api.database.postgres_client import get_pool
 
 from app.services.session_service import get_sessions_for_user, get_chat_history_for_session
-from app.models.schemas import SessionRequest
+from app.models.schemas import SessionRequest, ClientInsertionRequest
 from app.services.audio_service import convert_audio_to_text
 
 
@@ -47,7 +48,8 @@ chatbot_app.add_middleware(
 # API router — all backend endpoints under /api for nginx routing
 api_router = APIRouter(prefix="/api", tags=["api"])
 
-VALID_USERNAMES = {"v4demo", "poc"}
+# VALID_USERNAMES = {"v4demo", "poc"}
+# VALID_USERNAMES = {"v4demo", "poc"}
 
 # =====================================================
 # In-Memory Store
@@ -63,6 +65,11 @@ VALID_USERNAMES = {"v4demo", "poc"}
 # =====================================================
 MAX_HISTORY =  settings.MAX_HISTORY
 memory_store = {}
+MAX_AUDIO_BYTES = 500 * 1024  # 500 KB
+
+#Track sessions already saved by frontend HTTP POST
+# So WebSocketDisconnect does NOT save again (prevents double save)
+frontend_saved_sessions: set = set()
 
 #chat memory for debugging purpose. 
 def print_memory(session_id: str):
@@ -173,13 +180,6 @@ async def ws_chat_endpoint(websocket: WebSocket):
             is_graph = bool(data.get("isGraph", False))
             logger.info(f"📊 isGraph flag received: {is_graph}")
 
-            
-
-            if user_name not in VALID_USERNAMES:
-                logger.info("invalid user name")
-                await websocket.send_text(json.dumps({"error": "Invalid user name"}))
-                continue
-            
 
             if not session_id:
                 logger.info("invalid session id")
@@ -188,6 +188,8 @@ async def ws_chat_endpoint(websocket: WebSocket):
 
             #  Track current session_id for disconnect save
             current_session_id = session_id
+            audio_base64   = None   # will hold base64 string if audio
+            query_to_store = None
             #----------------- audio integration by mega-----------------
             
             # ── NEW: AUDIO PATH — isAudio = true then convert it into the text and send to  process query function
@@ -201,9 +203,25 @@ async def ws_chat_endpoint(websocket: WebSocket):
                         timeout=settings.WS_SESSION_TIMEOUT
                     )
                     logger.info(f"📦 Audio bytes received: {len(audio_bytes)} bytes")
-
-                    # ── Convert audio → text via Gemini ─────────────────────
-                    user_query = await convert_audio_to_text(audio_bytes)
+                    # ── NEW: Audio size guard — reject if > 500 KB
+                    if len(audio_bytes) > MAX_AUDIO_BYTES:
+                        logger.warning(f"⚠️ Audio too large: {len(audio_bytes)} bytes > {MAX_AUDIO_BYTES} bytes")
+                        await websocket.send_text(json.dumps({
+                            "error": "Voice query is too long. Please keep it brief and try again."
+                        }))
+                        continue
+                    
+                    audio_base64   = "data:audio/ogg;base64," + base64.b64encode(audio_bytes).decode("utf-8")
+                    query_to_store = audio_base64   # ── store audio base64 as query in DB
+                    logger.info(f"🔒 Audio encoded to base64 | size={len(audio_base64)} chars")    
+                    try:
+                        user_query = await convert_audio_to_text(audio_bytes)
+                    except Exception as e:
+                        await websocket.send_text(json.dumps({
+                            "response": " Sorry, voice input is temporarily unavailable at this moment.Please type your message instead."
+                        }))
+                        await websocket.send_text("[DONE]")  
+                        continue
                     logger.info(f"📝 Audio transcribed: {user_query}")
 
                 except asyncio.TimeoutError:
@@ -221,6 +239,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
             # ==================================================================
             else:
                 user_query = data.get("query", "").strip()
+                query_to_store = user_query
                 logger.info(f"💬 Text message | user={user_name} | session={session_id} | query={user_query}")
 
                 if not user_query:
@@ -262,8 +281,14 @@ async def ws_chat_endpoint(websocket: WebSocket):
 
             except Exception as e:
                 logger.error(f"❌ LangChain error: {e}", exc_info=True)
-                final_response_text = "Sorry, something went wrong."
-                # ── CHANGED: fallback context_summary on error
+                # ✅ Send specific message based on error type
+                if "timed out" in str(e).lower():
+                    final_response_text = " The request is taking too long. Please try again in a moment."
+                elif "quota" in str(e).lower() or "429" in str(e):
+                    final_response_text = " Service is temporarily busy due to high demand. Please try again in a few seconds."
+                else:
+                    final_response_text = " Sorry, something went wrong. Please try again."
+                
                 context_summary = final_response_text
 
             await websocket.send_text(json.dumps({
@@ -282,8 +307,11 @@ async def ws_chat_endpoint(websocket: WebSocket):
             logger.info(f"🧠 lc_memory updated with context_summary | session={session_id}")
 
             memory_store[session_id]["history"].append({
-                "query":     user_query,
-                "assistant": final_response_text  # full data → DB → frontend display
+                "query":     query_to_store,
+                "assistant": final_response_text,  # full data → DB → frontend display
+                "context":   context_summary,         # short summary → title generation only
+                "is_audio":  is_audio #flag for rendering
+            
             })
             logger.info(f"💾 history updated with full response | session={session_id}")
 
@@ -295,12 +323,19 @@ async def ws_chat_endpoint(websocket: WebSocket):
 
     except WebSocketDisconnect:
         if current_session_id:
-            session_data = memory_store.get(current_session_id, {})
-            await save_session_to_postgres_service(
-                session_id = current_session_id,
-                user_name = session_data.get("user_name", ""),
-                history   = session_data.get("history", [])
-            )
+            # Only save on disconnect if frontend has NOT already saved via HTTP POST
+            if current_session_id not in frontend_saved_sessions:
+                session_data = memory_store.get(current_session_id, {})
+                await save_session_to_postgres_service(
+                    session_id = current_session_id,
+                    user_name  = session_data.get("user_name", ""),
+                    history    = session_data.get("history", [])
+                )
+                logger.info(f"✅ Saved on disconnect | session={current_session_id}")
+            else:
+                logger.info(f"⏭️ Skipping disconnect save — frontend already saved | session={current_session_id}")
+                frontend_saved_sessions.discard(current_session_id)  # cleanup
+
         logger.info("🔌 WebSocket client disconnected")
         
 @api_router.post("/session")
@@ -313,9 +348,7 @@ async def sessions_endpoint(request: SessionRequest):
         logger.info("invalid user name")
         raise HTTPException(status_code=400, detail="userName is required")
 
-    if user_name not in VALID_USERNAMES:
-        raise HTTPException(status_code=403, detail=f"Invalid user name '{user_name}'. Access denied.")
-
+    
     # ── Case 1: chatHistory present → save session to PostgreSQL ──
     if incoming_history:
         logger.info(f"💾 Saving chat history | user_name={user_name} | session_id={session_id} | messages={len(incoming_history)}")
@@ -324,17 +357,22 @@ async def sessions_endpoint(request: SessionRequest):
         history_pairs = []
         pending_query = None
 
+        pending_is_audio = False
         for msg in incoming_history:
             role = (msg.role or "").lower()
             if role == "user":
                 pending_query = msg.text or ""
+                pending_is_audio = getattr(msg, "isAudio", False)
             elif role == "ai":
                 if pending_query is not None:
                     history_pairs.append({
-                        "query": pending_query,
-                        "assistant": msg.text or ""
+                        "query":     pending_query,
+                        "assistant": msg.text or "",
+                        "is_audio":  pending_is_audio,
+                        "context":   msg.text or ""
                     })
-                    pending_query = None
+                    pending_query    = None
+                    pending_is_audio = False
 
         # If conversation ended with a user message but no assistant reply,
         # still persist it with empty assistant text so it's not lost.
@@ -349,6 +387,10 @@ async def sessions_endpoint(request: SessionRequest):
             user_name  = user_name,
             history    = history_pairs
         )
+        #Mark this session as saved by frontend
+        # So WebSocketDisconnect will NOT save it again
+        frontend_saved_sessions.add(session_id)
+        logger.info(f"🏷️ Marked session as frontend-saved | session={session_id}")
 
         return {
             "user_name":  user_name,
@@ -376,6 +418,180 @@ async def sessions_endpoint(request: SessionRequest):
         "type":          "history",
         "chat_history":  history
     }
+    
+from app.services.sync.engine import run_sync
+@api_router.post("/client_insertion")
+async def client_insertion(request: ClientInsertionRequest):
+    userId = request.userId.strip()
+    userName = request.userName.strip()
+    service = request.service.strip()
+    token = request.token.strip()
+    if not userId or not userName:
+        logger.info("invalid client insertion payload")
+        raise HTTPException(status_code=400, detail="userId and userName are required")
+
+    conn = None
+    try:
+        conn = get_pool()
+        conn.rollback()  # clear any previous failed transaction
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT client_name, base_url, user_id, user_name, jwt_token, last_synced_at
+            FROM client_sync_config
+            WHERE user_id = %s AND user_name = %s
+            LIMIT 1
+            """,
+            (userId, userName),
+        )
+
+        row = cursor.fetchone()
+
+    except Exception as e:
+        logger.error(
+            f"❌ Failed to check client_sync_config | user_id={userId} | user_name={userName} | error={e}",
+            exc_info=True,
+        )
+        try:
+            if conn is not None and not getattr(conn, "closed", True):
+                conn.rollback()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail="Database error while checking client configuration")
+
+    if row:
+        client_name, base_url, db_user_id, db_user_name, db_jwt_token, last_synced_at = row
+        cursor.close()
+        return {
+            "client_type": "old",
+            "exists": True,
+            "client": {
+                "client_name": client_name,
+                "base_url": base_url,
+                "user_id": db_user_id,
+                "user_name": db_user_name,
+                "token": db_jwt_token,
+            },
+        }
+
+    # No existing client — insert new row into client_sync_config
+    cursor.execute(
+        """
+        INSERT INTO client_sync_config
+        (client_name, base_url, user_id, user_name, jwt_token, last_synced_at)
+        VALUES (%s, %s, %s, %s, %s, NOW())
+        RETURNING id, client_name, base_url, user_id, user_name, jwt_token, last_synced_at
+        """,
+        (userName, service, userId, userName, token),
+    )
+
+    new_row = cursor.fetchone()
+    conn.commit()
+    cursor.close()
+
+    new_id, client_name, base_url, db_user_id, db_user_name, db_jwt_token, last_synced_at = new_row
+
+    return {
+        "client_type": "new",
+        "exists": False,
+        "client": {
+            "id": new_id,
+            "client_name": client_name,
+            "base_url": base_url,
+            "user_id": db_user_id,
+            "user_name": db_user_name,
+            "service": service,
+            "token": db_jwt_token,
+        },
+    }
+    
+from app.services.sync.engine import run_sync
+@api_router.post("/client_insertion")
+async def client_insertion(request: ClientInsertionRequest):
+    userId = request.userId.strip()
+    userName = request.userName.strip()
+    service = request.service.strip()
+    token = request.token.strip()
+    if not userId or not userName:
+        logger.info("invalid client insertion payload")
+        raise HTTPException(status_code=400, detail="userId and userName are required")
+
+    conn = None
+    try:
+        conn = get_pool()
+        conn.rollback()  # clear any previous failed transaction
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT client_name, base_url, user_id, user_name, jwt_token, last_synced_at
+            FROM client_sync_config
+            WHERE user_id = %s AND user_name = %s
+            LIMIT 1
+            """,
+            (userId, userName),
+        )
+
+        row = cursor.fetchone()
+
+    except Exception as e:
+        logger.error(
+            f"❌ Failed to check client_sync_config | user_id={userId} | user_name={userName} | error={e}",
+            exc_info=True,
+        )
+        try:
+            if conn is not None and not getattr(conn, "closed", True):
+                conn.rollback()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail="Database error while checking client configuration")
+
+    if row:
+        client_name, base_url, db_user_id, db_user_name, db_jwt_token, last_synced_at = row
+        cursor.close()
+        return {
+            "client_type": "old",
+            "exists": True,
+            "client": {
+                "client_name": client_name,
+                "base_url": base_url,
+                "user_id": db_user_id,
+                "user_name": db_user_name,
+                "token": db_jwt_token,
+            },
+        }
+
+    # No existing client — insert new row into client_sync_config
+    cursor.execute(
+        """
+        INSERT INTO client_sync_config
+        (client_name, base_url, user_id, user_name, jwt_token, last_synced_at)
+        VALUES (%s, %s, %s, %s, %s, NOW())
+        RETURNING id, client_name, base_url, user_id, user_name, jwt_token, last_synced_at
+        """,
+        (userName, service, userId, userName, token),
+    )
+
+    new_row = cursor.fetchone()
+    conn.commit()
+    cursor.close()
+
+    new_id, client_name, base_url, db_user_id, db_user_name, db_jwt_token, last_synced_at = new_row
+
+    return {
+        "client_type": "new",
+        "exists": False,
+        "client": {
+            "id": new_id,
+            "client_name": client_name,
+            "base_url": base_url,
+            "user_id": db_user_id,
+            "user_name": db_user_name,
+            "service": service,
+            "token": db_jwt_token,
+        },
+    }
 
 
 @api_router.get("/health", tags=["Health"])
@@ -393,3 +609,4 @@ async def startup_event():
 @chatbot_app.get("/health", tags=["Health"])
 def health():
     return {"status": "ok", "service": "Facility Management AI Assistant"}
+

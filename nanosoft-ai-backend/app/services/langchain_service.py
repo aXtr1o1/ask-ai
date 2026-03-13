@@ -48,6 +48,7 @@ class LangChainService:
 
     # ── Print ONE clean summary line at end of every query ──────────────────
     def _log_query_summary(self, user_query: str):
+        
         logger.info(
             f"📊 QUERY TOKEN SUMMARY | query='{user_query}' "
             f"| input_tokens={self._total_input_tokens} "
@@ -212,6 +213,13 @@ class LangChainService:
                         "📊 Tool result | %s | p_list_length=%s | p_count=%s | total_for_count=%s",
                         tool_name, len(p_list), p_count, total_for_count
                     )
+                    # ── If tool actually ran in aggregate mode → force aggregate intent
+                    # This overrides whatever the intent classifier says later
+                    tool_was_aggregate = args.get("is_aggregate") is True
+                    if tool_was_aggregate:
+                        logger.info("📊 Tool ran in aggregate mode → forcing AGGREGATE intent (skipping classifier)")
+                        is_aggregate_query = True
+                        is_count_query = False
 
                     
                     if p_count == 0 and total_for_count == 0:
@@ -250,15 +258,17 @@ class LangChainService:
 
                     
                     # is_aggregate_query is the new 3rd intent
-                    intent = intent_msg.content.strip().lower()
-                    is_count_query     = intent == "count"
-                    is_aggregate_query = intent == "aggregate"  
-                    # anything else = list (existing behaviour)
+                    if not tool_was_aggregate:
+                        intent = intent_msg.content.strip().lower()
+                        is_count_query     = intent == "count"
+                        is_aggregate_query = intent == "aggregate"
+                    else:
+                        intent = "aggregate"  # already forced above
 
                     if is_count_query:
                         logger.info("🔢 Intent=COUNT — sending count only to model | query='%s'", user_query)
                     elif is_aggregate_query:
-                        logger.info("📊 Intent=AGGREGATE — sending grouped summary to model | query='%s'", user_query)  # ✅ ADDED
+                        logger.info("📊 Intent=AGGREGATE — sending grouped summary to model | query='%s'", user_query)
                     else:
                         logger.info("📋 Intent=LIST — sending full records to model | query='%s'", user_query)
 
@@ -371,10 +381,14 @@ class LangChainService:
                     context_summary = first_line if first_line else f"Found grouped summary with {display_count} rows."
                     logger.info("🧠 Aggregate query context_summary='%s'", context_summary[:80])
                     if is_graph:
-                        logger.info("📊 [GRAPH] Wrapping aggregate as graph JSON | records=%d", len(p_list_for_model))
-                        graph_response = self.build_graph_response(context_summary, p_list_for_model)
-                        self._log_query_summary(current_user_query)
-                        return graph_response, context_summary, messages
+                        # ── Only build graph if tool actually ran in aggregate mode ──
+                        if tool_was_aggregate:
+                            logger.info("📊 [GRAPH] Wrapping aggregate as graph JSON | records=%d", len(p_list_for_model))
+                            graph_response = self.build_graph_response(context_summary, p_list_for_model)
+                            self._log_query_summary(current_user_query)
+                            return graph_response, context_summary, messages
+                        else:
+                            logger.warning("⚠️ [GRAPH] Intent=AGGREGATE but tool ran in RAW mode — skipping graph, returning text")
 
                     
                 else:
@@ -385,6 +399,24 @@ class LangChainService:
 
                 logger.info("✅ Final response generated after tool execution")
                 self._log_query_summary(current_user_query)
+                entity = "data"
+                if "asset" in final_content.lower():
+                    entity = "assets"
+                elif "complaint" in final_content.lower():
+                    entity = "complaints"
+                elif "ppm" in final_content.lower():
+                    entity = "ppm tasks"
+
+                if is_graph and not is_aggregate_query:
+                    final_content = (
+                        f"{final_content}\n\n"
+                        "📊 **I'd love to visualize that for you!**\n"
+                        f"Since you asked for a graph, I've calculated the total, but I can't draw a chart for a single number. "
+                        f"To build a visual layout, I need to **group these {entity}** into categories.\n\n"
+                        "**Try rephrasing your question**\n"
+                        "Once you add a category , I can generate the perfect chart for you! 📈"
+
+                    )
                 return final_content, context_summary, messages
 
             else:
@@ -407,7 +439,12 @@ class LangChainService:
                     tool_name = "BDM" if needs_bdm else ("ASSETS" if needs_assets else "PPM")
                     logger.warning("⚠️ Model skipped tool for data query — forcing %s", tool_name)
                     tool_fn = self.tool_map[tool_name]
-                    args = {"user_name": user_name, "limit": None}
+                    aggregate_keywords = ("by ", "per ", "group by", "breakdown", "summarize", "compare")
+                    args = {
+                        "user_name": user_name, 
+                        "limit": None,
+                        "is_aggregate": any(kw in user_query.lower() for kw in aggregate_keywords)
+                    }
                     logger.info("🔍 Calling forced tool | tool=%s | user_name=%s", tool_name, user_name)
                     tool_result = tool_fn.invoke(dict(args))
 
@@ -472,10 +509,15 @@ class LangChainService:
                     self._accumulate_tokens(intent_msg)
 
                     #  — 3 intents for forced path same as normal path
-                    intent = intent_msg.content.strip().lower()
-                    is_count_query     = intent == "count"
-                    is_aggregate_query = intent == "aggregate"  
-
+                    tool_was_aggregate = args.get("is_aggregate") is True
+                    if not tool_was_aggregate:
+                        intent = intent_msg.content.strip().lower()
+                        is_count_query     = intent == "count"
+                        is_aggregate_query = intent == "aggregate"
+                    else:
+                        intent = "aggregate"
+                        is_aggregate_query = True
+                        is_count_query = False
                     if is_count_query:
                         logger.info("🔢 Intent=COUNT [FORCED] | query='%s'", user_query)
                     elif is_aggregate_query:
@@ -569,26 +611,46 @@ class LangChainService:
                         context_summary = content
                         logger.info("🧠 [FORCED] Count context_summary='%s'", context_summary[:80])
                     elif is_aggregate_query:
-                        
                         first_line = content.split("\n")[0].strip()
                         context_summary = first_line if first_line else f"Found grouped summary with {display_count} rows."
                         logger.info("🧠 [FORCED] Aggregate context_summary='%s'", context_summary[:80])
                         if is_graph:
-                            logger.info("📊 [GRAPH FORCED] Wrapping aggregate as graph JSON | records=%d", len(p_list_for_model))
-                            graph_response =self.build_graph_response(context_summary, p_list_for_model)
-                            self._log_query_summary(current_user_query)
-                            return graph_response, context_summary, messages
-
-                        
+                            # ── Only build graph if tool actually ran in aggregate mode ──
+                            tool_was_aggregate = args.get("is_aggregate") is True
+                            if tool_was_aggregate:
+                                logger.info("📊 [GRAPH FORCED] Wrapping aggregate as graph JSON | records=%d", len(p_list_for_model))
+                                graph_response = self.build_graph_response(context_summary, p_list_for_model)
+                                self._log_query_summary(current_user_query)
+                                return graph_response, context_summary, messages
+                            else:
+                                logger.warning("⚠️ [GRAPH FORCED] Intent=AGGREGATE but tool ran in RAW mode — skipping graph, returning text")                            
+                                                    
                     else:
                         first_line = content.split("\n")[0].strip()
                         context_summary = first_line if first_line else f"Found {display_count} records for your request."
                         logger.info("🧠 [FORCED] List context_summary='%s'", context_summary[:80])
 
                     self._log_query_summary(current_user_query)
-                    return content, context_summary, messages
+                    entity = "data"
+                    if "asset" in content.lower():
+                        entity = "assets"
+                    elif "complaint" in content.lower():
+                        entity = "complaints"
+                    elif "ppm" in content.lower():
+                        entity = "ppm tasks"
 
-                
+                    if is_graph and not is_aggregate_query:
+                        content = (
+                            f"{content}\n\n"
+                            "📊 **I'd love to visualize that for you!**\n"
+                            f"Since you asked for a graph, I've calculated the total, but I can't draw a chart for a single number. "
+                            f"To build a visual layout, I need to **group these {entity}** into categories.\n\n"
+                            "**Try rephrasing your question**\n"
+                            "Once you add a category , I can generate the perfect chart for you! 📈"
+
+                        )
+                    return content, context_summary, messages
+                    
                 content = ai_msg.content
                 if not content or str(content).strip() == "":
                     content = "No results found for the given query."
