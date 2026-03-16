@@ -1,87 +1,195 @@
 """
-Audio Service — High-Fidelity Transcription for Noisy Mono Audio.
+Audio Service — Transcription + Confirmation in One Model Call
+───────────────────────────────────────────────────────────────
+Zero-shot approach — rules only, no examples.
+Simple 3-outcome classification:
+  1. General knowledge → proceed directly
+  2. Data query        → always confirm with user first
+  3. Not FM query      → ask user to repeat
 """
 import logging
 import tempfile
 import os
-# Using the modern SDK
+import json
+import asyncio
 from google import genai
 from app.config import settings
-import asyncio 
 
 logger = logging.getLogger("audio_service")
 logger.setLevel(logging.INFO)
 
-# ── Initialize Client ────────────────────────────────────────────────────────
-# The new SDK uses a Client object for better session management
+# ── Initialize Gemini Client ─────────────────────────────────────────────────
 client = genai.Client(api_key=settings.GOOGLE_API_KEY)
 
-async def convert_audio_to_text(audio_bytes: bytes) -> str:
+# ── FM Domain Reference ──────────────────────────────────────────────────────
+FM_DOMAIN_REFERENCE = """
+This assistant handles 3 domains: ASSETS, PPM, BDM.
+Filter fields: division, discipline, locality, building, floor, spot_name,
+status, condition, priority, asset_type, make, model, trade_group,
+service_area, owner, serial_no, asset_tag_no, frequency, stage,
+contract, tech, equipment, work_order, complaint_type, complaint_mode,
+complaint_nature, wo_type, service_type, complainer, analysis_tech,
+execution_tech, complaint_no.
+"""
+
+# ── System Instructions — Pure Zero-Shot, Rules Only ─────────────────────────
+SYSTEM_INSTRUCTIONS = f"""
+You are an expert Facility Management audio transcription system.
+
+DOMAIN KNOWLEDGE:
+{FM_DOMAIN_REFERENCE}
+
+YOUR JOB — complete all steps in one pass:
+
+STEP 1 — TRANSCRIBE:
+- Remove filler words and stutters.
+- Keep only the final corrected thought if user restarts.
+- Ignore background noise.
+- If a filter field value is physically unclear due to noise or mumbling
+  → replace that word with [Unsure] and add to uncertain_terms.
+- Never mark [Unsure] just because a value seems unusual.
+
+STEP 2 — CLASSIFY into exactly one of 3 outcomes:
+
+OUTCOME 1 — GENERAL KNOWLEDGE OR GREETING:
+The user is asking a conceptual or definitional FM question,
+OR greeting, introducing themselves, or making small talk.
+This includes greetings like "Hi", "Hello", "Good morning",
+introductions like "My name is X", and casual phrases like
+"Thank you", "Bye", "How are you".
+Names in introductions are NOT filter values and require NO confirmation.
+Any sentence that starts with "My name is" or "I am" is always OUTCOME 1.
+No data will be fetched. No filter fields involved.
+→ needs_clarification = false
+→ clarification_question = ""
+
+OUTCOME 2 — DATA QUERY:
+The user wants to fetch real data from the system.
+This includes any query that wants to list, show, count, or filter
+assets, complaints, or PPM tasks — with or without filter values.
+→ needs_clarification = true
+→ clarification_question must be a single friendly sentence that
+  repeats back what you understood, ending with "Is that correct?"
+  If any word was [Unsure], mention it was unclear in the question.
+
+OUTCOME 3 — NOT FM QUERY:
+The audio does not relate to facility management at all.
+Includes casual conversation, accidental recordings, vague statements.
+→ needs_clarification = true
+→ clarification_question = "I didn't quite catch that. Could you please repeat your question?"
+
+STEP 3 — OUTPUT:
+Return ONLY this exact JSON. No extra text, no markdown.
+{{
+    "transcription": "clean transcribed text, or empty string for OUTCOME 3",
+    "uncertain_terms": ["word1"],
+    "needs_clarification": true or false,
+    "clarification_question": "confirmation sentence or question, empty string for OUTCOME 1"
+}}
+"""
+
+
+async def convert_audio_to_text(audio_bytes: bytes) -> dict:
     """
-    Transcribes mono OGG audio with strict anti-hallucination rules for noise.
+    Transcribes audio AND classifies the query in ONE model call.
+
+    Returns:
+    {
+        "transcription":          str  — clean text (empty if OUTCOME 3)
+        "uncertain_terms":        list — physically unclear words
+        "needs_clarification":    bool — True for data queries and non-FM queries
+        "clarification_question": str  — confirmation or repeat request
+    }
+
+    main.py flow:
+        if needs_clarification=True (data query):
+            send clarification_question to user → wait for reply
+            if yes  → run with original transcription
+            if no   → use their corrected reply as new query
+        if needs_clarification=False (general knowledge):
+            run process_query directly
     """
-    tmp_path = None
+    tmp_path      = None
     uploaded_file = None
 
     try:
-        # 1. Write bytes to a temp file
+        # ── 1. Write bytes to temp file ──────────────────────────────────────
         with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
             tmp.write(audio_bytes)
             tmp_path = tmp.name
-
         logger.info(f"🎵 Audio file ready: {tmp_path}")
 
-        # 2. Upload to Gemini Files API
-        # We specify audio/ogg to ensure the model handles the Opus codec correctly
-        # ✅ NEW — correct syntax
-        uploaded_file = client.files.upload(file=tmp_path, config={'mime_type': 'audio/ogg'})
+        # ── 2. Upload to Gemini Files API ────────────────────────────────────
+        uploaded_file = client.files.upload(
+            file=tmp_path,
+            config={"mime_type": "audio/ogg"}
+        )
         logger.info(f"✅ Uploaded: {uploaded_file.name}")
 
-        # 3. Use a Strict "Ground Truth" Prompt
-        # This is designed specifically for your mono/noise/single-speaker needs
-        prompt = """
-            TASK: Professional clean-text transcription.
-            INPUT: Single-speaker mono audio with background noise and verbal fillers.
-
-            STRICT INSTRUCTIONS:
-            1. CLEAN OUTPUT: Remove filler words (um, ah, uh, like, you know) and stutters. 
-            2. LOGICAL INTENT: If the user restarts a sentence (e.g., "I want to... I mean, I need to go"), only transcribe the final, corrected thought ("I need to go").
-            3. NO HALLUCINATION: If noise makes a phrase unintelligible and you cannot be 100% sure of the words, do NOT guess. Instead, write [Unsure].
-            4. FORMATTING: Return only the clean, final text. Do not include speaker labels or timestamps.
-            5. NOISE FILTER: Completely ignore background clicks, wind, or static.
-
-            GOAL: Provide the final 'intended' message of the speaker. If the audio is too noisy to be sure, use the [Unsure] tag.
-            """
-
+        # ── 3. Call Gemini ───────────────────────────────────────────────────
         try:
             response = await asyncio.wait_for(
                 asyncio.to_thread(
                     client.models.generate_content,
                     model=settings.GOOGLE_AI_MODEL,
-                    contents=[prompt, uploaded_file]
+                    contents=["Transcribe and classify this audio.", uploaded_file],
+                    config={
+                        "system_instruction": SYSTEM_INSTRUCTIONS,
+                        "response_mime_type": "application/json"
+                    }
                 ),
-                timeout=10.0  # fail fast in this seconds
+                timeout=15.0
             )
         except asyncio.TimeoutError:
             raise Exception("Audio transcription timed out")
 
-        transcribed_text = response.text.strip()
+        # ── 4. Parse result ──────────────────────────────────────────────────
+        result = json.loads(response.text)
+        logger.info(f"📝 Transcription result: {result}")
 
-        if not transcribed_text:
-            raise ValueError("Gemini returned no text (check if audio is pure noise).")
+        # ── 5. Safety checks ─────────────────────────────────────────────────
+        transcription          = result.get("transcription", "").strip()
+        uncertain_terms        = result.get("uncertain_terms", [])
+        needs_clarification    = bool(result.get("needs_clarification", False))
+        clarification_question = result.get("clarification_question", "").strip()
 
-        return transcribed_text
+        # needs_clarification=True but no question → use default
+        if needs_clarification and not clarification_question:
+            clarification_question = "I didn't quite catch that. Could you please repeat your question?"
+
+        # Empty transcription but needs_clarification=False → fix it
+        if not transcription and not needs_clarification:
+            needs_clarification    = True
+            clarification_question = "I didn't quite catch that. Could you please repeat your question?"
+
+        if needs_clarification:
+            logger.info(f"🔍 Confirmation/Clarification: '{clarification_question}'")
+        else:
+            logger.info(f"✅ General knowledge — PROCEED directly")
+
+        return {
+            "transcription":          transcription,
+            "uncertain_terms":        uncertain_terms,
+            "needs_clarification":    needs_clarification,
+            "clarification_question": clarification_question
+        }
 
     except Exception as e:
-        logger.error(f"❌ Transcription failed: {e}")
-        raise
+        logger.error(f"❌ Transcription error: {e}")
+        # Safe fallback — never crash the WebSocket
+        return {
+            "transcription":          "",
+            "uncertain_terms":        [],
+            "needs_clarification":    True,
+            "clarification_question": "I'm sorry, I couldn't process that audio. Could you please repeat your request?"
+        }
 
     finally:
-        # 5. Clean up local temp file
+        # ── Cleanup temp file ────────────────────────────────────────────────
         if tmp_path and os.path.exists(tmp_path):
             os.remove(tmp_path)
-            
-        # 6. Clean up Gemini Cloud file (Good practice for privacy/quota)
+
+        # ── Cleanup Gemini cloud file ────────────────────────────────────────
         if uploaded_file:
             try:
                 client.files.delete(name=uploaded_file.name)
