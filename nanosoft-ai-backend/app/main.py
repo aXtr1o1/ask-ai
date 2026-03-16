@@ -518,6 +518,7 @@ async def client_insertion(request: ClientInsertionRequest):
     userId = request.userId.strip()
     userName = request.userName.strip()
     service = request.service.strip()
+    client_name = request.clientName.strip()
     token = request.token.strip()
     if not userId or not userName:
         logger.info("invalid client insertion payload")
@@ -576,7 +577,7 @@ async def client_insertion(request: ClientInsertionRequest):
         VALUES (%s, %s, %s, %s, %s, NOW())
         RETURNING id, client_name, base_url, user_id, user_name, jwt_token, last_synced_at
         """,
-        (userName, service, userId, userName, token),
+        (client_name, service, userId, userName, token),
     )
 
     new_row = cursor.fetchone()
