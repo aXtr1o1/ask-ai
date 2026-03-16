@@ -11,7 +11,7 @@ from datetime import datetime
 
 
 # Test 1: Check get_sessions_for_user returns list of sessions for a user
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_get_sessions_for_user():
     # Fake DB returns 2 sessions
     now = datetime.now()
@@ -36,7 +36,7 @@ async def test_get_sessions_for_user():
 
 
 # Test 2: Check get_chat_history_for_session returns correct chat history
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_get_chat_history_for_session():
     # Fake DB returns chat history JSON
     history = [
@@ -58,7 +58,7 @@ async def test_get_chat_history_for_session():
 
 
 # Test 3: Check empty result is returned when session is not found in DB
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_get_chat_history_session_not_found():
     # Fake DB returns no row for this session
     mock_cursor = MagicMock()

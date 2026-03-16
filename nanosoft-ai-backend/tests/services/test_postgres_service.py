@@ -9,7 +9,7 @@ from app.services.postgres_service import save_session_to_postgres_service, gene
 
 
 # Test 1: Check save_session saves correctly when history has records
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_save_session_success():
     # Fake history with one chat pair
     history = [
@@ -36,7 +36,7 @@ async def test_save_session_success():
 
 
 # Test 2: Check save_session skips saving when history is empty
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_save_session_empty_history():
     mock_conn = MagicMock()
 
@@ -53,7 +53,7 @@ async def test_save_session_empty_history():
 
 
 # Test 3: Check DB failure is handled without crashing the app
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_save_session_db_error():
     history = [
         {"query": "show me assets", "assistant": "Found 1 asset.", "is_audio": False}
