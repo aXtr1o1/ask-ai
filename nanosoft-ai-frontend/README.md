@@ -10,10 +10,10 @@ This is a modern, high-performance AI chat interface built with **Next.js 14** (
 
 ##  Tech Stack
 
-* **Framework: [Next.js 14](https://nextjs.org/) (App Router)
-* **Language: [TypeScript](https://www.typescriptlang.org/)
-* **Styling: [Tailwind CSS](https://tailwindcss.com/)
-* **Icons: [Lucide React](https://lucide.dev/)
+* **Framework:** [Next.js 14](https://nextjs.org/) (App Router)
+* **Language:** [TypeScript](https://www.typescriptlang.org/)
+* **Styling:** [Tailwind CSS](https://tailwindcss.com/)
+* **Icons:** [Lucide React](https://lucide.dev/)
 
 ## 📂 Project Structure
 
@@ -37,17 +37,20 @@ npm install
 ```
 
 ## 2. Configure Environment
+
+Create a `.env.local` file in the root directory to point to your FastAPI server:
+
 ```bash
-Create a .env.local file in the root directory to point to your FastAPI server:
-API_URL=[http://127.0.0.1:8001/chat]
+API_URL=http://127.0.0.1:8001/chat
 ```
 
 ## 3. Run Development Server
-```
-cd app
+
+```bash
 npm run dev
-Open http://localhost:3000 in your browser.
 ```
+
+Open http://localhost:3000 in your browser.
 
 # API Workflow
 The frontend acts as the "Controller" in the following sequence:

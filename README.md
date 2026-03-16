@@ -32,7 +32,7 @@ cd nanosoft-ai-backend
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
-uvicorn main:app --reload
+uvicorn app.main:chatbot_app --reload
 ```
 
 ### Useful scripts
