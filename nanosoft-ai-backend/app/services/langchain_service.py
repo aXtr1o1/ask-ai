@@ -36,7 +36,9 @@ class LangChainService:
             logger.info("🚀 LangChainService initialized with ASSETS, PPM, BDM tools")
         except Exception as e:
             logger.error(f"❌ LangChainService init failed: {e}", exc_info=True)
-            raise
+            # In test/CI environments there may be no valid API key.
+            # Defer hard failure until the model is actually used.
+            self.model = None
 
     # ── Accumulate tokens from each model call ───────────────────────────────
     # ── Called after every model.invoke() to add up tokens for this query
