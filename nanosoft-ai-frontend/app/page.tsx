@@ -932,6 +932,7 @@ export default function Home() {
   const [audioPlayingIndex, setAudioPlayingIndex] = useState<number | null>(null);
   const [audioProgressMap,  setAudioProgressMap]  = useState<Record<number, number>>({});
   const [audioDurationMap,  setAudioDurationMap]  = useState<Record<number, number>>({});
+  const audioDurationMapRef = useRef<Record<number, number>>({});
   const [loginPageClientLogoPath, setLoginPageClientLogoPath] = useState<string | null>(null);
   const [loginFooterLogoPath, setLoginFooterLogoPath] = useState<string | null>(null);
 
@@ -1691,6 +1692,7 @@ useEffect(() => {
     // ── FIX BUG 1: load real duration from the audio element itself ──────
     audio.addEventListener("loadedmetadata", () => {
       if (isFinite(audio.duration) && audio.duration > 0) {
+        audioDurationMapRef.current[idx] = audio.duration;
         setAudioDurationMap(prev => ({ ...prev, [idx]: audio.duration }));
       } else if (passedDuration > 0) {
         setAudioDurationMap(prev => ({ ...prev, [idx]: passedDuration }));
@@ -1701,7 +1703,7 @@ useEffect(() => {
     const progressLoop = () => {
       const a = audioPlayersRef.current[idx];
       if (!a || a.paused) return;
-      const dur = audioDurationMap[idx] ?? passedDuration;
+      const dur = audioDurationMapRef.current[idx] ?? passedDuration;
       if (dur > 0) {
         const pct = (a.currentTime / dur) * 100;
         setAudioProgressMap(prev => ({ ...prev, [idx]: pct }));

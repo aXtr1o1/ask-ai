@@ -303,19 +303,19 @@ export function HorizontalBarChartRenderer({ graphData, currentChartType, onChar
           <ResponsiveContainer width="100%" height="100%">
             <BarChart
               data={graphData.records.slice(0, 50)}
-              margin={{ top: 15, right: 20, left: 130, bottom: 5 }}
+              margin={{ top: 15, right: 20, left: 20, bottom: 5 }}
               barCategoryGap="15%"
               layout="vertical"
             >
               {/* Subtle grid lines matching dark theme */}
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(212,175,55,0.12)" vertical={false} />
 
-              {/* Y Axis — now shows labels for categories (reversed from vertical) */}
+              {/* Y Axis — labels hidden to move chart left */}
               <YAxis
                 dataKey={graphData.label_key}
                 type="category"
-                tick={{ fill: "#9CA3AF", fontSize: 9 }}
-                width={115}
+                tick={false}
+                width={0}
                 interval={1}
               />
 
@@ -459,8 +459,9 @@ export function LineChartRenderer({ graphData, currentChartType, onChartTypeChan
 }
 
 // ─── Pie Chart Component ────────────────────────────────────────────────────
-export function PieChartRenderer({ graphData, currentChartType, onChartTypeChange }: { graphData: GraphData; currentChartType?: ChartType; onChartTypeChange?: (type: ChartType) => void }) {
-  const tooltipStyle = { 
+export function PieChartRenderer({ graphData, currentChartType, onChartTypeChange }: { graphData: GraphData; currentChartType?: ChartType; onChartTypeChange?: (type: ChartType) => void }) { 
+    const [activeIndex, setActiveIndex] = useState<number | null>(null);
+    const tooltipStyle = { 
     background: 'var(--color-bg-alt)', 
     border: '1px solid var(--color-border)', 
     color: 'var(--color-text)' 
@@ -484,8 +485,8 @@ export function PieChartRenderer({ graphData, currentChartType, onChartTypeChang
       </div>
 
       {/* Pie chart container — compact size for centered pie with visible labels */}
-      <div className="graph-chart-container" style={{ position: 'relative', maxWidth: '600px', margin: '0 auto' }}>
-        <div style={{ width: "100%", minWidth: "600px", height: "100%", display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+      <div className="graph-chart-container" style={{ position: 'relative', maxWidth: '600px', margin: '0 auto', border: 'none', boxShadow: 'none' }}>
+        <div style={{ width: "100%", minWidth: "600px", height: "100%", display: 'flex', justifyContent: 'center', alignItems: 'center', border: 'none' }}>
           <ResponsiveContainer width="100%" height="100%">
             <PieChart margin={{ top: 10, right: 80, bottom: 10, left: 80 }}>
               <Pie
@@ -493,13 +494,19 @@ export function PieChartRenderer({ graphData, currentChartType, onChartTypeChang
                 cx="50%"
                 cy="50%"
                 labelLine={false}
-                label={({ name, value }) => `${name}: ${value?.toLocaleString() || 0}`}
+                label={false}
                 outerRadius={120}
                 fill="#8884d8"
                 dataKey="value"
+                onMouseEnter={(_, index) => setActiveIndex(index)}
+                onMouseLeave={() => setActiveIndex(null)}
               >
                 {pieData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                  <Cell 
+                    key={`cell-${index}`} 
+                    fill={COLORS[index % COLORS.length]}
+                    opacity={activeIndex === null || activeIndex === index ? 1 : 0.5}
+                  />
                 ))}
               </Pie>
               <Tooltip
@@ -509,12 +516,25 @@ export function PieChartRenderer({ graphData, currentChartType, onChartTypeChang
                   fontSize: 13,
                   padding: "8px 12px"
                 }}
-                formatter={(value: any) => {
-                  if (typeof value === 'number') return [value.toLocaleString(), graphData.value_key];
-                  if (typeof value === 'string') return [value, graphData.value_key];
-                  return ["0", graphData.value_key];
+                content={({ active, payload }: any) => {
+                  if (active && payload && payload.length > 0) {
+                    const data = payload[0];
+                    return (
+                      <div
+                        style={{
+                          ...tooltipStyle,
+                          borderRadius: "8px",
+                          fontSize: "13px",
+                          padding: "8px 12px"
+                        }}
+                      >
+                        <div>{`${graphData.label_key}: ${data.name}`}</div>
+                        <div>{`${graphData.value_key}: ${typeof data.value === 'number' ? data.value.toLocaleString() : data.value}`}</div>
+                      </div>
+                    );
+                  }
+                  return null;
                 }}
-                labelFormatter={(label) => `${graphData.label_key}: ${label}`}
               />
             </PieChart>
           </ResponsiveContainer>
