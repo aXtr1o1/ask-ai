@@ -10,7 +10,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 
 
 # Test 1: Check process_query returns response when model makes a tool call
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_process_query_with_tool_call():
     # Mock the entire LangChainService to avoid real Gemini init
     with patch("app.services.langchain_service.ChatGoogleGenerativeAI") as mock_llm:
@@ -60,7 +60,7 @@ async def test_process_query_with_tool_call():
 
 
 # Test 2: Check process_query returns direct response when no tool call needed
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_process_query_no_tool_call():
     # Mock the entire LangChainService
     with patch("app.services.langchain_service.ChatGoogleGenerativeAI") as mock_llm:
@@ -90,7 +90,7 @@ async def test_process_query_no_tool_call():
 
 
 # Test 3: Check process_query raises error when user_name is missing
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_process_query_missing_user_name():
     with patch("app.services.langchain_service.ChatGoogleGenerativeAI") as mock_llm:
         mock_model_instance = MagicMock()
