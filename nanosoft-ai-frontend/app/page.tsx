@@ -6,13 +6,22 @@ import Image from "next/image";
 import { ThemeToggle } from "./components/ThemeToggle";
 import BackgroundLayer from "./components/BackgroundLayer";
 import { useTheme } from "./components/useTheme";
-import { IconUser } from "@tabler/icons-react";
+
+import { useVoiceRecorder, RecordingInterface, VoicePreviewBar, VoiceMicButton } from "./components/VoiceRecorder";
+import { parseGraphData, BarChartRenderer, HorizontalBarChartRenderer, LineChartRenderer, PieChartRenderer, ChartType } from "./components/GraphRenderer";
+import { IconUser, IconMicrophone, IconPlayerPlay, IconPlayerPause, IconTrash, IconArrowUp, IconChartBar } from "@tabler/icons-react";
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface Message {
   role: "user" | "ai" | "error";
   text: string;
   streaming?: boolean;
   isLargeDataset?: boolean;
+  isAudio?: boolean;
+  audioDuration?: number;
+  audioUrl?: string;
+  sendStatus?: "sent" | "failed" | "sending";
+   isGraphResponse?: boolean;  // ← Set to true if response is type="graph"
+  chartType?: ChartType;      // ← chart type per message
 }
 interface FolderItem { id: string; name: string; }
 interface ChatSession { id: string; title: string; createdAt: number; updatedAt?: number; }
@@ -355,10 +364,10 @@ function renderLargeDataset(text: string): string | null {
   // Final HTML
   // ─────────────────────────────────────────
   const table = `
+  <div class="large-dataset-context">
+    ${escapeHTML(context)}
+  </div>
   <div class="large-dataset-wrapper">
-    <div class="large-dataset-context">
-      ${escapeHTML(context)}
-    </div>
     <table class="large-dataset-table">
       ${head}
       ${body}
@@ -760,6 +769,17 @@ function formatOutput(text: string): string {
   return html;
 }
 
+function decodeEntities(text: string): string {
+  if (!text) return "";
+  return text
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+}
+
+
 // ─── Session ID ───────────────────────────────────────────────────────────────
 function generateSessionId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function")
@@ -799,12 +819,6 @@ const IconSearch = () => (
   >
     <circle cx="11" cy="11" r="5.5" />
     <line x1="15" y1="15" x2="20" y2="20" />
-  </svg>
-);
-const IconSend = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-    <line x1="12" y1="19" x2="12" y2="5"/>
-    <polyline points="5 12 12 5 19 12"/>
   </svg>
 );
 const IconHamburger = () => (
@@ -899,29 +913,80 @@ export default function Home() {
   const [sessionId,    setSessionId]    = useState<string>(() => generateSessionId());
   const [searchVal,    setSearchVal]    = useState("");
   const [isRecording,  setIsRecording]  = useState<boolean>(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const [isLocked, setIsLocked] = useState(false);
+  const [recordedAudioBlob, setRecordedAudioBlob] = useState<Blob | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [playbackTime, setPlaybackTime] = useState(0);
+  const [slideGestureActive, setSlideGestureActive] = useState(false);
   const [loggedInUser, setLoggedInUser] = useState<string | null>(null);
   const [authChecked,  setAuthChecked]  = useState<boolean>(false);
   const [menuOpen,     setMenuOpen]     = useState(false);
   const [wsConnectionState, setWsConnectionState] = useState<'connecting'|'connected'|'failed'>('connecting');
+  const [isGraphMode, setIsGraphMode] = useState<boolean>(false);
+  const [chartType, setChartType] = useState<ChartType>('vertical-bar');
   const [activeFeature, setActiveFeature] = useState<'chat' | 'archived' | 'library'>('chat');
   const [showFeaturePlaceholder, setShowFeaturePlaceholder] = useState<boolean>(false);
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [audioPlayingIndex, setAudioPlayingIndex] = useState<number | null>(null);
+  const [audioProgressMap,  setAudioProgressMap]  = useState<Record<number, number>>({});
+  const [audioDurationMap,  setAudioDurationMap]  = useState<Record<number, number>>({});
+  const audioDurationMapRef = useRef<Record<number, number>>({});
   const [loginPageClientLogoPath, setLoginPageClientLogoPath] = useState<string | null>(null);
   const [loginFooterLogoPath, setLoginFooterLogoPath] = useState<string | null>(null);
 
+  // ─── Refs (declare early for use in hooks) ────────────────────────────────
   const messagesEndRef   = useRef<HTMLDivElement | null>(null);
   const inputRef         = useRef<HTMLTextAreaElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const menuRef          = useRef<HTMLDivElement>(null);
-  const wsRef            = useRef<WebSocket | null>(null);  // single WebSocket for the whole tab
+  const wsRef            = useRef<WebSocket | null>(null);
   const sessionIdRef = useRef<string>(sessionId);
   const wsConnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectDelayRef = useRef(2000);
   const sessionMessagesRef = useRef<Map<string, Message[]>>(new Map());
+  const streamRef = useRef<MediaStream | null>(null);
+  const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const audioPlaybackRef = useRef<HTMLAudioElement | null>(null);
+  const recordingStartTimeRef = useRef<number>(0);
+  const touchStartYRef = useRef<number>(0);
+  const touchStartXRef = useRef<number>(0);
+  const audioPlayersRef = useRef<Record<number, HTMLAudioElement>>({});
+  const accRef = useRef<string>("");
+  const pingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const userActiveRef = useRef<boolean>(true);
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ─── Voice Recorder Hook ──────────────────────────────────────────────────
+  const voiceRecorder = useVoiceRecorder(
+    isLoading,
+    wsConnectionState,
+    loggedInUser || "anonymous",
+    sessionId,
+    wsRef,
+    (duration: number, audioUrl: string) => {
+      setIsGraphMode(false);
+      setMessages(prev => {
+        const updated = [...prev, {
+          role: "user" as const,
+          text: "Voice message",
+          isAudio: true,
+          audioDuration: duration,
+          audioUrl: audioUrl
+        }];
+        sessionMessagesRef.current.set(sessionId, updated);
+        return updated;
+      });
+      setIsLoading(true);
+      accRef.current = "";
+      setTimeout(() => inputRef.current?.focus(), 100);
+    }
+  );
 
   // Read userName and branding logos from URL (e.g. from autologin redirect); persist logos to localStorage
   useEffect(() => {
+    
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
       const userName = params.get("userName") ?? params.get("userId");
@@ -993,10 +1058,6 @@ export default function Home() {
   useEffect(() => { resizeTA(); }, [input]);
 
   // ── Persistent WebSocket: connect once on mount, stay open all session ───────
-  const accRef = useRef<string>("");   // accumulates current response text
-  const pingRef = useRef<ReturnType<typeof setInterval> | null>(null);   // ping for ACTIVE session only
-  const userActiveRef = useRef<boolean>(true);  // is user actively using the page?
-  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const IDLE_TIMEOUT = 2 * 60 * 1000;  // 2 minutes
   const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
 
@@ -1027,25 +1088,39 @@ export default function Home() {
       }
     }, 30_000);
   };
+    const stripHtml = (html: string) => {
+    const temp = document.createElement("div");
+    temp.innerHTML = html;
+    return temp.textContent || "";
+  };
 
   // ── Save chat history to backend (PostgreSQL) ───────────────────────────────
   const saveChatHistory = async (sid: string, msgs: Message[]) => {
-    const valid = msgs.filter(m => m.role !== "error");
-    if (valid.length === 0) return;
-    try {
-      await fetch(`${baseUrl}/api/session`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userName: loggedInUser,
-          sessionId: sid,
-          chatHistory: valid.map(m => ({ role: m.role, text: m.text })),
-        }),
-      });
-    } catch (err) {
-      console.warn("Failed to save chat history:", err);
-    }
+  const valid = msgs.filter(m => m.role !== "error");
+  if (valid.length === 0) return;
+  try {
+    await fetch(`${baseUrl}/api/session`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        userName: loggedInUser,
+        sessionId: sid,
+        chatHistory: valid.map(m => ({
+          role: m.role,
+          text: m.isAudio
+            ? (m.audioUrl || m.text)
+            : m.role === "ai"
+              ? stripHtml(m.text)
+              : m.text,
+          isAudio: m.isAudio ?? false,
+        })),
+      }),
+    });
+  } catch (err) {
+    console.warn("Failed to save chat history:", err);
+  }
   };
+
   const saveChatHistoryRef = useRef(saveChatHistory);
   useEffect(() => { saveChatHistoryRef.current = saveChatHistory; });
 
@@ -1124,32 +1199,51 @@ export default function Home() {
         if (jsonStr.trim() === "[DONE]" || jsonStr.trim() === "__END__") {
           const finalText = accRef.current;
           let processedText = finalText;
+          let isGraphResponse = false;
          
-          // 🔑 FIRST: Extract response content (removes session_id wrapper)
-          const cleanedText = extractResponseContent(finalText);
-         
-          // 🔑 SECOND: TRY RENDERING AS LARGE DATASET TABLE FIRST
-          const largeDatasetHTML = renderLargeDataset(cleanedText);
-         
-          if (largeDatasetHTML) {
-            // Successfully rendered as large dataset table
-            processedText = largeDatasetHTML;
-            console.log("✅ [DONE] Rendered as large dataset table");
+          // 🔑 FIRST: Check if this is a GRAPH response (type="graph")
+          const cleanedForGraph = extractResponseContent(finalText);
+          const graphData = parseGraphData(cleanedForGraph);
+          if (graphData) {
+            console.log("📊 [DONE] Graph response detected — will render as bar chart");
+            processedText = cleanedForGraph // ← Keep raw JSON for parseGraphData() in render
+            isGraphResponse = true;
           } else {
-            // Not a large dataset → try to format as text/table
-            try {
-              processedText = formatOutput(cleanedText);
-              console.log("📝 [DONE] Formatted as text output");
-            } catch (err) {
-              console.log("📝 [DONE] Using raw text", err);
-              processedText = finalText;
+            // Not a graph → continue with normal processing
+            // 🔑 SECOND: Extract response content (removes session_id wrapper)
+            const cleanedText = extractResponseContent(finalText);
+           
+            // 🔑 THIRD: TRY RENDERING AS LARGE DATASET TABLE FIRST
+            const largeDatasetHTML = renderLargeDataset(cleanedText);
+           
+            if (largeDatasetHTML) {
+              // Successfully rendered as large dataset table
+              processedText = largeDatasetHTML;
+              console.log("✅ [DONE] Rendered as large dataset table");
+            } else {
+              // Not a large dataset → try to format as text/table
+              try {
+                processedText = formatOutput(cleanedText);
+                console.log("📝 [DONE] Formatted as text output");
+              } catch (err) {
+                console.log("📝 [DONE] Using raw text", err);
+                processedText = finalText;
+              }
             }
           }
          
           setMessages(prev => {
             const u = [...prev];
             const l = u.length - 1;
-            if (u[l]?.role === "ai") u[l] = { role: "ai", text: processedText, streaming: false };
+            if (u[l]?.role === "ai") {
+              u[l] = {
+                role: "ai",
+                text: processedText,
+                streaming: false,
+                isGraphResponse: isGraphResponse,  // ← Set graph flag
+                chartType: chartType               // ← Store chart type
+              };
+            }
             // Persist to per-session store so switching sessions keeps history
             const activeSid = sessionIdRef.current;
             sessionMessagesRef.current.set(activeSid, u);
@@ -1231,7 +1325,7 @@ export default function Home() {
 
   // Connect when component mounts (after auth is confirmed)
 useEffect(() => {
-  if (!authChecked) return;
+  if (!authChecked || !loggedInUser) return;
 
   connectWS();
 
@@ -1372,14 +1466,26 @@ useEffect(() => {
      
       const text = m.text || "";
      
-      // Check if already formatted (contains HTML tags)
-      if (text.includes('<table') || text.includes('<div') || text.includes('large-dataset')) {
-        console.log("✅ [HISTORY] Message already formatted - skipping");
-        return m;
+      // 🔑 FIRST: Check if this is a GRAPH response
+      const graphData = parseGraphData(text);
+      if (graphData) {
+        console.log("📊 [HISTORY] Graph response detected — keeping as raw JSON for chart");
+        return { ...m, text, isGraphResponse: true };  // ← Mark as graph
       }
      
+      // Check if already formatted (contains HTML tags)
+        if (
+      text.includes('<table') || 
+      text.includes('<div class=') || 
+      text.includes('<div style=') ||
+      text.includes('large-dataset-wrapper')
+    ) {
+      console.log("✅ [HISTORY] Message already HTML formatted (from cache) - skipping");
+      return m;
+    }
+          
       // Extract response content (removes session_id wrapper)
-      const cleanedText = extractResponseContent(text);
+      const cleanedText = decodeEntities(extractResponseContent(text));
      
       // Try to render as large dataset table first
       const largeDatasetHTML = renderLargeDataset(cleanedText);
@@ -1470,9 +1576,25 @@ useEffect(() => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         const history: Message[] = [];
+        //handles is_audio from backend
         for (const entry of (data?.chat_history ?? [])) {
-          if (entry.query) history.push({ role: "user", text: entry.query });
-          if (entry.assistant) history.push({ role: "ai", text: entry.assistant });
+          if (entry.query) {
+            if (entry.is_audio) {
+              // query is base64 audio string from DB
+              history.push({
+                role: "user",
+                text: "Voice message",
+                isAudio: true,
+                audioUrl: entry.query,   // base64 → audio player
+                audioDuration: 0         // duration not stored in DB
+              });
+            } else {
+              history.push({ role: "user", text: entry.query });
+            }
+          }
+          if (entry.assistant) {
+            history.push({ role: "ai", text: entry.assistant });
+          }
         }
         const processed = processLoadedMessages(history);
         sessionMessagesRef.current.set(targetSid, processed);
@@ -1494,27 +1616,31 @@ useEffect(() => {
   };
 
   const handleLogout = async () => {
-    // Save all sessions to backend before logging out
-    const savePromises: Promise<void>[] = [];
-    sessionMessagesRef.current.forEach((msgs, sid) => {
-      const valid = msgs.filter(m => m.role !== "error");
-      if (valid.length > 0) {
-        savePromises.push(saveChatHistoryRef.current(sid, msgs));
-      }
-    });
-    try { await Promise.all(savePromises); } catch { /* best-effort */ }
-
-    if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
-    if (idleTimerRef.current) { clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
+  const savePromises: Promise<void>[] = [];
+  sessionMessagesRef.current.forEach((msgs, sid) => {
+    const valid = msgs.filter(m => m.role !== "error");
+    if (valid.length > 0) {
+      savePromises.push(saveChatHistoryRef.current(sid, msgs));
     }
+  });
 
-    localStorage.removeItem("loggedInUser");
-    router.replace("/login");
-  };
+  try {
+    await Promise.all(savePromises);
+    console.log("✅ All sessions saved before logout");
+  } catch {
+    console.warn("⚠️ Some sessions failed to save on logout");
+  }
 
+  if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
+  if (idleTimerRef.current) { clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
+  if (wsRef.current) {
+    wsRef.current.close();
+    wsRef.current = null;
+  }
+
+  localStorage.removeItem("loggedInUser");
+  router.replace("/login");
+};
   const toggleRecording = async () => {
     if (isRecording) {
       mediaRecorderRef.current?.stop();
@@ -1529,6 +1655,97 @@ useEffect(() => {
       } catch { alert("Please allow microphone access."); }
     }
    };
+
+  // ── Handle Audio Playback ─────────────────────────────────────────────────
+  const handleAudioPlayback = async (idx: number, audioUrl?: string, passedDuration: number = 0) => {
+  if (!audioUrl) return;
+
+  const isCurrentlyPlaying = audioPlayingIndex === idx;
+
+  if (isCurrentlyPlaying) {
+    const audio = audioPlayersRef.current[idx];
+    if (audio) {
+      audio.pause();
+      setAudioPlayingIndex(null);
+    }
+    return;
+  }
+
+  // Pause any other playing audio
+  if (audioPlayingIndex !== null) {
+    const otherAudio = audioPlayersRef.current[audioPlayingIndex];
+    if (otherAudio) otherAudio.pause();
+    setAudioPlayingIndex(null);
+  }
+
+  // Create audio element if not yet created for this index
+  if (!audioPlayersRef.current[idx]) {
+    let playUrl = audioUrl;
+    if (audioUrl.startsWith("data:")) {
+      const res = await fetch(audioUrl);
+      const blob = await res.blob();
+      playUrl = URL.createObjectURL(blob);
+    }
+    const audio = new Audio(playUrl);
+    let animationFrameId: number | null = null;
+
+    // ── FIX BUG 1: load real duration from the audio element itself ──────
+    audio.addEventListener("loadedmetadata", () => {
+      if (isFinite(audio.duration) && audio.duration > 0) {
+        audioDurationMapRef.current[idx] = audio.duration;
+        setAudioDurationMap(prev => ({ ...prev, [idx]: audio.duration }));
+      } else if (passedDuration > 0) {
+        setAudioDurationMap(prev => ({ ...prev, [idx]: passedDuration }));
+      }
+    });
+
+    // ── FIX BUG 3: rAF loop for smooth progress ──────────────────────────
+    const progressLoop = () => {
+      const a = audioPlayersRef.current[idx];
+      if (!a || a.paused) return;
+      const dur = audioDurationMapRef.current[idx] ?? passedDuration;
+      if (dur > 0) {
+        const pct = (a.currentTime / dur) * 100;
+        setAudioProgressMap(prev => ({ ...prev, [idx]: pct }));
+      }
+      animationFrameId = requestAnimationFrame(progressLoop);
+    };
+
+    audio.onplay = () => {
+      setAudioPlayingIndex(idx);
+      if (animationFrameId !== null) cancelAnimationFrame(animationFrameId);
+      animationFrameId = requestAnimationFrame(progressLoop);
+    };
+
+    audio.onpause = () => {
+      if (animationFrameId !== null) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+      }
+      setAudioPlayingIndex(null);
+    };
+
+    audio.onended = () => {
+      if (animationFrameId !== null) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+      }
+      setAudioPlayingIndex(null);
+      setAudioProgressMap(prev => ({ ...prev, [idx]: 0 }));
+    };
+
+    audioPlayersRef.current[idx] = audio;
+  }
+
+  // Trigger load so loadedmetadata fires (needed for old-session base64 URLs)
+  const audioElement = audioPlayersRef.current[idx];
+  if (audioElement) {
+    audioElement.play().catch(err => {
+      console.error("❌ Audio play failed:", err.message);
+      setAudioPlayingIndex(null);
+    });
+  }
+};
 
   // ── Send message over the persistent WebSocket ────────────────────────────
   const sendMessage = () => {
@@ -1562,7 +1779,10 @@ useEffect(() => {
 
   setShowFeaturePlaceholder(false);
   setMessages(prev => {
-    const updated = [...prev, { role: "user" as const, text: userText }];
+    const updated = [...prev, {
+      role: "user" as const,
+      text: userText
+    }];
     // Save to per-session store
     sessionMessagesRef.current.set(sessionId, updated);
     return updated;
@@ -1572,9 +1792,15 @@ useEffect(() => {
   accRef.current = "";
 
   ws.send(JSON.stringify({
+    type: "message",
+    messageType: "text",
+    isAudio: false,
+    isText: true,
+    isGraph: isGraphMode,
     query: userText,
     userName: loggedInUser,
-    sessionId
+    sessionId,
+    timestamp: Date.now()
   }));
 };
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -1604,6 +1830,7 @@ useEffect(() => {
       <aside className="sidebar">
         {/* Sidebar Header with Logo */}
         <div className="sidebar-header">
+          
           <div style={{ display: "flex", alignItems: "center" }}>
             <div
               className="brand-box"
@@ -1721,6 +1948,7 @@ useEffect(() => {
 
           {/* Chat History – only visible when Chat feature is active */}
           {activeFeature === 'chat' && (
+            
             <div className="chat-history-box" style={{ marginTop: 24, display: "flex", flexDirection: "column", minHeight: 0 }}>
               <div className="chat-history-scroll">
                 {chatSessions.map(s => (
@@ -1822,6 +2050,32 @@ useEffect(() => {
                 const isUser      = msg.role === "user";
                 const isError     = msg.role === "error";
                 const isStreaming = msg.streaming === true;
+                const isAudio     = msg.isAudio === true;
+                const isGraphMsg  = msg.isGraphResponse === true;  // ← Use explicit flag
+               
+                // ✅ Parse graph data ONLY if message is marked as graph response
+                const graphData = isGraphMsg
+                  ? parseGraphData(msg.text)
+                  : null;
+
+                // DEBUG: Log rendering decision
+                if (isGraphMsg) {
+                  console.log("✅ [RENDER] Marked as graph message → will render BarChartRenderer", {
+                    parsed: graphData !== null,
+                    type: graphData?.type,
+                  });
+                } else if (!isUser && !isError && !isStreaming) {
+                  console.log("📨 [RENDER] Regular message → will render as HTML", {
+                    textLength: msg.text?.length || 0,
+                  });
+                }
+
+                // Format duration as MM:SS
+                const formatDuration = (seconds: number): string => {
+                  const mins = Math.floor(seconds / 60);
+                  const secs = seconds % 60;
+                  return `${mins}:${secs.toString().padStart(2, "0")}`;
+                };
 
                 return (
                   <div key={idx} className={`message-row ${msg.role}`}>
@@ -1831,7 +2085,52 @@ useEffect(() => {
 
                     <div className={`message-bubble ${msg.role}`}>
 
-                      {isUser || isError ? (
+                      {isAudio ? (
+                    /* ── Audio Message: Show player UI ── */
+                    (() => {
+                      // BUG 1 FIX: prefer real loaded duration, fall back to stored, then 0
+                      const realDur = audioDurationMap[idx] ?? msg.audioDuration ?? 0;
+                      const progress = audioProgressMap[idx] ?? 0;
+                      // currentTime = progress% of realDur
+                      const currentSec = realDur > 0 ? (progress / 100) * realDur : 0;
+
+                      const fmtSec = (s: number) => {
+                        const m = Math.floor(s / 60);
+                        const sec = Math.floor(s % 60);
+                        return `${m}:${sec.toString().padStart(2, "0")}`;
+                      };
+
+                      return (
+                        <div className="voice-message-container">
+                          <button
+                            className="voice-message-play-btn"
+                            onClick={() => handleAudioPlayback(idx, msg.audioUrl, msg.audioDuration || 0)}
+                            disabled={!isUser}
+                          >
+                            {audioPlayingIndex === idx ? <IconPlayerPause size={20} /> : <IconPlayerPlay size={20} />}
+                          </button>
+                          <div style={{ display: "flex", flexDirection: "column", flex: 1, gap: "6px" }}>
+                            <div className="voice-message-progress-wrapper">
+                              <div
+                                className="voice-message-progress-bar"
+                                style={{
+                                  width: `${progress}%`,
+                                  transition: "width 0.1s linear",   // smooth CSS transition
+                                }}
+                              />
+                            </div>
+                            {/* BUG 1 FIX: show real duration; if playing show currentTime / total */}
+                            <div className="voice-message-duration">
+                              {audioPlayingIndex === idx
+                                ? `${fmtSec(currentSec)} / ${fmtSec(realDur)}`
+                                : fmtSec(realDur)
+                              }
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()
+                      ) : isUser || isError ? (
                         /* ── User / Error: plain text ── */
                         <>{msg.text}</>
 
@@ -1841,6 +2140,31 @@ useEffect(() => {
                           {msg.text}
                           <span className="stream-cursor"/>
                         </div>
+
+                      ) : isGraphMsg && graphData ? (
+                        /* ── Graph: Render chart with per-message type switcher ── */
+                        (() => {
+                          const msgChartType = msg.chartType || 'vertical-bar';
+
+                          const handleChartTypeChange = (newType: ChartType) => {
+                            setChartType(newType);
+                            setMessages(prev => {
+                              const updated = [...prev];
+                              updated[idx] = { ...updated[idx], chartType: newType };
+                              return updated;
+                            });
+                          };
+
+                          if (msgChartType === 'horizontal-bar') {
+                            return <HorizontalBarChartRenderer key={`hbar-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
+                          } else if (msgChartType === 'pie') {
+                            return <PieChartRenderer key={`pie-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
+                          } else if (msgChartType === 'line') {
+                            return <LineChartRenderer key={`line-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
+                          } else {
+                            return <BarChartRenderer key={`bar-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
+                          }
+                        })()
 
                       ) : (
                         /* ── Complete: already formatted at [DONE] time ── */
@@ -1875,24 +2199,70 @@ useEffect(() => {
 
         {/* Input footer */}
         <div className="input-footer">
-          <div className="input-wrapper">
-            <textarea
-              ref={inputRef}
-              className="main-input"
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              disabled={isLoading || wsConnectionState !== 'connected'}
-              placeholder={wsConnectionState === 'connected' ? "Ask Anything..." : "Waiting for connection…"}
-              rows={1}
+          {voiceRecorder.isRecording && (
+            <div className={`voice-recording-overlay${voiceRecorder.closingRecording ? ' closing' : ''}`}>
+              <RecordingInterface
+                recordingTime={voiceRecorder.recordingTime}
+                onCancel={voiceRecorder.cancelRecording}
+                formatTime={voiceRecorder.formatTime}
+              />
+            </div>
+          )}
+         
+          {voiceRecorder.recordedAudioBlob ? (
+            <VoicePreviewBar
+              isPlaying={voiceRecorder.isPlaying}
+              playbackTime={voiceRecorder.playbackTime}
+              totalDuration={voiceRecorder.totalDuration}
+              displayTimeText={voiceRecorder.displayTimeText}
+              onTogglePlayback={voiceRecorder.togglePlayback}
+              onDelete={voiceRecorder.deleteRecording}
+              onSend={voiceRecorder.sendVoiceMessage}
+              isLoading={isLoading}
+              wsConnectionState={wsConnectionState}
             />
-            <button className="send-btn" onClick={sendMessage} disabled={isLoading || wsConnectionState !== 'connected' || !input.trim()}>
-              <IconSend/>
-            </button>
-          </div>
-          {loginFooterLogoPath && (
-            <div style={{ display: "flex", justifyContent: "center", marginTop: 8 }}>
-              <img src={loginFooterLogoPath} alt="Footer logo" style={{ maxHeight: 40, objectFit: "contain" }} />
+          ) : (
+            <div className="input-wrapper">
+              <textarea
+                ref={inputRef}
+                className="main-input"
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                disabled={isLoading || wsConnectionState !== 'connected'}
+                placeholder={wsConnectionState === 'connected' ? "Ask Anything..." : "Waiting for connection…"}
+                rows={1}
+              />
+              <VoiceMicButton
+                forwardedRef={voiceRecorder.micButtonRef}
+                onClick={voiceRecorder.toggleRecording}
+                disabled={isLoading || wsConnectionState !== 'connected' || voiceRecorder.recordedAudioBlob !== null}
+              />
+              <button
+                onClick={() => setIsGraphMode(p => !p)}
+                title={isGraphMode ? "Graph mode ON — click to turn off" : "Click for graph output"}
+                style={{
+                  background: isGraphMode
+                    ? "linear-gradient(135deg, #d4af37, #f5c249)"
+                    : "transparent",
+                  border: isGraphMode
+                    ? "1px solid #d4af37"
+                    : "1px solid rgba(255,255,255,0.15)",
+                  borderRadius: 8,
+                  padding: "6px 8px",
+                  cursor: "pointer",
+                  color: isGraphMode ? "#000" : "#9CA3AF",
+                  transition: "all 0.2s ease",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <IconChartBar size={18} stroke={1.5} />
+              </button>
+              <button className="send-btn" onClick={sendMessage} disabled={isLoading || wsConnectionState !== 'connected' || !input.trim()}>
+                <IconArrowUp size={16} color="white" stroke={2}/>
+              </button>
             </div>
           )}
           <p className="footer-disclaimer">NanoSoft Ask AI can make mistakes. Verify important legal information.</p>

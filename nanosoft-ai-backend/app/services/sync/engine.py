@@ -5,16 +5,14 @@ from app.config import settings
 
 from .config import log, ENDPOINTS
 from .db_helpers import get_clients, update_sync_timestamp
-from .fetcher import fetch_single_page, fetch_login
+from .fetcher import fetch_single_page
 from .upsert_assets import upsert_assets
 from .upsert_ppm import upsert_ppm
 from .upsert_bdm import upsert_bdm
 
 
 # ─────────────────────────────────────────────────────────────
-
 # Deduplicates a list of records by a given key field
-
 # ─────────────────────────────────────────────────────────────
 def _dedup(records: list, key: str) -> list:
     seen = {}
@@ -25,11 +23,11 @@ def _dedup(records: list, key: str) -> list:
 
 # ─────────────────────────────────────────────────────────────
 # CORE SYNC LOGIC
-# 1. Login per client → get fresh jwt_token + api_user_id
-# 2. Use api jwt + api_user_id for fetching data from API
-# 3. Use db user_id + user_name for upserting into tables
+# 1. Read jwt_token + user_id directly from DB (no login call)
+# 2. Skip user if jwt_token is NULL or empty in DB
+# 3. Use jwt + user_id for fetching data from API
+# 4. Use db user_id + user_name for upserting into tables
 # Collects ALL pages first → global dedup → single upsert
-# fetched count = true unique records only (no duplicates)
 # ─────────────────────────────────────────────────────────────
 def run_sync() -> dict:
     sync_start = datetime.now(timezone.utc)
@@ -49,9 +47,18 @@ def run_sync() -> dict:
     clients = get_clients(cursor)
     log.info(f"📋 Found {len(clients)} client(s) in client_sync_config")
 
-    for (client_name, base_url, user_id, user_name, last_synced_at) in clients:
+    for (client_name, base_url, user_id, user_name, jwt_token, last_synced_at) in clients:
         log.info(f"\n{'─'*55}")
         log.info(f"👤 Client: {client_name} | user_id={user_id} | user_name={user_name} | {base_url}")
+
+        # ── SKIP user if jwt_token is NULL or empty in DB ─────
+        if not jwt_token or not str(jwt_token).strip():
+            log.warning(f"  ⚠️  Skipping [{client_name}] — jwt_token is NULL or empty in DB.")
+            summary["clients"].append({
+                "client":  client_name,
+                "status":  "skipped_no_jwt",
+            })
+            continue
 
         client_summary = {
             "client":    client_name,
@@ -61,16 +68,6 @@ def run_sync() -> dict:
             "endpoints": {},
             "synced_at": None,
         }
-
-        # ── STEP 1: Login to get fresh token + api_user_id ───────
-        api_jwt, api_user_id = fetch_login(base_url)
-        if not api_jwt or not api_user_id:
-            log.error(f"  ❌ Login failed for [{client_name}] — skipping client.")
-            client_summary["status"] = "login_failed"
-            summary["clients"].append(client_summary)
-            continue
-
-        log.info(f"  🔑 Login OK — api_user_id={api_user_id} (db user_id={user_id} | db user_name={user_name})")
 
         if last_synced_at is None:
             log.info("   ℹ️  First-ever sync — fetching ALL records from API.")
@@ -83,14 +80,14 @@ def run_sync() -> dict:
             log.info(f"\n  🔄 Endpoint: {endpoint}")
 
             page_index  = 1
-            all_records = []    # ← collect ALL pages here
+            all_records = []
             endpoint_ok = True
 
-            # ── STEP 2: Collect ALL pages first ──────────────────
+            # ── Collect ALL pages first ───────────────────────
             while True:
                 try:
                     records = fetch_single_page(
-                        base_url, api_jwt, api_user_id,
+                        base_url, jwt_token, user_id,
                         endpoint, last_synced_at, page_index
                     )
                 except Exception as e:
@@ -109,7 +106,7 @@ def run_sync() -> dict:
                 all_records.extend(records)
                 page_index += 1
 
-            # ── nothing fetched → skip upsert ─────────────────────
+            # ── nothing fetched → skip upsert ─────────────────
             if not all_records:
                 client_summary["endpoints"][endpoint] = {
                     "records_fetched": 0,
@@ -120,7 +117,7 @@ def run_sync() -> dict:
                 }
                 continue
 
-            # ── STEP 3: Global dedup across ALL pages ─────────────
+            # ── Global dedup across ALL pages ──────────────────
             raw_count = len(all_records)
 
             if endpoint == "/getAssets":
@@ -136,7 +133,7 @@ def run_sync() -> dict:
             if dupes_removed > 0:
                 log.info(f"  [{endpoint}] ⚠️  Removed {dupes_removed} duplicate(s) from API — {dedup_count} unique records remain.")
 
-            # ── STEP 4: Single upsert with clean unique records ───
+            # ── Single upsert with clean unique records ─────────
             ins = upd = err = 0
             try:
                 if endpoint == "/getAssets":
@@ -160,12 +157,12 @@ def run_sync() -> dict:
                 endpoint_ok = False
                 err = dedup_count
 
-            # ── free memory ───────────────────────────────────────
+            # ── free memory ────────────────────────────────────
             del all_records
 
-            # ── endpoint summary ──────────────────────────────────
+            # ── endpoint summary ───────────────────────────────
             client_summary["endpoints"][endpoint] = {
-                "records_fetched": dedup_count,   # ← true unique count
+                "records_fetched": dedup_count,
                 "inserted":        ins,
                 "updated":         upd,
                 "errors":          err,
@@ -173,7 +170,7 @@ def run_sync() -> dict:
             }
             log.info(f"  [{endpoint}] ✅ Total: fetched={dedup_count} | inserted={ins} | updated={upd} | errors={err}")
 
-        # ── commit all endpoints for this client ──────────────────
+        # ── commit all endpoints for this client ───────────────
         if synced_any:
             try:
                 update_sync_timestamp(cursor, client_name)

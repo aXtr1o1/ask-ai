@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Optional
 from pydantic import BaseModel, Field
-
+from typing import Optional, List
 
 # ==========================================
 # ✅ REQUEST MODELS
@@ -38,6 +38,9 @@ class AssetRequest(BaseModel):
     date_to: Optional[str] = None
     limit: Optional[int] = None
     offset: int = Field(default=0, ge=0)
+    is_aggregate: Optional[bool] = Field(default=False)
+    group_by_columns: Optional[List[str]] = Field(default=None)
+    aggregate_function: Optional[str] = Field(default=None)
 
 
 class PPMRequest(BaseModel):
@@ -67,6 +70,9 @@ class PPMRequest(BaseModel):
     sla_max: Optional[int] = None
     limit: Optional[int] = None
     offset: int = Field(default=0, ge=0)
+    is_aggregate: Optional[bool] = Field(default=False)
+    group_by_columns: Optional[List[str]] = Field(default=None)
+    aggregate_function: Optional[str] = Field(default=None)
 
 
 class BDMRequest(BaseModel):
@@ -99,3 +105,6 @@ class BDMRequest(BaseModel):
     completed_to: Optional[str] = None
     limit: Optional[int] = None
     offset: int = Field(default=0, ge=0)
+    is_aggregate: Optional[bool] = Field(default=False)
+    group_by_columns: Optional[List[str]] = Field(default=None)
+    aggregate_function: Optional[str] = Field(default=None)

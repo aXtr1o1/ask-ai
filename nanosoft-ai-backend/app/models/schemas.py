@@ -35,11 +35,17 @@ class AssetsInput(BaseModel):
     is_scraped: Optional[bool] = Field(None, description="Boolean flag for decommissioned assets. Set true if user mentions 'Scraped' or 'Disposed'.")
     enable_ppm: Optional[bool] = Field(None, description="Filter for scheduled maintenance assets. Set true if user mentions 'PPM Enabled' or 'Planned'.")
     enable_bdm: Optional[bool] = Field(None, description="Filter for breakdown-ready assets. Set true if user mentions 'BDM Enabled' or 'Reactive'.")
-    keyword: Optional[str] = Field(None, description="Mandatory fallback for any terms not labeled as a field. Use for general searches.")
+    keyword: Optional[str] = Field(None, description="Mandatory fallback ONLY for specific technical terms (e.g., 'leak', 'noise', 'flickering', 'broken', 'vibration'). ""IMPORTANT: Do not use vague conversational words, filler words, or generic synonyms for 'problem' here. ""If the user is vague, omit this field entirely and ask for clarification.")
     date_from: Optional[str] = Field(None, description="Installation start range. Use YYYY-MM-DD. Map if user mentions 'From Date' or 'Installed'.")
     date_to: Optional[str] = Field(None, description="Installation end range. Use YYYY-MM-DD. Map if user mentions 'To Date' or 'Installed'.")
     limit: Optional[int] = Field(default=None, description="Max number of results. Only set if user asks for a specific number (e.g. 'show 10'). For count/total queries (how many, total), MUST omit — do not set.")
     offset: Optional[int] = Field(default=None, description="Pagination offset. Omit unless requested.")
+  
+    is_aggregate: Optional[bool] = Field(default=False, description="Set True only when user asks grouping or summary questions like 'how many per division', 'breakdown by building'. For normal filter/list queries leave as False.")
+    group_by_columns: Optional[List[str]] = Field(default=None, description="List of columns to group by. Only fill when is_aggregate=True. Example: ['DivisionName'] or ['BuildingName', 'FloorName']. Valid columns: DivisionName, DisciplineName, BuildingName, FloorName, LocalityName, StatusName, ConditionName, PriorityName, AssetTypeName, MakeName, ModelName, SpotName, TradeGroupName, ServiceAreaName, YearOfManuf.")
+    aggregate_function: Optional[str] = Field(default=None, description="Aggregation function to apply. Only fill when is_aggregate=True. Use COUNT for 'how many', SUM for 'total of', AVG for 'average of'.")
+    
+
 
 
 class PPMInput(BaseModel):
@@ -60,7 +66,7 @@ class PPMInput(BaseModel):
     tech: Optional[str] = Field(None, description="Maintenance worker name. Map here if user mentions 'Technician' or 'Assigned Staff'.")
     equipment: Optional[str] = Field(None, description="Equipment name. Map if user mentions specific equipment.")
     spot_name: Optional[str] = Field(None, description="Filter by spot name. Map if user mentions 'Spot', 'Spot Name', or 'Location Spot'.")
-    keyword: Optional[str] = Field(None, description="Mandatory fallback for any terms not labeled as a field. Use for general searches.")
+    keyword: Optional[str] = Field(None, description="Mandatory fallback ONLY for specific technical terms (e.g., 'leak', 'noise', 'flickering', 'broken', 'vibration'). ""IMPORTANT: Do not use vague conversational words, filler words, or generic synonyms for 'problem' here. ""If the user is vague, omit this field entirely and ask for clarification.")
     date_from: Optional[str] = Field(None, description="Planned start range. Use YYYY-MM-DD. Map if user mentions 'Start Date' or 'Planned'.")
     date_to: Optional[str] = Field(None, description="Planned end range. Use YYYY-MM-DD. Map if user mentions 'End Date' or 'Planned'.")
     comp_from: Optional[str] = Field(None, description="Completion start range. Use YYYY-MM-DD. Map if user mentions 'Completed From' or 'Finished'.")
@@ -69,6 +75,12 @@ class PPMInput(BaseModel):
     sla_max: Optional[int] = Field(None, description="Maximum resolution minutes. Map here if user mentions 'SLA Max' or 'Duration'.")
     limit: Optional[int] = Field(default=None, description="Max number of results. Only set if user asks for a specific number (e.g. 'show 10'). For count/total queries (how many, total), MUST omit — do not set.")
     offset: Optional[int] = Field(default=None, description="Pagination offset. Omit unless requested.")
+
+    is_aggregate: Optional[bool] = Field(default=False, description="Set True only when user asks grouping or summary questions like 'how many PPM per division', 'breakdown by frequency'. For normal filter/list queries leave as False.")
+    group_by_columns: Optional[List[str]] = Field(default=None, description="List of columns to group by. Only fill when is_aggregate=True. Valid columns: DivisionName, DisciplineName, BuildingName, FloorName, LocalityName, FrequencyName, PPMStatus, PPMStageName, ContractName, SpotName.")
+    aggregate_function: Optional[str] = Field(default=None, description="Aggregation function to apply. Only fill when is_aggregate=True. Use COUNT for 'how many', SUM for 'total of', AVG for 'average of'.")
+    
+
 
 
 class BDMInput(BaseModel):
@@ -94,13 +106,18 @@ class BDMInput(BaseModel):
     execution_tech: Optional[str] = Field(None, description="Repair technician. Map here if user mentions 'Execution Technician' or 'Repairer'.")
     complainer: Optional[str] = Field(None, description="Name of the person who raised the complaint. Map here if user mentions 'Complainer'. ")
     spot_name: Optional[str] = Field(None, description="Filter by spot name. Map if user mentions 'Spot', 'Spot Name', or 'Location Spot'.")
-    keyword: Optional[str] = Field(None, description="Mandatory fallback for any terms not labeled as a field. Use for general searches.")
+    keyword: Optional[str] = Field(None, description="Mandatory fallback ONLY for specific technical terms (e.g., 'leak', 'noise', 'flickering', 'broken', 'vibration'). ""IMPORTANT: Do not use vague conversational words, filler words, or generic synonyms for 'problem' here. ""If the user is vague, omit this field entirely and ask for clarification.")
     date_from: Optional[str] = Field(None, description="Reported start range. Use YYYY-MM-DD. Map if user mentions 'Date From' or 'Raised'.")
     date_to: Optional[str] = Field(None, description="Reported end range. Use YYYY-MM-DD. Map if user mentions 'Date To' or 'Raised'.")
     completed_from: Optional[str] = Field(None, description="Resolution start range. Use YYYY-MM-DD. Map if user mentions 'Resolved From' or 'Closed'.")
     completed_to: Optional[str] = Field(None, description="Resolution end range. Use YYYY-MM-DD. Map if user mentions 'Resolved To' or 'Closed'.")
     limit: Optional[int] = Field(default=None, description="Max number of results. Only set if user asks for a specific number (e.g. 'show 10'). For count/total queries (how many, total), MUST omit — do not set.")
     offset: Optional[int] = Field(default=None, description="Pagination offset. Omit unless requested.")
+    
+    is_aggregate: Optional[bool] = Field(default=False, description="Set True only when user asks grouping or summary questions like 'how many complaints per division', 'breakdown by priority'. For normal filter/list queries leave as False.")
+    group_by_columns: Optional[List[str]] = Field(default=None, description="List of columns to group by. Only fill when is_aggregate=True. Valid columns: DivisionName, DisciplineName, BuildingName, FloorName, LocalityName, WoStatus, PriorityName, StageName, ComplaintTypeName, ComplaintModeName, SpotName, ContractName.")
+    aggregate_function: Optional[str] = Field(default=None, description="Aggregation function to apply. Only fill when is_aggregate=True. Use COUNT for 'how many', SUM for 'total of', AVG for 'average of'.")
+    
 
 class ChatRequest(BaseModel):
     """Request schema for chat endpoint"""
@@ -113,6 +130,7 @@ class FrontendChatMessage(BaseModel):
     """Shape of a single chat message sent from frontend when saving history."""
     role: str
     text: str
+    isAudio: bool = False
 
 
 class SessionRequest(BaseModel):
