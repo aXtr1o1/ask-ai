@@ -67,6 +67,13 @@ MAX_HISTORY =  settings.MAX_HISTORY
 memory_store = {}
 MAX_AUDIO_BYTES = 500 * 1024  # 500 KB
 
+YES_WORDS = {"yes", "yeah", "yep", "yup", "correct", "right",
+             "ok", "okay", "sure", "confirmed", "proceed", "go ahead",
+             "that's right", "thats right", "yes that's correct"}
+
+NO_WORDS  = {"no", "nope", "nah", "wrong", "incorrect", "not right",
+             "that's wrong", "thats wrong", "not correct"}
+
 #Track sessions already saved by frontend HTTP POST
 # So WebSocketDisconnect does NOT save again (prevents double save)
 frontend_saved_sessions: set = set()
@@ -77,64 +84,32 @@ def print_memory(session_id: str):
     session_data = memory_store.get(session_id, {})
     history      = session_data.get("history", [])
     lc_memory    = session_data.get("lc_memory", [])
-
+ 
     print(f"\n🧠 SESSION: {session_id} | user: {session_data.get('user_name', 'N/A')}")
-
+ 
     print(f"\n💾 HISTORY ({len(history)} entries)")
     for i, item in enumerate(history, 1):
-        print(f"  [{i}] Query: {item['query']}")
-        print(f"       Assitant: {item['assistant'][:100]}{'...' if len(item['assistant']) > 100 else ''}")
-
+        # ── If audio query → show [AUDIO] instead of base64 encoded string
+        raw_query = item.get("query", "")
+        is_audio  = item.get("is_audio", False)
+        if is_audio or (isinstance(raw_query, str) and raw_query.startswith("data:audio")):
+            display_query = "[AUDIO 🎙️]"
+        else:
+            display_query = raw_query[:100] + ("..." if len(raw_query) > 100 else "")
+ 
+        print(f"  [{i}] Query:     {display_query}")
+        print(f"       Assistant: {item['assistant'][:100]}{'...' if len(item['assistant']) > 100 else ''}")
+ 
     print(f"\n🤖 LC_MEMORY ({len(lc_memory) // 2} pairs | last {settings.MAX_HISTORY} sent to model)")
     pairs = list(zip(lc_memory[0::2], lc_memory[1::2]))
     for i, (h, a) in enumerate(pairs, 1):
-        print(f"  [{i}] Query: {(h.content or '')[:100]}")
-        print(f"       Assitant: {(a.content or '')[:100]}")
-
+        h_content = (h.content or "")
+        # ── lc_memory stores the transcribed text not base64
+        # so no audio check needed here — just truncate normally
+        print(f"  [{i}] Query:     {h_content[:100]}{'...' if len(h_content) > 100 else ''}")
+        print(f"       Assistant: {(a.content or '')[:100]}")
+ 
     print()
-
-# @chatbot_app.post("/chat")
-# async def chat_endpoint(request: ChatRequest):
-#     user_query = request.query
-#     user_id = request.userId
-#     session_id = request.sessionId
-#     logger.info(f"Request | user_id={user_id} | session_id={session_id} | query={user_query}")
-
-#     if user_id not in VALID_USER_IDS:
-#         logger.warning(f"🚫 Invalid user_id attempted: '{user_id}'")
-#         raise HTTPException(status_code=403, detail=f"Invalid user ID '{user_id}'. Access denied.")
-
-#     logger.info(f"✅ Valid user: {user_id} | Session: {session_id}")
-
-#     if session_id not in memory_store:
-#         memory_store[session_id] = {"lc_memory": [], "history": [], "user_id": user_id}
-#         logger.info(f"🆕 Memory initialized for session_id: {session_id}")
-
-    # lc_memory = list(memory_store[session_id]["lc_memory"])
-    # messages = [get_system_prompt(user_id)] + lc_memory
-    # messages.append(HumanMessage(content=user_query))
-
-    # try:
-    #     final_response_text, _ = await langchain_service.process_query(messages, user_id=user_id,session_id=session_id)
-    #     logger.info(f"✅ Response generated for session_id: {session_id}")
-    # except Exception as e:
-    #     logger.error(f"❌ LangChain error: {e}", exc_info=True)
-    #     final_response_text = "Sorry, something went wrong while processing your request."
-
-    # memory_store[session_id]["lc_memory"].append(HumanMessage(content=user_query))
-    # memory_store[session_id]["lc_memory"].append(AIMessage(content=final_response_text))
-    # memory_store[session_id]["history"].append({"query": user_query, "assistant": final_response_text})
-
-    # if len(memory_store[session_id]["history"]) > MAX_HISTORY:
-    #     memory_store[session_id]["history"] = memory_store[session_id]["history"][-MAX_HISTORY:]
-    #     memory_store[session_id]["lc_memory"] = memory_store[session_id]["lc_memory"][-(MAX_HISTORY * 2):]
-
-    # print_memory(session_id)
-
-    # return {"user_id": user_id, "session_id": session_id, "response": final_response_text}
-
-
-# =====================================================
 
 @api_router.websocket("/chat")
 async def ws_chat_endpoint(websocket: WebSocket):
@@ -191,39 +166,153 @@ async def ws_chat_endpoint(websocket: WebSocket):
             current_session_id = session_id
             audio_base64   = None   # will hold base64 string if audio
             query_to_store = None
+            # ==================================================================
+            # ── CONFIRMATION REPLY CHECK
+            # ── If pending_transcription exists → user is replying yes/no
+            # ==================================================================
+            pending_transcription = memory_store.get(session_id, {}).get("pending_transcription")
+
+            if pending_transcription:
+                reply_text = data.get("query", "").strip().lower()
+
+                # If reply is audio → transcribe it first
+                if is_audio:
+                    try:
+                        audio_bytes = await asyncio.wait_for(
+                            websocket.receive_bytes(),
+                            timeout=settings.WS_SESSION_TIMEOUT
+                        )
+                        transcribed = await convert_audio_to_text(audio_bytes)
+                        reply_text  = transcribed["transcription"].strip().lower()
+                        logger.info(f"🎙️ Audio confirmation reply: '{reply_text}'")
+                    except Exception as e:
+                        logger.error(f"❌ Confirmation audio failed: {e}")
+                        reply_text = ""
+
+                logger.info(f"🔁 Confirmation reply: '{reply_text}' | pending='{pending_transcription}'")
+
+                # Clear pending immediately
+                memory_store[session_id]["pending_transcription"] = None
+
+                if reply_text in YES_WORDS:
+                    # User confirmed → run original transcription
+                    user_query     = pending_transcription
+                    query_to_store =  reply_text
+                    logger.info(f"✅ User confirmed → running: '{user_query}'")
+
+                elif reply_text in NO_WORDS:
+                    # User said no → ask to rephrase
+                    msg = "No problem! Could you please tell me what you meant? I'll try again."
+                    await websocket.send_text(json.dumps({
+                        "session_id": session_id,
+                        "response":   msg
+                    }))
+                    await websocket.send_text("[DONE]")
+                    memory_store[session_id]["history"].append({
+                        "query":     pending_transcription,
+                        "assistant": msg,
+                        "context":   msg,
+                        "is_audio":  is_audio
+                    })
+                    logger.info("🔄 User said no — asked to rephrase")
+                    continue
+
+                else:
+                    # User gave corrected query directly
+                    user_query     = data.get("query", "").strip() if not is_audio else reply_text
+                    query_to_store = user_query
+                    logger.info(f"🔄 User gave correction → running: '{user_query}'")
+
+            # ==================================================================
             #----------------- audio integration by mega-----------------
             
             # ── NEW: AUDIO PATH — isAudio = true then convert it into the text and send to  process query function
-            if is_audio:
-                logger.info(f" Audio message received | user={user_name} | session={session_id}")
+            elif is_audio:
+                logger.info(f"🎙️ Audio message | user={user_name} | session={session_id}")
 
                 try:
-                    # ── Receive raw binary OGG audio bytes ───────────────────
+                    # ── Receive audio bytes ──────────────────────────────────
                     audio_bytes = await asyncio.wait_for(
                         websocket.receive_bytes(),
                         timeout=settings.WS_SESSION_TIMEOUT
                     )
                     logger.info(f"📦 Audio bytes received: {len(audio_bytes)} bytes")
-                    # ── NEW: Audio size guard — reject if > 500 KB
+
+                    # ── Size guard ───────────────────────────────────────────
                     if len(audio_bytes) > MAX_AUDIO_BYTES:
-                        logger.warning(f"⚠️ Audio too large: {len(audio_bytes)} bytes > {MAX_AUDIO_BYTES} bytes")
                         await websocket.send_text(json.dumps({
                             "error": "Voice query is too long. Please keep it brief and try again."
                         }))
                         continue
-                    
+
                     audio_base64   = "data:audio/ogg;base64," + base64.b64encode(audio_bytes).decode("utf-8")
-                    query_to_store = audio_base64   # ── store audio base64 as query in DB
-                    logger.info(f"🔒 Audio encoded to base64 | size={len(audio_base64)} chars")    
+                    query_to_store = audio_base64
+
+                    # ── STEP 1: Transcribe + Validate in ONE call ────────────
+                    # Returns:
+                    # {
+                    #   "transcription":          str,
+                    #   "uncertain_terms":        list,
+                    #   "needs_clarification":    bool,
+                    #   "clarification_question": str
+                    # }
                     try:
-                        user_query = await convert_audio_to_text(audio_bytes)
+                        transcription_result = await convert_audio_to_text(audio_bytes)
                     except Exception as e:
+                        logger.error(f"❌ Transcription failed: {e}")
                         await websocket.send_text(json.dumps({
-                            "response": " Sorry, voice input is temporarily unavailable at this moment.Please type your message instead."
+                            "response": "Sorry, voice input is temporarily unavailable. Please type your message instead."
                         }))
-                        await websocket.send_text("[DONE]")  
+                        await websocket.send_text("[DONE]")
                         continue
-                    logger.info(f"📝 Audio transcribed: {user_query}")
+
+                    user_query             = transcription_result["transcription"]
+                    uncertain_terms        = transcription_result["uncertain_terms"]
+                    needs_clarification    = transcription_result["needs_clarification"]
+                    clarification_question = transcription_result["clarification_question"]
+
+                    logger.info(f"📝 Transcribed: '{user_query}' | uncertain={uncertain_terms} | needs_clarification={needs_clarification}")
+
+                    # ── STEP 2: Check if clarification needed ────────────────
+                    if needs_clarification:
+                        logger.info(f"🔍 Clarification needed: '{clarification_question}'")
+
+                        # ── Send clarification question to frontend ───────────
+                        await websocket.send_text(json.dumps({
+                            "session_id":          session_id,
+                            "response":            clarification_question,
+                            "needs_clarification": True
+                        }))
+                        await websocket.send_text("[DONE]")
+
+                        # ── Store in history ─────────────────────────────────
+                        if session_id not in memory_store:
+                            memory_store[session_id] = {
+                                "lc_memory": [],
+                                "history":   [],
+                                "user_name": user_name
+                            }
+
+                        # ── Save original transcription for yes/no handling ───
+                        memory_store[session_id]["pending_transcription"] = user_query
+                        logger.info(f"💾 Saved pending_transcription: '{user_query}'")
+
+                        memory_store[session_id]["history"].append({
+                            "query":                 query_to_store,
+                            "assistant":             clarification_question,
+                            "context":               f"Confirmation asked for: {user_query}",
+                            "is_audio":              True,
+                            "pending_transcription": user_query
+                        })
+
+                        # ── Stop here — user reply comes as next message ──────
+                        continue
+
+                    else:
+                        logger.info(f"✅ Audio validated — PROCEED | query='{user_query}'")
+
+                    # ── user_query is clean and ready ─────────────────────────
+                    # Fall through to process_query below
 
                 except asyncio.TimeoutError:
                     logger.warning("⏰ Timed out waiting for audio bytes")
@@ -235,10 +324,12 @@ async def ws_chat_endpoint(websocket: WebSocket):
                     await websocket.send_text(json.dumps({"error": "Audio processing failed. Please try again."}))
                     continue
 
+
+                
             # ==================================================================
             # ── NORMAL TEXT PATH — isAudio = false
             # ==================================================================
-            else:
+            elif not pending_transcription:
                 user_query = data.get("query", "").strip()
                 query_to_store = user_query
                 logger.info(f"💬 Text message | user={user_name} | session={session_id} | query={user_query}")
@@ -254,7 +345,8 @@ async def ws_chat_endpoint(websocket: WebSocket):
                 memory_store[session_id] = {
                     "lc_memory": [],
                     "history":   [],
-                    "user_name": user_name
+                    "user_name": user_name,
+                    "pending_transcription": None
                 }
                 logger.info(f"🆕 Memory initialized for session_id: {session_id}")
 
@@ -506,94 +598,6 @@ async def client_insertion(request: ClientInsertionRequest):
             "token": db_jwt_token,
         },
     }
-    
-from app.services.sync.engine import run_sync
-@api_router.post("/client_insertion")
-async def client_insertion(request: ClientInsertionRequest):
-    userId = request.userId.strip()
-    userName = request.userName.strip()
-    service = request.service.strip()
-    token = request.token.strip()
-    if not userId or not userName:
-        logger.info("invalid client insertion payload")
-        raise HTTPException(status_code=400, detail="userId and userName are required")
-
-    conn = None
-    try:
-        conn = get_pool()
-        conn.rollback()  # clear any previous failed transaction
-        cursor = conn.cursor()
-
-        cursor.execute(
-            """
-            SELECT client_name, base_url, user_id, user_name, jwt_token, last_synced_at
-            FROM client_sync_config
-            WHERE user_id = %s AND user_name = %s
-            LIMIT 1
-            """,
-            (userId, userName),
-        )
-
-        row = cursor.fetchone()
-
-    except Exception as e:
-        logger.error(
-            f"❌ Failed to check client_sync_config | user_id={userId} | user_name={userName} | error={e}",
-            exc_info=True,
-        )
-        try:
-            if conn is not None and not getattr(conn, "closed", True):
-                conn.rollback()
-        except Exception:
-            pass
-        raise HTTPException(status_code=500, detail="Database error while checking client configuration")
-
-    if row:
-        client_name, base_url, db_user_id, db_user_name, db_jwt_token, last_synced_at = row
-        cursor.close()
-        return {
-            "client_type": "old",
-            "exists": True,
-            "client": {
-                "client_name": client_name,
-                "base_url": base_url,
-                "user_id": db_user_id,
-                "user_name": db_user_name,
-                "token": db_jwt_token,
-            },
-        }
-
-    # No existing client — insert new row into client_sync_config
-    cursor.execute(
-        """
-        INSERT INTO client_sync_config
-        (client_name, base_url, user_id, user_name, jwt_token, last_synced_at)
-        VALUES (%s, %s, %s, %s, %s, NOW())
-        RETURNING id, client_name, base_url, user_id, user_name, jwt_token, last_synced_at
-        """,
-        (userName, service, userId, userName, token),
-    )
-
-    new_row = cursor.fetchone()
-    conn.commit()
-    cursor.close()
-
-    new_id, client_name, base_url, db_user_id, db_user_name, db_jwt_token, last_synced_at = new_row
-
-    return {
-        "client_type": "new",
-        "exists": False,
-        "client": {
-            "id": new_id,
-            "client_name": client_name,
-            "base_url": base_url,
-            "user_id": db_user_id,
-            "user_name": db_user_name,
-            "service": service,
-            "token": db_jwt_token,
-        },
-    }
-
 
 @api_router.get("/health", tags=["Health"])
 def api_health():

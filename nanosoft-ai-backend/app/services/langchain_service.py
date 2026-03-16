@@ -245,9 +245,12 @@ class LangChainService:
                                         (e.g. "show me assets", "list complaints", "get PPM records")
 
                         IMPORTANT RULES:
-                        - "how many per X" or "count by X" or "breakdown by X" = aggregate (NOT count)
+                         "how many per X" or "count by X" or "breakdown by X" = aggregate (NOT count)
                         - "how many total" or "how many exist" with no grouping = count
                         - "show", "list", "display", "get", "fetch" = list
+                        - "give me X", "show X", "get X" where X is a number = list (NOT count)
+                          The number means a limit — user wants to SEE records, not count them.
+                        
 
                         Query: "{user_query}"
 
@@ -409,12 +412,11 @@ class LangChainService:
 
                 if is_graph and not is_aggregate_query:
                     final_content = (
-                        f"{final_content}\n\n"
-                        "📊 **I'd love to visualize that for you!**\n"
-                        f"Since you asked for a graph, I've calculated the total, but I can't draw a chart for a single number. "
-                        f"To build a visual layout, I need to **group these {entity}** into categories.\n\n"
-                        "**Try rephrasing your question**\n"
-                        "Once you add a category , I can generate the perfect chart for you! 📈"
+                        f"Here are the results for your query:\n\n{final_content}\n\n"
+                        f"**Graph not available for this query**\n"
+                        f"To generate a chart, the data needs to be grouped by a category.\n"
+                        f"Since your query *'{user_query}'* does not include any grouping or category, a graph cannot be created.\n\n"
+                        f"**Tip:** Try modifying your question by adding a category (for example: by type, date, or status) so that I can generate a meaningful chart"
 
                     )
                 return final_content, context_summary, messages
@@ -500,7 +502,9 @@ class LangChainService:
                         - "how many per X" or "count by X" or "breakdown by X" = aggregate (NOT count)
                         - "how many total" or "how many exist" with no grouping = count
                         - "show", "list", "display", "get", "fetch" = list
-
+                        - "give me X", "show X", "get X" where X is a number = list (NOT count)
+                          The number means a limit — user wants to SEE records, not count them
+                          
                         Query: "{user_query}"
 
                         Reply with ONLY one word: count or aggregate or list
@@ -641,12 +645,11 @@ class LangChainService:
 
                     if is_graph and not is_aggregate_query:
                         content = (
-                            f"{content}\n\n"
-                            "📊 **I'd love to visualize that for you!**\n"
-                            f"Since you asked for a graph, I've calculated the total, but I can't draw a chart for a single number. "
-                            f"To build a visual layout, I need to **group these {entity}** into categories.\n\n"
-                            "**Try rephrasing your question**\n"
-                            "Once you add a category , I can generate the perfect chart for you! 📈"
+                        f"Here are the results for your query:\n\n{content}\n\n"
+                        f"**Graph not available for this query**\n"
+                        f"To generate a chart, the data needs to be grouped by a category.\n"
+                        f"Since your query *'{user_query}'* does not include any grouping or category, a graph cannot be created.\n\n"
+                        f"**Tip:** Try modifying your question by adding a category (for example: by type, date, or status) so that I can generate a meaningful chart"
 
                         )
                     return content, context_summary, messages

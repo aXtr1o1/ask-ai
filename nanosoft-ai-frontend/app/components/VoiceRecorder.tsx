@@ -197,6 +197,7 @@ export function useVoiceRecorder(
           setAudioDuration(audio.duration);
         }
       });
+      audio.load();
 
       // ── rAF-based smooth progress loop ──────────────────────────────────
       const progressLoop = () => {
@@ -224,8 +225,8 @@ export function useVoiceRecorder(
       };
     }
 
-    // Toggle play / pause
-    if (isPlaying) {
+// Toggle play / pause
+    if (!audioPlaybackRef.current.paused) {
       audioPlaybackRef.current.pause();
     } else {
       audioPlaybackRef.current.play();

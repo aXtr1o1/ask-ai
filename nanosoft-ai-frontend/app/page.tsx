@@ -932,6 +932,7 @@ export default function Home() {
   const [audioPlayingIndex, setAudioPlayingIndex] = useState<number | null>(null);
   const [audioProgressMap,  setAudioProgressMap]  = useState<Record<number, number>>({});
   const [audioDurationMap,  setAudioDurationMap]  = useState<Record<number, number>>({});
+  const audioDurationMapRef = useRef<Record<number, number>>({});
   const [loginPageClientLogoPath, setLoginPageClientLogoPath] = useState<string | null>(null);
   const [loginFooterLogoPath, setLoginFooterLogoPath] = useState<string | null>(null);
 
@@ -985,25 +986,7 @@ export default function Home() {
 
   // Read userName and branding logos from URL (e.g. from autologin redirect); persist logos to localStorage
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      const params = new URLSearchParams(window.location.search);
-      const userName = params.get("userName") ?? params.get("userId");
-      const clientLogo = params.get("loginPageClientLogoPath");
-      const footerLogo = params.get("loginFooterLogoPath");
-      setUserIdFromUrl(userName);
-      if (clientLogo) {
-        setLoginPageClientLogoPath(clientLogo);
-        localStorage.setItem("loginPageClientLogoPath", clientLogo);
-      } else {
-        setLoginPageClientLogoPath(localStorage.getItem("loginPageClientLogoPath"));
-      }
-      if (footerLogo) {
-        setLoginFooterLogoPath(footerLogo);
-        localStorage.setItem("loginFooterLogoPath", footerLogo);
-      } else {
-        setLoginFooterLogoPath(localStorage.getItem("loginFooterLogoPath"));
-      }
-    }
+    
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
       const userName = params.get("userName") ?? params.get("userId");
@@ -1709,6 +1692,7 @@ useEffect(() => {
     // ── FIX BUG 1: load real duration from the audio element itself ──────
     audio.addEventListener("loadedmetadata", () => {
       if (isFinite(audio.duration) && audio.duration > 0) {
+        audioDurationMapRef.current[idx] = audio.duration;
         setAudioDurationMap(prev => ({ ...prev, [idx]: audio.duration }));
       } else if (passedDuration > 0) {
         setAudioDurationMap(prev => ({ ...prev, [idx]: passedDuration }));
@@ -1719,7 +1703,7 @@ useEffect(() => {
     const progressLoop = () => {
       const a = audioPlayersRef.current[idx];
       if (!a || a.paused) return;
-      const dur = audioDurationMap[idx] ?? passedDuration;
+      const dur = audioDurationMapRef.current[idx] ?? passedDuration;
       if (dur > 0) {
         const pct = (a.currentTime / dur) * 100;
         setAudioProgressMap(prev => ({ ...prev, [idx]: pct }));
@@ -1846,16 +1830,7 @@ useEffect(() => {
       <aside className="sidebar">
         {/* Sidebar Header with Logo */}
         <div className="sidebar-header">
-          <div style={{ display: "flex", alignItems: "center" }}>
-            <div
-              className="brand-box"
-              style={loginPageClientLogoPath ? { width: "100%", maxWidth: 220, height: "auto", minHeight: 56, maxHeight: 72, padding: 0, border: "none", borderRadius: 0 } : undefined}
-            >
-              {loginPageClientLogoPath ? (
-                <img src={loginPageClientLogoPath} alt="Client logo" style={{ width: "100%", maxWidth: 220, height: "auto", maxHeight: 72, objectFit: "contain", display: "block" }} />
-              ) : (
-                <Image src="/icon.png" alt="Nanosoft Ask AI" width={20} height={20} style={{ borderRadius: 0 }}/>
-              )}
+          
           <div style={{ display: "flex", alignItems: "center" }}>
             <div
               className="brand-box"
@@ -1973,7 +1948,7 @@ useEffect(() => {
 
           {/* Chat History – only visible when Chat feature is active */}
           {activeFeature === 'chat' && (
-            <div className="chat-history-box" style={{ marginTop: 24, display: "flex", flexDirection: "column", minHeight: 0 }}>
+            
             <div className="chat-history-box" style={{ marginTop: 24, display: "flex", flexDirection: "column", minHeight: 0 }}>
               <div className="chat-history-scroll">
                 {chatSessions.map(s => (
