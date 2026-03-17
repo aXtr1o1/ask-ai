@@ -8,9 +8,10 @@ import logging
 import asyncio
 import json
 from fastapi import WebSocket, WebSocketDisconnect
+import time
 
 from app.models.schemas import ChatRequest
-import base64 
+import base64
 from app.config import settings
 from app.services.langchain_service import langchain_service
 from app.prompts.system_prompt import get_system_prompt
@@ -19,11 +20,7 @@ from app.api.database.postgres_client import get_pool
 
 from app.services.session_service import get_sessions_for_user, get_chat_history_for_session
 from app.models.schemas import SessionRequest, ClientInsertionRequest
-from app.models.schemas import SessionRequest, ClientInsertionRequest
 from app.services.audio_service import convert_audio_to_text
-
-
-
 
 logger = logging.getLogger("chatbot_app")
 logger.setLevel(logging.INFO)
@@ -49,24 +46,45 @@ chatbot_app.add_middleware(
 # API router — all backend endpoints under /api for nginx routing
 api_router = APIRouter(prefix="/api", tags=["api"])
 
-# VALID_USERNAMES = {"v4demo", "poc"}
-# VALID_USERNAMES = {"v4demo", "poc"}
-
 # =====================================================
-# In-Memory Store
+# In-Memory Store with TTL cleanup
 #
 # Structure:
 # {
 #   "session-abc-123": {
 #     "lc_memory": [HumanMessage, AIMessage, ...],
 #     "history": [...],
-#     "user_name": "v4demo"
+#     "user_name": "v4demo",
+#     "last_activity": timestamp
 #   }
 # }
 # =====================================================
-MAX_HISTORY =  settings.MAX_HISTORY
+MAX_HISTORY = settings.MAX_HISTORY
 memory_store = {}
 MAX_AUDIO_BYTES = 500 * 1024  # 500 KB
+SESSION_TTL_SECONDS = 3600  # 1 hour TTL for abandoned sessions
+
+def cleanup_expired_sessions():
+    """Remove sessions that haven't been active for SESSION_TTL_SECONDS"""
+    current_time = time.time()
+    expired_sessions = []
+
+    for session_id, session_data in memory_store.items():
+        last_activity = session_data.get("last_activity", current_time)
+        if current_time - last_activity > SESSION_TTL_SECONDS:
+            expired_sessions.append(session_id)
+
+    for session_id in expired_sessions:
+        del memory_store[session_id]
+        logger.info(f"🧹 Cleaned up expired session: {session_id}")
+
+    if expired_sessions:
+        logger.info(f"🧹 Cleaned up {len(expired_sessions)} expired sessions")
+
+def update_session_activity(session_id: str):
+    """Update the last activity timestamp for a session"""
+    if session_id in memory_store:
+        memory_store[session_id]["last_activity"] = time.time()
 
 #Track sessions already saved by frontend HTTP POST
 # So WebSocketDisconnect does NOT save again (prevents double save)
@@ -150,6 +168,13 @@ async def ws_chat_endpoint(websocket: WebSocket):
 
             #  Track current session_id for disconnect save
             current_session_id = session_id
+
+            # Periodic cleanup of expired sessions (every 10th request)
+            if hash(session_id) % 10 == 0:
+                cleanup_expired_sessions()
+
+            # Update session activity
+            update_session_activity(session_id)
             audio_base64   = None   # will hold base64 string if audio
             query_to_store = None
             #----------------- audio integration by mega-----------------
@@ -215,7 +240,8 @@ async def ws_chat_endpoint(websocket: WebSocket):
                 memory_store[session_id] = {
                     "lc_memory": [],
                     "history":   [],
-                    "user_name": user_name
+                    "user_name": user_name,
+                    "last_activity": time.time()
                 }
                 logger.info(f"🆕 Memory initialized for session_id: {session_id}")
 
@@ -466,95 +492,6 @@ async def client_insertion(request: ClientInsertionRequest):
             "service": service,
             "token": db_jwt_token,
         },
-    }
-    
-from app.services.sync.engine import run_sync
-@api_router.post("/client_insertion")
-async def client_insertion(request: ClientInsertionRequest):
-    userId = request.userId.strip()
-    userName = request.userName.strip()
-    service = request.service.strip()
-    token = request.token.strip()
-    if not userId or not userName:
-        logger.info("invalid client insertion payload")
-        raise HTTPException(status_code=400, detail="userId and userName are required")
-
-    conn = None
-    try:
-        conn = get_pool()
-        conn.rollback()  # clear any previous failed transaction
-        cursor = conn.cursor()
-
-        cursor.execute(
-            """
-            SELECT client_name, base_url, user_id, user_name, jwt_token, last_synced_at
-            FROM client_sync_config
-            WHERE user_id = %s AND user_name = %s
-            LIMIT 1
-            """,
-            (userId, userName),
-        )
-
-        row = cursor.fetchone()
-
-    except Exception as e:
-        logger.error(
-            f"❌ Failed to check client_sync_config | user_id={userId} | user_name={userName} | error={e}",
-            exc_info=True,
-        )
-        try:
-            if conn is not None and not getattr(conn, "closed", True):
-                conn.rollback()
-        except Exception:
-            pass
-        raise HTTPException(status_code=500, detail="Database error while checking client configuration")
-
-    if row:
-        client_name, base_url, db_user_id, db_user_name, db_jwt_token, last_synced_at = row
-        cursor.close()
-        return {
-            "client_type": "old",
-            "exists": True,
-            "client": {
-                "client_name": client_name,
-                "base_url": base_url,
-                "user_id": db_user_id,
-                "user_name": db_user_name,
-                "token": db_jwt_token,
-            },
-        }
-
-    # No existing client — insert new row into client_sync_config
-    cursor.execute(
-        """
-        INSERT INTO client_sync_config
-        (client_name, base_url, user_id, user_name, jwt_token, last_synced_at)
-        VALUES (%s, %s, %s, %s, %s, NOW())
-        RETURNING id, client_name, base_url, user_id, user_name, jwt_token, last_synced_at
-        """,
-        (userName, service, userId, userName, token),
-    )
-
-    new_row = cursor.fetchone()
-    conn.commit()
-    cursor.close()
-
-    new_id, client_name, base_url, db_user_id, db_user_name, db_jwt_token, last_synced_at = new_row
-
-    return {
-        "client_type": "new",
-        "exists": False,
-        "client": {
-            "id": new_id,
-            "client_name": client_name,
-            "base_url": base_url,
-            "user_id": db_user_id,
-            "user_name": db_user_name,
-            "service": service,
-            "token": db_jwt_token,
-        },
-    }
-
 
 @api_router.get("/health", tags=["Health"])
 def api_health():

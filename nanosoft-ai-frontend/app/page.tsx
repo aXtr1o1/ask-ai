@@ -1112,6 +1112,30 @@ export default function Home() {
     return temp.textContent || "";
   };
 
+  // ── Convert base64 audio to blob URL for immediate use ─────────────────────
+  const base64ToAudioUrl = (base64String: string): string => {
+    try {
+      if (!base64String || !base64String.startsWith("data:audio/")) {
+        return base64String;
+      }
+      // Extract base64 data part
+      const base64Data = base64String.split(",")[1];
+      if (!base64Data) return base64String;
+
+      // Convert to binary and create blob
+      const binaryString = atob(base64Data);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      const blob = new Blob([bytes], { type: "audio/ogg" });
+      return URL.createObjectURL(blob);
+    } catch (error) {
+      console.warn("Failed to convert base64 to audio URL:", error);
+      return base64String;
+    }
+  };
+
   // ── Save chat history to backend (PostgreSQL) ───────────────────────────────
   const saveChatHistory = async (sid: string, msgs: Message[]) => {
   const valid = msgs.filter(m => m.role !== "error");
