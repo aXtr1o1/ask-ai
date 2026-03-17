@@ -930,7 +930,8 @@ export default function Home() {
   const router        = useRouter();
   // const searchParams  = useSearchParams();
   // const userIdFromUrl = searchParams.get("userId");
-  const [userIdFromUrl, setUserIdFromUrl] = useState<string | null>(null);
+  const [userIdFromUrl, setUserIdFromUrl] = useState<string | null>(null); // display name
+  const [clientNameFromUrl, setClientNameFromUrl] = useState<string | null>(null); // backend username
   const [input,        setInput]        = useState<string>("");
   const [messages,     setMessages]     = useState<Message[]>([]);
   const [isLoading,    setIsLoading]    = useState<boolean>(false);
@@ -943,7 +944,7 @@ export default function Home() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackTime, setPlaybackTime] = useState(0);
   const [slideGestureActive, setSlideGestureActive] = useState(false);
-  const [loggedInUser, setLoggedInUser] = useState<string | null>(null);
+  const [loggedInUser, setLoggedInUser] = useState<string | null>(null); // backend username (client_name)
   const [authChecked,  setAuthChecked]  = useState<boolean>(false);
   const [menuOpen,     setMenuOpen]     = useState(false);
   const [wsConnectionState, setWsConnectionState] = useState<'connecting'|'connected'|'failed'>('connecting');
@@ -956,6 +957,7 @@ export default function Home() {
   const [audioPlayingIndex, setAudioPlayingIndex] = useState<number | null>(null);
   const [audioProgressMap,  setAudioProgressMap]  = useState<Record<number, number>>({});
   const [audioDurationMap,  setAudioDurationMap]  = useState<Record<number, number>>({});
+  const audioDurationMapRef = useRef<Record<number, number>>({});
   const [loginPageClientLogoPath, setLoginPageClientLogoPath] = useState<string | null>(null);
   const [loginFooterLogoPath, setLoginFooterLogoPath] = useState<string | null>(null);
 
@@ -1012,10 +1014,14 @@ export default function Home() {
     
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
-      const userName = params.get("userName") ?? params.get("userId");
+      const userName = params.get("userName") ?? params.get("userId"); // display only
+      const clientName = params.get("clientName"); // backend username
       const clientLogo = params.get("loginPageClientLogoPath");
       const footerLogo = params.get("loginFooterLogoPath");
       setUserIdFromUrl(userName);
+      if (clientName) {
+        setClientNameFromUrl(clientName);
+      }
       if (clientLogo) {
         setLoginPageClientLogoPath(clientLogo);
         localStorage.setItem("loginPageClientLogoPath", clientLogo);
@@ -1042,15 +1048,18 @@ export default function Home() {
   // Auth guard
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (userIdFromUrl) {
-      localStorage.setItem("loggedInUser", userIdFromUrl);
-      setLoggedInUser(userIdFromUrl);
+    // Prefer clientNameFromUrl as backend username; fall back to userIdFromUrl
+    const backendUserName = clientNameFromUrl;
+    if (backendUserName) {
+      localStorage.setItem("loggedInUser", backendUserName);
+      setLoggedInUser(backendUserName);
       setAuthChecked(true);
       router.replace("/");
       return;
     }
     const stored = localStorage.getItem("loggedInUser");
     if (!stored) { router.replace("/login"); return; }
+    // stored value is backend username (client_name)
     setLoggedInUser(stored);
     setAuthChecked(true);
   }, [router, userIdFromUrl]);
@@ -1734,6 +1743,7 @@ export default function Home() {
     // ── FIX BUG 1: load real duration from the audio element itself ──────
     audio.addEventListener("loadedmetadata", () => {
       if (isFinite(audio.duration) && audio.duration > 0) {
+        audioDurationMapRef.current[idx] = audio.duration;
         setAudioDurationMap(prev => ({ ...prev, [idx]: audio.duration }));
       } else if (passedDuration > 0) {
         setAudioDurationMap(prev => ({ ...prev, [idx]: passedDuration }));
@@ -1744,7 +1754,7 @@ export default function Home() {
     const progressLoop = () => {
       const a = audioPlayersRef.current[idx];
       if (!a || a.paused) return;
-      const dur = audioDurationMap[idx] ?? passedDuration;
+      const dur = audioDurationMapRef.current[idx] ?? passedDuration;
       if (dur > 0) {
         const pct = (a.currentTime / dur) * 100;
         setAudioProgressMap(prev => ({ ...prev, [idx]: pct }));
@@ -1911,8 +1921,8 @@ export default function Home() {
                   <IconUser  />
                   </div>
                   <div className="profile-user-info">
-                    {/* <span className="profile-label">LOGGED IN AS</span> */}
-                    <span className="profile-userid">{loggedInUser}</span>
+                    {/* Display original userName (if available) while backend uses client_name */}
+                    <span className="profile-userid">{userIdFromUrl ?? loggedInUser}</span>
                   </div>
                 </div>
                 <div className="profile-divider" />

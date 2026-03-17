@@ -36,87 +36,9 @@ class LangChainService:
             logger.info("🚀 LangChainService initialized with ASSETS, PPM, BDM tools")
         except Exception as e:
             logger.error(f"❌ LangChainService init failed: {e}", exc_info=True)
-            raise
-
-    def _classify_query_intent(self, user_query: str) -> str:
-        """
-        Classify user query into one of three intents: count, aggregate, or list.
-        Returns the intent as a lowercase string.
-        """
-        intent_msg = self.model.invoke([
-            HumanMessage(content=f"""
-            Classify this user query into one of three intents:
-            - "count"     → user wants ONLY a single total number
-                            (e.g. "how many assets exist?", "total complaints count")
-            - "aggregate" → user wants a grouped summary or breakdown by category
-                            (e.g. "how many assets per division?", "breakdown by building",
-                            "total complaints by priority", "summarize by status",
-                            "group by floor and building", "compare by make or model")
-            - "list"      → user wants full records shown as a table
-                            (e.g. "show me assets", "list complaints", "get PPM records")
-
-            IMPORTANT RULES:
-            - "how many per X" or "count by X" or "breakdown by X" = aggregate (NOT count)
-            - "how many total" or "how many exist" with no grouping = count
-            - "show", "list", "display", "get", "fetch" = list
-
-            Query: "{user_query}"
-
-            Reply with ONLY one word: count or aggregate or list
-            """)
-        ])
-        self._accumulate_tokens(intent_msg)
-        return intent_msg.content.strip().lower()
-
-    def _extract_user_query_from_messages(self, messages: list) -> str:
-        """Extract the current user query from message history."""
-        for m in reversed(messages):
-            if isinstance(m, HumanMessage):
-                return (m.content or "") if isinstance(m.content, str) else ""
-        return ""
-
-    def _process_tool_result_data(self, tool_result, tool_name: str):
-        """
-        Process and normalize tool result data into consistent format.
-        Returns tuple: (p_list, p_count, total_for_count)
-        """
-        # Parse tool result — tools return JSON string, not dict
-        parsed = tool_result
-        if isinstance(tool_result, str):
-            try:
-                parsed = json.loads(tool_result)
-            except json.JSONDecodeError:
-                logger.warning("Tool %s returned non-JSON: %s", tool_name, tool_result[:100])
-                return [], 0, 0
-
-        # Extract p_list and p_count from API response shape
-        if isinstance(parsed, dict):
-            if "p_list" in parsed:
-                p_count = parsed.get("p_count", 0)
-                p_list = parsed.get("p_list", [])
-            else:
-                p_list = list(parsed.values())
-                p_count = len(p_list)
-        else:
-            p_list = parsed if isinstance(parsed, list) else []
-            p_count = len(p_list)
-
-        # For count queries: SP may return total in rows (COUNT(*) OVER ()) — prefer that
-        total_for_count = p_count
-        if p_list and isinstance(p_list[0], dict):
-            for key in ("total_count", "total_count_over", "full_count", "overall_count"):
-                val = p_list[0].get(key)
-                if isinstance(val, (int, float)) and val >= 0:
-                    total_for_count = int(val)
-                    logger.info("📊 Using total from row field '%s' = %s", key, total_for_count)
-                    break
-
-        logger.info(
-            "📊 Tool result | %s | p_list_length=%s | p_count=%s | total_for_count=%s",
-            tool_name, len(p_list), p_count, total_for_count
-        )
-
-        return p_list, p_count, total_for_count
+            # In test/CI environments there may be no valid API key.
+            # Defer hard failure until the model is actually used.
+            self.model = None
 
     # ── Accumulate tokens from each model call ───────────────────────────────
     # ── Called after every model.invoke() to add up tokens for this query
@@ -277,6 +199,34 @@ class LangChainService:
 
                     
                     #  call 2 -updated from 2 intents (count/list) to 3 intents (count/aggregate/list)
+                    intent_msg = self.model.invoke([
+                        HumanMessage(content=f"""
+                        Classify this user query into one of three intents:
+                        - "count"     → user wants ONLY a single total number
+                                        (e.g. "how many assets exist?", "total complaints count")
+                        - "aggregate" → user wants a grouped summary or breakdown by category
+                                        (e.g. "how many assets per division?", "breakdown by building",
+                                        "total complaints by priority", "summarize by status",
+                                        "group by floor and building", "compare by make or model")
+                        - "list"      → user wants full records shown as a table
+                                        (e.g. "show me assets", "list complaints", "get PPM records")
+
+                        IMPORTANT RULES:
+                         "how many per X" or "count by X" or "breakdown by X" = aggregate (NOT count)
+                        - "how many total" or "how many exist" with no grouping = count
+                        - "show", "list", "display", "get", "fetch" = list
+                        - "give me X", "show X", "get X" where X is a number = list (NOT count)
+                          The number means a limit — user wants to SEE records, not count them.
+                        
+
+                        Query: "{user_query}"
+
+                        Reply with ONLY one word: count or aggregate or list
+                        """)
+                    ])
+                    self._accumulate_tokens(intent_msg)
+
+                    
                     # is_aggregate_query is the new 3rd intent
                     if not tool_was_aggregate:
                         intent = self._classify_query_intent(user_query)
@@ -429,12 +379,11 @@ class LangChainService:
 
                 if is_graph and not is_aggregate_query:
                     final_content = (
-                        f"{final_content}\n\n"
-                        "📊 **I'd love to visualize that for you!**\n"
-                        f"Since you asked for a graph, I've calculated the total, but I can't draw a chart for a single number. "
-                        f"To build a visual layout, I need to **group these {entity}** into categories.\n\n"
-                        "**Try rephrasing your question**\n"
-                        "Once you add a category , I can generate the perfect chart for you! 📈"
+                        f"Here are the results for your query:\n\n{final_content}\n\n"
+                        f"**Graph not available for this query**\n"
+                        f"To generate a chart, the data needs to be grouped by a category.\n"
+                        f"Since your query *'{user_query}'* does not include any grouping or category, a graph cannot be created.\n\n"
+                        f"**Tip:** Try modifying your question by adding a category (for example: by type, date, or status) so that I can generate a meaningful chart"
 
                     )
                 return final_content, context_summary, messages
@@ -478,6 +427,33 @@ class LangChainService:
 
                     #  CALL 5 — Intent check for FORCED path
                     #  updated to 3 intents same as CALL 2 above
+                    intent_msg = self.model.invoke([
+                        HumanMessage(content=f"""
+                        Classify this user query into one of three intents:
+                        - "count"     → user wants ONLY a single total number
+                                        (e.g. "how many assets exist?", "total complaints count")
+                        - "aggregate" → user wants a grouped summary or breakdown by category
+                                        (e.g. "how many assets per division?", "breakdown by building",
+                                        "total complaints by priority", "summarize by status",
+                                        "group by floor and building", "compare by make or model")
+                        - "list"      → user wants full records shown as a table
+                                        (e.g. "show me assets", "list complaints", "get PPM records")
+
+                        IMPORTANT RULES:
+                        - "how many per X" or "count by X" or "breakdown by X" = aggregate (NOT count)
+                        - "how many total" or "how many exist" with no grouping = count
+                        - "show", "list", "display", "get", "fetch" = list
+                        - "give me X", "show X", "get X" where X is a number = list (NOT count)
+                          The number means a limit — user wants to SEE records, not count them
+                          
+                        Query: "{user_query}"
+
+                        Reply with ONLY one word: count or aggregate or list
+                        """)
+                    ])
+                    self._accumulate_tokens(intent_msg)
+
+                    #  — 3 intents for forced path same as normal path
                     tool_was_aggregate = args.get("is_aggregate") is True
                     if not tool_was_aggregate:
                         intent = self._classify_query_intent(user_query)
@@ -610,12 +586,11 @@ class LangChainService:
 
                     if is_graph and not is_aggregate_query:
                         content = (
-                            f"{content}\n\n"
-                            "📊 **I'd love to visualize that for you!**\n"
-                            f"Since you asked for a graph, I've calculated the total, but I can't draw a chart for a single number. "
-                            f"To build a visual layout, I need to **group these {entity}** into categories.\n\n"
-                            "**Try rephrasing your question**\n"
-                            "Once you add a category , I can generate the perfect chart for you! 📈"
+                        f"Here are the results for your query:\n\n{content}\n\n"
+                        f"**Graph not available for this query**\n"
+                        f"To generate a chart, the data needs to be grouped by a category.\n"
+                        f"Since your query *'{user_query}'* does not include any grouping or category, a graph cannot be created.\n\n"
+                        f"**Tip:** Try modifying your question by adding a category (for example: by type, date, or status) so that I can generate a meaningful chart"
 
                         )
                     return content, context_summary, messages

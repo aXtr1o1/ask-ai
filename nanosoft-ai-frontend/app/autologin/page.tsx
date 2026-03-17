@@ -113,10 +113,20 @@ export default async function AutoLoginPage({ searchParams }: AutoLoginPageProps
     const backendBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
     const clientInsertionUrl = `${backendBaseUrl}/api/client_insertion`;
     const token = xAuth?.startsWith("Bearer ") ? xAuth : xAuth ? `Bearer ${xAuth}` : "";
+    const clientName =
+      (() => {
+        try {
+          const hostname = new URL(autoLoginOutput!.service!).hostname;
+          return hostname.split(".")[0] || autoLoginOutput!.userName!;
+        } catch {
+          return autoLoginOutput!.userName!;
+        }
+      })();
     console.log("[autologin] calling client_insertion", {
       userId: String(autoLoginOutput.userID),
       userName: autoLoginOutput.userName,
       service: autoLoginOutput.service,
+      clientName,
       hasToken: !!token,
     });
 
@@ -133,6 +143,7 @@ export default async function AutoLoginPage({ searchParams }: AutoLoginPageProps
           userId: String(autoLoginOutput.userID),
           userName: autoLoginOutput.userName,
           service: autoLoginOutput.service,
+          clientName,
           token,
         }),
         cache: "no-store",
@@ -191,9 +202,10 @@ export default async function AutoLoginPage({ searchParams }: AutoLoginPageProps
       }
     }
 
-    // Pass username and logo paths to main chat page via query params
+    // Pass username, clientName and logo paths to main chat page via query params
     const search = new URLSearchParams();
     search.set("userName", autoLoginOutput.userName);
+    search.set("clientName", clientName);
     if (LoginPageClientLogoPath) search.set("loginPageClientLogoPath", LoginPageClientLogoPath);
     if (LoginFooterLogoPath) search.set("loginFooterLogoPath", LoginFooterLogoPath);
     const target = `/?${search.toString()}`;
