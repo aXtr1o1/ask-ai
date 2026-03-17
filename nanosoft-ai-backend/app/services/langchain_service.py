@@ -152,14 +152,19 @@ class LangChainService:
                     args["user_name"] = user_name
 
                     # Override limit for count queries — LLM often passes limit=1 incorrectly
-                    user_query = self._extract_user_query_from_messages(messages)
+                    user_query = ""
+                    for m in reversed(messages):
+                        if isinstance(m, HumanMessage):
+                            user_query = (m.content or "") if isinstance(m.content, str) else ""
+                            break
 
+                    
                     count_patterns = ("how many", "total", "number of", "count of", "count ", "how many ")
                     if any(p in user_query.lower() for p in count_patterns) and args.get("limit") is not None:
                         logger.info("📊 Count query detected — clearing limit=%s", args.get("limit"))
                         args["limit"] = None
 
-                    #previously limit was only cleared for count queries now i cleared for the list queries also.
+                    #previously limit was only cleared for count queries now i cleared for the list queries also. 
 
                     list_patterns = ("list", "show me", "get ", "fetch ", "display",
                                      "all assets", "all complaints", "all bdm", "all ppm")
@@ -170,16 +175,46 @@ class LangChainService:
 
                     tool_result = tool_fn.invoke(dict(args))
 
-                    p_list, p_count, total_for_count = self._process_tool_result_data(tool_result, tool_name)
+                    # Parse tool result — tools return JSON string, not dict
 
-                    # If tool result couldn't be parsed, skip to next tool
-                    if p_count == 0 and total_for_count == 0 and not p_list:
-                        # Check if this is a parsing error rather than empty results
-                        if isinstance(tool_result, str) and not tool_result.strip().startswith('{'):
+                    parsed = tool_result
+                    if isinstance(tool_result, str):
+                        try:
+                            parsed = json.loads(tool_result)
+                        except json.JSONDecodeError:
+                            logger.warning("Tool %s returned non-JSON: %s", tool_name, tool_result[:100])
                             messages.append(
                                 ToolMessage(content=tool_result, tool_call_id=tool_call["id"])
                             )
                             continue
+
+                    # Extract p_list and p_count from API response shape
+                    if isinstance(parsed, dict):
+                        if "p_list" in parsed:
+                            p_count = parsed.get("p_count", 0)
+                            p_list = parsed.get("p_list", [])
+                        else:
+                            p_list = list(parsed.values())
+                            p_count = len(p_list)
+                    else:
+                        p_list = parsed if isinstance(parsed, list) else []
+                        p_count = len(p_list)
+
+                    # For count queries: SP may return total in rows (COUNT(*) OVER ()) — prefer that
+                    
+                    total_for_count = p_count
+                    if p_list and isinstance(p_list[0], dict):
+                        for key in ("total_count", "total_count_over", "full_count", "overall_count"):
+                            val = p_list[0].get(key)
+                            if isinstance(val, (int, float)) and val >= 0:
+                                total_for_count = int(val)
+                                logger.info("📊 Using total from row field '%s' = %s", key, total_for_count)
+                                break
+
+                    logger.info(
+                        "📊 Tool result | %s | p_list_length=%s | p_count=%s | total_for_count=%s",
+                        tool_name, len(p_list), p_count, total_for_count
+                    )
                     # ── If tool actually ran in aggregate mode → force aggregate intent
                     # This overrides whatever the intent classifier says later
                     tool_was_aggregate = args.get("is_aggregate") is True
@@ -229,7 +264,7 @@ class LangChainService:
                     
                     # is_aggregate_query is the new 3rd intent
                     if not tool_was_aggregate:
-                        intent = self._classify_query_intent(user_query)
+                        intent = intent_msg.content.strip().lower()
                         is_count_query     = intent == "count"
                         is_aggregate_query = intent == "aggregate"
                     else:
@@ -389,10 +424,15 @@ class LangChainService:
                 return final_content, context_summary, messages
 
             else:
-                # tells the model exactly what the data is and how to render it
+                 # Model skipped tool — check if this is a data query that REQUIRES a tool
+                # if the model skipped the tool, we need to inject a synthetic tool call and result so the model formats from live data
 
 
-                user_query = self._extract_user_query_from_messages(messages)
+                user_query = ""
+                for m in reversed(messages):
+                    if isinstance(m, HumanMessage):
+                        user_query = (m.content or "") if isinstance(m.content, str) else ""
+                        break
                 q = user_query.lower()
                 data_patterns = ("how many", "list", "count", "total", "number of", "show me", "get ", "fetch ")
                 needs_bdm    = any(w in q for w in ("complaint", "bdm", "breakdown"))
@@ -405,22 +445,43 @@ class LangChainService:
                     tool_fn = self.tool_map[tool_name]
                     aggregate_keywords = ("by ", "per ", "group by", "breakdown", "summarize", "compare")
                     args = {
-                        "user_name": user_name,
+                        "user_name": user_name, 
                         "limit": None,
                         "is_aggregate": any(kw in user_query.lower() for kw in aggregate_keywords)
                     }
                     logger.info("🔍 Calling forced tool | tool=%s | user_name=%s", tool_name, user_name)
                     tool_result = tool_fn.invoke(dict(args))
 
-                    p_list, p_count, total_for_count = self._process_tool_result_data(tool_result, tool_name)
+                    try:
+                        parsed = json.loads(tool_result) if isinstance(tool_result, str) else tool_result
+                    except json.JSONDecodeError:
+                        parsed = {}
+                     #handle indexed dict from cache same as normal path
+                    if isinstance(parsed, dict) and "p_list" in parsed:
+                        p_list  = parsed.get("p_list", [])
+                        p_count = parsed.get("p_count", len(p_list))
+                    elif isinstance(parsed, dict):
+                        p_list  = list(parsed.values())
+                        p_count = len(p_list)
+                    else:
+                        p_list  = parsed if isinstance(parsed, list) else []
+                        p_count = len(p_list)
+
+                    total_for_count = p_count
+                    if p_list and isinstance(p_list[0], dict):
+                        for key in ("total_count", "total_count_over", "full_count", "overall_count"):
+                            val = p_list[0].get(key)
+                            if isinstance(val, (int, float)) and val >= 0:
+                                total_for_count = int(val)
+                                break
 
                     display_count = total_for_count if total_for_count > len(p_list) else p_count
 
                     if p_count == 0 and total_for_count == 0:
                         self._log_query_summary(current_user_query)
                         return "No results found for the given query.", "No results found for the given query.", messages
-
                     # Inject synthetic tool call + result so model formats from live data
+
                     fake_tool_id = "forced-" + tool_name.lower() + "-1"
                     synthetic_ai = AIMessage(content="", tool_calls=[{"name": tool_name, "id": fake_tool_id, "args": {"user_name": user_name}}])
                     messages.append(synthetic_ai)
@@ -456,7 +517,7 @@ class LangChainService:
                     #  — 3 intents for forced path same as normal path
                     tool_was_aggregate = args.get("is_aggregate") is True
                     if not tool_was_aggregate:
-                        intent = self._classify_query_intent(user_query)
+                        intent = intent_msg.content.strip().lower()
                         is_count_query     = intent == "count"
                         is_aggregate_query = intent == "aggregate"
                     else:
@@ -501,12 +562,12 @@ class LangChainService:
                         context_ai_msg = self.model.invoke(messages)
                         self._accumulate_tokens(context_ai_msg)
                         context_summary = context_ai_msg.content or f"Found {display_count} records for your request."
-                        
+
                         large_dataset_response = json.dumps({
                             "context_summary": context_summary,
                             "records": p_list
                         })
-                        
+
                         self._log_query_summary(current_user_query)
                         return large_dataset_response, context_summary, messages
 

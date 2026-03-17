@@ -4,12 +4,14 @@ import { useState, useRef, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { ThemeToggle } from "./components/ThemeToggle";
+import { useResponsive, getResponsivePieChartSize } from "./hooks/useResponsive";
 import BackgroundLayer from "./components/BackgroundLayer";
 import { useTheme } from "./components/useTheme";
 
 import { useVoiceRecorder, RecordingInterface, VoicePreviewBar, VoiceMicButton } from "./components/VoiceRecorder";
 import { parseGraphData, BarChartRenderer, HorizontalBarChartRenderer, LineChartRenderer, PieChartRenderer, ChartType } from "./components/GraphRenderer";
-import { IconUser, IconMicrophone, IconPlayerPlay, IconPlayerPause, IconTrash, IconArrowUp, IconChartBar } from "@tabler/icons-react";
+import TableWithTile, { TableWithTileRow } from "./components/TableWithTile";
+import { IconUser, IconMicrophone, IconPlayerPlay, IconPlayerPause, IconTrash, IconArrowUp, IconChartBar, IconList, IconLayoutGrid, IconMenu2, IconX } from "@tabler/icons-react";
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface Message {
   role: "user" | "ai" | "error";
@@ -23,6 +25,9 @@ interface Message {
    isGraphResponse?: boolean;  // ← Set to true if response is type="graph"
   chartType?: ChartType;      // ← chart type per message
   originalText?: string;      // ← Store original raw response before HTML processing
+  tableData?: TableWithTileRow[];  // ← Store table rows for TableWithTile component
+  tableTitle?: string;        // ← Title for the table
+  tableViewMode?: 'table' | 'tile';  // ← Toggle between table and tile views
 }
 interface FolderItem { id: string; name: string; }
 interface ChatSession { id: string; title: string; createdAt: number; updatedAt?: number; }
@@ -96,6 +101,49 @@ function cleanLine(raw: string): string {
   return s;
 }
 
+// ── Detect if HTML contains a <table> tag ────────────────────────────────────
+function hasTableTag(html: string): boolean {
+  return /<table[^>]*>/i.test(html);
+}
+
+// ── Extract table rows from HTML table ─────────────────────────────────────────
+function extractTableRows(html: string): TableWithTileRow[] {
+  const rows: TableWithTileRow[] = [];
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, "text/html");
+    const table = doc.querySelector("table");
+    if (!table) return rows;
+
+    // Get column headers
+    const headers: string[] = [];
+    const ths = table.querySelectorAll("thead th");
+    ths.forEach(th => {
+      const text = th.textContent?.trim() || "";
+      if (text) headers.push(text);
+    });
+
+    // Get table rows
+    const trs = table.querySelectorAll("tbody tr");
+    trs.forEach(tr => {
+      const tds = tr.querySelectorAll("td");
+      const row: TableWithTileRow = {};
+      tds.forEach((td, idx) => {
+        const header = headers[idx];
+        if (header) {
+          row[header] = td.textContent?.trim() || "—";
+        }
+      });
+      if (Object.keys(row).length > 0) {
+        rows.push(row);
+      }
+    });
+  } catch (err) {
+    console.warn("Failed to parse table HTML:", err);
+  }
+  return rows;
+}
+
 // ── Regex: matches "Key: value" or "**Key**: value" (key 2–30 alpha chars) ────
 const KV_LINE_RE   = /^\*{0,2}([A-Za-z][A-Za-z ]{1,28})\*{0,2}:[ \t]+(.+)$/;
 // Multi-KV on one line: "Key: Val, Key: Val"
@@ -132,6 +180,12 @@ function badge(val: string): string {
 const BADGE_COLS = new Set(["status","condition","state","wostatus","ppstatus","ppmstatus"]);
 function isBadgeCol(col: string): boolean {
   return BADGE_COLS.has(col.toLowerCase().replace(/[\s_]/g, ""));
+}
+
+// ── Extract table HTML from larger HTML block ────────────────────────────────
+function extractTableHtml(html: string): string | null {
+  const tableMatch = html.match(/<table[^>]*>[\s\S]*?<\/table>/i);
+  return tableMatch ? tableMatch[0] : null;
 }
 
 // ── Build HTML <table> from rows ──────────────────────────────────────────────
@@ -929,7 +983,7 @@ export const dynamic = "force-dynamic";
 export default function Home() {
   const router        = useRouter();
   // const searchParams  = useSearchParams();
-  // const userIdFromUrl = searchParams.get("userId");
+  const responsive    = useResponsive();  // Auto-detect screen size
   const [userIdFromUrl, setUserIdFromUrl] = useState<string | null>(null); // display name
   const [clientNameFromUrl, setClientNameFromUrl] = useState<string | null>(null); // backend username
   const [input,        setInput]        = useState<string>("");
@@ -947,6 +1001,7 @@ export default function Home() {
   const [loggedInUser, setLoggedInUser] = useState<string | null>(null); // backend username (client_name)
   const [authChecked,  setAuthChecked]  = useState<boolean>(false);
   const [menuOpen,     setMenuOpen]     = useState(false);
+  const [sidebarOpen,  setSidebarOpen]  = useState(true);  // Will be auto-closed by useEffect if mobile is detected
   const [wsConnectionState, setWsConnectionState] = useState<'connecting'|'connected'|'failed'>('connecting');
   const [isGraphMode, setIsGraphMode] = useState<boolean>(false);
   const [chartType, setChartType] = useState<ChartType>('vertical-bar');
@@ -1009,6 +1064,13 @@ export default function Home() {
     }
   );
 
+  // Sync sidebarOpen with responsive.isMobile - ensures sidebar closes on mobile detection
+  useEffect(() => {
+    if (responsive.isMobile) {
+      setSidebarOpen(false);
+    }
+  }, [responsive.isMobile]);
+
   // Read userName and branding logos from URL (e.g. from autologin redirect); persist logos to localStorage
   useEffect(() => {
     
@@ -1044,6 +1106,17 @@ export default function Home() {
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
+
+  // Update sidebar visibility based on screen size
+  useEffect(() => {
+    if (responsive.isDesktop) {
+      // Always show sidebar on desktop
+      setSidebarOpen(true);
+    } else if (responsive.isMobile) {
+      // Close sidebar on mobile (user can open with menu button)
+      setSidebarOpen(false);
+    }
+  }, [responsive.isDesktop, responsive.isMobile]);
 
   // Auth guard
   useEffect(() => {
@@ -1251,6 +1324,8 @@ export default function Home() {
           const finalText = accRef.current;
           let processedText = finalText;
           let isGraphResponse = false;
+          let tableData: TableWithTileRow[] | undefined = undefined;
+          let tableTitle: string | undefined = undefined;
          
           // 🔑 FIRST: Check if this is a GRAPH response (type="graph")
           const cleanedForGraph = extractResponseContent(finalText);
@@ -1270,11 +1345,26 @@ export default function Home() {
             if (largeDatasetHTML) {
               // Successfully rendered as large dataset table
               processedText = largeDatasetHTML;
-              console.log("✅ [DONE] Rendered as large dataset table");
+              // Try to extract table rows for TableWithTile component
+              const rows = extractTableRows(largeDatasetHTML);
+              if (rows.length > 0) {
+                tableData = rows;
+                tableTitle = "Data Results";
+                console.log("✅ [DONE] Rendered as large dataset table with TableWithTile");
+              }
             } else {
               // Not a large dataset → try to format as text/table
               try {
                 processedText = formatOutput(cleanedText);
+                // Try to extract table rows if HTML contains table
+                if (processedText.includes('<table')) {
+                  const rows = extractTableRows(processedText);
+                  if (rows.length > 0) {
+                    tableData = rows;
+                    tableTitle = "Results";
+                    console.log("✅ [DONE] Formatted as table with TableWithTile");
+                  }
+                }
                 console.log("📝 [DONE] Formatted as text output");
               } catch (err) {
                 console.log("📝 [DONE] Using raw text", err);
@@ -1293,7 +1383,9 @@ export default function Home() {
                 streaming: false,
                 isGraphResponse: isGraphResponse,  // ← Set graph flag
                 chartType: chartType,              // ← Store chart type
-                originalText: finalText            // ← Store original raw response before HTML processing
+                originalText: finalText,           // ← Store original raw response before HTML processing
+                tableData: tableData,              // ← Store table rows
+                tableTitle: tableTitle              // ← Store table title
               };
             }
             // Persist to per-session store so switching sessions keeps history
@@ -1453,6 +1545,11 @@ export default function Home() {
     setSessionId(newSessionId);
     sessionIdRef.current = newSessionId;
 
+    // Auto-close sidebar on mobile
+    if (responsive.isMobile) {
+      setSidebarOpen(false);
+    }
+
     // Immediately show this new chat at the top of the history list
     setChatSessions(prev => {
       const existing = prev.filter(s => s.id !== newSessionId);
@@ -1531,6 +1628,11 @@ export default function Home() {
       text.includes('large-dataset-wrapper')
     ) {
       console.log("✅ [HISTORY] Message already HTML formatted (from cache) - skipping");
+      // Try to extract table data from HTML
+      const rows = extractTableRows(text);
+      if (rows.length > 0) {
+        return { ...m, text, tableData: rows, tableTitle: "Data Results" };
+      }
       return m;
     }
           
@@ -1541,6 +1643,11 @@ export default function Home() {
       const largeDatasetHTML = renderLargeDataset(cleanedText);
       if (largeDatasetHTML) {
         console.log("✅ [HISTORY] Formatted as large dataset table");
+        // Try to extract table rows for TableWithTile
+        const rows = extractTableRows(largeDatasetHTML);
+        if (rows.length > 0) {
+          return { ...m, text: largeDatasetHTML, tableData: rows, tableTitle: "Data Results" };
+        }
         return { ...m, text: largeDatasetHTML };
       }
       
@@ -1549,6 +1656,13 @@ export default function Home() {
       try {
         const formattedText = formatOutput(cleanedText);
         console.log("✅ [HISTORY] Formatted as text output");
+        // Try to extract table rows if HTML contains table
+        if (formattedText.includes('<table')) {
+          const rows = extractTableRows(formattedText);
+          if (rows.length > 0) {
+            return { ...m, text: formattedText, tableData: rows, tableTitle: "Results" };
+          }
+        }
         return { ...m, text: formattedText };
       } catch (err) {
         // Not JSON → treat as already formatted or plain text
@@ -1564,6 +1678,11 @@ export default function Home() {
     if (isLoading) {
       setMessages(prev => [...prev, { role: "error", text: "Please wait for the current response to finish before switching chats." }]);
       return;
+    }
+
+    // Auto-close sidebar on mobile
+    if (responsive.isMobile) {
+      setSidebarOpen(false);
     }
 
     // Capture the currently active session ID
@@ -1883,12 +2002,21 @@ export default function Home() {
       {/* Content above background (MainLayout-style) */}
       <div className="app-content-wrapper">
       {/* ── Sidebar ─────────────────────────────────────────────────────── */}
-      <div className="sidebar-shell">
+      <div 
+        className="sidebar-shell" 
+        style={{ 
+          display: sidebarOpen ? 'flex' : responsive.isMobile ? 'none' : 'flex',
+          position: responsive.isMobile && sidebarOpen ? 'fixed' : 'relative',
+          top: 0,
+          left: 0,
+          zIndex: responsive.isMobile && sidebarOpen ? 9999 : 2,
+        }}
+      >
       <aside className="sidebar">
         {/* Sidebar Header with Logo */}
         <div className="sidebar-header">
           
-          <div style={{ display: "flex", alignItems: "center" }}>
+          <div style={{ display: "flex", alignItems: "center", flex: 1 }}>
             <div
               className="brand-box"
               style={loginPageClientLogoPath ? { width: "100%", maxWidth: 220, height: "auto", minHeight: 56, maxHeight: 72, padding: 0, border: "none", borderRadius: 0 } : undefined}
@@ -1904,7 +2032,28 @@ export default function Home() {
               )}
             </div>
           </div>
-          <div />
+          {/* Close button on mobile */}
+          {responsive.isMobile && (
+            <button
+              className="sidebar-close-btn"
+              onClick={() => setSidebarOpen(false)}
+              title="Close sidebar"
+              aria-label="Close sidebar"
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: 'var(--color-text)',
+                cursor: 'pointer',
+                padding: '8px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              <IconX size={24} />
+            </button>
+          )}
           <div className="hamburger-wrapper" ref={menuRef}>
             <button
               className="hamburger-btn"
@@ -2059,6 +2208,93 @@ export default function Home() {
       {/* ── Main Content ─────────────────────────────────────────────────── */}
       <div className="main-content">
 
+        {/* Mobile Header with Menu Button - sticky at top */}
+        {responsive.isMobile && (
+          <div
+            style={{
+              position: 'sticky',
+              top: 0,
+              left: 0,
+              right: 0,
+              height: '36px',
+              background: 'var(--color-bg-alt)',
+              borderBottom: '1px solid var(--color-border)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              paddingLeft: '12px',
+              paddingRight: '12px',
+              zIndex: 100,
+              backdropFilter: 'blur(10px)',
+            }}
+          >
+            <button
+              onClick={() => setSidebarOpen(true)}
+              title="Open sidebar"
+              aria-label="Open sidebar"
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: 'var(--color-text)',
+                cursor: 'pointer',
+                padding: '8px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              <IconMenu2 size={24} />
+            </button>
+            <div style={{ fontSize: '14px', fontWeight: '500', flex: 1, textAlign: 'center' }}>
+              Ask AI
+            </div>
+            <div style={{ width: '40px' }} />
+          </div>
+        )}
+
+        {/* Mobile Menu Button - legacy, disabled when header is shown */}
+        {false && responsive.isMobile && (
+          <button
+            className="mobile-menu-btn"
+            onClick={() => setSidebarOpen(true)}
+            title="Open sidebar"
+            aria-label="Open sidebar"
+            style={{
+              position: 'fixed',
+              top: 16,
+              left: 16,
+              zIndex: 1000,
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--color-text)',
+              cursor: 'pointer',
+              padding: '8px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'all 0.2s ease',
+              opacity: sidebarOpen ? 0 : 1,
+              pointerEvents: sidebarOpen ? 'none' : 'auto',
+            }}
+          >
+            <IconMenu2 size={24} />
+          </button>
+        )}
+
+        {/* Overlay when sidebar is open on mobile */}
+        {responsive.isMobile && sidebarOpen && (
+          <div
+            style={{
+              position: 'fixed',
+              inset: 0,
+              backgroundColor: 'rgba(0, 0, 0, 0.5)',
+              zIndex: 9998,
+            }}
+            onClick={() => setSidebarOpen(false)}
+          />
+        )}
+
         {/* History loading spinner */}
         {historyLoading && (
           <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -2142,7 +2378,7 @@ export default function Home() {
                       <div className="avatar-box"><IconAI/></div>
                     )}
 
-                    <div className={`message-bubble ${msg.role}`}>
+                    <div className={`message-bubble ${msg.role}${isGraphMsg ? ' graph-message' : ''}`}>
 
                       {isAudio ? (
                     /* ── Audio Message: Show player UI ── */
@@ -2160,7 +2396,13 @@ export default function Home() {
                       };
 
                       return (
-                        <div className="voice-message-container">
+                        <div className="voice-message-container" style={{
+                          fontSize: responsive.isMobile ? '12px' : responsive.isTablet ? '13px' : '14px',
+                          display: 'flex',
+                          gap: responsive.isMobile ? '8px' : '12px',
+                          alignItems: 'center',
+                          width: '100%',
+                        }}>
                           <button
                             className="voice-message-play-btn"
                             onClick={() => handleAudioPlayback(idx, msg.audioUrl, msg.audioDuration || 0)}
@@ -2179,7 +2421,9 @@ export default function Home() {
                               />
                             </div>
                             {/* BUG 1 FIX: show real duration; if playing show currentTime / total */}
-                            <div className="voice-message-duration">
+                            <div className="voice-message-duration" style={{
+                              fontSize: responsive.isMobile ? '11px' : responsive.isTablet ? '12px' : '13px',
+                            }}>
                               {audioPlayingIndex === idx
                                 ? `${fmtSec(currentSec)} / ${fmtSec(realDur)}`
                                 : fmtSec(realDur)
@@ -2203,32 +2447,72 @@ export default function Home() {
                       ) : isGraphMsg && graphData ? (
                         /* ── Graph: Render chart with per-message type switcher ── */
                         (() => {
-                          const msgChartType = msg.chartType || 'vertical-bar';
+                          const chartSize = getResponsivePieChartSize(responsive.screen);
+                          return (
+                        <div style={{
+                          display: 'flex',
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                          width: '100%',
+                          maxWidth: chartSize.containerMaxWidth,
+                          marginTop: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
+                          marginBottom: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
+                          marginLeft: 'auto',
+                          marginRight: 'auto',
+                          overflow: responsive.isMobile ? 'visible' : 'visible',
+                          paddingLeft: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
+                          paddingRight: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
+                          paddingTop: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
+                          paddingBottom: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
+                        }}>
+                          {(() => {
+                            const msgChartType = msg.chartType || 'vertical-bar';
 
-                          const handleChartTypeChange = (newType: ChartType) => {
-                            setChartType(newType);
-                            setMessages(prev => {
-                              const updated = [...prev];
-                              updated[idx] = { ...updated[idx], chartType: newType };
-                              return updated;
-                            });
-                          };
+                            const handleChartTypeChange = (newType: ChartType) => {
+                              setChartType(newType);
+                              setMessages(prev => {
+                                const updated = [...prev];
+                                updated[idx] = { ...updated[idx], chartType: newType };
+                                return updated;
+                              });
+                            };
 
-                          if (msgChartType === 'horizontal-bar') {
-                            return <HorizontalBarChartRenderer key={`hbar-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
-                          } else if (msgChartType === 'pie') {
-                            return <PieChartRenderer key={`pie-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
-                          } else if (msgChartType === 'line') {
-                            return <LineChartRenderer key={`line-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
-                          } else {
-                            return <BarChartRenderer key={`bar-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
-                          }
-                        })()
+                            if (msgChartType === 'horizontal-bar') {
+                              return <HorizontalBarChartRenderer key={`hbar-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
+                            } else if (msgChartType === 'pie') {
+                              return <PieChartRenderer key={`pie-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
+                            } else if (msgChartType === 'line') {
+                              return <LineChartRenderer key={`line-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
+                            } else {
+                              return <BarChartRenderer key={`bar-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
+                            }
+                          })()}
+                        </div>
+                          );
+                        })()  
+
+                      ) : msg.tableData && msg.tableData.length > 0 ? (
+                        /* ── Table: Render with TableWithTile component with toggle buttons for table/tile views ── */
+                        <TableWithTile 
+                          rows={msg.tableData}
+                          title={msg.tableTitle || "Data"}
+                          htmlTableContent={msg.text}
+                        />
 
                       ) : (
                         /* ── Complete: already formatted at [DONE] time ── */
-                        <div className="ai-bubble">
-                          <div dangerouslySetInnerHTML={{ __html: msg.text }} />
+                        <div className="ai-bubble" style={{
+                          fontSize: responsive.isMobile ? '13px' : responsive.isTablet ? '14px' : '15px',
+                          lineHeight: 1.5,
+                          maxWidth: responsive.isMobile ? '90%' : responsive.isTablet ? '85%' : '75%',
+                          display: 'flex',
+                          justifyContent: 'center',
+                          alignItems: 'flex-start',
+                        }}>
+                          <div dangerouslySetInnerHTML={{ __html: msg.text }} style={{
+                            width: '100%',
+                            textAlign: 'left',
+                          }} />
                         </div>
                       )}
 

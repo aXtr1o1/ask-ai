@@ -17,6 +17,7 @@ import {
 } from "recharts";
 import { IconChartBar, IconChartArea, IconChartPie, IconChartLine, IconChevronDown } from "@tabler/icons-react";
 import { useTheme } from "./useTheme";
+import { useResponsive, getResponsivePieChartSize } from "@/app/hooks/useResponsive";
 
 // ─── Graph Response Interface ────────────────────────────────────────────────
 export interface GraphData {
@@ -461,6 +462,8 @@ export function LineChartRenderer({ graphData, currentChartType, onChartTypeChan
 // ─── Pie Chart Component ────────────────────────────────────────────────────
 export function PieChartRenderer({ graphData, currentChartType, onChartTypeChange }: { graphData: GraphData; currentChartType?: ChartType; onChartTypeChange?: (type: ChartType) => void }) { 
     const [activeIndex, setActiveIndex] = useState<number | null>(null);
+    const responsive = useResponsive();
+    const chartSize = getResponsivePieChartSize(responsive.screen);
     const tooltipStyle = { 
     background: 'var(--color-bg-alt)', 
     border: '1px solid var(--color-border)', 
@@ -484,10 +487,10 @@ export function PieChartRenderer({ graphData, currentChartType, onChartTypeChang
         {graphData.context_summary}
       </div>
 
-      {/* Pie chart container — compact size for centered pie with visible labels */}
-      <div className="graph-chart-container" style={{ position: 'relative', maxWidth: '600px', margin: '0 auto', border: 'none', boxShadow: 'none' }}>
-        <div style={{ width: "100%", minWidth: "600px", height: "100%", display: 'flex', justifyContent: 'center', alignItems: 'center', border: 'none' }}>
-          <ResponsiveContainer width="100%" height="100%">
+      {/* Pie chart container — responsive size based on screen */}
+      <div className="graph-chart-container" style={{ position: 'relative', maxWidth: chartSize.containerMaxWidth, margin: '0 auto', border: 'none', boxShadow: 'none' }}>
+        <div style={{ width: chartSize.chartWidth, minWidth: chartSize.containerMinWidth, height: chartSize.height, display: 'flex', justifyContent: 'center', alignItems: 'center', border: 'none' }}>
+          <ResponsiveContainer width="100%" height={chartSize.chartHeight}>
             <PieChart margin={{ top: 10, right: 80, bottom: 10, left: 80 }}>
               <Pie
                 data={pieData}
@@ -495,7 +498,7 @@ export function PieChartRenderer({ graphData, currentChartType, onChartTypeChang
                 cy="50%"
                 labelLine={false}
                 label={false}
-                outerRadius={120}
+                outerRadius={responsive.isMobile ? 80 : responsive.isTablet ? 100 : 120}
                 fill="#8884d8"
                 dataKey="value"
                 onMouseEnter={(_, index) => setActiveIndex(index)}

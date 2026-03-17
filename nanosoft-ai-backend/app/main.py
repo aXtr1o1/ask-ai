@@ -8,10 +8,9 @@ import logging
 import asyncio
 import json
 from fastapi import WebSocket, WebSocketDisconnect
-import time
 
 from app.models.schemas import ChatRequest
-import base64
+import base64 
 from app.config import settings
 from app.services.langchain_service import langchain_service
 from app.prompts.system_prompt import get_system_prompt
@@ -21,6 +20,9 @@ from app.api.database.postgres_client import get_pool
 from app.services.session_service import get_sessions_for_user, get_chat_history_for_session
 from app.models.schemas import SessionRequest, ClientInsertionRequest
 from app.services.audio_service import convert_audio_to_text
+
+
+
 
 logger = logging.getLogger("chatbot_app")
 logger.setLevel(logging.INFO)
@@ -46,20 +48,22 @@ chatbot_app.add_middleware(
 # API router — all backend endpoints under /api for nginx routing
 api_router = APIRouter(prefix="/api", tags=["api"])
 
+# VALID_USERNAMES = {"v4demo", "poc"}
+# VALID_USERNAMES = {"v4demo", "poc"}
+
 # =====================================================
-# In-Memory Store with TTL cleanup
+# In-Memory Store
 #
 # Structure:
 # {
 #   "session-abc-123": {
 #     "lc_memory": [HumanMessage, AIMessage, ...],
 #     "history": [...],
-#     "user_name": "v4demo",
-#     "last_activity": timestamp
+#     "user_name": "v4demo"
 #   }
 # }
 # =====================================================
-MAX_HISTORY = settings.MAX_HISTORY
+MAX_HISTORY =  settings.MAX_HISTORY
 memory_store = {}
 MAX_AUDIO_BYTES = 500 * 1024  # 500 KB
 
@@ -73,6 +77,7 @@ NO_WORDS  = {"no", "nope", "nah", "wrong", "incorrect", "not right",
 #Track sessions already saved by frontend HTTP POST
 # So WebSocketDisconnect does NOT save again (prevents double save)
 frontend_saved_sessions: set = set()
+
 
 #chat memory for debugging purpose. 
 def print_memory(session_id: str):
@@ -159,13 +164,6 @@ async def ws_chat_endpoint(websocket: WebSocket):
 
             #  Track current session_id for disconnect save
             current_session_id = session_id
-
-            # Periodic cleanup of expired sessions (every 10th request)
-            if hash(session_id) % 10 == 0:
-                cleanup_expired_sessions()
-
-            # Update session activity
-            update_session_activity(session_id)
             audio_base64   = None   # will hold base64 string if audio
             query_to_store = None
             # ==================================================================
@@ -617,4 +615,3 @@ async def startup_event():
 @chatbot_app.get("/health", tags=["Health"])
 def health():
     return {"status": "ok", "service": "Facility Management AI Assistant"}
-
