@@ -3242,7 +3242,7 @@ textarea:focus-visible {
   overflow-x: auto;          /* Enable horizontal scrolling */
   overflow: visible;         /* Allow dropdown menu to open upward */
   margin: 12px 0;
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--color-bg-alt);
   border-radius: 8px;
   padding: 8px;              /* Reduced from 16px to minimize whitespace */
   scroll-behavior: smooth;   /* Smooth scrolling */

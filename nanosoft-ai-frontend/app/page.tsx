@@ -12,6 +12,7 @@ import { useVoiceRecorder, RecordingInterface, VoicePreviewBar, VoiceMicButton }
 import { parseGraphData, BarChartRenderer, HorizontalBarChartRenderer, LineChartRenderer, PieChartRenderer, ChartType } from "./components/GraphRenderer";
 import TableWithTile, { TableWithTileRow } from "./components/TableWithTile";
 import UpgradePlan from "./components/UpgradePlan";
+import WalkthroughPopup from "./components/WalkthroughPopup";
 import { IconUser, IconMicrophone, IconPlayerPlay, IconPlayerPause, IconTrash, IconArrowUp, IconChartBar, IconList, IconLayoutGrid, IconMenu2, IconX, IconCrown } from "@tabler/icons-react";
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface Message {
@@ -2656,6 +2657,9 @@ export default function Home() {
             </div>
           </div>
         )}
+        
+        {/* Walkthrough Popup */}
+        <WalkthroughPopup />
       </div>
       </div>
     </div>
