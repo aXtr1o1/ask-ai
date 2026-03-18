@@ -11,7 +11,8 @@ import { useTheme } from "./components/useTheme";
 import { useVoiceRecorder, RecordingInterface, VoicePreviewBar, VoiceMicButton } from "./components/VoiceRecorder";
 import { parseGraphData, BarChartRenderer, HorizontalBarChartRenderer, LineChartRenderer, PieChartRenderer, ChartType } from "./components/GraphRenderer";
 import TableWithTile, { TableWithTileRow } from "./components/TableWithTile";
-import { IconUser, IconMicrophone, IconPlayerPlay, IconPlayerPause, IconTrash, IconArrowUp, IconChartBar, IconList, IconLayoutGrid, IconMenu2, IconX } from "@tabler/icons-react";
+import UpgradePlan from "./components/UpgradePlan";
+import { IconUser, IconMicrophone, IconPlayerPlay, IconPlayerPause, IconTrash, IconArrowUp, IconChartBar, IconList, IconLayoutGrid, IconMenu2, IconX, IconCrown } from "@tabler/icons-react";
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface Message {
   role: "user" | "ai" | "error";
@@ -319,19 +320,25 @@ function renderLargeDataset(text: string): string | null {
   }
 
   // ─────────────────────────────────────────
-  // Detect large dataset
+  // Detect data (ANY size - no limits)
   // ─────────────────────────────────────────
   let records = [];
 
+  // Accept ANY array, regardless of size
   if (parsed.type === "large_dataset" && Array.isArray(parsed.records)) {
     records = parsed.records;
-  } else if (Array.isArray(parsed.records) && parsed.records.length > 100) {
+  } else if (Array.isArray(parsed.records)) {
     records = parsed.records;
-  } else if (Array.isArray(parsed.p_list) && parsed.p_list.length > 100) {
+  } else if (Array.isArray(parsed.p_list)) {
     records = parsed.p_list;
-  } else if (Array.isArray(parsed.data) && parsed.data.length > 100) {
+  } else if (Array.isArray(parsed.data)) {
     records = parsed.data;
   } else {
+    return null;
+  }
+
+  // Return null only if no records found
+  if (!records || records.length === 0) {
     return null;
   }
 
@@ -1001,6 +1008,7 @@ export default function Home() {
   const [loggedInUser, setLoggedInUser] = useState<string | null>(null); // backend username (client_name)
   const [authChecked,  setAuthChecked]  = useState<boolean>(false);
   const [menuOpen,     setMenuOpen]     = useState(false);
+  const [showUpgradePlan, setShowUpgradePlan] = useState(false);
   const [sidebarOpen,  setSidebarOpen]  = useState(true);  // Will be auto-closed by useEffect if mobile is detected
   const [wsConnectionState, setWsConnectionState] = useState<'connecting'|'connected'|'failed'>('connecting');
   const [isGraphMode, setIsGraphMode] = useState<boolean>(false);
@@ -1146,6 +1154,22 @@ export default function Home() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length, isLoading]);
+
+  // Handle body overflow when upgrade plan modal opens/closes
+  useEffect(() => {
+    if (showUpgradePlan) {
+      document.body.classList.add('upgrade-plan-open');
+      // Close sidebar on mobile/tablet when modal opens
+      if (responsive.isMobile || responsive.isTablet) {
+        setSidebarOpen(false);
+      }
+    } else {
+      document.body.classList.remove('upgrade-plan-open');
+    }
+    return () => {
+      document.body.classList.remove('upgrade-plan-open');
+    };
+  }, [showUpgradePlan, responsive.isMobile, responsive.isTablet]);
 
   // Auto-resize textarea
   const resizeTA = () => {
@@ -1339,33 +1363,24 @@ export default function Home() {
             // 🔑 SECOND: Extract response content (removes session_id wrapper)
             const cleanedText = extractResponseContent(finalText);
            
-            // 🔑 THIRD: TRY RENDERING AS LARGE DATASET TABLE FIRST
+            // 🔑 THIRD: ALWAYS TRY RENDERING AS TABLE STRUCTURE FIRST (ALL SIZES, NO LIMITS)
             const largeDatasetHTML = renderLargeDataset(cleanedText);
            
             if (largeDatasetHTML) {
-              // Successfully rendered as large dataset table
+              // Successfully rendered as unified table structure (any size)
               processedText = largeDatasetHTML;
-              // Try to extract table rows for TableWithTile component
+              // Always extract table rows for TableWithTile component
               const rows = extractTableRows(largeDatasetHTML);
               if (rows.length > 0) {
                 tableData = rows;
-                tableTitle = "Data Results";
-                console.log("✅ [DONE] Rendered as large dataset table with TableWithTile");
+                tableTitle = "Data";
+                console.log("✅ [DONE] Rendered as unified table structure (" + rows.length + " rows)");
               }
             } else {
-              // Not a large dataset → try to format as text/table
+              // Not tabular data → format as text output only
               try {
                 processedText = formatOutput(cleanedText);
-                // Try to extract table rows if HTML contains table
-                if (processedText.includes('<table')) {
-                  const rows = extractTableRows(processedText);
-                  if (rows.length > 0) {
-                    tableData = rows;
-                    tableTitle = "Results";
-                    console.log("✅ [DONE] Formatted as table with TableWithTile");
-                  }
-                }
-                console.log("📝 [DONE] Formatted as text output");
+                console.log("📝 [DONE] Formatted as text");
               } catch (err) {
                 console.log("📝 [DONE] Using raw text", err);
                 processedText = finalText;
@@ -1639,30 +1654,22 @@ export default function Home() {
       // Extract response content (removes session_id wrapper)
       const cleanedText = decodeEntities(extractResponseContent(text));
      
-      // Try to render as large dataset table first
+      // ALWAYS TRY RENDERING AS UNIFIED TABLE STRUCTURE FIRST (ALL SIZES)
       const largeDatasetHTML = renderLargeDataset(cleanedText);
       if (largeDatasetHTML) {
-        console.log("✅ [HISTORY] Formatted as large dataset table");
-        // Try to extract table rows for TableWithTile
+        console.log("✅ [HISTORY] Rendered as unified table structure");
+        // Always extract table rows for TableWithTile
         const rows = extractTableRows(largeDatasetHTML);
         if (rows.length > 0) {
-          return { ...m, text: largeDatasetHTML, tableData: rows, tableTitle: "Data Results" };
+          return { ...m, text: largeDatasetHTML, tableData: rows, tableTitle: "Data" };
         }
         return { ...m, text: largeDatasetHTML };
       }
       
-      
-      // Try to parse as JSON and format as text
+      // Not tabular data → try to format as text
       try {
         const formattedText = formatOutput(cleanedText);
         console.log("✅ [HISTORY] Formatted as text output");
-        // Try to extract table rows if HTML contains table
-        if (formattedText.includes('<table')) {
-          const rows = extractTableRows(formattedText);
-          if (rows.length > 0) {
-            return { ...m, text: formattedText, tableData: rows, tableTitle: "Results" };
-          }
-        }
         return { ...m, text: formattedText };
       } catch (err) {
         // Not JSON → treat as already formatted or plain text
@@ -2078,6 +2085,24 @@ export default function Home() {
                 <div className="profile-dropdown-item profile-action-btn">
                   <ThemeToggle />
                 </div>
+                <div className="profile-divider" />
+                <button
+                  className="profile-dropdown-item profile-action-btn"
+                  onClick={() => {
+                    setShowUpgradePlan(true);
+                    setMenuOpen(false);
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px',
+                    color: '#d4af37',
+                    fontWeight: 600,
+                  }}
+                >
+                  <IconCrown size={18} />
+                  <span>Upgrade Plan</span>
+                </button>
                 <div className="profile-divider" />
                 <button
                   className="profile-dropdown-item profile-action-btn profile-logout"
@@ -2610,6 +2635,27 @@ export default function Home() {
           )}
           <p className="footer-disclaimer">NanoSoft Ask AI can make mistakes. Verify important legal information.</p>
         </div>
+
+        {/* Upgrade Plan Modal */}
+        {showUpgradePlan && (
+          <div 
+            className="upgrade-plan-backdrop"
+            onClick={() => setShowUpgradePlan(false)}
+          >
+            <div 
+              className="upgrade-plan-modal"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                onClick={() => setShowUpgradePlan(false)}
+                className="upgrade-plan-close-btn"
+              >
+                ×
+              </button>
+              <UpgradePlan />
+            </div>
+          </div>
+        )}
       </div>
       </div>
     </div>

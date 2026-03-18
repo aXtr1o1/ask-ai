@@ -328,7 +328,7 @@ class LangChainService:
                     else:
                         logger.info("📋 Intent=LIST — sending full records to model | query='%s'", user_query)
 
-                    MAX_DISPLAY = 100
+                    MAX_DISPLAY = 1000000
                     p_list_for_model = p_list if len(p_list) <= MAX_DISPLAY else p_list[:MAX_DISPLAY]
                     is_large_result = len(p_list) > MAX_DISPLAY
 

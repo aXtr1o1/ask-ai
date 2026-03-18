@@ -45,10 +45,10 @@ export default function TableWithTile({
           display: 'flex',
           justifyContent: 'flex-end',
           alignItems: 'center',
-          gap: 16,
+          gap: 2,
           zIndex: 1000
         }}>
-          {/* Table View Button (Left) */}
+          {/* Table View Button (Left) - Toggle to Table */}
           <button
             onClick={() => setViewMode("table")}
             title="Switch to Table View"
@@ -66,7 +66,7 @@ export default function TableWithTile({
               cursor: 'pointer',
               fontSize: '12px',
               fontWeight: 600,
-              transition: 'all 0.1s ease-in-out',
+              transition: 'all 0.2s ease-in-out',
               backdropFilter: 'blur(8px)',
               transform: 'scale(1)',
               opacity: viewMode === "table" ? 1 : 0.6,
@@ -90,46 +90,7 @@ export default function TableWithTile({
             </span>
           </button>
 
-          {/* Center Toggle Switch */}
-          <button
-            onClick={() => setViewMode(viewMode === "table" ? "tile" : "table")}
-            title="Toggle between Table and Tile View"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: viewMode === "table" ? 'flex-start' : 'flex-end',
-              width: '48px',
-              height: '24px',
-              padding: '2px',
-              borderRadius: '12px',
-              background: 'linear-gradient(180deg, #2d3d4d 0%, #1a2a3a 100%)',
-              border: '1.5px solid #d4af37',
-              cursor: 'pointer',
-              transition: 'all 0.3s ease-in-out',
-              backdropFilter: 'blur(8px)',
-              boxShadow: '0 0 8px rgba(212, 175, 55, 0.4)',
-            }}
-            onMouseDown={e => {
-              (e.currentTarget as HTMLElement).style.transform = 'scale(0.95)';
-            }}
-            onMouseUp={e => {
-              (e.currentTarget as HTMLElement).style.transform = 'scale(1)';
-            }}
-          >
-            {/* Toggle circle */}
-            <div style={{
-              width: '18px',
-              height: '18px',
-              borderRadius: '50%',
-              background: viewMode === "table" 
-                ? 'linear-gradient(180deg, #ae8625 0%, #f7ef8a 35%, #d2ac47 65%, #edc967 100%)'
-                : 'linear-gradient(180deg, #ae8625 0%, #f7ef8a 35%, #d2ac47 65%, #edc967 100%)',
-              boxShadow: '0 0 8px rgba(212, 175, 55, 0.8)',
-              transition: 'all 0.3s ease-in-out',
-            }} />
-          </button>
-
-          {/* Tile View Button (Right) */}
+          {/* Tile View Button (Right) - Toggle to Tile */}
           <button
             onClick={() => setViewMode("tile")}
             title="Switch to Tile View"
@@ -147,7 +108,7 @@ export default function TableWithTile({
               cursor: 'pointer',
               fontSize: '12px',
               fontWeight: 600,
-              transition: 'all 0.1s ease-in-out',
+              transition: 'all 0.2s ease-in-out',
               backdropFilter: 'blur(8px)',
               transform: 'scale(1)',
               opacity: viewMode === "tile" ? 1 : 0.6,
@@ -174,13 +135,13 @@ export default function TableWithTile({
 
         <div className="content-shell" style={{ paddingTop: 0 }}>
         <div className="data-view-shell" style={{ 
-          transition: 'opacity 0.15s ease-in-out',
+          transition: 'all 0.2s ease-in-out',
           opacity: 1
         }}>
           {/* Table View - Old HTML format */}
           {viewMode === "table" && (
             <div className="data-view-panel is-active" style={{
-              animation: 'fadeIn 0.15s ease-in-out'
+              animation: 'fadeIn 0.2s ease-in-out'
             }}>
               {htmlTableContent ? (
                 <div dangerouslySetInnerHTML={{ __html: htmlTableContent }} />
@@ -226,7 +187,7 @@ export default function TableWithTile({
           {/* Tile View */}
           {viewMode === "tile" && (
             <div className="data-view-panel is-active" style={{
-              animation: 'fadeIn 0.15s ease-in-out'
+              animation: 'fadeIn 0.2s ease-in-out'
             }}>
               <div className="tile-cards-grid" style={{
                 gridTemplateColumns: responsive.isMobile 
