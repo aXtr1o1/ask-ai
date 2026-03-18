@@ -20,8 +20,7 @@ from app.api.database.postgres_client import get_pool
 from app.services.session_service import get_sessions_for_user, get_chat_history_for_session
 from app.models.schemas import SessionRequest, ClientInsertionRequest
 from app.services.audio_service import convert_audio_to_text
-
-
+from app.services.quota_service import quota_fallback_service
 
 
 logger = logging.getLogger("chatbot_app")
@@ -329,6 +328,9 @@ async def ws_chat_endpoint(websocket: WebSocket):
             # ==================================================================
             # ── NORMAL TEXT PATH — isAudio = false
             # ==================================================================
+            # ==================================================================
+            # ── NORMAL TEXT PATH — isAudio = false
+            # ==================================================================
             elif not pending_transcription:
                 user_query = data.get("query", "").strip()
                 query_to_store = user_query
@@ -338,8 +340,127 @@ async def ws_chat_endpoint(websocket: WebSocket):
                     logger.info("empty user query")
                     await websocket.send_text(json.dumps({"error": "Empty query"}))
                     continue
+                
+                # ✅ CHECK IF USER IS REPLYING TO QUOTA MENU
+                session_data = memory_store.get(session_id, {})
+                waiting_for_choice = session_data.get("waiting_for_table_choice", False)
+                
+                # ── QUOTA FALLBACK: user is choosing which table to query ──
+                if waiting_for_choice:
+                    logger.info(f"🔄 User replying to quota menu | reply: '{user_query}'")
+                    
+                    # Clear the flag immediately
+                    memory_store[session_id]["waiting_for_table_choice"] = False
+                    
+                    # Handle the user's table choice
+                    final_response_text, context_summary = quota_fallback_service.handle_user_table_choice(
+                        user_reply=user_query,
+                        user_name=user_name
+                    )
+                    
+                    if final_response_text is None:
+                        # Could not parse table type — ask again
+                        error_msg = (
+                            "I couldn't determine which table you want. "
+                            "Please reply with one of: **assets**, **ppm**, or **bdm**."
+                        )
+                        await websocket.send_text(json.dumps({
+                            "session_id": session_id,
+                            "response": error_msg
+                        }))
+                        await websocket.send_text("[DONE]")
+                        
+                        memory_store[session_id]["history"].append({
+                            "query": query_to_store,
+                            "assistant": error_msg,
+                            "context": error_msg,
+                            "is_audio": is_audio
+                        })
+                        logger.info("⚠️ Could not parse table choice — asked user again")
+                        continue
+                    
+                    # Successfully retrieved data — send to user
+                    await websocket.send_text(json.dumps({
+                        "session_id": session_id,
+                        "response": final_response_text
+                    }))
+                    await websocket.send_text("[DONE]")
+                    
+                    memory_store[session_id]["lc_memory"].append(HumanMessage(content=user_query))
+                    memory_store[session_id]["lc_memory"].append(AIMessage(content=context_summary))
+                    memory_store[session_id]["history"].append({
+                        "query": query_to_store,
+                        "assistant": final_response_text,
+                        "context": context_summary,
+                        "is_audio": is_audio
+                    })
+                    
+                    logger.info(f"✅ Quota fallback response sent | context: {context_summary}")
+                    print_memory(session_id)
+                    continue  # ← CRITICAL: Skip process_query completely
+                
+                # ── TWO-STEP TABLE: check if user is replying yes/no to table question
+                pending_table = session_data.get("pending_table")
+
+                if pending_table:
+                    reply = user_query.strip().lower()
+
+                    if reply in YES_WORDS:
+                        table_response = json.dumps({
+                            "context_summary": "Here is the detailed table you requested.",
+                            "records": pending_table
+                        })
+                        memory_store[session_id]["pending_table"] = None
+
+                        await websocket.send_text(json.dumps({
+                            "session_id": session_id,
+                            "response": table_response
+                        }))
+                        await websocket.send_text("[DONE]")
+
+                        memory_store[session_id]["lc_memory"].append(HumanMessage(content=user_query))
+                        memory_store[session_id]["lc_memory"].append(AIMessage(content="Table displayed."))
+                        memory_store[session_id]["history"].append({
+                            "query":     query_to_store,
+                            "assistant": table_response,
+                            "context":   "Table displayed on user request.",
+                            "is_audio":  is_audio
+                        })
+                        logger.info("✅ Table sent on user YES | records=%d", len(pending_table))
+                        print_memory(session_id)
+                        continue
+
+                    elif reply in NO_WORDS:
+                        memory_store[session_id]["pending_table"] = None
+                        no_msg = "No problem! Let me know if you have any other questions."
+
+                        await websocket.send_text(json.dumps({
+                            "session_id": session_id,
+                            "response": no_msg
+                        }))
+                        await websocket.send_text("[DONE]")
+
+                        memory_store[session_id]["lc_memory"].append(HumanMessage(content=user_query))
+                        memory_store[session_id]["lc_memory"].append(AIMessage(content=no_msg))
+                        memory_store[session_id]["history"].append({
+                            "query":     query_to_store,
+                            "assistant": no_msg,
+                            "context":   no_msg,
+                            "is_audio":  is_audio
+                        })
+                        logger.info("✅ User declined table")
+                        print_memory(session_id)
+                        continue
+
+                    else:
+                        # User sent a new query — clear pending and fall through
+                        memory_store[session_id]["pending_table"] = None
+                        logger.info("⚠️ Non-yes/no after table question — clearing pending_table, processing as new query")
             
+            # ── Continue to normal query processing ──
             logger.info(f"WS Request | user_name={user_name} | session_id={session_id} | query={user_query}")
+            
+        
                 
             if session_id not in memory_store:
                 memory_store[session_id] = {
@@ -375,12 +496,36 @@ async def ws_chat_endpoint(websocket: WebSocket):
             except Exception as e:
                 logger.error(f"❌ LangChain error: {e}", exc_info=True)
                 # ✅ Send specific message based on error type
-                if "timed out" in str(e).lower():
-                    final_response_text = " The request is taking too long. Please try again in a moment."
-                elif "quota" in str(e).lower() or "429" in str(e):
-                    final_response_text = " Service is temporarily busy due to high demand. Please try again in a few seconds."
+                if quota_fallback_service.is_quota_error(e):
+                    logger.warning("⚠️ Quota error caught in main.py - showing menu to user")
+                    
+                    # Get the quota exceeded message
+                    quota_message = quota_fallback_service.get_quota_exceeded_message()
+                    
+                    # Mark this session as waiting for user's table choice
+                    if session_id not in memory_store:
+                        memory_store[session_id] = {
+                            "lc_memory": [],
+                            "history": [],
+                            "user_name": user_name,
+                            "pending_transcription": None
+                        }
+                    
+                    # Set flag to indicate we're waiting for table choice
+                    memory_store[session_id]["waiting_for_table_choice"] = True
+                    
+                    final_response_text = quota_message
+                    context_summary = "AI quota exceeded - waiting for user table choice"
+                    
+                    logger.info("✅ Quota exceeded message sent to user")
+                
+                # Handle other errors
+                elif "timed out" in str(e).lower():
+                    final_response_text = "The request is taking too long. Please try again."
+                    context_summary = final_response_text
                 else:
-                    final_response_text = " Sorry, something went wrong. Please try again."
+                    final_response_text = "Sorry, something went wrong. Please try again."
+                    context_summary = final_response_text
                 
                 context_summary = final_response_text
 
@@ -398,6 +543,13 @@ async def ws_chat_endpoint(websocket: WebSocket):
             memory_store[session_id]["lc_memory"].append(HumanMessage(content=user_query))
             memory_store[session_id]["lc_memory"].append(AIMessage(content=context_summary))
             logger.info(f"🧠 lc_memory updated with context_summary | session={session_id}")
+            # ── Stash pending table data if response ends with table question
+            # ── langchain_service stores p_list_for_model on self for this purpose
+            pending_table = getattr(langchain_service, "_last_pending_table", None)
+            if pending_table:
+                memory_store[session_id]["pending_table"] = pending_table
+                langchain_service._last_pending_table = None  # clear after stashing
+                logger.info(f"📋 Stashed pending_table | records={len(pending_table)}")
 
             memory_store[session_id]["history"].append({
                 "query":     query_to_store,
