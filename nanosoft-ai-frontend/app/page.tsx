@@ -14,6 +14,7 @@ import TableWithTile, { TableWithTileRow } from "./components/TableWithTile";
 import UpgradePlan from "./components/UpgradePlan";
 import ManageAccount from "./components/ManageAccount/ManageAccount";
 import WalkthroughPopup from "./components/WalkthroughPopup";
+import LandingSuggestedQueries from "./components/LandingSuggestedQueries";
 import { IconUser, IconMicrophone, IconPlayerPlay, IconPlayerPause, IconTrash, IconArrowUp, IconChartBar, IconList, IconLayoutGrid, IconMenu2, IconX, IconCrown } from "@tabler/icons-react";
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface Message {
@@ -2018,6 +2019,108 @@ export default function Home() {
   const { theme } = useTheme();
   const isLanding = messages.length === 0;
 
+  /** Chat input + disclaimer; `landing` = centered column on empty state before first message */
+  const renderChatInputFooter = (variant: "landing" | "default") => (
+    <div
+      className={
+        variant === "landing" ? "input-footer input-footer--start" : "input-footer"
+      }
+    >
+      {voiceRecorder.isRecording && (
+        <div className={`voice-recording-overlay${voiceRecorder.closingRecording ? " closing" : ""}`}>
+          <RecordingInterface
+            recordingTime={voiceRecorder.recordingTime}
+            onCancel={voiceRecorder.cancelRecording}
+            formatTime={voiceRecorder.formatTime}
+          />
+        </div>
+      )}
+
+      {voiceRecorder.recordedAudioBlob ? (
+        <VoicePreviewBar
+          isPlaying={voiceRecorder.isPlaying}
+          playbackTime={voiceRecorder.playbackTime}
+          totalDuration={voiceRecorder.totalDuration}
+          displayTimeText={voiceRecorder.displayTimeText}
+          onTogglePlayback={voiceRecorder.togglePlayback}
+          onDelete={voiceRecorder.deleteRecording}
+          onSend={voiceRecorder.sendVoiceMessage}
+          isLoading={isLoading}
+          wsConnectionState={wsConnectionState}
+        />
+      ) : (
+        <div className="input-wrapper">
+          <textarea
+            ref={inputRef}
+            className="main-input"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            disabled={isLoading || wsConnectionState !== "connected"}
+            placeholder={
+              wsConnectionState === "connected" ? "Ask Anything..." : "Waiting for connection…"
+            }
+            rows={1}
+          />
+          <VoiceMicButton
+            forwardedRef={voiceRecorder.micButtonRef}
+            onClick={voiceRecorder.toggleRecording}
+            disabled={
+              isLoading ||
+              wsConnectionState !== "connected" ||
+              voiceRecorder.recordedAudioBlob !== null
+            }
+          />
+          <button
+            onClick={() => setIsGraphMode((p) => !p)}
+            title={isGraphMode ? "Graph mode ON — click to turn off" : "Click for graph output"}
+            style={{
+              background: isGraphMode
+                ? "linear-gradient(135deg, #d4af37, #f5c249)"
+                : "transparent",
+              border: isGraphMode
+                ? "1px solid #d4af37"
+                : "1px solid rgba(255,255,255,0.15)",
+              borderRadius: 8,
+              padding: "6px 8px",
+              cursor: "pointer",
+              color: isGraphMode ? "#000" : "#9CA3AF",
+              transition: "all 0.2s ease",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <IconChartBar size={18} stroke={1.5} />
+          </button>
+          <button
+            className="send-btn"
+            onClick={sendMessage}
+            disabled={isLoading || wsConnectionState !== "connected" || !input.trim()}
+          >
+            <IconArrowUp size={16} color="white" stroke={2} />
+          </button>
+        </div>
+      )}
+      {variant === "landing" && (
+        <LandingSuggestedQueries
+          onSelect={(q) => {
+            setInput(q);
+            requestAnimationFrame(() => inputRef.current?.focus());
+          }}
+          disabled={
+            isLoading ||
+            wsConnectionState !== "connected" ||
+            voiceRecorder.isRecording ||
+            !!voiceRecorder.recordedAudioBlob
+          }
+        />
+      )}
+      <p className="footer-disclaimer">
+      </p>
+    </div>
+  );
+
   if (!authChecked) {
     return (
       <div
@@ -2038,7 +2141,13 @@ export default function Home() {
     <div className="app-container app-container-with-bg">
       <BackgroundLayer theme={theme} />
       {/* Content above background (MainLayout-style) */}
-      <div className="app-content-wrapper">
+      <div
+        className={
+          !historyLoading && isLanding
+            ? "app-content-wrapper app-content-wrapper--landing-start"
+            : "app-content-wrapper"
+        }
+      >
       {/* ── Sidebar ─────────────────────────────────────────────────────── */}
       <div 
         className="sidebar-shell" 
@@ -2282,7 +2391,13 @@ export default function Home() {
       </div>
 
       {/* ── Main Content ─────────────────────────────────────────────────── */}
-      <div className="main-content">
+      <div
+        className={
+          !historyLoading && isLanding
+            ? "main-content main-content--landing-start"
+            : "main-content"
+        }
+      >
 
         {/* Mobile Header with Menu Button - sticky at top */}
         {responsive.isMobile && (
@@ -2364,8 +2479,11 @@ export default function Home() {
             style={{
               position: 'fixed',
               inset: 0,
-              backgroundColor: 'rgba(0, 0, 0, 0.5)',
               zIndex: 9998,
+              // Blur the background behind the sidebar (mobile "max blur")
+              backgroundColor: 'rgba(0, 0, 0, 0.35)',
+              backdropFilter: 'blur(30px) saturate(130%)',
+              WebkitBackdropFilter: 'blur(30px) saturate(130%)',
             }}
             onClick={() => setSidebarOpen(false)}
           />
@@ -2389,27 +2507,33 @@ export default function Home() {
           </div>
         )}
 
-        {/* Landing */}
+        {/* Landing — welcome shifted up; input vertically centered (only before first message) */}
         {!historyLoading && isLanding && (
-          <div className="landing-container">
-            <div className="landing-card">
-              <h1
-                style={{
-                  fontSize: 32,
-                  fontWeight: 700,
-                  marginBottom: 16,
-                  background: "linear-gradient(180deg, #AE8625 0%, #F7EF8A 35%, #D2AC47 65%, #EDC967 100%)",
-                  backgroundSize: "200% 200%",
-                  WebkitBackgroundClip: "text",
-                  backgroundClip: "text",
-                  WebkitTextFillColor: "transparent",
-                  animation: "goldShine 3s ease-in-out infinite",
-                }}
-              >
-                Welcome to Ask AI
-              </h1>
-              <p className="landing-subtitle">Let's work together buddy</p>
+          <div className="landing-start-column">
+            <div className="landing-start-spacer-top" aria-hidden />
+            <div className="landing-container landing-container--start">
+              <div className="landing-card">
+                <h1
+                  style={{
+                    fontSize: 32,
+                    fontWeight: 700,
+                    marginBottom: 16,
+                    background:
+                      "linear-gradient(180deg, #AE8625 0%, #F7EF8A 35%, #D2AC47 65%, #EDC967 100%)",
+                    backgroundSize: "200% 200%",
+                    WebkitBackgroundClip: "text",
+                    backgroundClip: "text",
+                    WebkitTextFillColor: "transparent",
+                    animation: "goldShine 3s ease-in-out infinite",
+                  }}
+                >
+                  Welcome to Ask AI
+                </h1>
+                <p className="landing-subtitle">{"Let's work together buddy"}</p>
+              </div>
             </div>
+            {renderChatInputFooter("landing")}
+            <div className="landing-start-spacer-bottom" aria-hidden />
           </div>
         )}
 
@@ -2616,76 +2740,8 @@ export default function Home() {
           </div>
         )}
 
-        {/* Input footer */}
-        <div className="input-footer">
-          {voiceRecorder.isRecording && (
-            <div className={`voice-recording-overlay${voiceRecorder.closingRecording ? ' closing' : ''}`}>
-              <RecordingInterface
-                recordingTime={voiceRecorder.recordingTime}
-                onCancel={voiceRecorder.cancelRecording}
-                formatTime={voiceRecorder.formatTime}
-              />
-            </div>
-          )}
-         
-          {voiceRecorder.recordedAudioBlob ? (
-            <VoicePreviewBar
-              isPlaying={voiceRecorder.isPlaying}
-              playbackTime={voiceRecorder.playbackTime}
-              totalDuration={voiceRecorder.totalDuration}
-              displayTimeText={voiceRecorder.displayTimeText}
-              onTogglePlayback={voiceRecorder.togglePlayback}
-              onDelete={voiceRecorder.deleteRecording}
-              onSend={voiceRecorder.sendVoiceMessage}
-              isLoading={isLoading}
-              wsConnectionState={wsConnectionState}
-            />
-          ) : (
-            <div className="input-wrapper">
-              <textarea
-                ref={inputRef}
-                className="main-input"
-                value={input}
-                onChange={e => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                disabled={isLoading || wsConnectionState !== 'connected'}
-                placeholder={wsConnectionState === 'connected' ? "Ask Anything..." : "Waiting for connection…"}
-                rows={1}
-              />
-              <VoiceMicButton
-                forwardedRef={voiceRecorder.micButtonRef}
-                onClick={voiceRecorder.toggleRecording}
-                disabled={isLoading || wsConnectionState !== 'connected' || voiceRecorder.recordedAudioBlob !== null}
-              />
-              <button
-                onClick={() => setIsGraphMode(p => !p)}
-                title={isGraphMode ? "Graph mode ON — click to turn off" : "Click for graph output"}
-                style={{
-                  background: isGraphMode
-                    ? "linear-gradient(135deg, #d4af37, #f5c249)"
-                    : "transparent",
-                  border: isGraphMode
-                    ? "1px solid #d4af37"
-                    : "1px solid rgba(255,255,255,0.15)",
-                  borderRadius: 8,
-                  padding: "6px 8px",
-                  cursor: "pointer",
-                  color: isGraphMode ? "#000" : "#9CA3AF",
-                  transition: "all 0.2s ease",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                <IconChartBar size={18} stroke={1.5} />
-              </button>
-              <button className="send-btn" onClick={sendMessage} disabled={isLoading || wsConnectionState !== 'connected' || !input.trim()}>
-                <IconArrowUp size={16} color="white" stroke={2}/>
-              </button>
-            </div>
-          )}
-          <p className="footer-disclaimer">NanoSoft Ask AI can make mistakes. Verify important legal information.</p>
-        </div>
+        {/* Input footer — bottom bar after chat starts or while history loads (not duplicated on landing) */}
+        {(historyLoading || !isLanding) && renderChatInputFooter("default")}
 
         {/* Upgrade Plan Modal */}
         {showUpgradePlan && (

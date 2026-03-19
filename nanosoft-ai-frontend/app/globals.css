@@ -222,6 +222,10 @@ html, body {
   overflow: hidden;  /* Prevent content from expanding beyond viewport */
 }
 
+.app-content-wrapper.app-content-wrapper--landing-start {
+  overflow: visible;
+}
+
 /* Dark mode: transparent so BackgroundLayer gradient is visible */
 :root[data-theme='dark'] .app-container,
 :root:not([data-theme]) .app-container {
@@ -799,6 +803,11 @@ html, body {
   background: transparent;
 }
 
+/* Welcome card uses translateY up; don’t clip it at the main pane edge */
+.main-content.main-content--landing-start {
+  overflow: visible;
+}
+
 /* ─── 7. HEADER ─── */
 .chat-header {
   display: flex;
@@ -1052,6 +1061,25 @@ html, body {
 }
 
 /* ─── 10. LANDING SCREEN ─── */
+/* Empty state: flex column so input sits near vertical center with welcome above */
+.landing-start-column {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  min-height: 0;
+  width: 100%;
+  animation: fadeIn 0.4s ease;
+  overflow: visible;
+  position: relative;
+}
+
+.landing-start-spacer-top,
+.landing-start-spacer-bottom {
+  flex: 1 1 0;
+  min-height: 32px;
+}
+
 .landing-container {
   flex: 1;
   display: flex;
@@ -1062,6 +1090,29 @@ html, body {
   overflow: hidden;
   animation: fadeIn 0.4s ease;
   background: transparent;
+}
+
+/* Start-only: no flex-grow; nudge welcome card upward */
+.landing-container.landing-container--start {
+  flex: 0 0 auto;
+  padding: 12px 24px 4px;
+  justify-content: flex-end;
+  /* Allow translated card to paint above — base .landing-container has overflow:hidden which clips the top border */
+  overflow: visible;
+}
+
+.landing-container--start .landing-card {
+  transform: translateY(-28px);
+}
+
+@media (max-width: 640px) {
+  .landing-container--start .landing-card {
+    transform: translateY(-16px);
+  }
+
+  .landing-container.landing-container--start {
+    padding: 8px 16px 4px;
+  }
 }
 
 .landing-card {
@@ -1754,13 +1805,261 @@ font-size: 15px;
 /* ─── 15. INPUT FOOTER ─── */
 .input-footer {
   width: 100%;
-  padding: 20px;
+  padding: 12px 20px 12px;
+  margin-bottom: 72px; /* lift chat bar up to make room for feature below */
   flex-shrink: 0;
   background: transparent;
   border: none;
   backdrop-filter: none;
   box-sizing: border-box;
   overflow: hidden;
+}
+
+/* Centered empty-state input: no extra bottom margin (layout uses flex spacers) */
+.input-footer.input-footer--start {
+  margin-bottom: 0;
+  padding-top: 4px;
+  padding-bottom: 16px;
+  overflow: visible;
+}
+
+/* Suggested questions (landing only) — pill chips under input, grouped by query type */
+.landing-suggested-queries {
+  max-width: 820px;
+  margin: 14px auto 0;
+  padding: 0 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  box-sizing: border-box;
+  position: relative;
+  overflow: visible;
+}
+
+.landing-suggested-row {
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  gap: 10px;
+}
+
+.landing-suggested-group {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  flex: 0 0 auto;
+}
+
+.landing-suggested-group-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-primary);
+  opacity: 0.95;
+}
+
+.landing-suggested-group-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+}
+
+.landing-suggested-group-toggle {
+  appearance: none;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  background: var(--color-bg-alt);
+  padding: 6px 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  color: var(--color-text);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.landing-suggested-group-toggle:hover:not(:disabled) {
+  background: var(--color-primary-soft);
+  border-color: var(--color-primary);
+}
+
+.landing-suggested-group-toggle--active {
+  background: var(--color-primary-soft);
+  border-color: var(--color-primary);
+  color: var(--color-text);
+}
+
+.landing-suggested-group-toggle:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.landing-suggested-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
+}
+
+.landing-suggested-chip {
+  appearance: none;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  background: rgba(30, 30, 30, 0.75);
+  color: var(--color-text);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
+  padding: 8px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  text-align: left;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease,
+    transform 0.12s ease;
+  max-width: 100%;
+}
+
+.landing-suggested-chip:hover:not(:disabled) {
+  background: var(--color-primary-soft);
+  border-color: var(--color-primary);
+  color: var(--color-text);
+  transform: translateY(-1px);
+}
+
+.landing-suggested-chip:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.landing-suggested-panel {
+  margin-top: 0;
+  background: var(--color-bg-alt);
+  border-radius: 18px;
+  border: 1px solid var(--color-border);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  padding: 10px 4px 6px;
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 10px);
+  transform: translate(-50%, 0);
+  width: min(520px, 100%);
+  z-index: 50;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+
+.landing-suggested-panel--open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.landing-suggested-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+}
+
+.landing-suggested-panel-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.landing-suggested-panel-close {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.landing-suggested-panel-close:hover {
+  background: var(--color-primary-soft);
+  color: var(--color-text);
+}
+
+.landing-suggested-panel-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.landing-suggested-panel-item {
+  appearance: none;
+  border: none;
+  border-top: 1px solid rgba(148, 163, 184, 0.4);
+  background: transparent;
+  color: var(--color-text);
+  text-align: left;
+  padding: 10px 16px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.landing-suggested-panel-item:first-child {
+  border-top: none;
+}
+
+.landing-suggested-panel-item:hover:not(:disabled) {
+  background: var(--color-primary-soft);
+}
+
+.landing-suggested-panel-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+:root[data-theme='light'] .landing-suggested-chip {
+  background: rgba(255, 255, 255, 0.9);
+  border-color: rgba(212, 175, 55, 0.35);
+  color: var(--color-text);
+}
+
+:root[data-theme='light'] .landing-suggested-chip:hover:not(:disabled) {
+  background: rgba(212, 175, 55, 0.12);
+  border-color: var(--color-primary);
+}
+
+@media (max-width: 640px) {
+  .landing-suggested-queries {
+    margin-top: 10px;
+    gap: 6px;
+    padding: 0;
+  }
+
+  .landing-suggested-row {
+    flex-wrap: wrap;
+  }
+
+  .landing-suggested-chip {
+    font-size: 11px;
+    padding: 7px 12px;
+  }
+
+  .landing-suggested-panel {
+    top: calc(100% + 8px);
+  }
 }
 
 .input-wrapper {
@@ -1901,6 +2200,17 @@ font-size: 15px;
   color: var(--color-text-muted);
   margin-top: 10px;
   transition: color 0.3s ease;
+}
+
+/* Landing: keep disclaimer fixed at the bottom of the landing view */
+.landing-start-column .footer-disclaimer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 8px;
+  margin-top: 0;
+  z-index: 1;
+  pointer-events: none;
 }
 
 /* ─── Responsive Width Sync: Messages & Input ─── */
