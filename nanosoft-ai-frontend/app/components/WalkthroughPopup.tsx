@@ -41,7 +41,7 @@ export default function WalkthroughPopup() {
           return 0; // Loop back to first slide
         }
       });
-    }, 3000);
+    }, 8000);
 
     return () => clearInterval(interval);
   }, []);

@@ -317,7 +317,7 @@ export default function UpgradePlan({ onManageAccountClick, onPlanChange }: Upgr
             {plan.highlight && !responsive.isMobile && (
               <div style={{
                 position: "absolute",
-                top: "-12px",
+                top: "-6px",
                 left: "50%",
                 transform: "translateX(-50%)",
                 background: "linear-gradient(180deg, var(--color-primary-soft) 0%, var(--color-primary-strong) 35%, var(--color-primary) 65%, var(--color-primary-strong) 100%)",
