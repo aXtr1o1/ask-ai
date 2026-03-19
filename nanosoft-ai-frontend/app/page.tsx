@@ -12,6 +12,7 @@ import { useVoiceRecorder, RecordingInterface, VoicePreviewBar, VoiceMicButton }
 import { parseGraphData, BarChartRenderer, HorizontalBarChartRenderer, LineChartRenderer, PieChartRenderer, ChartType } from "./components/GraphRenderer";
 import TableWithTile, { TableWithTileRow } from "./components/TableWithTile";
 import UpgradePlan from "./components/UpgradePlan";
+import ManageAccount from "./components/ManageAccount/ManageAccount";
 import WalkthroughPopup from "./components/WalkthroughPopup";
 import { IconUser, IconMicrophone, IconPlayerPlay, IconPlayerPause, IconTrash, IconArrowUp, IconChartBar, IconList, IconLayoutGrid, IconMenu2, IconX, IconCrown } from "@tabler/icons-react";
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -1010,6 +1011,8 @@ export default function Home() {
   const [authChecked,  setAuthChecked]  = useState<boolean>(false);
   const [menuOpen,     setMenuOpen]     = useState(false);
   const [showUpgradePlan, setShowUpgradePlan] = useState(false);
+  const [showManageAccount, setShowManageAccount] = useState(false);
+  const [currentPlan, setCurrentPlan] = useState<string>("Free"); // Track active plan
   const [sidebarOpen,  setSidebarOpen]  = useState(true);  // Will be auto-closed by useEffect if mobile is detected
   const [wsConnectionState, setWsConnectionState] = useState<'connecting'|'connected'|'failed'>('connecting');
   const [isGraphMode, setIsGraphMode] = useState<boolean>(false);
@@ -1118,6 +1121,11 @@ export default function Home() {
 
   // Update sidebar visibility based on screen size
   useEffect(() => {
+    // Don't change sidebar if a modal is open
+    if (showManageAccount || showUpgradePlan) {
+      return;
+    }
+    
     if (responsive.isDesktop) {
       // Always show sidebar on desktop
       setSidebarOpen(true);
@@ -1125,7 +1133,7 @@ export default function Home() {
       // Close sidebar on mobile (user can open with menu button)
       setSidebarOpen(false);
     }
-  }, [responsive.isDesktop, responsive.isMobile]);
+  }, [responsive.isDesktop, responsive.isMobile, showManageAccount, showUpgradePlan]);
 
   // Auth guard
   useEffect(() => {
@@ -1171,6 +1179,27 @@ export default function Home() {
       document.body.classList.remove('upgrade-plan-open');
     };
   }, [showUpgradePlan, responsive.isMobile, responsive.isTablet]);
+
+  // Handle sidebar close when manage account modal opens
+  useEffect(() => {
+    if (showManageAccount) {
+      setSidebarOpen(false);
+    }
+  }, [showManageAccount]);
+
+  // Handle body overflow when manage account modal opens/closes
+  useEffect(() => {
+    if (showManageAccount) {
+      document.body.classList.add('manage-account-open');
+      // Close sidebar when manage account modal opens
+      setSidebarOpen(false);
+    } else {
+      document.body.classList.remove('manage-account-open');
+    }
+    return () => {
+      document.body.classList.remove('manage-account-open');
+    };
+  }, [showManageAccount]);
 
   // Auto-resize textarea
   const resizeTA = () => {
@@ -2013,7 +2042,7 @@ export default function Home() {
       <div 
         className="sidebar-shell" 
         style={{ 
-          display: sidebarOpen ? 'flex' : responsive.isMobile ? 'none' : 'flex',
+          display: sidebarOpen ? 'flex' : 'none',
           position: responsive.isMobile && sidebarOpen ? 'fixed' : 'relative',
           top: 0,
           left: 0,
@@ -2092,6 +2121,7 @@ export default function Home() {
                   onClick={() => {
                     setShowUpgradePlan(true);
                     setMenuOpen(false);
+                    setSidebarOpen(false);
                   }}
                   style={{
                     display: 'flex',
@@ -2103,6 +2133,25 @@ export default function Home() {
                 >
                   <IconCrown size={18} />
                   <span>Upgrade Plan</span>
+                </button>
+                <div className="profile-divider" />
+                <button
+                  className="profile-dropdown-item profile-action-btn"
+                  onClick={() => {
+                    setShowManageAccount(true);
+                    setMenuOpen(false);
+                    setSidebarOpen(false);
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px',
+                    color: 'var(--color-primary)',
+                    fontWeight: 600,
+                  }}
+                >
+                  <IconUser size={18} />
+                  <span>Manage Account</span>
                 </button>
                 <div className="profile-divider" />
                 <button
@@ -2653,7 +2702,79 @@ export default function Home() {
               >
                 ×
               </button>
-              <UpgradePlan />
+              <UpgradePlan 
+                onManageAccountClick={() => {
+                  setShowUpgradePlan(false);
+                  setShowManageAccount(true);
+                }}
+                onPlanChange={(planName) => {
+                  setCurrentPlan(planName);
+                }}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Manage Account Full-Screen Page */}
+        {showManageAccount && (
+          <div 
+            style={{
+              position: "fixed",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              width: "100vw",
+              height: "100vh",
+              background: "var(--color-bg)",
+              zIndex: 10000,
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            <div style={{
+              position: "absolute",
+              top: "20px",
+              right: "20px",
+              zIndex: 10001,
+            }}>
+              <button
+                onClick={() => setShowManageAccount(false)}
+                style={{
+                  width: "40px",
+                  height: "40px",
+                  borderRadius: "6px",
+                  border: "1.5px solid var(--color-primary)",
+                  background: "transparent",
+                  color: "var(--color-primary)",
+                  cursor: "pointer",
+                  fontSize: "24px",
+                  fontWeight: 600,
+                  transition: "all 0.3s ease",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+                onMouseEnter={(e) => {
+                  const btn = e.currentTarget as HTMLElement;
+                  btn.style.background = "var(--color-primary)";
+                  btn.style.color = "var(--color-text)";
+                }}
+                onMouseLeave={(e) => {
+                  const btn = e.currentTarget as HTMLElement;
+                  btn.style.background = "transparent";
+                  btn.style.color = "var(--color-primary)";
+                }}
+              >
+                ×
+              </button>
+            </div>
+            <div style={{
+              flex: 1,
+              width: "100%",
+              height: "100%",
+            }}>
+              <ManageAccount currentPlan={currentPlan} />
             </div>
           </div>
         )}

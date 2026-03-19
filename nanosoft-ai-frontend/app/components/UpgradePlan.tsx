@@ -89,11 +89,24 @@ const plans: Plan[] = [
   },
 ];
 
-export default function UpgradePlan() {
+interface UpgradePlanProps {
+  onManageAccountClick?: () => void;
+  onPlanChange?: (planName: string) => void;
+}
+
+export default function UpgradePlan({ onManageAccountClick, onPlanChange }: UpgradePlanProps) {
   const responsive = useResponsive();
   const { theme } = useTheme();
   const [billingCycle, setBillingCycle] = useState<"monthly" | "yearly">("monthly");
   const [currentPlanId, setCurrentPlanId] = useState<string>("free");
+
+  const handlePlanSelection = (planId: string) => {
+    setCurrentPlanId(planId);
+    const plan = plans.find(p => p.id === planId);
+    if (plan && onPlanChange) {
+      onPlanChange(plan.name);
+    }
+  };
   
   // Subscription dates (demo data - would come from backend in production)
   const subscriptionDates = {
@@ -410,6 +423,7 @@ export default function UpgradePlan() {
             {/* CTA Button */}
             <button
               type="button"
+              onClick={() => handlePlanSelection(plan.id)}
               style={{
                 width: "100%",
                 padding: "8px 12px",
