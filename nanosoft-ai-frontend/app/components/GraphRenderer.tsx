@@ -83,10 +83,10 @@ function ChartTypeDropdown({ currentType, onTypeChange }: ChartTypeDropdownProps
   const [hoveredChartType, setHoveredChartType] = useState<ChartType | null>(null);
 
   const chartTypes = [
-    { type: 'vertical-bar' as ChartType, label: 'Bar Chart', icon: <IconChartBar size={16} /> },
-    { type: 'horizontal-bar' as ChartType, label: 'Horizontal Bar', icon: <IconChartArea size={16} /> },
-    { type: 'pie' as ChartType, label: 'Pie Chart', icon: <IconChartPie size={16} /> },
-    { type: 'line' as ChartType, label: 'Line Chart', icon: <IconChartLine size={16} /> },
+    { type: 'vertical-bar' as ChartType, label: 'Bar Chart', icon: <IconChartBar size={14} /> },
+    { type: 'horizontal-bar' as ChartType, label: 'Horizontal Bar', icon: <IconChartArea size={14} /> },
+    { type: 'pie' as ChartType, label: 'Pie Chart', icon: <IconChartPie size={14} /> },
+    { type: 'line' as ChartType, label: 'Line Chart', icon: <IconChartLine size={14} /> },
   ];
 
   const selectedChart = chartTypes.find(c => c.type === currentType) || chartTypes[0];
@@ -100,13 +100,13 @@ function ChartTypeDropdown({ currentType, onTypeChange }: ChartTypeDropdownProps
   const buttonBaseStyle = {
     display: 'flex',
     alignItems: 'center',
-    gap: '6px',
-    padding: '6px 10px',
+    gap: '4px',
+    padding: '3px 8px',
     background: isButtonHovered || isOpen ? 'var(--color-bg-active)' : 'var(--color-bg-alt)',
     border: isButtonHovered || isOpen ? '1px solid var(--color-primary)' : '1px solid var(--color-border)',
     borderRadius: '6px',
     color: 'var(--color-text)',
-    fontSize: '12px',
+    fontSize: '11px',
     fontWeight: '500',
     cursor: 'pointer',
     transition: 'all 0.2s ease',
@@ -136,7 +136,7 @@ function ChartTypeDropdown({ currentType, onTypeChange }: ChartTypeDropdownProps
       >
         {selectedChart.icon}
         <span>{selectedChart.label}</span>
-        <IconChevronDown size={14} style={{ marginLeft: '2px', transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s ease' }} />
+        <IconChevronDown size={12} style={{ marginLeft: '2px', transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s ease' }} />
       </button>
 
       {/* Dropdown Menu — Opens Upward with page theme styling */}
@@ -201,7 +201,11 @@ export function BarChartRenderer({ graphData, currentChartType, onChartTypeChang
     border: '1px solid var(--color-border)', 
     color: 'var(--color-text)' 
   };
-  
+  const barCount = Math.min(50, graphData.records.length);
+  /** Tighter gaps when many categories so chart fits width without horizontal scroll */
+  const barCategoryGap = barCount > 24 ? "4%" : barCount > 12 ? "8%" : "12%";
+  const maxBarSize = barCount > 30 ? 24 : barCount > 15 ? 32 : 40;
+
   return (
     <div className="ai-bubble" style={{ overflow: 'visible' }}>
       {/* Context summary shown above chart — from backend */}
@@ -209,14 +213,14 @@ export function BarChartRenderer({ graphData, currentChartType, onChartTypeChang
         {graphData.context_summary}
       </div>
 
-      {/* Bar chart container — enlarged & optimized */}
+      {/* Bar chart fits container width (no forced minWidth — avoids clipped bars + broken scroll) */}
       <div className="graph-chart-container" style={{ position: 'relative' }}>
-        <div style={{ width: "100%", minWidth: "900px", height: "100%" }}>
+        <div style={{ width: "100%", minWidth: 0, height: "100%", minHeight: 0 }}>
           <ResponsiveContainer width="100%" height="100%">
             <BarChart
               data={graphData.records.slice(0, 50)}
-              margin={{ top: 15, right: 20, left: 30, bottom: 5 }}
-              barCategoryGap="15%"
+              margin={{ top: 12, right: 8, left: 8, bottom: 8 }}
+              barCategoryGap={barCategoryGap}
             >
               {/* Subtle grid lines matching dark theme */}
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(212,175,55,0.12)" vertical={true} />
@@ -230,10 +234,10 @@ export function BarChartRenderer({ graphData, currentChartType, onChartTypeChang
 
               {/* Y Axis — value_key column e.g. result / count */}
               <YAxis 
-                tick={{ fill: "#9CA3AF", fontSize: 11 }} 
-                width={55}
+                tick={{ fill: "#9CA3AF", fontSize: 10 }} 
+                width={44}
                 domain={[0, "dataMax + 100"]}
-                label={{ value: graphData.value_key, angle: -90, position: "insideLeft", offset: -10, style: { fill: "#9CA3AF", fontSize: 11 } }}
+                label={{ value: graphData.value_key, angle: -90, position: "insideLeft", offset: -6, style: { fill: "#9CA3AF", fontSize: 10 } }}
               />
 
               {/* Tooltip on hover — shows label + value */}
@@ -255,7 +259,7 @@ export function BarChartRenderer({ graphData, currentChartType, onChartTypeChang
               />
 
               {/* Bars — alternating gold colors matching your theme */}
-              <Bar dataKey={graphData.value_key} radius={[6, 6, 0, 0]} barSize="75%" maxBarSize={40} strokeWidth={3} stroke="#8b6914">
+              <Bar dataKey={graphData.value_key} radius={[4, 4, 0, 0]} barSize="75%" maxBarSize={maxBarSize} strokeWidth={2} stroke="#8b6914">
                 {graphData.records.map((_, index) => (
                   <Cell
                     key={`cell-${index}`}
@@ -290,7 +294,10 @@ export function HorizontalBarChartRenderer({ graphData, currentChartType, onChar
     border: '1px solid var(--color-border)', 
     color: 'var(--color-text)' 
   };
-  
+  const rowCount = Math.min(50, graphData.records.length);
+  /** Enough vertical space for each row without inner scroll */
+  const chartHeight = Math.min(720, Math.max(280, rowCount * 17 + 96));
+
   return (
     <div className="ai-bubble" style={{ overflow: 'visible' }}>
       {/* Context summary shown above chart — from backend */}
@@ -299,13 +306,16 @@ export function HorizontalBarChartRenderer({ graphData, currentChartType, onChar
       </div>
 
       {/* Bar chart container — enlarged & optimized */}
-      <div className="graph-chart-container" style={{ position: 'relative' }}>
-        <div style={{ width: "100%", minWidth: "900px", height: "100%" }}>
+      <div
+        className="graph-chart-container graph-chart-container--horizontal"
+        style={{ position: 'relative', height: chartHeight, maxHeight: '72vh' }}
+      >
+        <div style={{ width: "100%", minWidth: 0, height: "100%", minHeight: 0 }}>
           <ResponsiveContainer width="100%" height="100%">
             <BarChart
               data={graphData.records.slice(0, 50)}
-              margin={{ top: 15, right: 20, left: 20, bottom: 5 }}
-              barCategoryGap="15%"
+              margin={{ top: 8, right: 12, left: 8, bottom: 8 }}
+              barCategoryGap={Math.min(50, graphData.records.length) > 20 ? "6%" : "12%"}
               layout="vertical"
             >
               {/* Subtle grid lines matching dark theme */}
@@ -345,7 +355,7 @@ export function HorizontalBarChartRenderer({ graphData, currentChartType, onChar
               />
 
               {/* Bars — alternating gold colors with uniform height */}
-              <Bar dataKey={graphData.value_key} radius={[0, 6, 6, 0]} barSize={18} strokeWidth={3} stroke="#8b6914">
+              <Bar dataKey={graphData.value_key} radius={[0, 4, 4, 0]} barSize={14} strokeWidth={2} stroke="#8b6914">
                 {graphData.records.map((_, index) => (
                   <Cell
                     key={`cell-${index}`}
@@ -389,11 +399,11 @@ export function LineChartRenderer({ graphData, currentChartType, onChartTypeChan
 
       {/* Line chart container — enlarged & optimized */}
       <div className="graph-chart-container" style={{ position: 'relative' }}>
-        <div style={{ width: "100%", minWidth: "900px", height: "100%" }}>
+        <div style={{ width: "100%", minWidth: 0, height: "100%", minHeight: 0 }}>
           <ResponsiveContainer width="100%" height="100%">
             <LineChart
               data={graphData.records.slice(0, 50)}
-              margin={{ top: 15, right: 20, left: 30, bottom: 5 }}
+              margin={{ top: 12, right: 8, left: 8, bottom: 8 }}
             >
               {/* Subtle grid lines matching dark theme */}
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(212,175,55,0.12)" />
@@ -407,10 +417,10 @@ export function LineChartRenderer({ graphData, currentChartType, onChartTypeChan
 
               {/* Y Axis — value_key column */}
               <YAxis 
-                tick={{ fill: "#9CA3AF", fontSize: 11 }} 
-                width={55}
+                tick={{ fill: "#9CA3AF", fontSize: 10 }} 
+                width={44}
                 domain={[0, "dataMax + 100"]}
-                label={{ value: graphData.value_key, angle: -90, position: "insideLeft", offset: -10, style: { fill: "#9CA3AF", fontSize: 11 } }}
+                label={{ value: graphData.value_key, angle: -90, position: "insideLeft", offset: -6, style: { fill: "#9CA3AF", fontSize: 10 } }}
               />
 
               {/* Tooltip on hover — shows label + value */}

@@ -56,7 +56,7 @@ export default function TableWithTile({
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              padding: '8px 12px',
+              padding: '4px 8px',
               borderRadius: '6px',
               background: viewMode === "table" 
                 ? 'linear-gradient(180deg, #ae8625 0%, #f7ef8a 35%, #d2ac47 65%, #edc967 100%)'
@@ -64,7 +64,7 @@ export default function TableWithTile({
               color: '#1f2937',
               border: '1px solid #d4af37',
               cursor: 'pointer',
-              fontSize: '12px',
+              fontSize: '11px',
               fontWeight: 600,
               transition: 'all 0.2s ease-in-out',
               backdropFilter: 'blur(8px)',
@@ -86,7 +86,7 @@ export default function TableWithTile({
               alignItems: 'center',
               textShadow: viewMode === "table" ? '0 0 8px rgba(255, 255, 255, 0.8)' : 'none',
             }}>
-              <IconList size={16} />
+              <IconList size={14} />
             </span>
           </button>
 
@@ -98,7 +98,7 @@ export default function TableWithTile({
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              padding: '8px 12px',
+              padding: '4px 8px',
               borderRadius: '6px',
               background: viewMode === "tile" 
                 ? 'linear-gradient(180deg, #ae8625 0%, #f7ef8a 35%, #d2ac47 65%, #edc967 100%)'
@@ -106,7 +106,7 @@ export default function TableWithTile({
               color: '#1f2937',
               border: '1px solid #d4af37',
               cursor: 'pointer',
-              fontSize: '12px',
+              fontSize: '11px',
               fontWeight: 600,
               transition: 'all 0.2s ease-in-out',
               backdropFilter: 'blur(8px)',
@@ -128,7 +128,7 @@ export default function TableWithTile({
               alignItems: 'center',
               textShadow: viewMode === "tile" ? '0 0 8px rgba(255, 255, 255, 0.8)' : 'none',
             }}>
-              <IconLayoutGrid size={16} />
+              <IconLayoutGrid size={14} />
             </span>
           </button>
         </div>
@@ -258,16 +258,14 @@ export default function TableWithTile({
                             >
                               <div className="tile-field-label" style={{
                                 fontSize: responsive.isMobile ? '11px' : responsive.isTablet ? '12px' : '11px',
-                                fontWeight: 600,
-                                color: '#d4af37',
+                                fontWeight: 700,
                                 textTransform: 'uppercase',
                                 letterSpacing: '0.5px',
                                 wordBreak: 'break-word',
                               }}>{col}</div>
                               <div className="tile-field-value" style={{
                                 fontSize: responsive.isMobile ? '13px' : responsive.isTablet ? '14px' : '12px',
-                                fontWeight: 500,
-                                color: '#f3f4f6',
+                                fontWeight: 400,
                                 wordBreak: 'break-word',
                                 lineHeight: 1.4,
                               }}>{row[col] || "—"}</div>

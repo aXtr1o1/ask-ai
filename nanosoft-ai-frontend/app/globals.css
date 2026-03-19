@@ -2790,7 +2790,7 @@ textarea:focus-visible {
   border: none;
   border-radius: 10px;
   background: var(--color-bg-alt);
-  padding: 52px 18px 18px;
+  padding: 25px 16px 16px;
   transition: background-color 0.3s ease, border-color 0.3s ease;
 }
 
@@ -2941,13 +2941,14 @@ textarea:focus-visible {
 
 .tile-card {
   width: 100%;
-  border-radius: 10px;
+  border-radius: 18px;
   background: linear-gradient(135deg, var(--tile-card-bg-start, rgba(30, 30, 30, 0.95)) 0%, var(--tile-card-bg-end, rgba(20, 20, 20, 0.98)) 100%);
-  box-shadow: 0 4px 12px var(--tile-card-shadow, rgba(0, 0, 0, 0.8)), inset 0 1px 0 rgba(212, 175, 55, 0.1);
+  box-shadow: 0 4px 16px var(--tile-card-shadow, rgba(0, 0, 0, 0.8)), inset 0 1px 0 rgba(212, 175, 55, 0.08);
   overflow: visible;
   transition: all 0.2s ease;
   border: 1.5px solid rgba(212, 175, 55, 0.2);
   min-height: 100px;
+  padding: 14px 18px 16px;
 }
 
 .tile-card:hover {
@@ -2973,6 +2974,11 @@ textarea:focus-visible {
   flex-direction: column;
   gap: 4px;
   min-width: 0;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: rgba(20, 20, 20, 0.7);
+  border: 1px solid rgba(148, 163, 184, 0.5);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
 }
 
 .tile-field-label {
@@ -2986,7 +2992,7 @@ textarea:focus-visible {
 
 .tile-field-value {
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 400;
   color: var(--tile-value-color, #f0f0f0);
   word-wrap: break-word;
   overflow-wrap: break-word;
@@ -3088,7 +3094,7 @@ textarea:focus-visible {
   }
 
   .table-with-tile {
-    padding-top: 60px;
+    padding-top: px;
   }
 
   .data-view-tile {
@@ -3224,48 +3230,33 @@ textarea:focus-visible {
 .graph-context-summary {
   font-size: 15px;
   color: #d1d5db;
-  margin-bottom: 20px;
+  margin-bottom: 12px;
   font-weight: 600;
   letter-spacing: 0.3px;
   line-height: 1.6;
   transition: color 0.3s ease;
 }
 
-/* Chart container — COMPACT SCROLLABLE VIEW */
+/* Chart container — fits message width, no horizontal scroll (chart scales inside) */
 .graph-chart-container {
   width: 100%;
-  max-width: 500px;          /* Reduced from 600px to fit in chat area */
-  height: 520px;             /* Increased from 400px for better bar spacing */
+  max-width: 100%;
+  height: 420px;
   display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  overflow-x: auto;          /* Enable horizontal scrolling */
-  overflow: visible;         /* Allow dropdown menu to open upward */
-  margin: 12px 0;
+  align-items: stretch;
+  justify-content: stretch;
+  overflow: hidden;          /* was overflow-x:auto + overflow:visible — visible killed horizontal scroll; now chart fits, no bar needed */
+  margin: 8px 0;
   background: var(--color-bg-alt);
   border-radius: 8px;
-  padding: 8px;              /* Reduced from 16px to minimize whitespace */
-  scroll-behavior: smooth;   /* Smooth scrolling */
-  position: relative;        /* Enable absolute positioning for dropdown */
+  padding: 6px;
+  position: relative;
+  box-sizing: border-box;
 }
 
-/* Scrollbar styling for the chart container */
-.graph-chart-container::-webkit-scrollbar {
-  height: 6px;               /* Reduced from 8px */
-}
-
-.graph-chart-container::-webkit-scrollbar-track {
-  background: rgba(212, 175, 55, 0.1);
-  border-radius: 4px;
-}
-
-.graph-chart-container::-webkit-scrollbar-thumb {
-  background: rgba(212, 175, 55, 0.4);
-  border-radius: 4px;
-}
-
-.graph-chart-container::-webkit-scrollbar-thumb:hover {
-  background: rgba(212, 175, 55, 0.6);
+/* Horizontal bar layout: height set inline from row count */
+.graph-chart-container--horizontal {
+  min-height: 280px;
 }
 
 /* Footer showing record count */
@@ -3294,17 +3285,6 @@ textarea:focus-visible {
   box-shadow: 0 2px 8px rgba(212, 175, 55, 0.06);
 }
 
-:root[data-theme='light'] .graph-chart-container::-webkit-scrollbar-track {
-  background: rgba(212, 175, 55, 0.08);
-}
-
-:root[data-theme='light'] .graph-chart-container::-webkit-scrollbar-thumb {
-  background: rgba(212, 175, 55, 0.25);
-}
-
-:root[data-theme='light'] .graph-chart-container::-webkit-scrollbar-thumb:hover {
-  background: rgba(212, 175, 55, 0.4);
-}
 /* --- Chart Type Dropdown Styles --- */
 
 .chart-dropdown {
