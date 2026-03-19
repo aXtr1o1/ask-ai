@@ -488,7 +488,7 @@ export function PieChartRenderer({ graphData, currentChartType, onChartTypeChang
       </div>
 
       {/* Pie chart container — responsive size based on screen */}
-      <div className="graph-chart-container" style={{ position: 'relative', maxWidth: chartSize.containerMaxWidth, margin: '0 auto', border: 'none', boxShadow: 'none' }}>
+      <div className="graph-chart-container" style={{ position: 'relative', maxWidth: chartSize.containerMaxWidth, margin: '0 auto', border: 'none', boxShadow: 'none', overflow: 'hidden' }}>
         <div style={{ width: chartSize.chartWidth, minWidth: chartSize.containerMinWidth, height: chartSize.height, display: 'flex', justifyContent: 'center', alignItems: 'center', border: 'none' }}>
           <ResponsiveContainer width="100%" height={chartSize.chartHeight}>
             <PieChart margin={{ top: 10, right: 80, bottom: 10, left: 80 }}>
