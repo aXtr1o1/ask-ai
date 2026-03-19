@@ -1,11 +1,55 @@
 "use client";
 
+import React, { useState, useEffect } from "react";
 import { useResponsive } from "@/app/hooks/useResponsive";
 import { useTheme } from "@/app/components/useTheme";
 
 export default function RateLimit() {
   const responsive = useResponsive();
   const { theme } = useTheme();
+  const [animated, setAnimated] = useState(false);
+
+  useEffect(() => {
+    setAnimated(true);
+  }, []);
+
+  const styles = `
+    @keyframes slideInUp {
+      from {
+        opacity: 0;
+        transform: translateY(30px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    @keyframes progressFill {
+      from {
+        width: 0;
+        opacity: 0;
+      }
+      to {
+        opacity: 1;
+      }
+    }
+
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 0.8; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(1.2); }
+    }
+
+    @keyframes statusGlow {
+      0%, 100% { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 0 12px currentColor; }
+      50% { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 0 20px currentColor; }
+    }
+  `;
 
   const formatNumber = (num: number) => {
     if (num >= 1000000) {
@@ -80,117 +124,253 @@ export default function RateLimit() {
     },
   ];
 
+  // Determine status color and text based on usage percentage
+  const getStatusInfo = (percentage: number) => {
+    if (percentage >= 80) return { color: "#ff6b6b", status: "Critical", bgColor: "rgba(255, 107, 107, 0.15)" };
+    if (percentage >= 60) return { color: "#ffd93d", status: "Warning", bgColor: "rgba(255, 217, 61, 0.15)" };
+    return { color: "#64c896", status: "Healthy", bgColor: "rgba(100, 200, 150, 0.15)" };
+  };
+
   return (
-    <div style={{
-      display: "flex",
-      flexDirection: "column",
-      gap: "24px",
-    }}>
-      {/* Rate Limit Cards Grid */}
+    <>
+      <style>{styles}</style>
       <div style={{
-        display: "grid",
-        gridTemplateColumns: responsive.isMobile ? "1fr" : responsive.isTablet ? "1fr" : "repeat(2, 1fr)",
-        gap: "12px",
+        display: "flex",
+        flexDirection: "column",
+        gap: "32px",
+        background: "var(--manageaccount-bg)",
+        color: "var(--manageaccount-text)",
+        border: `1px solid var(--manageaccount-border)`,
+        minHeight: "100vh",
+        width: "100%",
       }}>
-        {rateLimitMetrics.map((metric) => (
-          <div
-            key={metric.id}
-            style={{
-              background: `linear-gradient(135deg, ${metric.color} 0%, rgba(255, 255, 255, 0.02) 100%)`,
-              border: `1.5px solid ${metric.borderColor}`,
-              borderRadius: "12px",
-              padding: "20px",
-              transition: "all 0.3s ease",
-              cursor: "pointer",
-            }}
-            onMouseEnter={(e) => {
-              const div = e.currentTarget as HTMLElement;
-              div.style.transform = "translateY(-4px)";
-              div.style.boxShadow = `0 12px 32px ${metric.borderColor}`;
-            }}
-            onMouseLeave={(e) => {
-              const div = e.currentTarget as HTMLElement;
-              div.style.transform = "translateY(0)";
-              div.style.boxShadow = "none";
-            }}
-          >
-            <div style={{
-              marginBottom: "16px",
-            }}>
-              <p style={{
-                fontSize: "12px",
-                color: "rgba(255, 255, 255, 0.6)",
-                margin: 0,
-                marginBottom: "12px",
-                fontWeight: 500,
-                textTransform: "uppercase",
-                letterSpacing: "0.5px",
-              }}>
-                {metric.label}
-              </p>
+        {/* Rate Limit Cards Grid */}
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: "1fr",
+          gap: "16px",
+        }}>
+          {rateLimitMetrics.map((metric, index) => {
+            const status = getStatusInfo(metric.percentage);
+            return (
+            <div
+              key={metric.id}
+              style={{
+                background: `linear-gradient(135deg, ${metric.color} 0%, rgba(255, 255, 255, 0.01) 100%)`,
+                border: `1.5px solid ${metric.borderColor}`,
+                borderRadius: "18px",
+                padding: "28px",
+                transition: "all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1)",
+                cursor: "pointer",
+                backdropFilter: "blur(10px)",
+                boxShadow: `0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 ${metric.borderColor}`,
+                animation: animated ? `slideInUp 0.6s ease-out ${index * 0.1}s both` : "none",
+                position: "relative",
+                overflow: "hidden",
+              }}
+              onMouseEnter={(e) => {
+                const div = e.currentTarget as HTMLElement;
+                div.style.transform = "translateY(-8px) scale(1.01)";
+                div.style.boxShadow = `0 24px 56px ${metric.progressColor}30, inset 0 1px 0 ${metric.borderColor}`;
+                div.style.borderColor = metric.borderColor.replace('0.5', '0.9');
+              }}
+              onMouseLeave={(e) => {
+                const div = e.currentTarget as HTMLElement;
+                div.style.transform = "translateY(0) scale(1)";
+                div.style.boxShadow = `0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 ${metric.borderColor}`;
+                div.style.borderColor = metric.borderColor;
+              }}
+            >
+              {/* Animated Background Glow */}
+              <div style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                background: `radial-gradient(circle at center, ${metric.progressColor}10 0%, transparent 70%)`,
+                opacity: 0,
+                animation: `fadeIn 1.2s ease-out ${index * 0.15}s forwards`,
+                pointerEvents: "none",
+              }} />
+
               <div style={{
                 display: "flex",
-                alignItems: "baseline",
-                gap: "6px",
-                marginBottom: "12px",
+                justifyContent: "space-between",
+                alignItems: "flex-start",
+                marginBottom: "24px",
+                position: "relative",
+                zIndex: 1,
               }}>
-                <p style={{
-                  fontSize: "24px",
-                  fontWeight: 700,
-                  color: "#ffffff",
-                  margin: 0,
+                <div style={{ flex: 1 }}>
+                  <div style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    marginBottom: "16px",
+                  }}>
+                    <p style={{
+                      fontSize: "12px",
+                      color: "rgba(255, 255, 255, 0.6)",
+                      margin: 0,
+                      fontWeight: 600,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.7px",
+                      animation: `fadeIn 0.8s ease-out ${index * 0.1}s backward`,
+                    }}>
+                      {metric.label}
+                    </p>
+                    <div style={{
+                      width: "7px",
+                      height: "7px",
+                      borderRadius: "50%",
+                      background: metric.progressColor,
+                      opacity: 0.8,
+                      boxShadow: `0 0 12px ${metric.progressColor}`,
+                      animation: `pulse-dot 2.5s ease-in-out infinite`,
+                    }} />
+                  </div>
+                  <div style={{
+                    display: "flex",
+                    alignItems: "baseline",
+                    gap: "10px",
+                    marginBottom: "8px",
+                  }}>
+                    <p style={{
+                      fontSize: "36px",
+                      fontWeight: 800,
+                      color: "#ffffff",
+                      margin: 0,
+                      letterSpacing: "-0.5px",
+                      background: `linear-gradient(135deg, ${metric.progressColor}, #ffffff)`,
+                      backgroundClip: "text",
+                      WebkitBackgroundClip: "text",
+                      WebkitTextFillColor: "transparent",
+                      animation: `fadeIn 1s ease-out ${index * 0.15}s both`,
+                    }}>
+                      {metric.current}
+                    </p>
+                    <p style={{
+                      fontSize: "12px",
+                      color: "rgba(255, 255, 255, 0.5)",
+                      margin: 0,
+                      fontWeight: 500,
+                    }}>
+                      / {metric.limit}
+                    </p>
+                  </div>
+                  <p style={{
+                    fontSize: "11px",
+                    color: "rgba(255, 255, 255, 0.5)",
+                    margin: 0,
+                    fontWeight: 500,
+                  }}>
+                    {metric.unit}
+                  </p>
+                </div>
+                <div style={{
+                  background: status.bgColor,
+                  border: `1.5px solid ${status.color}`,
+                  borderRadius: "12px",
+                  padding: "8px 14px",
+                  marginLeft: "16px",
+                  backdropFilter: "blur(8px)",
+                  boxShadow: `inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 0 16px ${status.color}20`,
+                  animation: `fadeIn 1.1s ease-out ${index * 0.15}s both`,
                 }}>
-                  {metric.current}
-                </p>
-                <p style={{
-                  fontSize: "13px",
-                  color: "rgba(255, 255, 255, 0.5)",
-                  margin: 0,
-                  fontWeight: 500,
-                }}>
-                  / {metric.limit}
-                </p>
+                  <div style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "5px",
+                  }}>
+                    <div style={{
+                      width: "6px",
+                      height: "6px",
+                      borderRadius: "50%",
+                      background: status.color,
+                      boxShadow: `0 0 8px ${status.color}`,
+                      animation: `pulse-dot 2.5s ease-in-out infinite`,
+                    }} />
+                    <p style={{
+                      color: status.color,
+                      margin: 0,
+                      fontSize: "10px",
+                      fontWeight: 700,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.3px",
+                    }}>
+                      {status.status}
+                    </p>
+                  </div>
+                </div>
               </div>
-              <p style={{
-                fontSize: "11px",
-                color: "rgba(255, 255, 255, 0.5)",
-                margin: 0,
-              }}>
-                {metric.unit}
-              </p>
-            </div>
 
-            {/* Progress Bar */}
-            <div style={{
-              width: "100%",
-              height: "12px",
-              background: "rgba(255, 255, 255, 0.1)",
-              borderRadius: "6px",
-              overflow: "hidden",
-              marginBottom: "12px",
-              marginTop: "24px",
-            }}>
-              <div
-                style={{
-                  height: "100%",
-                  width: `${metric.percentage}%`,
-                  background: metric.progressColor,
-                  borderRadius: "4px",
-                  transition: "width 0.3s ease",
-                }}
-              />
+              {/* Progress Bar Container */}
+              <div style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "12px",
+                marginTop: "28px",
+                paddingTop: "24px",
+                borderTop: `1.5px solid ${metric.borderColor.replace('0.5', '0.2')}`,
+                position: "relative",
+                zIndex: 1,
+              }}>
+                {/* Enhanced Progress Bar */}
+                <div style={{
+                  width: "100%",
+                  height: "18px",
+                  background: "rgba(255, 255, 255, 0.08)",
+                  borderRadius: "10px",
+                  overflow: "hidden",
+                  border: `1px solid ${metric.borderColor.replace('0.5', '0.25')}`,
+                  position: "relative",
+                }}>
+                  <div
+                    style={{
+                      height: "100%",
+                      width: `${metric.percentage}%`,
+                      background: `linear-gradient(90deg, ${metric.progressColor}, ${metric.progressColor}dd)`,
+                      borderRadius: "8px",
+                      transition: "width 0.6s cubic-bezier(0.34, 1.56, 0.64, 1)",
+                      boxShadow: `0 0 16px ${metric.progressColor}90, inset 0 1px 0 rgba(255, 255, 255, 0.4)`,
+                      position: "relative",
+                      animation: animated ? `progressFill 1.2s cubic-bezier(0.34, 1.56, 0.64, 1) ${index * 0.1}s both` : "none",
+                    }}
+                  />
+                </div>
+                
+                {/* Usage Stats */}
+                <div style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                }}>
+                  <p style={{
+                    fontSize: "12px",
+                    color: "rgba(255, 255, 255, 0.5)",
+                    margin: 0,
+                    fontWeight: 500,
+                  }}>
+                    Usage
+                  </p>
+                  <p style={{
+                    fontSize: "14px",
+                    color: status.color,
+                    margin: 0,
+                    fontWeight: 700,
+                    letterSpacing: "0.3px",
+                    animation: `fadeIn 1.2s ease-out ${index * 0.15}s both`,
+                  }}>
+                    {metric.percentage}%
+                  </p>
+                </div>
+              </div>
             </div>
-            <p style={{
-              fontSize: "11px",
-              color: "rgba(255, 255, 255, 0.5)",
-              margin: 0,
-              textAlign: "right",
-            }}>
-              {metric.percentage}% used
-            </p>
-          </div>
-        ))}
+            );
+          })}
+        </div>
       </div>
-    </div>
+    </>
   );
 }

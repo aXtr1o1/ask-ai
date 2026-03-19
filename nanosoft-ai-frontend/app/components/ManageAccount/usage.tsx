@@ -1,5 +1,6 @@
 "use client";
 
+import React, { useState, useEffect } from "react";
 import { useResponsive } from "@/app/hooks/useResponsive";
 import { useTheme } from "@/app/components/useTheme";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
@@ -7,6 +8,66 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 export default function Usage() {
   const responsive = useResponsive();
   const { theme } = useTheme();
+  const [animated, setAnimated] = useState(false);
+
+  useEffect(() => {
+    setAnimated(true);
+  }, []);
+
+  const styles = `
+    @keyframes slideInUp {
+      from {
+        opacity: 0;
+        transform: translateY(30px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    @keyframes glow {
+      0%, 100% {
+        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 currentColor;
+      }
+      50% {
+        box-shadow: 0 12px 48px rgba(0, 0, 0, 0.6), inset 0 1px 0 currentColor;
+      }
+    }
+
+    @keyframes shimmer {
+      0% {
+        background-position: -1000px 0;
+      }
+      100% {
+        background-position: 1000px 0;
+      }
+    }
+
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 0.8; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(1.2); }
+    }
+
+    @keyframes float-up {
+      0% {
+        transform: translateY(0px);
+        opacity: 0;
+      }
+      50% {
+        opacity: 1;
+      }
+      100% {
+        transform: translateY(-20px);
+        opacity: 0;
+      }
+    }
+  `;
 
   // Chart data for metrics
   const textRequestsData = [
@@ -118,102 +179,190 @@ export default function Usage() {
   ];
 
   return (
-    <div style={{
-      display: "flex",
-      flexDirection: "column",
-      gap: "24px",
-    }}>
-      {/* Usage Metrics Grid */}
+    <>
+      <style>{styles}</style>
       <div style={{
-        display: "grid",
-        gridTemplateColumns: responsive.isMobile ? "1fr" : responsive.isTablet ? "1fr" : "repeat(2, 1fr)",
-        gap: "12px",
+        display: "flex",
+        flexDirection: "column",
+        gap: "32px",
+        background: "var(--manageaccount-bg)",
+        color: "var(--manageaccount-text)",
+        border: `1px solid var(--manageaccount-border)`,
+        minHeight: "100vh",
+        width: "100%",
       }}>
-        {usageMetrics.map((metric) => (
-          <div
-            key={metric.id}
-            style={{
-              background: `linear-gradient(135deg, ${metric.color} 0%, rgba(255, 255, 255, 0.02) 100%)`,
-              border: `1.5px solid ${metric.borderColor}`,
-              borderRadius: "12px",
-              padding: "20px",
-              transition: "all 0.3s ease",
-              cursor: "pointer",
-            }}
-            onMouseEnter={(e) => {
-              const div = e.currentTarget as HTMLElement;
-              div.style.transform = "translateY(-4px)";
-              div.style.boxShadow = `0 12px 32px ${metric.borderColor}`;
-            }}
-            onMouseLeave={(e) => {
-              const div = e.currentTarget as HTMLElement;
-              div.style.transform = "translateY(0)";
-              div.style.boxShadow = "none";
-            }}
-          >
-            <div style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "flex-start",
-              marginBottom: "16px",
-            }}>
-              <div>
-                <p style={{
-                  fontSize: "12px",
-                  color: "rgba(255, 255, 255, 0.6)",
-                  margin: 0,
-                  marginBottom: "12px",
-                  fontWeight: 500,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.5px",
-                }}>
-                  {metric.label}
-                </p>
-                <div style={{
-                  display: "flex",
-                  alignItems: "baseline",
-                  gap: "8px",
-                }}>
-                  <p style={{
-                    fontSize: "32px",
-                    fontWeight: 700,
-                    color: "#ffffff",
-                    margin: 0,
+        {/* Usage Metrics Grid */}
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: "1fr",
+          gap: "16px",
+        }}>
+          {usageMetrics.map((metric, index) => (
+            <div
+              key={metric.id}
+              style={{
+                background: `linear-gradient(135deg, ${metric.color} 0%, rgba(255, 255, 255, 0.01) 100%)`,
+                border: `1.5px solid ${metric.borderColor}`,
+                borderRadius: "18px",
+                padding: "28px",
+                transition: "all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1)",
+                cursor: "pointer",
+                backdropFilter: "blur(10px)",
+                boxShadow: `0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 ${metric.borderColor}`,
+                animation: animated ? `slideInUp 0.6s ease-out ${index * 0.1}s both` : "none",
+                position: "relative",
+                overflow: "hidden",
+              }}
+              onMouseEnter={(e) => {
+                const div = e.currentTarget as HTMLElement;
+                div.style.transform = "translateY(-8px) scale(1.01)";
+                div.style.boxShadow = `0 24px 56px ${metric.chartColor}30, inset 0 1px 0 ${metric.borderColor}`;
+                div.style.borderColor = metric.borderColor.replace('0.5', '0.9');
+              }}
+              onMouseLeave={(e) => {
+                const div = e.currentTarget as HTMLElement;
+                div.style.transform = "translateY(0) scale(1)";
+                div.style.boxShadow = `0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 ${metric.borderColor}`;
+                div.style.borderColor = metric.borderColor;
+              }}
+            >
+              {/* Animated Background Glow */}
+              <div style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                background: `radial-gradient(circle at center, ${metric.chartColor}10 0%, transparent 70%)`,
+                opacity: 0,
+                animation: `fadeIn 1.2s ease-out ${index * 0.15}s forwards`,
+                pointerEvents: "none",
+              }} />
+
+              <div style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "flex-start",
+                marginBottom: "24px",
+                position: "relative",
+                zIndex: 1,
+              }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    marginBottom: "16px",
                   }}>
-                    {metric.value}
-                  </p>
-                  <p style={{
-                    fontSize: "13px",
-                    color: metric.borderColor,
-                    margin: 0,
-                    fontWeight: 600,
+                    <p style={{
+                      fontSize: "12px",
+                      color: "rgba(255, 255, 255, 0.6)",
+                      margin: 0,
+                      fontWeight: 600,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.7px",
+                      animation: `fadeIn 0.8s ease-out ${index * 0.1}s backward`,
+                    }}>
+                      {metric.label}
+                    </p>
+                    <div style={{
+                      width: "7px",
+                      height: "7px",
+                      borderRadius: "50%",
+                      background: metric.chartColor,
+                      opacity: 0.8,
+                      boxShadow: `0 0 12px ${metric.chartColor}`,
+                      animation: `pulse-dot 2.5s ease-in-out infinite`,
+                    }} />
+                  </div>
+                  <div style={{
+                    display: "flex",
+                    alignItems: "baseline",
+                    gap: "10px",
+                    marginBottom: "8px",
                   }}>
-                    {metric.unit}
+                    <p style={{
+                      fontSize: "42px",
+                      fontWeight: 800,
+                      color: "#ffffff",
+                      margin: 0,
+                      letterSpacing: "-0.5px",
+                      background: `linear-gradient(135deg, ${metric.chartColor}, #ffffff)`,
+                      backgroundClip: "text",
+                      WebkitBackgroundClip: "text",
+                      WebkitTextFillColor: "transparent",
+                      animation: `fadeIn 1s ease-out ${index * 0.15}s both`,
+                    }}>
+                      {metric.value}
+                    </p>
+                    <p style={{
+                      fontSize: "14px",
+                      color: metric.borderColor,
+                      margin: 0,
+                      fontWeight: 700,
+                      opacity: 0.8,
+                    }}>
+                      {metric.unit}
+                    </p>
+                  </div>
+                  <p style={{
+                    fontSize: "12px",
+                    color: "rgba(255, 255, 255, 0.5)",
+                    margin: 0,
+                    fontWeight: 500,
+                  }}>
+                    {metric.subtext}
                   </p>
                 </div>
-                <p style={{
-                  fontSize: "12px",
-                  color: "rgba(255, 255, 255, 0.5)",
-                  margin: "12px 0 0 0",
+                <div style={{
+                  background: metric.borderColor.replace('0.5', '0.15'),
+                  border: `1.5px solid ${metric.borderColor}`,
+                  borderRadius: "14px",
+                  padding: "10px 14px",
+                  marginLeft: "16px",
+                  backdropFilter: "blur(8px)",
+                  boxShadow: `inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 0 16px ${metric.chartColor}20`,
+                  transition: "all 0.3s ease",
+                  animation: `fadeIn 1.1s ease-out ${index * 0.15}s both`,
                 }}>
-                  {metric.subtext}
-                </p>
+                  <p style={{
+                    color: metric.chartColor,
+                    margin: 0,
+                    fontSize: "11px",
+                    fontWeight: 700,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.4px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "5px",
+                  }}>
+                    <span style={{
+                      display: "inline-block",
+                      width: "6px",
+                      height: "6px",
+                      borderRadius: "50%",
+                      background: metric.chartColor,
+                      boxShadow: `0 0 8px ${metric.chartColor}`,
+                    }} />
+                    Active
+                  </p>
+                </div>
               </div>
-            </div>
 
             {/* Chart */}
             <div style={{
-              marginTop: "20px",
-              marginLeft: "-20px",
-              marginRight: "-20px",
-              marginBottom: "-20px",
-              borderTop: `1px solid ${metric.borderColor}`,
-              paddingTop: "16px",
-              paddingLeft: "20px",
-              paddingRight: "20px",
+              marginTop: "28px",
+              marginLeft: "-28px",
+              marginRight: "-80px",
+              marginBottom: "-28px",
+              borderTop: `1.5px solid ${metric.borderColor.replace('0.5', '0.2')}`,
+              paddingTop: "24px",
+              paddingLeft: "28px",
+              paddingRight: "10px",
               paddingBottom: "0",
+              background: `linear-gradient(180deg, rgba(0,0,0,0) 0%, ${metric.color.replace('0.3', '0.1')} 100%)`,
             }}>
-              <ResponsiveContainer width="100%" height={350}>
+              <ResponsiveContainer width="100%" height={280}>
                 <LineChart data={metric.data}>
                   <CartesianGrid
                     strokeDasharray="3 3"
@@ -272,5 +421,6 @@ export default function Usage() {
         ))}
       </div>
     </div>
+    </>
   );
 }

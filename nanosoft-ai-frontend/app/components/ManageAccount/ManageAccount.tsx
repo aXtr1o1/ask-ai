@@ -31,6 +31,7 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
   const [activeSection, setActiveSection] = useState<NavSection>("dashboard");
   const [dashboardView, setDashboardView] = useState<DashboardView>("usage");
   const [expandDashboard, setExpandDashboard] = useState(false);
+  const [showMobileSidebar, setShowMobileSidebar] = useState(false);
   const [accounts, setAccounts] = useState<Account[]>([
     {
       id: "1",
@@ -87,6 +88,16 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
     }
   };
 
+  const handleBackToDashboard = () => {
+    // On mobile and tablet, toggle the sidebar
+    if (responsive.isMobile || responsive.isTablet) {
+      setShowMobileSidebar(!showMobileSidebar);
+    } else {
+      // On desktop, navigate back to the previous page
+      router.back();
+    }
+  };
+
   const navItems = [
     { id: "dashboard" as NavSection, label: "Dashboard", icon: IconChartBar },
     { id: "settings" as NavSection, label: "Settings", icon: IconSettings },
@@ -106,21 +117,76 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
       background: "var(--color-bg)",
       color: "var(--color-text)",
     }}>
+      {/* Mobile Backdrop */}
+      {responsive.isMobile && showMobileSidebar && (
+        <div
+          onClick={() => setShowMobileSidebar(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0, 0, 0, 0.6)",
+            backdropFilter: "blur(8px)",
+            zIndex: 999,
+          }}
+        />
+      )}
       {/* Left Sidebar Navigation */}
-      {!responsive.isMobile && (
+      {(!responsive.isMobile || showMobileSidebar) && (
         <div style={{
           width: responsive.isTablet ? "200px" : "240px",
           minWidth: responsive.isTablet ? "200px" : "240px",
           height: "100%",
-          borderRight: "1px solid rgba(255, 255, 255, 0.1)",
+          background: "var(--sidebar-bg)",
+          color: "var(--color-text)",
+          borderRight: `1px solid var(--sidebar-border)`,
           overflowY: "auto",
-          background: "linear-gradient(180deg, rgba(30, 30, 35, 0.6) 0%, rgba(20, 20, 25, 0.8) 100%)",
           padding: "24px 0",
           boxSizing: "border-box",
           display: "flex",
           flexDirection: "column",
           gap: "8px",
+          position: responsive.isMobile ? "fixed" : "relative",
+          left: responsive.isMobile ? 0 : "auto",
+          top: responsive.isMobile ? 0 : "auto",
+          zIndex: responsive.isMobile ? 1000 : "auto",
         }}>
+          {/* Mobile Close Button */}
+          {responsive.isMobile && (
+            <div style={{
+              display: "flex",
+              justifyContent: "flex-end",
+              paddingRight: "16px",
+              paddingBottom: "8px",
+              borderBottom: "1px solid rgba(255, 255, 255, 0.1)",
+            }}>
+              <button
+                onClick={() => setShowMobileSidebar(false)}
+                style={{
+                  background: "rgba(255, 255, 255, 0.1)",
+                  border: "1px solid rgba(255, 255, 255, 0.2)",
+                  borderRadius: "8px",
+                  padding: "8px 8px",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "#ffffff",
+                  transition: "all 0.2s ease",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "rgba(255, 255, 255, 0.15)";
+                  e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.3)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "rgba(255, 255, 255, 0.1)";
+                  e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.2)";
+                }}
+                aria-label="Close sidebar"
+              >
+                <IconX size={20} strokeWidth={2} />
+              </button>
+            </div>
+          )}
           {navItems.map(({ id, label, icon: Icon }) => (
             <div key={id}>
               <button
@@ -128,6 +194,10 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
                   setActiveSection(id);
                   if (id === "dashboard") {
                     setExpandDashboard(!expandDashboard);
+                  }
+                  // Close mobile sidebar only for Settings, not for Dashboard
+                  if (responsive.isMobile && id === "settings") {
+                    setShowMobileSidebar(false);
                   }
                 }}
                 style={{
@@ -138,9 +208,9 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
                     ? "1.5px solid var(--color-primary)" 
                     : "1px solid transparent",
                   background: activeSection === id 
-                    ? "linear-gradient(135deg, var(--color-primary) 0%, rgba(var(--color-primary-rgb), 0.8) 100%)"
+                    ? "linear-gradient(135deg, var(--color-primary) 0%, rgba(var(--color-primary-rgb), 0.25) 100%)"
                     : "transparent",
-                  color: activeSection === id ? "#ffffff" : "var(--color-text-muted)",
+                  color: activeSection === id ? "var(--color-primary-strong)" : "var(--color-text)",
                   cursor: "pointer",
                   textAlign: "left",
                   transition: "all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)",
@@ -187,7 +257,13 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
                     <button
                       key={item.id}
                       type="button"
-                      onClick={() => setDashboardView(item.id)}
+                      onClick={() => {
+                        setDashboardView(item.id);
+                        // Close mobile sidebar after selecting a dashboard view
+                        if (responsive.isMobile) {
+                          setShowMobileSidebar(false);
+                        }
+                      }}
                       style={{
                         padding: "10px 14px",
                         borderRadius: "8px",
@@ -197,10 +273,12 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
                         border: dashboardView === item.id 
                           ? "1.5px solid var(--color-primary)"
                           : "1px solid transparent",
-                        color: dashboardView === item.id ? "var(--color-primary)" : "rgba(255, 255, 255, 0.7)",
+                        color: dashboardView === item.id ? "var(--color-primary)" : "var(--color-text)",
+                        background: dashboardView === item.id ? "rgba(var(--color-primary-rgb), 0.14)" : "transparent",
+                        borderRadius: "8px",
                         cursor: "pointer",
                         fontSize: "12px",
-                        fontWeight: dashboardView === item.id ? 600 : 500,
+                        fontWeight: dashboardView === item.id ? 700 : 500,
                         textAlign: "left",
                         transition: "all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)",
                         width: "100%",
@@ -237,6 +315,9 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
         flexDirection: "column",
         width: "100%",
         minHeight: 0,
+        opacity: responsive.isMobile && showMobileSidebar ? 0.7 : 1,
+        transition: "opacity 0.3s ease",
+        pointerEvents: responsive.isMobile && showMobileSidebar ? "none" : "auto",
       }}>
         {/* Header */}
         <div style={{
@@ -259,7 +340,7 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
             }}>
               {!responsive.isDesktop && (
                 <button
-                  onClick={() => router.back()}
+                  onClick={handleBackToDashboard}
                   style={{
                     background: "rgba(255, 255, 255, 0.1)",
                     border: "1px solid rgba(255, 255, 255, 0.2)",
@@ -329,7 +410,7 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
               display: "flex",
               flexDirection: "column",
               gap: "20px",
-              maxWidth: "900px",
+              maxWidth: responsive.isDesktop ? "1400px" : "100%",
             }}>
               {dashboardView === "usage" && (
                 <Usage />
