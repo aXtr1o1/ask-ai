@@ -328,7 +328,7 @@ class LangChainService:
                     else:
                         logger.info("📋 Intent=LIST — sending full records to model | query='%s'", user_query)
 
-                    MAX_DISPLAY = 1000000
+                    MAX_DISPLAY = 25
                     p_list_for_model = p_list if len(p_list) <= MAX_DISPLAY else p_list[:MAX_DISPLAY]
                     is_large_result = len(p_list) > MAX_DISPLAY
 
@@ -484,8 +484,8 @@ class LangChainService:
                 else:
                     self._last_pending_table = None
 
-                logger.info("✅ Final response generated after tool execution")
-                self._log_query_summary(current_user_query)
+                # logger.info("✅ Final response generated after tool execution")
+                # self._log_query_summary(current_user_query)
                 
 
                 logger.info("✅ Final response generated after tool execution")
@@ -625,7 +625,7 @@ class LangChainService:
                     else:
                         logger.info("📋 Intent=LIST [FORCED] | query='%s'", user_query)
 
-                    MAX_DISPLAY = 1000000000
+                    MAX_DISPLAY = 25
                     p_list_for_model = p_list if len(p_list) <= MAX_DISPLAY else p_list[:MAX_DISPLAY]
                     is_large_result = len(p_list) > MAX_DISPLAY
 

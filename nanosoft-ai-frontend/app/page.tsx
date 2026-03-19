@@ -1976,6 +1976,7 @@ export default function Home() {
     isGraph: isGraphMode,
     query: userText,
     userName: loggedInUser,
+    subUserName: userIdFromUrl,
     sessionId,
     timestamp: Date.now()
   }));
