@@ -12,6 +12,8 @@ import tempfile
 import os
 import json
 import asyncio
+import math
+import subprocess
 from google import genai
 from app.config import settings
 
@@ -195,3 +197,53 @@ async def convert_audio_to_text(audio_bytes: bytes) -> dict:
                 client.files.delete(name=uploaded_file.name)
             except Exception as cleanup_err:
                 logger.warning(f"⚠️ Cloud cleanup failed: {cleanup_err}")
+
+
+# Changes done by sanjeevan
+
+
+def get_audio_duration_seconds(audio_bytes: bytes) -> int | None:
+    """
+    Compute audio duration (seconds) by running `ffprobe` on the received bytes.
+    Returns an integer number of seconds, or None if duration can't be determined.
+    """
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
+            tmp.write(audio_bytes)
+            tmp_path = tmp.name
+
+        cmd = [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            tmp_path,
+        ]
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        if proc.returncode != 0:
+            logger.warning("⚠️ ffprobe failed: %s", (proc.stderr or "").strip()[:200])
+            return None
+
+        dur_str = (proc.stdout or "").strip()
+        if not dur_str:
+            return None
+
+        dur = float(dur_str)
+        if not math.isfinite(dur) or dur <= 0:
+            return None
+
+        # Use ceil so we don't under-consume audio credits.
+        return int(math.ceil(dur))
+    except Exception as e:
+        logger.warning("⚠️ Failed to compute audio duration: %s", str(e)[:200])
+        return None
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass

@@ -13,13 +13,19 @@ from app.models.schemas import ChatRequest
 import base64 
 from app.config import settings
 from app.services.langchain_service import langchain_service
+from app.services.user_profile_service import (
+    update_usage_if_exists,
+    get_credits_remaining,
+    consume_audio_seconds_if_available,
+    get_graph_count_and_limit,
+)
 from app.prompts.system_prompt import get_system_prompt
 from app.services.postgres_service import save_session_to_postgres_service
 from app.api.database.postgres_client import get_pool
 
 from app.services.session_service import get_sessions_for_user, get_chat_history_for_session
 from app.models.schemas import SessionRequest, ClientInsertionRequest
-from app.services.audio_service import convert_audio_to_text
+from app.services.audio_service import convert_audio_to_text, get_audio_duration_seconds
 from app.services.quota_service import quota_fallback_service
 
 
@@ -149,11 +155,25 @@ async def ws_chat_endpoint(websocket: WebSocket):
                 continue
             
             user_name  = str(data.get("userName", ""))
+            logger.info(f"📊 user_name={user_name}")
+            sub_user_name = str(data.get("subUserName", ""))
+            logger.info(f"📊 sub_user_name={sub_user_name}")
             session_id = str(data.get("sessionId", ""))
             is_audio   = bool(data.get("isAudio", False))  # ── NEW: audio flag
             logger.info(f"📊 isAudio flag received: {is_audio}")
             is_graph = bool(data.get("isGraph", False))
             logger.info(f"📊 isGraph flag received: {is_graph}")
+
+
+# Changes done by sanjeevan
+
+            # Client should send audio length for correct quota enforcement.
+            # Accept both `audioSeconds` and `audio_seconds`.
+            try:
+                audio_seconds_request = int(float(data.get("audioSeconds") or data.get("audio_seconds") or 0))
+            except Exception:
+                audio_seconds_request = 0
+            logger.info(f"📊 audio_seconds_request={audio_seconds_request}")
 
 
             if not session_id:
@@ -181,6 +201,45 @@ async def ws_chat_endpoint(websocket: WebSocket):
                             websocket.receive_bytes(),
                             timeout=settings.WS_SESSION_TIMEOUT
                         )
+                        
+# Changes done by sanjeevan
+                        # ── Size guard ─────────────────────────────────────────
+                        if len(audio_bytes) > MAX_AUDIO_BYTES:
+                            await websocket.send_text(json.dumps({
+                                "error": "Voice query is too long. Please keep it brief and try again."
+                            }))
+                            await websocket.send_text("[DONE]")
+                            continue
+
+                        # ── Audio credits check + consume ───────────────────────
+                        computed_audio_seconds = get_audio_duration_seconds(audio_bytes)
+                        audio_seconds_effective = (
+                            computed_audio_seconds
+                            if computed_audio_seconds is not None and computed_audio_seconds > 0
+                            else audio_seconds_request
+                        )
+                        logger.info(
+                            "📊 audio_seconds_effective=%s (client=%s, computed=%s)",
+                            audio_seconds_effective,
+                            audio_seconds_request,
+                            computed_audio_seconds,
+                        )
+
+                        if audio_seconds_effective and audio_seconds_effective > 0:
+                            consumed = await asyncio.to_thread(
+                                consume_audio_seconds_if_available,
+                                name=sub_user_name,
+                                audio_seconds_delta=audio_seconds_effective,
+                            )
+                            if consumed is False:
+                                msg = "Audio credits exhausted. Please recharge/upgrade your plan to continue."
+                                await websocket.send_text(json.dumps({
+                                    "session_id": session_id,
+                                    "response": msg
+                                }))
+                                await websocket.send_text("[DONE]")
+                                continue
+
                         transcribed = await convert_audio_to_text(audio_bytes)
                         reply_text  = transcribed["transcription"].strip().lower()
                         logger.info(f"🎙️ Audio confirmation reply: '{reply_text}'")
@@ -226,8 +285,9 @@ async def ws_chat_endpoint(websocket: WebSocket):
             #----------------- audio integration by mega-----------------
             
             # ── NEW: AUDIO PATH — isAudio = true then convert it into the text and send to  process query function
+            
             elif is_audio:
-                logger.info(f"🎙️ Audio message | user={user_name} | session={session_id}")
+                logger.info(f"🎙️ Audio message | user={sub_user_name} | session={session_id}")
 
                 try:
                     # ── Receive audio bytes ──────────────────────────────────
@@ -243,6 +303,51 @@ async def ws_chat_endpoint(websocket: WebSocket):
                             "error": "Voice query is too long. Please keep it brief and try again."
                         }))
                         continue
+
+
+# Changes done by sanjeevan
+                    # ── Audio credits check + consume ───────────────────────
+                    computed_audio_seconds = get_audio_duration_seconds(audio_bytes)
+                    audio_seconds_effective = (
+                        computed_audio_seconds
+                        if computed_audio_seconds is not None and computed_audio_seconds > 0
+                        else audio_seconds_request
+                    )
+                    logger.info(
+                        "📊 audio_seconds_effective=%s (client=%s, computed=%s)",
+                        audio_seconds_effective,
+                        audio_seconds_request,
+                        computed_audio_seconds,
+                    )
+
+                    if audio_seconds_effective and audio_seconds_effective > 0:
+                        consumed = await asyncio.to_thread(
+                            consume_audio_seconds_if_available,
+                            name=sub_user_name,
+                            audio_seconds_delta=audio_seconds_effective,
+                        )
+                        if consumed is False:
+                            msg = "Audio credits exhausted. Please recharge/upgrade your plan to continue."
+                            await websocket.send_text(json.dumps({
+                                "session_id": session_id,
+                                "response": msg
+                            }))
+                            await websocket.send_text("[DONE]")
+
+                            if session_id not in memory_store:
+                                memory_store[session_id] = {
+                                    "lc_memory": [],
+                                    "history": [],
+                                    "user_name": user_name,
+                                    "pending_transcription": None,
+                                }
+                            memory_store[session_id]["history"].append({
+                                "query": "",
+                                "assistant": msg,
+                                "context": msg,
+                                "is_audio": True,
+                            })
+                            continue
 
                     audio_base64   = "data:audio/ogg;base64," + base64.b64encode(audio_bytes).decode("utf-8")
                     query_to_store = audio_base64
@@ -475,23 +580,60 @@ async def ws_chat_endpoint(websocket: WebSocket):
             messages  = [get_system_prompt(user_name)] + lc_memory
             messages.append(HumanMessage(content=user_query))
 
+# Changes done by sanjeevan
             try:
-                # ── CHANGED: process_query now returns 3-tuple (final_response_text, context_summary, messages)
-                # ── final_response_text → full data (sent to frontend + stored in history for DB)
-                # ── context_summary     → short sentence (stored in lc_memory for model — no token error)
-                # langchain_service will use this flag to decide:
-                # if is_graph=True AND aggregate query → return graph JSON
-                # if is_graph=False → return normal markdown table (unchanged)
+                # ── Credits gate: if credits_remaining == 0, skip model ───────
+                try:
+                    credits_remaining = await asyncio.to_thread(get_credits_remaining, sub_user_name)  # TODO: swap to real external user id from auth
+                except Exception as e:
+                    logger.warning("⚠️ credits check failed (continuing): %s", str(e)[:200])
+                    credits_remaining = None
 
-                final_response_text, context_summary, _ = await langchain_service.process_query(
-                    messages,
-                    user_name=user_name,
-                    session_id=session_id,
-                     is_graph   = is_graph  # graph flag passed here
+                if credits_remaining == 0:
+                    final_response_text = "You’re out of credits. Please recharge/upgrade your plan to continue."
+                    context_summary = final_response_text
+                    logger.info("⛔ Credits exhausted | name=%s", sub_user_name)
+                else:
+                    # ── Graph gate: if graph_count > graph_limit, skip model ───
+                    try:
+                        if is_graph:
+                            graph_info = await asyncio.to_thread(get_graph_count_and_limit, sub_user_name)
+                        else:
+                            graph_info = None
+                    except Exception as e:
+                        logger.warning("⚠️ graph check failed (continuing): %s", str(e)[:200])
+                        graph_info = None
 
-                )
-                logger.info(f"✅ Response generated for session_id: {session_id}")
-                logger.info(f"🧠 context_summary for lc_memory: {context_summary[:80]}")
+                    if is_graph and graph_info is not None:
+                        graph_count, graph_limit = graph_info
+                        # If graph_count already reached the allowed limit, block the model call.
+                        # This avoids "count crosses the limit in the same request" behavior.
+                        if graph_count >= graph_limit:
+                            final_response_text = "Your graph credits is over. Please recharge/upgrade your plan to continue."
+                            context_summary = final_response_text
+                            logger.info(
+                                "⛔ Graph exhausted | name=%s graph_count=%s graph_limit=%s",
+                                user_name,
+                                graph_count,
+                                graph_limit,
+                            )
+                        else:
+                            final_response_text, context_summary, _ = await langchain_service.process_query(
+                                messages,
+                                user_name=user_name,
+                                session_id=session_id,
+                                is_graph=is_graph,  # graph flag passed here
+                            )
+                    else:
+                        final_response_text, context_summary, _ = await langchain_service.process_query(
+                            messages,
+                            user_name=user_name,
+                            session_id=session_id,
+                            is_graph=is_graph,  # graph flag passed here
+                        )
+
+                    logger.info(f"✅ Response generated for session_id: {session_id}")
+                    logger.info(f"🧠 context_summary for lc_memory: {context_summary[:80]}")
 
             except Exception as e:
                 logger.error(f"❌ LangChain error: {e}", exc_info=True)
@@ -534,6 +676,35 @@ async def ws_chat_endpoint(websocket: WebSocket):
                 "response":   final_response_text
             }))
             await websocket.send_text("[DONE]")
+            
+# Changes done by sanjeevan
+
+            # ── Update user_profile usage counters after each response ───────
+            try:
+                tokens_delta = int(getattr(langchain_service, "_total_tokens", 0) or 0)
+                is_graph_response = False
+                graph_delta = 0
+                # Graph responses are JSON with {"type":"graph", ...}
+                if bool(is_graph) and isinstance(final_response_text, str):
+                    try:
+                        payload = json.loads(final_response_text)
+                        is_graph_response = isinstance(payload, dict) and payload.get("type") == "graph"
+                    except Exception:
+                        is_graph_response = False
+                if is_graph_response:
+                    graph_delta = 1
+                
+                await asyncio.to_thread(
+                    update_usage_if_exists,
+                    name=sub_user_name,  # TODO: swap to real external user id from auth
+                    tokens_used_delta=tokens_delta,
+                    request_delta=1,
+                    graph_delta=graph_delta,
+                    credits_per_request=1,
+                    audio_seconds_delta=0,
+                )
+            except Exception as e:
+                logger.warning("⚠️ user_profile update failed: %s", str(e)[:200])
 
             # ── CHANGED: TWO SEPARATE MEMORIES
             # ── lc_memory → stores context_summary ONLY (sent to model as past context)
