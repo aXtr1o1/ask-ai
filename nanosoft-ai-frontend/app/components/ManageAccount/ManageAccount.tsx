@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { IconEdit, IconCheck, IconX, IconSettings, IconCreditCard, IconShield, IconBell, IconArrowLeft } from "@tabler/icons-react";
+import { IconCheck, IconX, IconSettings, IconCreditCard, IconShield, IconBell, IconArrowLeft, IconChartBar } from "@tabler/icons-react";
 import { useResponsive } from "@/app/hooks/useResponsive";
 import { useTheme } from "@/app/components/useTheme";
 import Usage from "./usage";
@@ -18,12 +18,13 @@ interface Account {
 
 interface ManageAccountProps {
   currentPlan?: string;
+  profileName?: string;
 }
 
 type NavSection = "dashboard" | "settings";
 type DashboardView = "usage" | "rate-limit";
 
-export default function ManageAccount({ currentPlan = "Pro" }: ManageAccountProps) {
+export default function ManageAccount({ currentPlan = "Pro", profileName = "My Account" }: ManageAccountProps) {
   const router = useRouter();
   const responsive = useResponsive();
   const { theme } = useTheme();
@@ -33,7 +34,7 @@ export default function ManageAccount({ currentPlan = "Pro" }: ManageAccountProp
   const [accounts, setAccounts] = useState<Account[]>([
     {
       id: "1",
-      name: "My Account",
+      name: profileName,
       email: "user@example.com",
       plan: currentPlan,
       createdAt: "2026-01-15",
@@ -87,7 +88,7 @@ export default function ManageAccount({ currentPlan = "Pro" }: ManageAccountProp
   };
 
   const navItems = [
-    { id: "dashboard" as NavSection, label: "Dashboard", icon: IconEdit },
+    { id: "dashboard" as NavSection, label: "Dashboard", icon: IconChartBar },
     { id: "settings" as NavSection, label: "Settings", icon: IconSettings },
   ];
 
@@ -413,42 +414,6 @@ export default function ManageAccount({ currentPlan = "Pro" }: ManageAccountProp
                       </p>
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActiveSection("dashboard");
-                      handleEdit(accounts[0]);
-                    }}
-                    style={{
-                      padding: "10px 18px",
-                      borderRadius: "8px",
-                      background: "var(--color-primary)",
-                      border: "none",
-                      color: "#ffffff",
-                      cursor: "pointer",
-                      transition: "all 0.3s ease",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "8px",
-                      fontSize: "13px",
-                      fontWeight: 600,
-                      whiteSpace: "nowrap",
-                      boxShadow: "0 6px 16px rgba(var(--color-primary-rgb), 0.3)",
-                    }}
-                    onMouseEnter={(e) => {
-                      const btn = e.currentTarget as HTMLElement;
-                      btn.style.transform = "translateY(-2px)";
-                      btn.style.boxShadow = "0 8px 20px rgba(var(--color-primary-rgb), 0.4)";
-                    }}
-                    onMouseLeave={(e) => {
-                      const btn = e.currentTarget as HTMLElement;
-                      btn.style.transform = "translateY(0)";
-                      btn.style.boxShadow = "0 6px 16px rgba(var(--color-primary-rgb), 0.3)";
-                    }}
-                  >
-                    <IconEdit size={16} strokeWidth={2} />
-                    Edit
-                  </button>
                 </div>
               </div>
 

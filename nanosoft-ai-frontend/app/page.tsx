@@ -2775,7 +2775,7 @@ export default function Home() {
               width: "100%",
               height: "100%",
             }}>
-              <ManageAccount currentPlan={currentPlan} />
+              <ManageAccount currentPlan={currentPlan} profileName={loggedInUser || "My Account"} />
             </div>
           </div>
         )}
