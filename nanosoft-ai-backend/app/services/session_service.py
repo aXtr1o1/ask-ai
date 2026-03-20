@@ -99,6 +99,7 @@ async def get_chat_history_for_session(user_name: str, session_id: str) -> list:
             {
                 "query":     item.get("query",     ""),
                 "assistant": item.get("assistant", ""),
+                "context":   item.get("context", ""),
                 "is_audio":  item.get("is_audio",  False)
             }
             for item in history
