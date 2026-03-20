@@ -54,7 +54,8 @@ async def test_get_chat_history_for_session():
     assert len(result) == 1
     assert result[0]["query"] == "show me assets"
     assert result[0]["assistant"] == "Found 1 asset."
-    assert "context" not in result[0]
+    assert result[0]["context"] == "summary"
+    
 
 
 # Test 3: Check empty result is returned when session is not found in DB
