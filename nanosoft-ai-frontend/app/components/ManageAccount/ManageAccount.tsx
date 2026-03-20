@@ -30,7 +30,6 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
   const { theme } = useTheme();
   const [activeSection, setActiveSection] = useState<NavSection>("dashboard");
   const [dashboardView, setDashboardView] = useState<DashboardView>("usage");
-  const [expandDashboard, setExpandDashboard] = useState(false);
   const [showMobileSidebar, setShowMobileSidebar] = useState(false);
   const [accounts, setAccounts] = useState<Account[]>([
     {
@@ -192,9 +191,6 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
               <button
                 onClick={() => {
                   setActiveSection(id);
-                  if (id === "dashboard") {
-                    setExpandDashboard(!expandDashboard);
-                  }
                   // Close mobile sidebar only for Settings, not for Dashboard
                   if (responsive.isMobile && id === "settings") {
                     setShowMobileSidebar(false);
@@ -242,7 +238,7 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
               </button>
 
               {/* Dashboard Submenu */}
-              {id === "dashboard" && activeSection === "dashboard" && expandDashboard && (
+              {id === "dashboard" && (
                 <div style={{
                   display: "flex",
                   flexDirection: "column",
@@ -258,6 +254,7 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
                       key={item.id}
                       type="button"
                       onClick={() => {
+                        setActiveSection("dashboard");
                         setDashboardView(item.id);
                         // Close mobile sidebar after selecting a dashboard view
                         if (responsive.isMobile) {
@@ -274,8 +271,6 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
                           ? "1.5px solid var(--color-primary)"
                           : "1px solid transparent",
                         color: dashboardView === item.id ? "var(--color-primary)" : "var(--color-text)",
-                        background: dashboardView === item.id ? "rgba(var(--color-primary-rgb), 0.14)" : "transparent",
-                        borderRadius: "8px",
                         cursor: "pointer",
                         fontSize: "12px",
                         fontWeight: dashboardView === item.id ? 700 : 500,
@@ -626,15 +621,7 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
           flexShrink: 0,
           background: "linear-gradient(180deg, transparent 0%, rgba(var(--color-primary-rgb), 0.05) 100%)",
         }}>
-          <p style={{
-            fontSize: "12px",
-            color: "rgba(255, 255, 255, 0.5)",
-            margin: 0,
-            textAlign: "center",
-            lineHeight: "1.5",
-          }}>
-            You can manage up to 5 accounts on your plan. Each account operates independently with its own dedicated settings.
-          </p>
+          
         </div>
       </div>
     </div>

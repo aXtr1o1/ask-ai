@@ -126,9 +126,12 @@ export default function RateLimit() {
 
   // Determine status color and text based on usage percentage
   const getStatusInfo = (percentage: number) => {
-    if (percentage >= 80) return { color: "#ff6b6b", status: "Critical", bgColor: "rgba(255, 107, 107, 0.15)" };
-    if (percentage >= 60) return { color: "#ffd93d", status: "Warning", bgColor: "rgba(255, 217, 61, 0.15)" };
-    return { color: "#64c896", status: "Healthy", bgColor: "rgba(100, 200, 150, 0.15)" };
+    // Keep statuses readable, but aligned with the project's gold/black style.
+    if (percentage >= 80)
+      return { color: "#f87171", status: "Critical", bgColor: "rgba(248, 113, 113, 0.12)" };
+    if (percentage >= 60)
+      return { color: "#fbbf24", status: "Warning", bgColor: "rgba(251, 191, 36, 0.12)" };
+    return { color: "#d4af37", status: "Healthy", bgColor: "rgba(212, 175, 55, 0.12)" };
   };
 
   return (
@@ -138,16 +141,16 @@ export default function RateLimit() {
         display: "flex",
         flexDirection: "column",
         gap: "32px",
-        background: "var(--manageaccount-bg)",
+        background: "transparent",
         color: "var(--manageaccount-text)",
         border: `1px solid var(--manageaccount-border)`,
-        minHeight: "100vh",
+        minHeight: 0,
         width: "100%",
       }}>
         {/* Rate Limit Cards Grid */}
         <div style={{
           display: "grid",
-          gridTemplateColumns: "1fr",
+          gridTemplateColumns: responsive.isDesktop ? "repeat(2, 1fr)" : "1fr",
           gap: "16px",
         }}>
           {rateLimitMetrics.map((metric, index) => {
@@ -156,14 +159,14 @@ export default function RateLimit() {
             <div
               key={metric.id}
               style={{
-                background: `linear-gradient(135deg, ${metric.color} 0%, rgba(255, 255, 255, 0.01) 100%)`,
-                border: `1.5px solid ${metric.borderColor}`,
+                background: `linear-gradient(135deg, rgba(212, 175, 55, ${theme === "dark" ? 0.12 : 0.22}) 0%, rgba(255, 255, 255, 0.02) 100%)`,
+                border: `1.5px solid rgba(212, 175, 55, ${theme === "dark" ? 0.35 : 0.30})`,
                 borderRadius: "18px",
-                padding: "28px",
+                padding: responsive.isMobile ? "18px" : "22px",
                 transition: "all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1)",
                 cursor: "pointer",
                 backdropFilter: "blur(10px)",
-                boxShadow: `0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 ${metric.borderColor}`,
+                boxShadow: `0 12px 44px rgba(0, 0, 0, ${theme === "dark" ? 0.34 : 0.18}), inset 0 1px 0 rgba(212, 175, 55, 0.18)`,
                 animation: animated ? `slideInUp 0.6s ease-out ${index * 0.1}s both` : "none",
                 position: "relative",
                 overflow: "hidden",
@@ -171,14 +174,14 @@ export default function RateLimit() {
               onMouseEnter={(e) => {
                 const div = e.currentTarget as HTMLElement;
                 div.style.transform = "translateY(-8px) scale(1.01)";
-                div.style.boxShadow = `0 24px 56px ${metric.progressColor}30, inset 0 1px 0 ${metric.borderColor}`;
-                div.style.borderColor = metric.borderColor.replace('0.5', '0.9');
+                div.style.boxShadow = `0 24px 56px rgba(212, 175, 55, 0.18), inset 0 1px 0 rgba(212, 175, 55, 0.35)`;
+                div.style.borderColor = theme === "dark" ? "rgba(212, 175, 55, 0.55)" : "rgba(212, 175, 55, 0.45)";
               }}
               onMouseLeave={(e) => {
                 const div = e.currentTarget as HTMLElement;
                 div.style.transform = "translateY(0) scale(1)";
-                div.style.boxShadow = `0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 ${metric.borderColor}`;
-                div.style.borderColor = metric.borderColor;
+                div.style.boxShadow = `0 12px 44px rgba(0, 0, 0, ${theme === "dark" ? 0.34 : 0.18}), inset 0 1px 0 rgba(212, 175, 55, 0.18)`;
+                div.style.borderColor = theme === "dark" ? "rgba(212, 175, 55, 0.35)" : "rgba(212, 175, 55, 0.30)";
               }}
             >
               {/* Animated Background Glow */}
@@ -188,7 +191,7 @@ export default function RateLimit() {
                 left: 0,
                 right: 0,
                 bottom: 0,
-                background: `radial-gradient(circle at center, ${metric.progressColor}10 0%, transparent 70%)`,
+                background: `radial-gradient(circle at 20% 10%, rgba(212, 175, 55, 0.22) 0%, transparent 55%), radial-gradient(circle at center, ${metric.progressColor}12 0%, transparent 70%)`,
                 opacity: 0,
                 animation: `fadeIn 1.2s ease-out ${index * 0.15}s forwards`,
                 pointerEvents: "none",
@@ -312,7 +315,7 @@ export default function RateLimit() {
                 gap: "12px",
                 marginTop: "28px",
                 paddingTop: "24px",
-                borderTop: `1.5px solid ${metric.borderColor.replace('0.5', '0.2')}`,
+                borderTop: `1.5px solid rgba(212, 175, 55, ${theme === "dark" ? 0.22 : 0.20})`,
                 position: "relative",
                 zIndex: 1,
               }}>
@@ -320,10 +323,10 @@ export default function RateLimit() {
                 <div style={{
                   width: "100%",
                   height: "18px",
-                  background: "rgba(255, 255, 255, 0.08)",
+                  background: "rgba(255, 255, 255, 0.06)",
                   borderRadius: "10px",
                   overflow: "hidden",
-                  border: `1px solid ${metric.borderColor.replace('0.5', '0.25')}`,
+                  border: `1px solid rgba(212, 175, 55, ${theme === "dark" ? 0.25 : 0.20})`,
                   position: "relative",
                 }}>
                   <div

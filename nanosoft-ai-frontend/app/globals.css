@@ -3794,7 +3794,10 @@ body.upgrade-plan-open {
 
 /* Dim backdrop behind modal and hide sidebar (subtle, no blur on content) */
 body.upgrade-plan-open .app-container {
-  opacity: 0.6;
+  /* Keep the app dimming effect only on the backdrop.
+     Dimmiting the whole app-container also fades the upgrade modal itself
+     (which looks "dull"). */
+  opacity: 1;
   pointer-events: none;
 }
 
@@ -3814,7 +3817,7 @@ body.upgrade-plan-open .main-content {
 }
 :root[data-theme='dark'],
 :root:not([data-theme]) {
-  --manageaccount-bg: linear-gradient(135deg, #181a20 0%, #23243a 100%);
+  --manageaccount-bg: linear-gradient(135deg, #181a20 0%, #141420 100%);
 }
 /* Make scrollbars invisible but still scrollable */
 /* For Webkit browsers (Chrome, Edge, Safari) */

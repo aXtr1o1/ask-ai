@@ -140,7 +140,7 @@ export default function UpgradePlan({ onManageAccountClick, onPlanChange }: Upgr
           fontWeight: 700,
           color: "#f3f4f6",
           marginBottom: "6px",
-          display: "none",
+          display: "block",
         }}>
           Choose Your Plan
         </h1>

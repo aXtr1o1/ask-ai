@@ -178,6 +178,17 @@ export default function Usage() {
     },
   ];
 
+  const kpiMetrics = usageMetrics.filter((m) =>
+    ["text-requests", "text-usage", "audio-requests", "audio-usage"].includes(m.id)
+  );
+  const textUsageMetric = usageMetrics.find((m) => m.id === "text-usage")!;
+  const audioUsageMetric = usageMetrics.find((m) => m.id === "audio-usage")!;
+  const breakdownMetrics = kpiMetrics;
+
+  const isDark = theme === "dark";
+  const textMuted = isDark ? "rgba(255, 255, 255, 0.6)" : "rgba(0, 0, 0, 0.55)";
+  const textFaint = isDark ? "rgba(255, 255, 255, 0.45)" : "rgba(0, 0, 0, 0.40)";
+
   return (
     <>
       <style>{styles}</style>
@@ -185,241 +196,257 @@ export default function Usage() {
         display: "flex",
         flexDirection: "column",
         gap: "32px",
-        background: "var(--manageaccount-bg)",
+        background: "transparent",
         color: "var(--manageaccount-text)",
         border: `1px solid var(--manageaccount-border)`,
-        minHeight: "100vh",
+        minHeight: 0,
         width: "100%",
       }}>
-        {/* Usage Metrics Grid */}
         <div style={{
-          display: "grid",
-          gridTemplateColumns: "1fr",
+          display: "flex",
+          flexDirection: "column",
           gap: "16px",
         }}>
-          {usageMetrics.map((metric, index) => (
-            <div
-              key={metric.id}
-              style={{
-                background: `linear-gradient(135deg, ${metric.color} 0%, rgba(255, 255, 255, 0.01) 100%)`,
-                border: `1.5px solid ${metric.borderColor}`,
-                borderRadius: "18px",
-                padding: "28px",
-                transition: "all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1)",
-                cursor: "pointer",
-                backdropFilter: "blur(10px)",
-                boxShadow: `0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 ${metric.borderColor}`,
-                animation: animated ? `slideInUp 0.6s ease-out ${index * 0.1}s both` : "none",
-                position: "relative",
-                overflow: "hidden",
-              }}
-              onMouseEnter={(e) => {
-                const div = e.currentTarget as HTMLElement;
-                div.style.transform = "translateY(-8px) scale(1.01)";
-                div.style.boxShadow = `0 24px 56px ${metric.chartColor}30, inset 0 1px 0 ${metric.borderColor}`;
-                div.style.borderColor = metric.borderColor.replace('0.5', '0.9');
-              }}
-              onMouseLeave={(e) => {
-                const div = e.currentTarget as HTMLElement;
-                div.style.transform = "translateY(0) scale(1)";
-                div.style.boxShadow = `0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 ${metric.borderColor}`;
-                div.style.borderColor = metric.borderColor;
-              }}
-            >
-              {/* Animated Background Glow */}
-              <div style={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                background: `radial-gradient(circle at center, ${metric.chartColor}10 0%, transparent 70%)`,
-                opacity: 0,
-                animation: `fadeIn 1.2s ease-out ${index * 0.15}s forwards`,
-                pointerEvents: "none",
-              }} />
+          {/* KPI strip */}
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: responsive.isDesktop ? "repeat(4, 1fr)" : "repeat(2, 1fr)",
+            gap: "12px",
+          }}>
+            {kpiMetrics.map((metric, index) => (
+              <div
+                key={metric.id}
+                style={{
+                  background: `linear-gradient(135deg, rgba(212, 175, 55, ${isDark ? 0.12 : 0.22}) 0%, rgba(255, 255, 255, 0.02) 100%)`,
+                  border: `1.5px solid rgba(212, 175, 55, ${isDark ? 0.35 : 0.30})`,
+                  borderRadius: "18px",
+                  padding: "16px 16px 14px",
+                  position: "relative",
+                  overflow: "hidden",
+                  backdropFilter: "blur(10px)",
+                  boxShadow: `0 10px 36px rgba(0, 0, 0, ${isDark ? 0.35 : 0.18})`,
+                  cursor: "default",
+                  animation: animated ? `slideInUp 0.55s ease-out ${index * 0.08}s both` : "none",
+                }}
+              >
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    background: `radial-gradient(circle at 30% 10%, ${metric.chartColor}18 0%, transparent 55%)`,
+                    pointerEvents: "none",
+                  }}
+                />
 
-              <div style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "flex-start",
-                marginBottom: "24px",
-                position: "relative",
-                zIndex: 1,
-              }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                    marginBottom: "16px",
-                  }}>
+                <div style={{ position: "relative", zIndex: 1, display: "flex", gap: "12px", alignItems: "flex-start" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
                     <p style={{
-                      fontSize: "12px",
-                      color: "rgba(255, 255, 255, 0.6)",
+                      fontSize: "11px",
+                      color: textMuted,
                       margin: 0,
-                      fontWeight: 600,
+                      fontWeight: 700,
                       textTransform: "uppercase",
-                      letterSpacing: "0.7px",
-                      animation: `fadeIn 0.8s ease-out ${index * 0.1}s backward`,
+                      letterSpacing: "0.6px",
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
                     }}>
                       {metric.label}
                     </p>
-                    <div style={{
-                      width: "7px",
-                      height: "7px",
-                      borderRadius: "50%",
-                      background: metric.chartColor,
-                      opacity: 0.8,
-                      boxShadow: `0 0 12px ${metric.chartColor}`,
-                      animation: `pulse-dot 2.5s ease-in-out infinite`,
-                    }} />
-                  </div>
-                  <div style={{
-                    display: "flex",
-                    alignItems: "baseline",
-                    gap: "10px",
-                    marginBottom: "8px",
-                  }}>
+
+                    <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginTop: "8px" }}>
+                      <p style={{
+                        fontSize: "26px",
+                        fontWeight: 900,
+                        margin: 0,
+                        letterSpacing: "-0.4px",
+                        color: isDark ? "#ffffff" : "#0f172a",
+                      }}>
+                        {metric.value}
+                      </p>
+                      <p style={{
+                        fontSize: "12px",
+                        fontWeight: 800,
+                        margin: 0,
+                        color: metric.borderColor,
+                        opacity: 0.95,
+                      }}>
+                        {metric.unit}
+                      </p>
+                    </div>
+
                     <p style={{
-                      fontSize: "42px",
-                      fontWeight: 800,
-                      color: "#ffffff",
-                      margin: 0,
-                      letterSpacing: "-0.5px",
-                      background: `linear-gradient(135deg, ${metric.chartColor}, #ffffff)`,
-                      backgroundClip: "text",
-                      WebkitBackgroundClip: "text",
-                      WebkitTextFillColor: "transparent",
-                      animation: `fadeIn 1s ease-out ${index * 0.15}s both`,
+                      fontSize: "11px",
+                      color: textFaint,
+                      margin: "6px 0 0",
+                      fontWeight: 600,
                     }}>
-                      {metric.value}
-                    </p>
-                    <p style={{
-                      fontSize: "14px",
-                      color: metric.borderColor,
-                      margin: 0,
-                      fontWeight: 700,
-                      opacity: 0.8,
-                    }}>
-                      {metric.unit}
+                      {metric.subtext}
                     </p>
                   </div>
-                  <p style={{
-                    fontSize: "12px",
-                    color: "rgba(255, 255, 255, 0.5)",
-                    margin: 0,
-                    fontWeight: 500,
-                  }}>
-                    {metric.subtext}
-                  </p>
-                </div>
-                <div style={{
-                  background: metric.borderColor.replace('0.5', '0.15'),
-                  border: `1.5px solid ${metric.borderColor}`,
-                  borderRadius: "14px",
-                  padding: "10px 14px",
-                  marginLeft: "16px",
-                  backdropFilter: "blur(8px)",
-                  boxShadow: `inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 0 16px ${metric.chartColor}20`,
-                  transition: "all 0.3s ease",
-                  animation: `fadeIn 1.1s ease-out ${index * 0.15}s both`,
-                }}>
-                  <p style={{
-                    color: metric.chartColor,
-                    margin: 0,
-                    fontSize: "11px",
-                    fontWeight: 700,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.4px",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "5px",
-                  }}>
-                    <span style={{
-                      display: "inline-block",
-                      width: "6px",
-                      height: "6px",
-                      borderRadius: "50%",
-                      background: metric.chartColor,
-                      boxShadow: `0 0 8px ${metric.chartColor}`,
-                    }} />
-                    Active
-                  </p>
+
+                  <div style={{ width: "96px", height: "46px", flexShrink: 0 }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={metric.data}>
+                        <XAxis dataKey="date" hide />
+                        <YAxis hide />
+                        <Line
+                          type="monotone"
+                          dataKey="value"
+                          stroke={metric.chartColor}
+                          strokeWidth={2.5}
+                          dot={false}
+                          isAnimationActive={false}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
                 </div>
               </div>
+            ))}
+          </div>
 
-            {/* Chart */}
+          {/* Trends */}
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: responsive.isDesktop ? "repeat(2, 1fr)" : "1fr",
+            gap: "16px",
+          }}>
+            {[textUsageMetric, audioUsageMetric].map((metric, index) => (
+              <div
+                key={metric.id}
+                style={{
+                  background: `linear-gradient(135deg, rgba(212, 175, 55, ${isDark ? 0.10 : 0.20}) 0%, rgba(255, 255, 255, 0.02) 100%)`,
+                  border: `1.5px solid rgba(212, 175, 55, ${isDark ? 0.35 : 0.30})`,
+                  borderRadius: "18px",
+                  padding: "16px",
+                  backdropFilter: "blur(10px)",
+                  boxShadow: `0 14px 52px rgba(0, 0, 0, ${isDark ? 0.34 : 0.18})`,
+                  overflow: "hidden",
+                  animation: animated ? `slideInUp 0.6s ease-out ${0.15 + index * 0.12}s both` : "none",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <p style={{ margin: 0, fontSize: 12, fontWeight: 800, color: textMuted, textTransform: "uppercase", letterSpacing: "0.6px" }}>
+                      Trend
+                    </p>
+                    <p style={{ margin: 0, fontSize: 18, fontWeight: 900, color: isDark ? "#ffffff" : "#0f172a" }}>
+                      {metric.label}
+                    </p>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ width: 9, height: 9, borderRadius: 999, background: metric.chartColor, boxShadow: `0 0 18px ${metric.chartColor}aa` }} />
+                    <p style={{ margin: 0, fontSize: 11, fontWeight: 800, color: textMuted, textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                      Active
+                    </p>
+                  </div>
+                </div>
+
+                <div style={{ height: 260 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={metric.data}>
+                      <CartesianGrid
+                        strokeDasharray="4 4"
+                        stroke={isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.08)"}
+                        vertical={false}
+                      />
+                      <XAxis
+                        dataKey="date"
+                        tick={{ fontSize: 11, fill: isDark ? "rgba(255,255,255,0.55)" : "rgba(0,0,0,0.55)" }}
+                        axisLine={{ stroke: isDark ? "rgba(255,255,255,0.10)" : "rgba(0,0,0,0.10)" }}
+                        tickLine={false}
+                      />
+                      <YAxis
+                        tick={{ fontSize: 11, fill: isDark ? "rgba(255,255,255,0.55)" : "rgba(0,0,0,0.55)" }}
+                        axisLine={false}
+                        tickLine={false}
+                        width={42}
+                        domain={["auto", "auto"]}
+                      />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: isDark ? "rgba(20, 20, 25, 0.95)" : "rgba(240, 240, 245, 0.95)",
+                          border: `1px solid rgba(212, 175, 55, ${isDark ? 0.40 : 0.35})`,
+                          borderRadius: "10px",
+                          color: isDark ? "#ffffff" : "#000000",
+                        }}
+                        cursor={{ stroke: metric.chartColor, strokeOpacity: 0.35 }}
+                        formatter={(val: unknown) => [formatNumber(Number(val)), metric.unit]}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="value"
+                        stroke={metric.chartColor}
+                        strokeWidth={2.8}
+                        dot={{ r: 3, fill: metric.chartColor }}
+                        activeDot={{ r: 6 }}
+                        isAnimationActive={false}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Compact day breakdown */}
+          <div style={{
+            background: `linear-gradient(135deg, rgba(212, 175, 55, ${isDark ? 0.08 : 0.18}) 0%, rgba(255, 255, 255, 0.02) 100%)`,
+            border: `1.5px solid rgba(212, 175, 55, ${isDark ? 0.35 : 0.30})`,
+            borderRadius: "18px",
+            padding: "16px",
+            backdropFilter: "blur(10px)",
+            boxShadow: `0 12px 44px rgba(0, 0, 0, ${isDark ? 0.30 : 0.18})`,
+            overflow: "hidden",
+          }}>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, marginBottom: 12 }}>
+              <div>
+                <p style={{ margin: 0, fontSize: 12, fontWeight: 900, color: textMuted, textTransform: "uppercase", letterSpacing: "0.6px" }}>
+                  Last 4 Days
+                </p>
+                <p style={{ margin: "6px 0 0", fontSize: 16, fontWeight: 900, color: isDark ? "#ffffff" : "#0f172a" }}>
+                  Day-by-day breakdown
+                </p>
+              </div>
+              <p style={{ margin: 0, fontSize: 11, color: textFaint, fontWeight: 700 }}>
+                Demo values
+              </p>
+            </div>
+
             <div style={{
-              marginTop: "28px",
-              marginLeft: "-28px",
-              marginRight: "-80px",
-              marginBottom: "-28px",
-              borderTop: `1.5px solid ${metric.borderColor.replace('0.5', '0.2')}`,
-              paddingTop: "24px",
-              paddingLeft: "28px",
-              paddingRight: "10px",
-              paddingBottom: "0",
-              background: `linear-gradient(180deg, rgba(0,0,0,0) 0%, ${metric.color.replace('0.3', '0.1')} 100%)`,
+              display: "grid",
+              gridTemplateColumns: responsive.isDesktop ? "repeat(4, 1fr)" : "repeat(2, 1fr)",
+              gap: 12,
             }}>
-              <ResponsiveContainer width="100%" height={280}>
-                <LineChart data={metric.data}>
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                    stroke={theme === "dark" ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.1)"}
-                    vertical={false}
-                  />
-                  <XAxis
-                    dataKey="date"
-                    tick={{
-                      fontSize: 11,
-                      fill: theme === "dark" ? "rgba(255, 255, 255, 0.5)" : "rgba(0, 0, 0, 0.5)",
-                    }}
-                    axisLine={{
-                      stroke: theme === "dark" ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.1)",
-                    }}
-                  />
-                  <YAxis
-                    tick={{
-                      fontSize: 11,
-                      fill: theme === "dark" ? "rgba(255, 255, 255, 0.5)" : "rgba(0, 0, 0, 0.5)",
-                    }}
-                    axisLine={{
-                      stroke: theme === "dark" ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.1)",
-                    }}
-                    width={40}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: theme === "dark" ? "rgba(20, 20, 25, 0.95)" : "rgba(240, 240, 245, 0.95)",
-                      border: `1px solid ${metric.borderColor}`,
-                      borderRadius: "8px",
-                      color: theme === "dark" ? "#ffffff" : "#000000",
-                    }}
-                    cursor={{
-                      stroke: metric.chartColor,
-                      strokeOpacity: 0.3,
-                    }}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="value"
-                    stroke={metric.chartColor}
-                    strokeWidth={2.5}
-                    dot={{
-                      fill: metric.chartColor,
-                      r: 4,
-                    }}
-                    activeDot={{
-                      r: 6,
-                    }}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
+              {breakdownMetrics.map((metric) => (
+                <div
+                  key={metric.id}
+                  style={{
+                    borderRadius: 14,
+                    padding: 12,
+                    border: `1.5px solid rgba(212, 175, 55, ${isDark ? 0.22 : 0.18})`,
+                    background: `linear-gradient(180deg, rgba(0,0,0,${isDark ? 0.08 : 0.04}) 0%, rgba(255,255,255,0.01) 100%)`,
+                  }}
+                >
+                  <p style={{ margin: 0, fontSize: 12, fontWeight: 900, color: textMuted, textTransform: "uppercase", letterSpacing: "0.55px" }}>
+                    {metric.label}
+                  </p>
+                  <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+                    {metric.data.map((row: { date: string; value: number }) => (
+                      <div key={row.date} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                        <span style={{ fontSize: 11, fontWeight: 800, color: textFaint }}>{row.date}</span>
+                        <span style={{ fontSize: 11, fontWeight: 900, color: metric.chartColor }}>
+                          {formatNumber(row.value)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
-        ))}
-      </div>
+        </div>
     </div>
     </>
   );
