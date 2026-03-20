@@ -452,7 +452,8 @@ class LangChainService:
                         # ── Only build graph if tool actually ran in aggregate mode ──
                         if tool_was_aggregate and is_graph:  # ← ADD is_graph CHECK
                             logger.info("📊 [GRAPH] Wrapping aggregate as graph JSON | records=%d", len(p_list_for_model))
-                            graph_response = self.build_graph_response(context_summary, p_list_for_model)
+                            graph_context = f"Here is the graph result for your query."
+                            graph_response = self.build_graph_response(graph_context, p_list_for_model)
                             self._log_query_summary(current_user_query)
                             return graph_response, context_summary, messages
                         else:
@@ -722,7 +723,8 @@ class LangChainService:
                         logger.info("🧠 [FORCED] Aggregate context_summary='%s'", context_summary[:80])
                         if is_graph and tool_was_aggregate:  # ← BOTH conditions must be true
                             logger.info("📊 [GRAPH FORCED] Wrapping aggregate as graph JSON...")
-                            graph_response = self.build_graph_response(context_summary, p_list_for_model)
+                            graph_context = f"Here is the graph result for your query."
+                            graph_response = self.build_graph_response(graph_context, p_list_for_model)
                             return graph_response, context_summary, messages
                         
                                                     

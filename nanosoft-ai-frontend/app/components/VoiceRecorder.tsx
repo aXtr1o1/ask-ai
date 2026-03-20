@@ -37,6 +37,7 @@ export function useVoiceRecorder(
   isLoading: boolean,
   wsConnectionState: string,
   loggedInUser: string,
+  subUserName: string,
   sessionId: string,
   wsRef: React.MutableRefObject<WebSocket | null>,
   onVoiceMessageSent?: (duration: number, audioUrl: string) => void
@@ -287,6 +288,7 @@ export function useVoiceRecorder(
       audio: true,
       text: false,
       userName: loggedInUser,
+      subUserName,
       sessionId,
       duration: actualDuration,
       fileFormat: "ogg",
