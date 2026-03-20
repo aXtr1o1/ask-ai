@@ -1283,7 +1283,7 @@ export default function Home() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        userName: loggedInUser,
+        userName: userIdFromUrl ?? loggedInUser,
         sessionId: sid,
         chatHistory: valid.map(m => ({
           role: m.role,
@@ -1543,7 +1543,7 @@ export default function Home() {
         const res = await fetch(`${baseUrl}/api/session`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userName: loggedInUser, historyOnClick: false }),
+          body: JSON.stringify({ userName: userIdFromUrl ?? loggedInUser, historyOnClick: false }),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
@@ -1615,7 +1615,7 @@ export default function Home() {
         const res = await fetch(`${baseUrl}/api/session`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userName: loggedInUser, historyOnClick: false }),
+          body: JSON.stringify({ userName: userIdFromUrl ?? loggedInUser, historyOnClick: false }),
         });
         if (!res.ok) return;
         const data = await res.json();
@@ -1737,7 +1737,7 @@ export default function Home() {
         const res = await fetch(`${baseUrl}/api/session`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userName: loggedInUser, historyOnClick: false }),
+          body: JSON.stringify({ userName: userIdFromUrl ?? loggedInUser, historyOnClick: false }),
         });
         if (!res.ok) return;
         const data = await res.json();
@@ -1780,7 +1780,7 @@ export default function Home() {
         const res = await fetch(`${baseUrl}/api/session`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userName: loggedInUser, sessionId: targetSid, historyOnClick: true }),
+          body: JSON.stringify({ userName: userIdFromUrl ?? loggedInUser, sessionId: targetSid, historyOnClick: true }),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
@@ -2008,7 +2008,7 @@ export default function Home() {
     isGraph: isGraphMode,
     query: userText,
     userName: loggedInUser,
-    subUserName: userIdFromUrl,
+    subUserName: userIdFromUrl ?? loggedInUser,
     sessionId,
     timestamp: Date.now()
   }));
