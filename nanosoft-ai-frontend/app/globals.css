@@ -33,6 +33,16 @@
   --tile-label-color: #a88840;
   --tile-value-color: #2d3748;
 
+  /* Tile card CSS variables used in TableWithTile */
+  --tile-card-bg: #ffffff;
+  --tile-card-border: 1px solid rgba(0, 0, 0, 0.08);
+  --tile-card-text: #0f172a;
+  --tile-card-text-muted: rgba(31, 41, 55, 0.7);
+  --tile-field-bg: rgba(255, 255, 255, 0.9);
+  --tile-field-border: 1px solid rgba(148, 163, 184, 0.25);
+  --tile-field-label: #0f172a;
+  --tile-field-value: #1f2937;
+
   /* Sidebar Theme Variables - Light Mode */
   --sidebar-bg: #ffffff;
   --sidebar-text: #5a3e36; /* Brown color for visible text */
@@ -80,6 +90,16 @@
   --tile-card-bg-end-hover: rgba(30, 30, 30, 1);
   --tile-label-color: #f7ef8a;
   --tile-value-color: #f0f0f0;
+
+  /* Tile card CSS variables used in TableWithTile */
+  --tile-card-bg: #1d1d1d2f; /* dark gray bg (not blue) */
+  --tile-card-border: 1px solid rgba(255, 255, 255, 0.15);
+  --tile-card-text: #f8fafc;
+  --tile-card-text-muted: rgba(248, 250, 252, 0.7);
+  --tile-field-bg:#1d1d1d2f;
+  --tile-field-border: 1px solid rgba(148, 163, 184, 0.5);
+  --tile-field-label: #e5e7eb;
+  --tile-field-value: #cbd5e1;
 
   /* Legacy support (will be removed in future) */
   --background: var(--color-bg);
@@ -1342,7 +1362,9 @@ html, body {
 /* Mobile: account for sticky header */
 @media (max-width: 640px) {
   .chat-scroll-area {
-    max-height: calc(100vh - 36px);  /* 56px header height */
+    max-height: calc(100vh - 36px);  /* header height */
+    margin-top: 36px;
+    padding-top: 8px;
   }
 }
 
@@ -1987,6 +2009,16 @@ font-size: 15px;
 .landing-suggested-panel-list {
   display: flex;
   flex-direction: column;
+  max-height: 220px;
+  overflow-y: auto;
+  scroll-behavior: smooth;
+  -ms-overflow-style: none; /* IE and Edge */
+  scrollbar-width: none; /* Firefox */
+}
+
+.landing-suggested-panel-list::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 .landing-suggested-panel-item {
@@ -3232,17 +3264,19 @@ textarea:focus-visible {
 .tile-card {
   width: 100%;
   border-radius: 18px;
-  background: linear-gradient(135deg, var(--tile-card-bg-start, rgba(30, 30, 30, 0.95)) 0%, var(--tile-card-bg-end, rgba(20, 20, 20, 0.98)) 100%);
+  background: none;
+  background-color: var(--tile-card-bg, rgba(31, 41, 55, 0.65));
   box-shadow: 0 4px 16px var(--tile-card-shadow, rgba(0, 0, 0, 0.8)), inset 0 1px 0 rgba(212, 175, 55, 0.08);
   overflow: visible;
-  transition: all 0.2s ease;
+  transition: box-shadow 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
   border: 1.5px solid rgba(212, 175, 55, 0.2);
   min-height: 100px;
   padding: 14px 18px 16px;
 }
 
 .tile-card:hover {
-  background: linear-gradient(135deg, var(--tile-card-bg-start-hover, rgba(65, 65, 65, 0.95)) 0%, var(--tile-card-bg-end-hover, rgba(55, 55, 55, 1)) 100%);
+  background: none;
+  background-color: var(--tile-card-bg-hover, var(--tile-card-bg, rgba(31, 41, 55, 0.65)));
   box-shadow: 0 6px 16px rgba(212, 175, 55, 0.25), inset 0 1px 0 rgba(212, 175, 55, 0.12);
   border-color: rgba(212, 175, 55, 0.4);
   transform: translateY(-1px);

@@ -13,6 +13,11 @@ export default function RateLimit() {
     setAnimated(true);
   }, []);
 
+  const isDark = theme === "dark";
+  const textColor = isDark ? "#ffffff" : "#0f172a";
+  const textMuted = isDark ? "rgba(255,255,255,0.7)" : "rgba(15,23,42,0.8)";
+  const textFaint = isDark ? "rgba(255,255,255,0.5)" : "rgba(15,23,42,0.6)";
+
   const styles = `
     @keyframes slideInUp {
       from {
@@ -214,7 +219,7 @@ export default function RateLimit() {
                   }}>
                     <p style={{
                       fontSize: "12px",
-                      color: "rgba(255, 255, 255, 0.6)",
+                      color: textMuted,
                       margin: 0,
                       fontWeight: 600,
                       textTransform: "uppercase",
@@ -242,20 +247,20 @@ export default function RateLimit() {
                     <p style={{
                       fontSize: "36px",
                       fontWeight: 800,
-                      color: "#ffffff",
+                      color: isDark ? "transparent" : "#0f172a",
                       margin: 0,
                       letterSpacing: "-0.5px",
-                      background: `linear-gradient(135deg, ${metric.progressColor}, #ffffff)`,
-                      backgroundClip: "text",
-                      WebkitBackgroundClip: "text",
-                      WebkitTextFillColor: "transparent",
+                      background: isDark ? `linear-gradient(135deg, ${metric.progressColor}, #ffffff)` : "none",
+                      backgroundClip: isDark ? "text" : "unset",
+                      WebkitBackgroundClip: isDark ? "text" : "unset",
+                      WebkitTextFillColor: isDark ? "transparent" : "initial",
                       animation: `fadeIn 1s ease-out ${index * 0.15}s both`,
                     }}>
                       {metric.current}
                     </p>
                     <p style={{
                       fontSize: "12px",
-                      color: "rgba(255, 255, 255, 0.5)",
+                      color: textFaint,
                       margin: 0,
                       fontWeight: 500,
                     }}>
@@ -264,7 +269,7 @@ export default function RateLimit() {
                   </div>
                   <p style={{
                     fontSize: "11px",
-                    color: "rgba(255, 255, 255, 0.5)",
+                    color: textFaint,
                     margin: 0,
                     fontWeight: 500,
                   }}>
@@ -351,7 +356,7 @@ export default function RateLimit() {
                 }}>
                   <p style={{
                     fontSize: "12px",
-                    color: "rgba(255, 255, 255, 0.5)",
+                    color: textFaint,
                     margin: 0,
                     fontWeight: 500,
                   }}>

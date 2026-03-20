@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { IconList, IconLayoutGrid } from "@tabler/icons-react";
+import { useTheme } from "@/app/components/useTheme";
 import { useResponsive, getResponsiveTable, getResponsiveTileDisplay, getSmartVisibleColumns } from "@/app/hooks/useResponsive";
 
 export type TableWithTileRow = Record<string, string>;
@@ -22,6 +23,17 @@ export default function TableWithTile({
   const responsive = useResponsive();
   const tableConfig = getResponsiveTable(responsive.screen);
   const tileConfig = getResponsiveTileDisplay(responsive.screen);
+  const { theme } = useTheme();
+  const isDark = theme === "dark";
+  // Use CSS variables set by root theme in globals.css
+  const tileBackground = "var(--tile-card-bg, #ffffff)";
+  const tileBorder = "var(--tile-card-border, 1px solid rgba(0, 0, 0, 0.08))";
+  const tileText = "var(--tile-card-text, #0f172a)";
+  const tileTextMuted = "var(--tile-card-text-muted, rgba(31, 41, 55, 0.7))";
+  const tileFieldBackground = "var(--tile-field-bg, rgba(255, 255, 255, 0.9))";
+  const tileFieldBorder = "var(--tile-field-border, 1px solid rgba(148, 163, 184, 0.25))";
+  const tileFieldLabelColor = "var(--tile-field-label, #0f172a)";
+  const tileFieldValueColor = "var(--tile-field-value, #1f2937)";
   const [viewMode, setViewMode] = useState<"table" | "tile">("table");
 
   // Automatically detect columns from rows
@@ -208,6 +220,11 @@ export default function TableWithTile({
                     <div key={rowIdx} className="tile-card" style={{
                       padding: responsive.isMobile ? '8px' : responsive.isTablet ? tileConfig.cardPadding : '12px',
                       minHeight: responsive.isMobile ? '120px' : responsive.isTablet ? tileConfig.cardHeight : '280px',
+                      backgroundColor: tileBackground,
+                      border: tileBorder,
+                      color: tileText,
+                      boxShadow: isDark ? '0 8px 20px rgba(0,0,0,0.35)' : '0 8px 20px rgba(0,0,0,0.07)',
+                      transition: 'border 0.2s ease, box-shadow 0.2s ease, color 0.2s ease',
                     }}>
                       {/* Top colored strip */}
                       <div className="tile-card-header" />
@@ -254,6 +271,8 @@ export default function TableWithTile({
                                 display: 'flex',
                                 flexDirection: 'column',
                                 gap: responsive.isMobile ? '4px' : '6px',
+                                backgroundColor: tileFieldBackground,
+                                border: tileFieldBorder,
                               }}
                             >
                               <div className="tile-field-label" style={{
