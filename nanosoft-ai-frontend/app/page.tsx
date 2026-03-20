@@ -1056,6 +1056,7 @@ export default function Home() {
     isLoading,
     wsConnectionState,
     loggedInUser || "anonymous",
+    userIdFromUrl ?? "",
     sessionId,
     wsRef,
     (duration: number, audioUrl: string) => {
