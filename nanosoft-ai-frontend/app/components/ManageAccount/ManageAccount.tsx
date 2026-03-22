@@ -112,15 +112,16 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
     }
   };
 
-  const navItems = [
-    { id: "dashboard" as NavSection, label: "Dashboard", icon: IconChartBar },
-    { id: "settings" as NavSection, label: "Settings", icon: IconSettings },
-  ];
+  const navItems = [{ id: "dashboard" as NavSection, label: "Dashboard", icon: IconChartBar }];
 
   const dashboardMenuItems = [
     { id: "usage" as DashboardView, label: "Usage" },
     { id: "rate-limit" as DashboardView, label: "Rate Limit" },
   ];
+
+  const isUsageActive = activeSection === "dashboard" && dashboardView === "usage";
+  const isRateLimitActive = activeSection === "dashboard" && dashboardView === "rate-limit";
+  const isSettingsActive = activeSection === "settings";
 
   return (
     <div style={{
@@ -224,65 +225,118 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
                 <span>{label}</span>
               </button>
 
-              {/* Dashboard Submenu */}
-              {id === "dashboard" && activeSection === "dashboard" && (
+              {/* Dashboard Header + Tabs */}
+              {id === "dashboard" && (
                 <div style={{
                   display: "flex",
                   flexDirection: "column",
-                  gap: "4px",
+                  gap: "10px",
                   marginTop: "8px",
                   paddingLeft: "8px",
                   borderLeft: "2px solid rgba(var(--color-primary-rgb), 0.3)",
                   marginLeft: "16px",
                   paddingTop: "8px",
                 }}>
-                  {dashboardMenuItems.map((item) => (
+                  <div style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "stretch",
+                    gap: "8px",
+                  }}>
                     <button
-                      key={item.id}
                       type="button"
                       onClick={() => {
                         setActiveSection("dashboard");
-                        setDashboardView(item.id);
-                        // Close mobile sidebar after selecting a dashboard view
+                        setDashboardView("usage");
                         if (responsive.isMobile || responsive.isTablet) {
                           updateMobileSidebar(false);
                         }
                       }}
                       style={{
-                        padding: "10px 14px",
+                        width: "100%",
+                        padding: "10px 12px",
                         borderRadius: "8px",
-                        background: dashboardView === item.id 
+                        background: isUsageActive
                           ? "linear-gradient(135deg, rgba(var(--color-primary-rgb), 0.2) 0%, rgba(var(--color-primary-rgb), 0.1) 100%)"
                           : "transparent",
-                        border: dashboardView === item.id 
+                        border: isUsageActive
                           ? "1.5px solid var(--color-primary)"
                           : "1px solid transparent",
-                        color: dashboardView === item.id ? "var(--color-primary)" : "var(--color-text)",
+                        color: isUsageActive ? "var(--color-primary)" : "var(--color-text)",
                         cursor: "pointer",
                         fontSize: "12px",
-                        fontWeight: dashboardView === item.id ? 700 : 500,
+                        fontWeight: isUsageActive ? 700 : 500,
                         textAlign: "left",
                         transition: "all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)",
-                        width: "100%",
-                      }}
-                      onMouseEnter={(e) => {
-                        if (dashboardView !== item.id) {
-                          const btn = e.currentTarget as HTMLElement;
-                          btn.style.background = "rgba(var(--color-primary-rgb), 0.08)";
-                          btn.style.color = "var(--color-primary)";
-                        }
-                      }}
-                      onMouseLeave={(e) => {
-                        if (dashboardView !== item.id) {
-                          const btn = e.currentTarget as HTMLElement;
-                          btn.style.background = "transparent";
-                          btn.style.color = "rgba(255, 255, 255, 0.7)";
-                        }
                       }}
                     >
-                      {item.label}
+                      Usage
                     </button>
-                  ))}
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveSection("dashboard");
+                        setDashboardView("rate-limit");
+                        if (responsive.isMobile || responsive.isTablet) {
+                          updateMobileSidebar(false);
+                        }
+                      }}
+                      style={{
+                        width: "100%",
+                        padding: "10px 12px",
+                        borderRadius: "8px",
+                        background: isRateLimitActive
+                          ? "linear-gradient(135deg, rgba(var(--color-primary-rgb), 0.2) 0%, rgba(var(--color-primary-rgb), 0.1) 100%)"
+                          : "transparent",
+                        border: isRateLimitActive
+                          ? "1.5px solid var(--color-primary)"
+                          : "1px solid transparent",
+                        color: isRateLimitActive ? "var(--color-primary)" : "var(--color-text)",
+                        cursor: "pointer",
+                        fontSize: "12px",
+                        fontWeight: isRateLimitActive ? 700 : 500,
+                        textAlign: "left",
+                        transition: "all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)",
+                      }}
+                    >
+                      Rate Limit
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveSection("settings");
+                        if (responsive.isMobile || responsive.isTablet) {
+                          updateMobileSidebar(false);
+                        }
+                      }}
+                      style={{
+                        width: "100%",
+                        padding: "10px 12px",
+                        borderRadius: "8px",
+                        background: isSettingsActive
+                          ? "linear-gradient(135deg, rgba(var(--color-primary-rgb), 0.2) 0%, rgba(var(--color-primary-rgb), 0.1) 100%)"
+                          : "transparent",
+                        border: isSettingsActive
+                          ? "1.5px solid var(--color-primary)"
+                          : "1px solid transparent",
+                        color: isSettingsActive ? "var(--color-primary)" : "var(--color-text)",
+                        cursor: "pointer",
+                        fontSize: "12px",
+                        fontWeight: isSettingsActive ? 700 : 500,
+                        textAlign: "left",
+                        transition: "all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "flex-start",
+                        gap: "8px",
+                      }}
+                    >
+                      <IconSettings size={16} strokeWidth={1.5} />
+                      Settings
+                    </button>
+                  </div>
                 </div>
               )}
             </div>

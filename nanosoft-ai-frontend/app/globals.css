@@ -1813,7 +1813,7 @@ font-size: 15px;
 .input-footer {
   width: 100%;
   padding: 12px 20px 12px;
-  margin-bottom: 72px; /* lift chat bar up to make room for feature below */
+  margin-bottom: 0;
   flex-shrink: 0;
   background: transparent;
   border: none;
