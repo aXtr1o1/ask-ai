@@ -1013,6 +1013,7 @@ export default function Home() {
   const [menuOpen,     setMenuOpen]     = useState(false);
   const [showUpgradePlan, setShowUpgradePlan] = useState(false);
   const [showManageAccount, setShowManageAccount] = useState(false);
+  const [isManageAccountMenuOpen, setIsManageAccountMenuOpen] = useState(false);
   const [currentPlan, setCurrentPlan] = useState<string>("Free"); // Track active plan
   const [sidebarOpen,  setSidebarOpen]  = useState(true);  // Will be auto-closed by useEffect if mobile is detected
   const [wsConnectionState, setWsConnectionState] = useState<'connecting'|'connected'|'failed'>('connecting');
@@ -1023,6 +1024,12 @@ export default function Home() {
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [audioPlayingIndex, setAudioPlayingIndex] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!showManageAccount) {
+      setIsManageAccountMenuOpen(false);
+    }
+  }, [showManageAccount]);
   const [audioProgressMap,  setAudioProgressMap]  = useState<Record<number, number>>({});
   const [audioDurationMap,  setAudioDurationMap]  = useState<Record<number, number>>({});
   const audioDurationMapRef = useRef<Record<number, number>>({});
@@ -1283,7 +1290,7 @@ export default function Home() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        userName: loggedInUser,
+        userName: userIdFromUrl ?? loggedInUser,
         sessionId: sid,
         chatHistory: valid.map(m => ({
           role: m.role,
@@ -1543,7 +1550,7 @@ export default function Home() {
         const res = await fetch(`${baseUrl}/api/session`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userName: loggedInUser, historyOnClick: false }),
+          body: JSON.stringify({ userName: userIdFromUrl ?? loggedInUser, historyOnClick: false }),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
@@ -1615,7 +1622,7 @@ export default function Home() {
         const res = await fetch(`${baseUrl}/api/session`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userName: loggedInUser, historyOnClick: false }),
+          body: JSON.stringify({ userName: userIdFromUrl ?? loggedInUser, historyOnClick: false }),
         });
         if (!res.ok) return;
         const data = await res.json();
@@ -1737,7 +1744,7 @@ export default function Home() {
         const res = await fetch(`${baseUrl}/api/session`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userName: loggedInUser, historyOnClick: false }),
+          body: JSON.stringify({ userName: userIdFromUrl ?? loggedInUser, historyOnClick: false }),
         });
         if (!res.ok) return;
         const data = await res.json();
@@ -1780,7 +1787,7 @@ export default function Home() {
         const res = await fetch(`${baseUrl}/api/session`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userName: loggedInUser, sessionId: targetSid, historyOnClick: true }),
+          body: JSON.stringify({ userName: userIdFromUrl ?? loggedInUser, sessionId: targetSid, historyOnClick: true }),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
@@ -2008,7 +2015,7 @@ export default function Home() {
     isGraph: isGraphMode,
     query: userText,
     userName: loggedInUser,
-    subUserName: userIdFromUrl,
+    subUserName: userIdFromUrl ?? loggedInUser,
     sessionId,
     timestamp: Date.now()
   }));
@@ -2019,6 +2026,9 @@ export default function Home() {
 
   const { theme } = useTheme();
   const isLanding = messages.length === 0;
+
+  // Mobile/tablet header is hidden while sidebar/menu is open, or when modals are active.
+  const isMobileHeaderVisible = (responsive.isMobile || responsive.isTablet) && !sidebarOpen && !showUpgradePlan && !showManageAccount;
 
   /** Chat input + disclaimer; `landing` = centered column on empty state before first message */
   const renderChatInputFooter = (variant: "landing" | "default") => (
@@ -2181,7 +2191,7 @@ export default function Home() {
             </div>
           </div>
           {/* Close button on mobile */}
-          {responsive.isMobile && (
+          {responsive.isMobile && !showManageAccount && !showUpgradePlan && (
             <button
               className="sidebar-close-btn"
               onClick={() => setSidebarOpen(false)}
@@ -2400,11 +2410,11 @@ export default function Home() {
         }
       >
 
-        {/* Mobile Header with Menu Button - sticky at top */}
-        {responsive.isMobile && (
+        {/* Mobile Header with Menu Button - sticky at top (hidden while sidebar is open) */}
+        {isMobileHeaderVisible && (
           <div
             style={{
-              position: 'sticky',
+              position: 'fixed',
               top: 0,
               left: 0,
               right: 0,
@@ -2416,7 +2426,7 @@ export default function Home() {
               justifyContent: 'space-between',
               paddingLeft: '12px',
               paddingRight: '12px',
-              zIndex: 100,
+              zIndex: 10000,
               backdropFilter: 'blur(10px)',
             }}
           >
@@ -2475,13 +2485,13 @@ export default function Home() {
         )}
 
         {/* Overlay when sidebar is open on mobile */}
-        {responsive.isMobile && sidebarOpen && (
+        {(responsive.isMobile || responsive.isTablet) && sidebarOpen && (
           <div
             style={{
               position: 'fixed',
               inset: 0,
-              zIndex: 9998,
-              // Blur the background behind the sidebar (mobile "max blur")
+              zIndex: 9997,
+              // Blur the background behind the sidebar (mobile/tablet "max blur")
               backgroundColor: 'rgba(0, 0, 0, 0.35)',
               backdropFilter: 'blur(30px) saturate(130%)',
               WebkitBackdropFilter: 'blur(30px) saturate(130%)',
@@ -2748,6 +2758,17 @@ export default function Home() {
         {showUpgradePlan && (
           <div 
             className="upgrade-plan-backdrop"
+            style={{
+              position: 'fixed',
+              inset: 0,
+              background: 'rgba(0, 0, 0, 0.60)',
+              backdropFilter: 'blur(12px) saturate(120%)',
+              WebkitBackdropFilter: 'blur(12px) saturate(120%)',
+              zIndex: 10010,
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+            }}
             onClick={() => setShowUpgradePlan(false)}
           >
             <div 
@@ -2790,15 +2811,19 @@ export default function Home() {
               flexDirection: "column",
             }}
           >
-            <div style={{
-              position: "absolute",
-              top: "20px",
-              right: "20px",
-              zIndex: 10001,
-            }}>
-              <button
-                onClick={() => setShowManageAccount(false)}
-                style={{
+            {!isManageAccountMenuOpen && (
+              <div style={{
+                position: "absolute",
+                top: "20px",
+                right: "20px",
+                zIndex: 10001,
+              }}>
+                <button
+                  onClick={() => {
+                    setShowManageAccount(false);
+                    setIsManageAccountMenuOpen(false);
+                  }}
+                  style={{
                   width: "40px",
                   height: "40px",
                   borderRadius: "6px",
@@ -2827,12 +2852,17 @@ export default function Home() {
                 ×
               </button>
             </div>
+          )}
             <div style={{
               flex: 1,
               width: "100%",
               height: "100%",
             }}>
-              <ManageAccount currentPlan={currentPlan} profileName={loggedInUser || "My Account"} />
+              <ManageAccount
+                currentPlan={currentPlan}
+                profileName={loggedInUser || "My Account"}
+                onMenuToggle={setIsManageAccountMenuOpen}
+              />
             </div>
           </div>
         )}

@@ -122,8 +122,8 @@ export default function Usage() {
 
   const usageMetrics = [
     {
-      id: "text-requests",
-      label: "Text API Requests",
+      id: "text-request",
+      label: "Text API Request",
       value: "1.2K",
       unit: "requests",
       subtext: "This month",
@@ -144,8 +144,8 @@ export default function Usage() {
       data: textUsageData,
     },
     {
-      id: "audio-requests",
-      label: "Audio API Requests",
+      id: "audio-request",
+      label: "Audio API Request",
       value: "342",
       unit: "requests",
       subtext: "This month",
@@ -179,7 +179,7 @@ export default function Usage() {
   ];
 
   const kpiMetrics = usageMetrics.filter((m) =>
-    ["text-requests", "text-usage", "audio-requests", "audio-usage"].includes(m.id)
+    ["text-request", "text-usage", "audio-request", "audio-usage"].includes(m.id)
   );
   const textUsageMetric = usageMetrics.find((m) => m.id === "text-usage")!;
   const audioUsageMetric = usageMetrics.find((m) => m.id === "audio-usage")!;
@@ -247,9 +247,10 @@ export default function Usage() {
                       fontWeight: 700,
                       textTransform: "uppercase",
                       letterSpacing: "0.6px",
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
+                      whiteSpace: "normal",
+                      overflow: "visible",
+                      textOverflow: "unset",
+                      wordBreak: "break-word",
                     }}>
                       {metric.label}
                     </p>
@@ -260,7 +261,11 @@ export default function Usage() {
                         fontWeight: 900,
                         margin: 0,
                         letterSpacing: "-0.4px",
-                        color: isDark ? "#ffffff" : "#0f172a",
+                        color: isDark ? "transparent" : "#0f172a",
+                        background: isDark ? `linear-gradient(135deg, ${metric.chartColor}, #ffffff)` : "none",
+                        backgroundClip: isDark ? "text" : "unset",
+                        WebkitBackgroundClip: isDark ? "text" : "unset",
+                        WebkitTextFillColor: isDark ? "transparent" : "initial",
                       }}>
                         {metric.value}
                       </p>
@@ -291,7 +296,7 @@ export default function Usage() {
                         <XAxis dataKey="date" hide />
                         <YAxis hide />
                         <Line
-                          type="monotone"
+                          type="linear"
                           dataKey="value"
                           stroke={metric.chartColor}
                           strokeWidth={2.5}
@@ -375,7 +380,7 @@ export default function Usage() {
                         formatter={(val: unknown) => [formatNumber(Number(val)), metric.unit]}
                       />
                       <Line
-                        type="monotone"
+                        type="linear"
                         dataKey="value"
                         stroke={metric.chartColor}
                         strokeWidth={2.8}

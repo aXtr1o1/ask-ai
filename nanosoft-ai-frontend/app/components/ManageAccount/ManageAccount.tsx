@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { IconCheck, IconX, IconSettings, IconCreditCard, IconShield, IconBell, IconArrowLeft, IconChartBar } from "@tabler/icons-react";
+import { IconSettings, IconMenu2, IconChartBar } from "@tabler/icons-react";
 import { useResponsive } from "@/app/hooks/useResponsive";
 import { useTheme } from "@/app/components/useTheme";
 import Usage from "./usage";
@@ -19,23 +19,38 @@ interface Account {
 interface ManageAccountProps {
   currentPlan?: string;
   profileName?: string;
+  onMenuToggle?: (isOpen: boolean) => void;
 }
 
 type NavSection = "dashboard" | "settings";
 type DashboardView = "usage" | "rate-limit";
 
-export default function ManageAccount({ currentPlan = "Pro", profileName = "My Account" }: ManageAccountProps) {
+export default function ManageAccount({ currentPlan = "Pro", profileName = "My Account", onMenuToggle }: ManageAccountProps) {
   const router = useRouter();
   const responsive = useResponsive();
   const { theme } = useTheme();
+  const isDark = theme === "dark";
+  const headerColor = isDark ? "#ffffff" : "#0f172a";
+  const subheaderColor = isDark ? "rgba(255,255,255,0.75)" : "rgba(15,23,42,0.8)";
+  const sidebarText = isDark ? "#F8FAFC" : "#0f172a";
+  const sidebarTextMuted = isDark ? "rgba(248, 250, 252, 0.72)" : "rgba(15, 23, 42, 0.7)";
+  const sidebarTextActive = isDark ? "#FFFFFF" : "#0f172a";
+  const bodyText = isDark ? "#f8fafc" : "#0f172a";
+  const bodyTextMuted = isDark ? "rgba(248, 250, 252, 0.7)" : "rgba(15, 23, 42, 0.68)";
   const [activeSection, setActiveSection] = useState<NavSection>("dashboard");
   const [dashboardView, setDashboardView] = useState<DashboardView>("usage");
   const [showMobileSidebar, setShowMobileSidebar] = useState(false);
+
+  const updateMobileSidebar = (isOpen: boolean) => {
+    setShowMobileSidebar(isOpen);
+    if (onMenuToggle) onMenuToggle(isOpen);
+  };
+
   const [accounts, setAccounts] = useState<Account[]>([
     {
       id: "1",
       name: profileName,
-      email: "user@example.com",
+      email: "v4demo@example.com",
       plan: currentPlan,
       createdAt: "2026-01-15",
     },
@@ -88,24 +103,25 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
   };
 
   const handleBackToDashboard = () => {
-    // On mobile and tablet, toggle the sidebar
+    // On mobile and tablet, open the sidebar and keep the close button hidden
     if (responsive.isMobile || responsive.isTablet) {
-      setShowMobileSidebar(!showMobileSidebar);
+      updateMobileSidebar(true);
     } else {
       // On desktop, navigate back to the previous page
       router.back();
     }
   };
 
-  const navItems = [
-    { id: "dashboard" as NavSection, label: "Dashboard", icon: IconChartBar },
-    { id: "settings" as NavSection, label: "Settings", icon: IconSettings },
-  ];
+  const navItems = [{ id: "dashboard" as NavSection, label: "Dashboard", icon: IconChartBar }];
 
   const dashboardMenuItems = [
     { id: "usage" as DashboardView, label: "Usage" },
     { id: "rate-limit" as DashboardView, label: "Rate Limit" },
   ];
+
+  const isUsageActive = activeSection === "dashboard" && dashboardView === "usage";
+  const isRateLimitActive = activeSection === "dashboard" && dashboardView === "rate-limit";
+  const isSettingsActive = activeSection === "settings";
 
   return (
     <div style={{
@@ -119,7 +135,7 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
       {/* Mobile Backdrop */}
       {responsive.isMobile && showMobileSidebar && (
         <div
-          onClick={() => setShowMobileSidebar(false)}
+          onClick={() => updateMobileSidebar(false)}
           style={{
             position: "fixed",
             inset: 0,
@@ -149,56 +165,28 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
           top: responsive.isMobile ? 0 : "auto",
           zIndex: responsive.isMobile ? 1000 : "auto",
         }}>
-          {/* Mobile Close Button */}
-          {responsive.isMobile && (
-            <div style={{
-              display: "flex",
-              justifyContent: "flex-end",
-              paddingRight: "16px",
-              paddingBottom: "8px",
-              borderBottom: "1px solid rgba(255, 255, 255, 0.1)",
-            }}>
-              <button
-                onClick={() => setShowMobileSidebar(false)}
-                style={{
-                  background: "rgba(255, 255, 255, 0.1)",
-                  border: "1px solid rgba(255, 255, 255, 0.2)",
-                  borderRadius: "8px",
-                  padding: "8px 8px",
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  color: "#ffffff",
-                  transition: "all 0.2s ease",
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = "rgba(255, 255, 255, 0.15)";
-                  e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.3)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = "rgba(255, 255, 255, 0.1)";
-                  e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.2)";
-                }}
-                aria-label="Close sidebar"
-              >
-                <IconX size={20} strokeWidth={2} />
-              </button>
-            </div>
-          )}
+
           {navItems.map(({ id, label, icon: Icon }) => (
             <div key={id}>
               <button
                 onClick={() => {
-                  setActiveSection(id);
-                  // Close mobile sidebar only for Settings, not for Dashboard
-                  if (responsive.isMobile && id === "settings") {
-                    setShowMobileSidebar(false);
+                  if (id === "dashboard") {
+                    setActiveSection("dashboard");
+                    if (responsive.isMobile || responsive.isTablet) {
+                      updateMobileSidebar(false);
+                    }
+                    // Optionally, keep last selection or reset
+                    // setDashboardView("usage");
+                  } else {
+                    setActiveSection(id);
+                    if (responsive.isMobile || responsive.isTablet) {
+                      updateMobileSidebar(false);
+                    }
                   }
                 }}
                 style={{
-                  width: "calc(100% - 16px)",
-                  marginLeft: "8px",
+                  width: "100%",
+                  margin: "0",
                   padding: "12px 16px",
                   border: activeSection === id 
                     ? "1.5px solid var(--color-primary)" 
@@ -237,65 +225,118 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
                 <span>{label}</span>
               </button>
 
-              {/* Dashboard Submenu */}
+              {/* Dashboard Header + Tabs */}
               {id === "dashboard" && (
                 <div style={{
                   display: "flex",
                   flexDirection: "column",
-                  gap: "4px",
+                  gap: "10px",
                   marginTop: "8px",
                   paddingLeft: "8px",
                   borderLeft: "2px solid rgba(var(--color-primary-rgb), 0.3)",
                   marginLeft: "16px",
                   paddingTop: "8px",
                 }}>
-                  {dashboardMenuItems.map((item) => (
+                  <div style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "stretch",
+                    gap: "8px",
+                  }}>
                     <button
-                      key={item.id}
                       type="button"
                       onClick={() => {
                         setActiveSection("dashboard");
-                        setDashboardView(item.id);
-                        // Close mobile sidebar after selecting a dashboard view
-                        if (responsive.isMobile) {
-                          setShowMobileSidebar(false);
+                        setDashboardView("usage");
+                        if (responsive.isMobile || responsive.isTablet) {
+                          updateMobileSidebar(false);
                         }
                       }}
                       style={{
-                        padding: "10px 14px",
+                        width: "100%",
+                        padding: "10px 12px",
                         borderRadius: "8px",
-                        background: dashboardView === item.id 
+                        background: isUsageActive
                           ? "linear-gradient(135deg, rgba(var(--color-primary-rgb), 0.2) 0%, rgba(var(--color-primary-rgb), 0.1) 100%)"
                           : "transparent",
-                        border: dashboardView === item.id 
+                        border: isUsageActive
                           ? "1.5px solid var(--color-primary)"
                           : "1px solid transparent",
-                        color: dashboardView === item.id ? "var(--color-primary)" : "var(--color-text)",
+                        color: isUsageActive ? "var(--color-primary)" : "var(--color-text)",
                         cursor: "pointer",
                         fontSize: "12px",
-                        fontWeight: dashboardView === item.id ? 700 : 500,
+                        fontWeight: isUsageActive ? 700 : 500,
                         textAlign: "left",
                         transition: "all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)",
-                        width: "100%",
-                      }}
-                      onMouseEnter={(e) => {
-                        if (dashboardView !== item.id) {
-                          const btn = e.currentTarget as HTMLElement;
-                          btn.style.background = "rgba(var(--color-primary-rgb), 0.08)";
-                          btn.style.color = "var(--color-primary)";
-                        }
-                      }}
-                      onMouseLeave={(e) => {
-                        if (dashboardView !== item.id) {
-                          const btn = e.currentTarget as HTMLElement;
-                          btn.style.background = "transparent";
-                          btn.style.color = "rgba(255, 255, 255, 0.7)";
-                        }
                       }}
                     >
-                      {item.label}
+                      Usage
                     </button>
-                  ))}
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveSection("dashboard");
+                        setDashboardView("rate-limit");
+                        if (responsive.isMobile || responsive.isTablet) {
+                          updateMobileSidebar(false);
+                        }
+                      }}
+                      style={{
+                        width: "100%",
+                        padding: "10px 12px",
+                        borderRadius: "8px",
+                        background: isRateLimitActive
+                          ? "linear-gradient(135deg, rgba(var(--color-primary-rgb), 0.2) 0%, rgba(var(--color-primary-rgb), 0.1) 100%)"
+                          : "transparent",
+                        border: isRateLimitActive
+                          ? "1.5px solid var(--color-primary)"
+                          : "1px solid transparent",
+                        color: isRateLimitActive ? "var(--color-primary)" : "var(--color-text)",
+                        cursor: "pointer",
+                        fontSize: "12px",
+                        fontWeight: isRateLimitActive ? 700 : 500,
+                        textAlign: "left",
+                        transition: "all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)",
+                      }}
+                    >
+                      Rate Limit
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveSection("settings");
+                        if (responsive.isMobile || responsive.isTablet) {
+                          updateMobileSidebar(false);
+                        }
+                      }}
+                      style={{
+                        width: "100%",
+                        padding: "10px 12px",
+                        borderRadius: "8px",
+                        background: isSettingsActive
+                          ? "linear-gradient(135deg, rgba(var(--color-primary-rgb), 0.2) 0%, rgba(var(--color-primary-rgb), 0.1) 100%)"
+                          : "transparent",
+                        border: isSettingsActive
+                          ? "1.5px solid var(--color-primary)"
+                          : "1px solid transparent",
+                        color: isSettingsActive ? "var(--color-primary)" : "var(--color-text)",
+                        cursor: "pointer",
+                        fontSize: "12px",
+                        fontWeight: isSettingsActive ? 700 : 500,
+                        textAlign: "left",
+                        transition: "all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "flex-start",
+                        gap: "8px",
+                      }}
+                    >
+                      <IconSettings size={16} strokeWidth={1.5} />
+                      Settings
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -345,7 +386,7 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    color: "#ffffff",
+                    color: isDark ? "#ffffff" : "#000000",
                     transition: "all 0.2s ease",
                   }}
                   onMouseEnter={(e) => {
@@ -356,20 +397,20 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
                     e.currentTarget.style.background = "rgba(255, 255, 255, 0.1)";
                     e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.2)";
                   }}
-                  aria-label="Go back"
+                  aria-label="Open menu"
                 >
-                  <IconArrowLeft size={20} strokeWidth={2} />
+                  <IconMenu2 size={20} strokeWidth={2} />
                 </button>
               )}
             </div>
             <h1 style={{
               fontSize: responsive.isMobile ? "24px" : responsive.isTablet ? "32px" : "40px",
               fontWeight: 700,
-              color: "#ffffff",
+              color: headerColor,
               margin: 0,
               marginBottom: "12px",
               letterSpacing: "-0.5px",
-              textShadow: "0 2px 8px rgba(0, 0, 0, 0.2)",
+              textShadow: isDark ? "0 2px 8px rgba(0, 0, 0, 0.2)" : "none",
             }}>
               {activeSection === "dashboard" && dashboardView === "usage" && "Usage Statistics"}
               {activeSection === "dashboard" && dashboardView === "rate-limit" && "Rate Limit"}
@@ -377,7 +418,7 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
             </h1>
             <p style={{
               fontSize: responsive.isMobile ? "13px" : responsive.isTablet ? "14px" : "15px",
-              color: "rgba(255, 255, 255, 0.6)",
+              color: subheaderColor,
               margin: 0,
               fontWeight: 400,
             }}>
@@ -451,7 +492,7 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
                       <h2 style={{
                         fontSize: responsive.isMobile ? "20px" : "24px",
                         fontWeight: 700,
-                        color: "#ffffff",
+                        color: isDark ? "#ffffff" : "#0f172a",
                         margin: 0,
                       }}>
                         {accounts[0]?.name || "My Account"}
@@ -476,14 +517,14 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
                     }}>
                       <p style={{
                         fontSize: "14px",
-                        color: "rgba(255, 255, 255, 0.8)",
+                        color: bodyText,
                         margin: 0,
                       }}>
                         {accounts[0]?.email || "user@example.com"}
                       </p>
                       <p style={{
                         fontSize: "13px",
-                        color: "rgba(255, 255, 255, 0.6)",
+                        color: bodyTextMuted,
                         margin: 0,
                       }}>
                         Created on {accounts[0]?.createdAt || "2008-01-15"}
@@ -507,7 +548,7 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
                 }}>
                   <p style={{
                     fontSize: "12px",
-                    color: "rgba(255, 255, 255, 0.6)",
+                    color: isDark ? "rgba(255, 255, 255, 0.6)" : "rgba(15, 23, 42, 0.7)",
                     margin: 0,
                     marginBottom: "8px",
                     fontWeight: 500,
@@ -518,7 +559,7 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
                   </p>
                   <p style={{
                     fontSize: "14px",
-                    color: "#ffffff",
+                    color: bodyText,
                     margin: 0,
                     fontWeight: 600,
                   }}>
@@ -534,7 +575,7 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
                 }}>
                   <p style={{
                     fontSize: "12px",
-                    color: "rgba(255, 255, 255, 0.6)",
+                    color: isDark ? "rgba(255, 255, 255, 0.6)" : "rgba(15, 23, 42, 0.7)",
                     margin: 0,
                     marginBottom: "8px",
                     fontWeight: 500,
@@ -545,7 +586,7 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
                   </p>
                   <p style={{
                     fontSize: "14px",
-                    color: "#ffffff",
+                    color: bodyText,
                     margin: 0,
                     fontWeight: 600,
                   }}>
@@ -561,7 +602,7 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
                 }}>
                   <p style={{
                     fontSize: "12px",
-                    color: "rgba(255, 255, 255, 0.6)",
+                    color: isDark ? "rgba(255, 255, 255, 0.6)" : "rgba(15, 23, 42, 0.7)",
                     margin: 0,
                     marginBottom: "8px",
                     fontWeight: 500,
@@ -572,7 +613,7 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
                   </p>
                   <p style={{
                     fontSize: "14px",
-                    color: "#ffffff",
+                    color: bodyText,
                     margin: 0,
                     fontWeight: 600,
                   }}>
@@ -588,7 +629,7 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
                 }}>
                   <p style={{
                     fontSize: "12px",
-                    color: "rgba(255, 255, 255, 0.6)",
+                    color: isDark ? "rgba(255, 255, 255, 0.6)" : "rgba(15, 23, 42, 0.7)",
                     margin: 0,
                     marginBottom: "8px",
                     fontWeight: 500,
@@ -599,7 +640,7 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
                   </p>
                   <p style={{
                     fontSize: "13px",
-                    color: "#ffffff",
+                    color: bodyText,
                     margin: 0,
                     fontFamily: "monospace",
                     fontWeight: 500,

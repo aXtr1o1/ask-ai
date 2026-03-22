@@ -138,7 +138,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
                     session_data = memory_store.get(current_session_id, {})
                     await save_session_to_postgres_service(
                         session_id = current_session_id,
-                        user_name  = session_data.get("user_name", ""),
+                        user_name  = session_data.get("sub_user_name") or session_data.get("user_name", ""),
                         history    = session_data.get("history", [])
                     )
                 break
@@ -571,9 +571,11 @@ async def ws_chat_endpoint(websocket: WebSocket):
                 memory_store[session_id] = {
                     "lc_memory": [],
                     "history":   [],
-                    "user_name": user_name,
+                    "user_name":     user_name,
+                    "sub_user_name": sub_user_name,
                     "pending_transcription": None
                 }
+                
                 logger.info(f"🆕 Memory initialized for session_id: {session_id}")
 
             lc_memory = list(memory_store[session_id]["lc_memory"])
@@ -744,10 +746,11 @@ async def ws_chat_endpoint(websocket: WebSocket):
                 session_data = memory_store.get(current_session_id, {})
                 await save_session_to_postgres_service(
                     session_id = current_session_id,
-                    user_name  = session_data.get("user_name", ""),
+                    user_name  = session_data.get("sub_user_name") or session_data.get("user_name", ""),
                     history    = session_data.get("history", [])
                 )
                 logger.info(f"✅ Saved on disconnect | session={current_session_id}")
+                
             else:
                 logger.info(f"⏭️ Skipping disconnect save — frontend already saved | session={current_session_id}")
                 frontend_saved_sessions.discard(current_session_id)  # cleanup
