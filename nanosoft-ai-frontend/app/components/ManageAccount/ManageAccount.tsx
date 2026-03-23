@@ -107,8 +107,9 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
     if (responsive.isMobile || responsive.isTablet) {
       updateMobileSidebar(true);
     } else {
-      // On desktop, navigate back to the previous page
-      router.back();
+      // On desktop, keep dashboard visible and reset to Usage
+      setActiveSection("dashboard");
+      setDashboardView("usage");
     }
   };
 
@@ -171,11 +172,10 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
                 onClick={() => {
                   if (id === "dashboard") {
                     setActiveSection("dashboard");
+                    setDashboardView("usage");
                     if (responsive.isMobile || responsive.isTablet) {
                       updateMobileSidebar(false);
                     }
-                    // Optionally, keep last selection or reset
-                    // setDashboardView("usage");
                   } else {
                     setActiveSection(id);
                     if (responsive.isMobile || responsive.isTablet) {
@@ -225,9 +225,9 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
               </button>
 
               {/* Dashboard Submenu */}
-              {id === "dashboard" && activeSection === "dashboard" && (
+              {id === "dashboard" && (
                 <div style={{
-                  display: "flex",
+                  display: activeSection === "dashboard" ? "flex" : "none",
                   flexDirection: "column",
                   gap: "4px",
                   marginTop: "8px",
@@ -243,7 +243,6 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
                       onClick={() => {
                         setActiveSection("dashboard");
                         setDashboardView(item.id);
-                        // Close mobile sidebar after selecting a dashboard view
                         if (responsive.isMobile || responsive.isTablet) {
                           updateMobileSidebar(false);
                         }
@@ -252,12 +251,12 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
                         padding: "10px 14px",
                         borderRadius: "8px",
                         background: dashboardView === item.id 
-                          ? "linear-gradient(135deg, rgba(var(--color-primary-rgb), 0.2) 0%, rgba(var(--color-primary-rgb), 0.1) 100%)"
+                          ? "rgba(255, 223, 128, 0.2)" // light theme accent fallback
                           : "transparent",
                         border: dashboardView === item.id 
-                          ? "1.5px solid var(--color-primary)"
+                          ? "1.5px solid #f8b76a"
                           : "1px solid transparent",
-                        color: dashboardView === item.id ? "var(--color-primary)" : "var(--color-text)",
+                        color: dashboardView === item.id ? "#c07a1a" : "#6b7280",
                         cursor: "pointer",
                         fontSize: "12px",
                         fontWeight: dashboardView === item.id ? 700 : 500,
@@ -268,15 +267,15 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
                       onMouseEnter={(e) => {
                         if (dashboardView !== item.id) {
                           const btn = e.currentTarget as HTMLElement;
-                          btn.style.background = "rgba(var(--color-primary-rgb), 0.08)";
-                          btn.style.color = "var(--color-primary)";
+                          btn.style.background = "rgba(248, 160, 36, 0.08)";
+                          btn.style.color = "#d97706";
                         }
                       }}
                       onMouseLeave={(e) => {
                         if (dashboardView !== item.id) {
                           const btn = e.currentTarget as HTMLElement;
                           btn.style.background = "transparent";
-                          btn.style.color = "rgba(255, 255, 255, 0.7)";
+                          btn.style.color = "#6b7280";
                         }
                       }}
                     >
