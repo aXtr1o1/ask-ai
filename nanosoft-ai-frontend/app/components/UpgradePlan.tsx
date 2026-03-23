@@ -138,11 +138,11 @@ export default function UpgradePlan({ onManageAccountClick, onPlanChange }: Upgr
         <h1 style={{
           fontSize: responsive.isMobile ? "20px" : responsive.isTablet ? "28px" : "36px",
           fontWeight: 700,
-          color: "#f3f4f6",
+          color: theme === "light" ? "#000" : "#f3f4f6",
           marginBottom: "6px",
           display: "block",
         }}>
-          Choose Your Plan
+          Choose Your Plan 
         </h1>
         <p style={{
           fontSize: responsive.isMobile ? "11px" : responsive.isTablet ? "12px" : "14px",
