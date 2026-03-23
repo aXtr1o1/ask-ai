@@ -278,9 +278,9 @@ html, body {
 
 /* ─── 5. SIDEBAR ─── */
 .sidebar {
-  width: 260px;
-  min-width: 260px;
-  max-width: 260px;
+  width: 240px;
+  min-width: 240px;
+  max-width: 240px;
   flex-shrink: 0;
   backdrop-filter: blur(25px);
   -webkit-backdrop-filter: blur(25px);
@@ -3406,6 +3406,36 @@ textarea:focus-visible {
   background: #f9fafb;
 }
 
+@media (min-width: 768px) and (max-width: 1024px) {
+  /* iPad/tablet: compact sidebar to fit table/tile area and keep main content usable */
+  .sidebar-shell {
+    width: 240px !important;
+    max-width: 240px !important;
+    min-width: 240px !important;
+    height: 100%;
+    padding: 12px;
+    box-sizing: border-box;
+  }
+
+  .sidebar {
+    width: 240px !important;
+    max-width: 240px !important;
+    min-width: 240px !important;
+    overflow: hidden;
+  }
+
+  .main-content {
+    max-width: calc(100vw - 240px) !important;
+    width: calc(100vw - 240px) !important;
+    padding: 12px 12px !important;
+  }
+
+  .chat-scroll-area,
+  .sidebar-scroll {
+    max-height: calc(100vh - 88px);
+  }
+}
+
 @media (max-width: 640px) {
   /* Reduce sidebar width on mobile to prevent cramping */
   .sidebar-shell {
@@ -3460,7 +3490,7 @@ textarea:focus-visible {
   }
 
   .table-with-tile {
-    padding-top: 0;
+    padding-top: 12px;
   }
 
   .data-view-tile {
@@ -3468,6 +3498,19 @@ textarea:focus-visible {
     right: 12px;
     gap: 4px;
     padding: 4px;
+  }
+
+  /* Mobile: make the toggle flow above the table to avoid overlap */
+  .table-with-tile .data-view-tile,
+  .data-view-tile {
+    position: static !important;
+    display: inline-flex !important;
+    margin: 8px 0 12px 0 !important;
+    box-shadow: none !important;
+    right: auto !important;
+    top: auto !important;
+    align-self: flex-end !important;
+    z-index: 30 !important;
   }
 
   .data-view-option {
@@ -3562,6 +3605,11 @@ textarea:focus-visible {
     padding-top: calc(var(--header-height) + 8px);
   }
 
+  /* Tablet: keep toggle absolute but ensure it sits above content */
+  .data-view-tile {
+    z-index: 60;
+  }
+
   .tile-card > div[style*="grid"] {
     grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)) !important;
     gap: 16px !important;
@@ -3625,6 +3673,31 @@ textarea:focus-visible {
   padding: 6px;
   position: relative;
   box-sizing: border-box;
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .graph-chart-container,
+  .graph-context-summary,
+  .graph-footer,
+  .chart-dropdown,
+  .chart-dropdown-button,
+  .chart-dropdown-menu {
+    user-select: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+  }
+}
+
+.graph-context-summary,
+.graph-footer,
+.chart-dropdown,
+.chart-dropdown-button,
+.chart-dropdown-menu {
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
 }
 
 /* Horizontal bar layout: height set inline from row count */

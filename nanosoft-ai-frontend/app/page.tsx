@@ -2040,7 +2040,7 @@ export default function Home() {
   const isLanding = messages.length === 0;
 
   // Mobile/tablet header is hidden while sidebar/menu is open, or when modals are active.
-  const isMobileHeaderVisible = (responsive.isMobile || responsive.isTablet) && !sidebarOpen && !showUpgradePlan && !showManageAccount;
+  const isMobileHeaderVisible = responsive.isMobile && !sidebarOpen && !showUpgradePlan && !showManageAccount;
 
   /** Chat input + disclaimer; `landing` = centered column on empty state before first message */
   const renderChatInputFooter = (variant: "landing" | "default") => (
