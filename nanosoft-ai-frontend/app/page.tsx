@@ -1120,6 +1120,18 @@ export default function Home() {
     }
   }, []);
 
+  // Mobile viewport height fix (handles dynamic browser chrome on iOS/Android)
+  useEffect(() => {
+    const setVh = () => {
+      document.documentElement.style.setProperty("--vh", `${window.innerHeight * 0.01}px`);
+    };
+    if (typeof window !== "undefined") {
+      setVh();
+      window.addEventListener("resize", setVh);
+    }
+    return () => window.removeEventListener("resize", setVh);
+  }, []);
+
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
