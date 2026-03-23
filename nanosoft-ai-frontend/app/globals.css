@@ -796,6 +796,10 @@ html, body {
 }
 
 /* ─── 6. MAIN CONTENT ─── */
+:root {
+  --header-height: 56px;
+}
+
 .main-content {
   flex: 1;
   display: flex;
@@ -807,11 +811,13 @@ html, body {
   position: relative;
   overflow: hidden;
   background: transparent;
+  padding-top: 0; /* no offset for desktop by default */
 }
 
 /* Welcome card uses translateY up; don’t clip it at the main pane edge */
 .main-content.main-content--landing-start {
   overflow: visible;
+  padding-top: 0;
 }
 
 /* ─── 7. HEADER ─── */
@@ -825,6 +831,35 @@ html, body {
   z-index: 200;
   overflow: visible;
 }
+
+@media (max-width: 1024px) {
+  .chat-header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+    height: var(--header-height);
+    z-index: 10000;
+    background: var(--color-bg-alt);
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .main-content {
+    padding-top: var(--header-height);
+  }
+
+  .main-content.main-content--landing-start {
+    padding-top: var(--header-height);
+  }
+
+  .chat-scroll-area {
+    margin-top: 0;
+    max-height: calc(var(--vh, 1vh) * 100 - var(--header-height));
+    padding-top: 8px;
+  }
+}
+
 
 .chat-header-transparent {
   background: transparent;
@@ -1357,13 +1392,17 @@ html, body {
   width: 100%;
   min-width: 0;
   background: transparent;
+  margin-top: 0;
+  padding-top: 8px;
+  box-sizing: border-box;
+  max-height: calc(var(--vh, 1vh) * 100 - var(--header-height));
 }
 
 /* Mobile: account for sticky header */
 @media (max-width: 640px) {
   .chat-scroll-area {
-    max-height: calc(100vh - 36px);  /* header height */
-    margin-top: 36px;
+    max-height: calc(var(--vh, 1vh) * 100 - var(--header-height));
+    margin-top: 0;
     padding-top: 8px;
   }
 }
@@ -3396,11 +3435,14 @@ textarea:focus-visible {
     min-height: 0;
     display: flex;
     flex-direction: column;  /* Stack header above chat area */
+    padding-top: var(--header-height); /* ensure fixed mobile header does not overlap chat */
   }
 
   .chat-scroll-area {
     width: 100%;
-    max-height: calc(100vh - 56px);  /* Account for sticky header (56px) */
+    max-height: calc(var(--vh, 1vh) * 100 - var(--header-height));  /* account for sticky header height */
+    margin-top: 0;
+    padding-top: calc(var(--header-height) + 1px);
   }
 
   .messages-container {
@@ -3418,7 +3460,7 @@ textarea:focus-visible {
   }
 
   .table-with-tile {
-    padding-top: px;
+    padding-top: 0;
   }
 
   .data-view-tile {
@@ -3511,6 +3553,13 @@ textarea:focus-visible {
     width: 100%;
     max-width: calc(100vw - 180px - 24px);  /* Account for sidebar (180px) + padding (12px*2) */
     min-height: 0;
+    padding-top: var(--header-height); /* ensure mobile/tablet fixed header does not overlap message area */
+  }
+
+  .chat-scroll-area {
+    max-height: calc(var(--vh, 1vh) * 100 - var(--header-height));
+    margin-top: 0;
+    padding-top: calc(var(--header-height) + 8px);
   }
 
   .tile-card > div[style*="grid"] {
