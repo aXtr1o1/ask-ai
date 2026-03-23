@@ -4,12 +4,18 @@ import { useState, useRef, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { ThemeToggle } from "./components/ThemeToggle";
+import { useResponsive, getResponsivePieChartSize } from "./hooks/useResponsive";
 import BackgroundLayer from "./components/BackgroundLayer";
 import { useTheme } from "./components/useTheme";
 
 import { useVoiceRecorder, RecordingInterface, VoicePreviewBar, VoiceMicButton } from "./components/VoiceRecorder";
 import { parseGraphData, BarChartRenderer, HorizontalBarChartRenderer, LineChartRenderer, PieChartRenderer, ChartType } from "./components/GraphRenderer";
-import { IconUser, IconMicrophone, IconPlayerPlay, IconPlayerPause, IconTrash, IconArrowUp, IconChartBar } from "@tabler/icons-react";
+import TableWithTile, { TableWithTileRow } from "./components/TableWithTile";
+import UpgradePlan from "./components/UpgradePlan";
+import ManageAccount from "./components/ManageAccount/ManageAccount";
+import WalkthroughPopup from "./components/WalkthroughPopup";
+import LandingSuggestedQueries from "./components/LandingSuggestedQueries";
+import { IconUser, IconMicrophone, IconPlayerPlay, IconPlayerPause, IconTrash, IconArrowUp, IconChartBar, IconList, IconLayoutGrid, IconMenu2, IconX, IconCrown } from "@tabler/icons-react";
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface Message {
   role: "user" | "ai" | "error";
@@ -22,6 +28,10 @@ interface Message {
   sendStatus?: "sent" | "failed" | "sending";
    isGraphResponse?: boolean;  // ← Set to true if response is type="graph"
   chartType?: ChartType;      // ← chart type per message
+  originalText?: string;      // ← Store original raw response before HTML processing
+  tableData?: TableWithTileRow[];  // ← Store table rows for TableWithTile component
+  tableTitle?: string;        // ← Title for the table
+  tableViewMode?: 'table' | 'tile';  // ← Toggle between table and tile views
 }
 interface FolderItem { id: string; name: string; }
 interface ChatSession { id: string; title: string; createdAt: number; updatedAt?: number; }
@@ -95,6 +105,49 @@ function cleanLine(raw: string): string {
   return s;
 }
 
+// ── Detect if HTML contains a <table> tag ────────────────────────────────────
+function hasTableTag(html: string): boolean {
+  return /<table[^>]*>/i.test(html);
+}
+
+// ── Extract table rows from HTML table ─────────────────────────────────────────
+function extractTableRows(html: string): TableWithTileRow[] {
+  const rows: TableWithTileRow[] = [];
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, "text/html");
+    const table = doc.querySelector("table");
+    if (!table) return rows;
+
+    // Get column headers
+    const headers: string[] = [];
+    const ths = table.querySelectorAll("thead th");
+    ths.forEach(th => {
+      const text = th.textContent?.trim() || "";
+      if (text) headers.push(text);
+    });
+
+    // Get table rows
+    const trs = table.querySelectorAll("tbody tr");
+    trs.forEach(tr => {
+      const tds = tr.querySelectorAll("td");
+      const row: TableWithTileRow = {};
+      tds.forEach((td, idx) => {
+        const header = headers[idx];
+        if (header) {
+          row[header] = td.textContent?.trim() || "—";
+        }
+      });
+      if (Object.keys(row).length > 0) {
+        rows.push(row);
+      }
+    });
+  } catch (err) {
+    console.warn("Failed to parse table HTML:", err);
+  }
+  return rows;
+}
+
 // ── Regex: matches "Key: value" or "**Key**: value" (key 2–30 alpha chars) ────
 const KV_LINE_RE   = /^\*{0,2}([A-Za-z][A-Za-z ]{1,28})\*{0,2}:[ \t]+(.+)$/;
 // Multi-KV on one line: "Key: Val, Key: Val"
@@ -133,7 +186,14 @@ function isBadgeCol(col: string): boolean {
   return BADGE_COLS.has(col.toLowerCase().replace(/[\s_]/g, ""));
 }
 
+// ── Extract table HTML from larger HTML block ────────────────────────────────
+function extractTableHtml(html: string): string | null {
+  const tableMatch = html.match(/<table[^>]*>[\s\S]*?<\/table>/i);
+  return tableMatch ? tableMatch[0] : null;
+}
+
 // ── Build HTML <table> from rows ──────────────────────────────────────────────
+// ── Build HTML <table> from rows - SMALL DATA TABLES ──
 // ── Build HTML <table> from rows - SMALL DATA TABLES ──
 function buildTable(rows: Record<string, string>[], cols?: string[]): string {
   if (!rows.length) return "";
@@ -147,7 +207,7 @@ function buildTable(rows: Record<string, string>[], cols?: string[]): string {
 
   const thead = `<thead><tr>${allCols.map(c => `<th>${esc(c)}</th>`).join("")}</tr></thead>`;
 
-  const tbody = `<tbody>${rows.map((row, ri) =>
+  const tbody = `<tbody>${rows.map(row =>
     `<tr>${allCols.map(col => {
       const val  = row[col] ?? "—";
       const cell = isBadgeCol(col) ? badge(val) : esc(val);
@@ -263,19 +323,25 @@ function renderLargeDataset(text: string): string | null {
   }
 
   // ─────────────────────────────────────────
-  // Detect large dataset
+  // Detect data (ANY size - no limits)
   // ─────────────────────────────────────────
   let records = [];
 
+  // Accept ANY array, regardless of size
   if (parsed.type === "large_dataset" && Array.isArray(parsed.records)) {
     records = parsed.records;
-  } else if (Array.isArray(parsed.records) && parsed.records.length > 100) {
+  } else if (Array.isArray(parsed.records)) {
     records = parsed.records;
-  } else if (Array.isArray(parsed.p_list) && parsed.p_list.length > 100) {
+  } else if (Array.isArray(parsed.p_list)) {
     records = parsed.p_list;
-  } else if (Array.isArray(parsed.data) && parsed.data.length > 100) {
+  } else if (Array.isArray(parsed.data)) {
     records = parsed.data;
   } else {
+    return null;
+  }
+
+  // Return null only if no records found
+  if (!records || records.length === 0) {
     return null;
   }
 
@@ -388,17 +454,21 @@ function formatLargeDatasetTable(largeDataData: any): string {
     console.warn("⚠️ Large dataset records is not an array:", typeof records);
     records = [];
   }
- 
+  
+  
   if (records.length === 0) {
     return `<div class="large-dataset-context"><strong>Summary:</strong> ${esc(context)}</div>`;
   }
- 
+  
+  
   console.log(`✅ Formatting large dataset: ${records.length} records, context length: ${context.length}`);
- 
+  
+  
   // ═══════════════════════════════════════════════════════════════════
   // DYNAMICALLY COLLECT ALL COLUMNS FROM RECORDS (EXCLUDING HIDDEN)
   // ═══════════════════════════════════════════════════════════════════
- 
+  
+  
   const allKeys = new Set<string>();
   records.forEach((r: any) => {
     if (r && typeof r === 'object') {
@@ -410,35 +480,43 @@ function formatLargeDatasetTable(largeDataData: any): string {
       });
     }
   });
- 
+  
+  
   // Convert Set to array while preserving order
   const colsToShow: string[] = Array.from(allKeys);
- 
+  
+  
   console.log(`📊 Dynamic columns detected: ${colsToShow.length} columns (hidden: ${records[0] ? Object.keys(records[0]).filter(k => isHiddenColumn(k)).length : 0}):`, colsToShow.slice(0, 10));
- 
+  
+  
   // ═══════════════════════════════════════════════════════════════════
   // BUILD HTML TABLE STRUCTURE DYNAMICALLY - USING CSS CLASSES
   // ═══════════════════════════════════════════════════════════════════
- 
+  
+  
   // 1. Create table header with ALL columns (excluding hidden)
   let tableHeadHTML = "<thead><tr>";
   colsToShow.forEach(col => {
     tableHeadHTML += `<th>${esc(col)}</th>`;
   });
   tableHeadHTML += "</tr></thead>";
- 
+  
+  
   // 2. Create table body rows dynamically
   let tableBodyHTML = "<tbody>";
   records.forEach((record: any, rowIndex: number) => {
     if (!record || typeof record !== 'object') return;
-   
+    
+    
     tableBodyHTML += `<tr>`;
-   
+    
+    
     // Populate visible columns for each row (skip hidden columns)
     colsToShow.forEach(col => {
       const val = record[col];
       let cellContent = "—";
-     
+      
+      
       if (val === null || val === undefined) {
         cellContent = "—";
       } else if (typeof val === "boolean") {
@@ -449,7 +527,8 @@ function formatLargeDatasetTable(largeDataData: any): string {
       } else {
         const strVal = String(val);
         const displayVal = strVal.length > 100 ? strVal.substring(0, 100) + "…" : strVal;
-       
+        
+        
         // Apply status badge styling for status-like columns
         if (isBadgeCol(col) && val) {
           cellContent = badge(strVal);
@@ -457,17 +536,21 @@ function formatLargeDatasetTable(largeDataData: any): string {
           cellContent = esc(displayVal);
         }
       }
-     
+      
+      
       tableBodyHTML += `<td>${cellContent}</td>`;
     });
-   
+    
+    
     tableBodyHTML += "</tr>";
   });
   tableBodyHTML += "</tbody>";
- 
+  
+  
   // 3. Create table footer with summary - ALIGN RIGHT
   const tfoot = `<tfoot><tr><td colspan="${colsToShow.length}" style="text-align: right; padding-right: 14px;">Total: ${records.length} record${records.length !== 1 ? "s" : ""} | ${colsToShow.length} column${colsToShow.length !== 1 ? "s" : ""}</td></tr></tfoot>`;
- 
+  
+  
   // 4. Complete table HTML with CSS classes for styling
   const tableHTML = `<div class="large-dataset-wrapper">
     <table class="large-dataset-table">
@@ -476,12 +559,16 @@ function formatLargeDatasetTable(largeDataData: any): string {
       ${tfoot}
     </table>
   </div>`;
- 
+  
+  
   // 5. Add context summary above table - JUST THE CONTEXT ONLY
-  const contextHTML = context
-    ? `<div class="large-dataset-context">${esc(context)}</div>`
+  // const contextHTML = context 
+  //   ? `<div class="large-dataset-context">${esc(context)}</div>` 
+  const contextHTML = context 
+    ? `<div class="large-dataset-context">${esc(context)}</div>` 
     : "";
- 
+  
+  
   const fullHTML = contextHTML + tableHTML;
   console.log(` HTML generated - length: ${fullHTML.length}, has table-wrapper: ${fullHTML.includes('large-dataset-wrapper')}`);
   return fullHTML;
@@ -614,7 +701,8 @@ function formatOutput(text: string): string {
 
   // Remove emojis from the first line only (Found X records message)
   text = removeEmoji(text);
- 
+  
+  
   const allLines = text.split("\n");
   let   html     = "";
 
@@ -905,7 +993,7 @@ export const dynamic = "force-dynamic";
 export default function Home() {
   const router        = useRouter();
   // const searchParams  = useSearchParams();
-  // const userIdFromUrl = searchParams.get("userId");
+  const responsive    = useResponsive();  // Auto-detect screen size
   const [userIdFromUrl, setUserIdFromUrl] = useState<string | null>(null); // display name
   const [clientNameFromUrl, setClientNameFromUrl] = useState<string | null>(null); // backend username
   const [input,        setInput]        = useState<string>("");
@@ -923,6 +1011,11 @@ export default function Home() {
   const [loggedInUser, setLoggedInUser] = useState<string | null>(null); // backend username (client_name)
   const [authChecked,  setAuthChecked]  = useState<boolean>(false);
   const [menuOpen,     setMenuOpen]     = useState(false);
+  const [showUpgradePlan, setShowUpgradePlan] = useState(false);
+  const [showManageAccount, setShowManageAccount] = useState(false);
+  const [isManageAccountMenuOpen, setIsManageAccountMenuOpen] = useState(false);
+  const [currentPlan, setCurrentPlan] = useState<string>("Free"); // Track active plan
+  const [sidebarOpen,  setSidebarOpen]  = useState(true);  // Will be auto-closed by useEffect if mobile is detected
   const [wsConnectionState, setWsConnectionState] = useState<'connecting'|'connected'|'failed'>('connecting');
   const [isGraphMode, setIsGraphMode] = useState<boolean>(false);
   const [chartType, setChartType] = useState<ChartType>('vertical-bar');
@@ -931,6 +1024,12 @@ export default function Home() {
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [audioPlayingIndex, setAudioPlayingIndex] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!showManageAccount) {
+      setIsManageAccountMenuOpen(false);
+    }
+  }, [showManageAccount]);
   const [audioProgressMap,  setAudioProgressMap]  = useState<Record<number, number>>({});
   const [audioDurationMap,  setAudioDurationMap]  = useState<Record<number, number>>({});
   const audioDurationMapRef = useRef<Record<number, number>>({});
@@ -964,6 +1063,7 @@ export default function Home() {
     isLoading,
     wsConnectionState,
     loggedInUser || "anonymous",
+    userIdFromUrl ?? "",
     sessionId,
     wsRef,
     (duration: number, audioUrl: string) => {
@@ -984,6 +1084,13 @@ export default function Home() {
       setTimeout(() => inputRef.current?.focus(), 100);
     }
   );
+
+  // Sync sidebarOpen with responsive.isMobile - ensures sidebar closes on mobile detection
+  useEffect(() => {
+    if (responsive.isMobile) {
+      setSidebarOpen(false);
+    }
+  }, [responsive.isMobile]);
 
   // Read userName and branding logos from URL (e.g. from autologin redirect); persist logos to localStorage
   useEffect(() => {
@@ -1013,6 +1120,18 @@ export default function Home() {
     }
   }, []);
 
+  // Mobile viewport height fix (handles dynamic browser chrome on iOS/Android)
+  useEffect(() => {
+    const setVh = () => {
+      document.documentElement.style.setProperty("--vh", `${window.innerHeight * 0.01}px`);
+    };
+    if (typeof window !== "undefined") {
+      setVh();
+      window.addEventListener("resize", setVh);
+    }
+    return () => window.removeEventListener("resize", setVh);
+  }, []);
+
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
@@ -1020,6 +1139,22 @@ export default function Home() {
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
+
+  // Update sidebar visibility based on screen size
+  useEffect(() => {
+    // Don't change sidebar if a modal is open
+    if (showManageAccount || showUpgradePlan) {
+      return;
+    }
+    
+    if (responsive.isDesktop) {
+      // Always show sidebar on desktop
+      setSidebarOpen(true);
+    } else if (responsive.isMobile) {
+      // Close sidebar on mobile (user can open with menu button)
+      setSidebarOpen(false);
+    }
+  }, [responsive.isDesktop, responsive.isMobile, showManageAccount, showUpgradePlan]);
 
   // Auth guard
   useEffect(() => {
@@ -1045,15 +1180,47 @@ export default function Home() {
     sessionIdRef.current = sessionId;
   }, [sessionId]);
 
-  // Keep sessionIdRef in sync with state
-  useEffect(() => {
-    sessionIdRef.current = sessionId;
-  }, [sessionId]);
-
   // Auto-scroll
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length, isLoading]);
+
+  // Handle body overflow when upgrade plan modal opens/closes
+  useEffect(() => {
+    if (showUpgradePlan) {
+      document.body.classList.add('upgrade-plan-open');
+      // Close sidebar on mobile/tablet when modal opens
+      if (responsive.isMobile || responsive.isTablet) {
+        setSidebarOpen(false);
+      }
+    } else {
+      document.body.classList.remove('upgrade-plan-open');
+    }
+    return () => {
+      document.body.classList.remove('upgrade-plan-open');
+    };
+  }, [showUpgradePlan, responsive.isMobile, responsive.isTablet]);
+
+  // Handle sidebar close when manage account modal opens
+  useEffect(() => {
+    if (showManageAccount) {
+      setSidebarOpen(false);
+    }
+  }, [showManageAccount]);
+
+  // Handle body overflow when manage account modal opens/closes
+  useEffect(() => {
+    if (showManageAccount) {
+      document.body.classList.add('manage-account-open');
+      // Close sidebar when manage account modal opens
+      setSidebarOpen(false);
+    } else {
+      document.body.classList.remove('manage-account-open');
+    }
+    return () => {
+      document.body.classList.remove('manage-account-open');
+    };
+  }, [showManageAccount]);
 
   // Auto-resize textarea
   const resizeTA = () => {
@@ -1102,6 +1269,30 @@ export default function Home() {
     return temp.textContent || "";
   };
 
+  // ── Convert base64 audio to blob URL for immediate use ─────────────────────
+  const base64ToAudioUrl = (base64String: string): string => {
+    try {
+      if (!base64String || !base64String.startsWith("data:audio/")) {
+        return base64String;
+      }
+      // Extract base64 data part
+      const base64Data = base64String.split(",")[1];
+      if (!base64Data) return base64String;
+
+      // Convert to binary and create blob
+      const binaryString = atob(base64Data);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      const blob = new Blob([bytes], { type: "audio/ogg" });
+      return URL.createObjectURL(blob);
+    } catch (error) {
+      console.warn("Failed to convert base64 to audio URL:", error);
+      return base64String;
+    }
+  };
+
   // ── Save chat history to backend (PostgreSQL) ───────────────────────────────
   const saveChatHistory = async (sid: string, msgs: Message[]) => {
   const valid = msgs.filter(m => m.role !== "error");
@@ -1111,14 +1302,14 @@ export default function Home() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        userName: loggedInUser,
+        userName: userIdFromUrl ?? loggedInUser,
         sessionId: sid,
         chatHistory: valid.map(m => ({
           role: m.role,
           text: m.isAudio
             ? (m.audioUrl || m.text)
             : m.role === "ai"
-              ? stripHtml(m.text)
+              ? (m.originalText || stripHtml(m.text))  // ← Use original raw response if available, fallback to stripHtml
               : m.text,
           isAudio: m.isAudio ?? false,
         })),
@@ -1208,6 +1399,8 @@ export default function Home() {
           const finalText = accRef.current;
           let processedText = finalText;
           let isGraphResponse = false;
+          let tableData: TableWithTileRow[] | undefined = undefined;
+          let tableTitle: string | undefined = undefined;
          
           // 🔑 FIRST: Check if this is a GRAPH response (type="graph")
           const cleanedForGraph = extractResponseContent(finalText);
@@ -1221,25 +1414,31 @@ export default function Home() {
             // 🔑 SECOND: Extract response content (removes session_id wrapper)
             const cleanedText = extractResponseContent(finalText);
            
-            // 🔑 THIRD: TRY RENDERING AS LARGE DATASET TABLE FIRST
+            // 🔑 THIRD: ALWAYS TRY RENDERING AS TABLE STRUCTURE FIRST (ALL SIZES, NO LIMITS)
             const largeDatasetHTML = renderLargeDataset(cleanedText);
            
             if (largeDatasetHTML) {
-              // Successfully rendered as large dataset table
+              // Successfully rendered as unified table structure (any size)
               processedText = largeDatasetHTML;
-              console.log("✅ [DONE] Rendered as large dataset table");
+              // Always extract table rows for TableWithTile component
+              const rows = extractTableRows(largeDatasetHTML);
+              if (rows.length > 0) {
+                tableData = rows;
+                tableTitle = "Data";
+                console.log("✅ [DONE] Rendered as unified table structure (" + rows.length + " rows)");
+              }
             } else {
-              // Not a large dataset → try to format as text/table
+              // Not tabular data → format as text output only
               try {
                 processedText = formatOutput(cleanedText);
-                console.log("📝 [DONE] Formatted as text output");
+                console.log("📝 [DONE] Formatted as text");
               } catch (err) {
                 console.log("📝 [DONE] Using raw text", err);
                 processedText = finalText;
               }
             }
           }
-         
+          
           setMessages(prev => {
             const u = [...prev];
             const l = u.length - 1;
@@ -1249,7 +1448,10 @@ export default function Home() {
                 text: processedText,
                 streaming: false,
                 isGraphResponse: isGraphResponse,  // ← Set graph flag
-                chartType: chartType               // ← Store chart type
+                chartType: chartType,              // ← Store chart type
+                originalText: finalText,           // ← Store original raw response before HTML processing
+                tableData: tableData,              // ← Store table rows
+                tableTitle: tableTitle              // ← Store table title
               };
             }
             // Persist to per-session store so switching sessions keeps history
@@ -1267,7 +1469,8 @@ export default function Home() {
         if (part) {
           accRef.current += part;
           const snap = accRef.current;
-         
+          
+          
           // Extract text for display during streaming
           let displayText = snap;
           try {
@@ -1276,16 +1479,17 @@ export default function Home() {
             // If can't parse yet (incomplete JSON), show what we have
             displayText = snap;
           }
-         
+          
+          
           setMessages(prev => {
             const u = [...prev];
             const l = u.length - 1;
             // If last message is already our streaming AI bubble → update it
             if (u[l]?.role === "ai" && u[l]?.streaming === true) {
-              u[l] = { role: "ai", text: displayText, streaming: true };
+              u[l] = { ...u[l], text: displayText, streaming: true };  // ← Preserve chartType
             } else {
-              // First chunk → create the AI bubble now (only once)
-              u.push({ role: "ai", text: displayText, streaming: true });
+              // First chunk → create the AI bubble now (only once) with current chartType
+              u.push({ role: "ai", text: displayText, streaming: true, chartType: chartType });
             }
             return u;
           });
@@ -1328,26 +1532,22 @@ export default function Home() {
   // Keep ref in sync so markUserActive can call connectWS
   useEffect(() => { connectWSRef.current = connectWS; });
 
-  // Keep ref in sync so markUserActive can call connectWS
-  useEffect(() => { connectWSRef.current = connectWS; });
-
   // Connect when component mounts (after auth is confirmed)
-useEffect(() => {
-  if (!authChecked || !loggedInUser) return;
+  useEffect(() => {
+    if (!authChecked || !loggedInUser) return;
 
-  connectWS();
+    connectWS();
 
-
-  return () => {
-    if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
-    if (idleTimerRef.current) { clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
-    if (wsConnectTimeoutRef.current) { clearTimeout(wsConnectTimeoutRef.current); wsConnectTimeoutRef.current = null; }
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
-  };
-},[authChecked]);
+    return () => {
+      if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
+      if (idleTimerRef.current) { clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
+      if (wsConnectTimeoutRef.current) { clearTimeout(wsConnectTimeoutRef.current); wsConnectTimeoutRef.current = null; }
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+    };
+  }, [authChecked, loggedInUser]);
 
   // Helper: sort sessions newest-first (by updatedAt or createdAt)
   const sortSessionsNewestFirst = (list: ChatSession[]): ChatSession[] =>
@@ -1362,7 +1562,7 @@ useEffect(() => {
         const res = await fetch(`${baseUrl}/api/session`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userName: loggedInUser, historyOnClick: false }),
+          body: JSON.stringify({ userName: userIdFromUrl ?? loggedInUser, historyOnClick: false }),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
@@ -1411,6 +1611,11 @@ useEffect(() => {
     setSessionId(newSessionId);
     sessionIdRef.current = newSessionId;
 
+    // Auto-close sidebar on mobile
+    if (responsive.isMobile) {
+      setSidebarOpen(false);
+    }
+
     // Immediately show this new chat at the top of the history list
     setChatSessions(prev => {
       const existing = prev.filter(s => s.id !== newSessionId);
@@ -1429,7 +1634,7 @@ useEffect(() => {
         const res = await fetch(`${baseUrl}/api/session`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userName: loggedInUser, historyOnClick: false }),
+          body: JSON.stringify({ userName: userIdFromUrl ?? loggedInUser, historyOnClick: false }),
         });
         if (!res.ok) return;
         const data = await res.json();
@@ -1471,7 +1676,7 @@ useEffect(() => {
   const processLoadedMessages = (msgs: Message[]): Message[] => {
     return msgs.map(m => {
       if (m.role !== "ai") return m;
-     
+      
       const text = m.text || "";
      
       // 🔑 FIRST: Check if this is a GRAPH response
@@ -1489,20 +1694,30 @@ useEffect(() => {
       text.includes('large-dataset-wrapper')
     ) {
       console.log("✅ [HISTORY] Message already HTML formatted (from cache) - skipping");
+      // Try to extract table data from HTML
+      const rows = extractTableRows(text);
+      if (rows.length > 0) {
+        return { ...m, text, tableData: rows, tableTitle: "Data Results" };
+      }
       return m;
     }
           
       // Extract response content (removes session_id wrapper)
       const cleanedText = decodeEntities(extractResponseContent(text));
      
-      // Try to render as large dataset table first
+      // ALWAYS TRY RENDERING AS UNIFIED TABLE STRUCTURE FIRST (ALL SIZES)
       const largeDatasetHTML = renderLargeDataset(cleanedText);
       if (largeDatasetHTML) {
-        console.log("✅ [HISTORY] Formatted as large dataset table");
+        console.log("✅ [HISTORY] Rendered as unified table structure");
+        // Always extract table rows for TableWithTile
+        const rows = extractTableRows(largeDatasetHTML);
+        if (rows.length > 0) {
+          return { ...m, text: largeDatasetHTML, tableData: rows, tableTitle: "Data" };
+        }
         return { ...m, text: largeDatasetHTML };
       }
-     
-      // Try to parse as JSON and format as text
+      
+      // Not tabular data → try to format as text
       try {
         const formattedText = formatOutput(cleanedText);
         console.log("✅ [HISTORY] Formatted as text output");
@@ -1523,6 +1738,11 @@ useEffect(() => {
       return;
     }
 
+    // Auto-close sidebar on mobile
+    if (responsive.isMobile) {
+      setSidebarOpen(false);
+    }
+
     // Capture the currently active session ID
     const currentSid = sessionIdRef.current;
 
@@ -1536,7 +1756,7 @@ useEffect(() => {
         const res = await fetch(`${baseUrl}/api/session`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userName: loggedInUser, historyOnClick: false }),
+          body: JSON.stringify({ userName: userIdFromUrl ?? loggedInUser, historyOnClick: false }),
         });
         if (!res.ok) return;
         const data = await res.json();
@@ -1579,7 +1799,7 @@ useEffect(() => {
         const res = await fetch(`${baseUrl}/api/session`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userName: loggedInUser, sessionId: targetSid, historyOnClick: true }),
+          body: JSON.stringify({ userName: userIdFromUrl ?? loggedInUser, sessionId: targetSid, historyOnClick: true }),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
@@ -1807,6 +2027,7 @@ useEffect(() => {
     isGraph: isGraphMode,
     query: userText,
     userName: loggedInUser,
+    subUserName: userIdFromUrl ?? loggedInUser,
     sessionId,
     timestamp: Date.now()
   }));
@@ -1818,11 +2039,122 @@ useEffect(() => {
   const { theme } = useTheme();
   const isLanding = messages.length === 0;
 
+  // Mobile/tablet header is hidden while sidebar/menu is open, or when modals are active.
+  const isMobileHeaderVisible = (responsive.isMobile || responsive.isTablet) && !sidebarOpen && !showUpgradePlan && !showManageAccount;
+
+  /** Chat input + disclaimer; `landing` = centered column on empty state before first message */
+  const renderChatInputFooter = (variant: "landing" | "default") => (
+    <div
+      className={
+        variant === "landing" ? "input-footer input-footer--start" : "input-footer"
+      }
+    >
+      {voiceRecorder.isRecording && (
+        <div className={`voice-recording-overlay${voiceRecorder.closingRecording ? " closing" : ""}`}>
+          <RecordingInterface
+            recordingTime={voiceRecorder.recordingTime}
+            onCancel={voiceRecorder.cancelRecording}
+            formatTime={voiceRecorder.formatTime}
+          />
+        </div>
+      )}
+
+      {voiceRecorder.recordedAudioBlob ? (
+        <VoicePreviewBar
+          isPlaying={voiceRecorder.isPlaying}
+          playbackTime={voiceRecorder.playbackTime}
+          totalDuration={voiceRecorder.totalDuration}
+          displayTimeText={voiceRecorder.displayTimeText}
+          onTogglePlayback={voiceRecorder.togglePlayback}
+          onDelete={voiceRecorder.deleteRecording}
+          onSend={voiceRecorder.sendVoiceMessage}
+          isLoading={isLoading}
+          wsConnectionState={wsConnectionState}
+        />
+      ) : (
+        <div className="input-wrapper">
+          <textarea
+            ref={inputRef}
+            className="main-input"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            disabled={isLoading || wsConnectionState !== "connected"}
+            placeholder={
+              wsConnectionState === "connected" ? "Ask Anything..." : "Waiting for connection…"
+            }
+            rows={1}
+          />
+          <VoiceMicButton
+            forwardedRef={voiceRecorder.micButtonRef}
+            onClick={voiceRecorder.toggleRecording}
+            disabled={
+              isLoading ||
+              wsConnectionState !== "connected" ||
+              voiceRecorder.recordedAudioBlob !== null
+            }
+          />
+          <button
+            onClick={() => setIsGraphMode((p) => !p)}
+            title={isGraphMode ? "Graph mode ON — click to turn off" : "Click for graph output"}
+            style={{
+              background: isGraphMode
+                ? "linear-gradient(135deg, #d4af37, #f5c249)"
+                : "transparent",
+              border: isGraphMode
+                ? "1px solid #d4af37"
+                : "1px solid rgba(255,255,255,0.15)",
+              borderRadius: 8,
+              padding: "6px 8px",
+              cursor: "pointer",
+              color: isGraphMode ? "#000" : "#9CA3AF",
+              transition: "all 0.2s ease",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <IconChartBar size={18} stroke={1.5} />
+          </button>
+          <button
+            className="send-btn"
+            onClick={sendMessage}
+            disabled={isLoading || wsConnectionState !== "connected" || !input.trim()}
+          >
+            <IconArrowUp size={16} color="white" stroke={2} />
+          </button>
+        </div>
+      )}
+      {variant === "landing" && (
+        <LandingSuggestedQueries
+          onSelect={(q) => {
+            setInput(q);
+            requestAnimationFrame(() => inputRef.current?.focus());
+          }}
+          disabled={
+            isLoading ||
+            wsConnectionState !== "connected" ||
+            voiceRecorder.isRecording ||
+            !!voiceRecorder.recordedAudioBlob
+          }
+        />
+      )}
+      <p className="footer-disclaimer">
+      </p>
+    </div>
+  );
+
   if (!authChecked) {
     return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center",
-        background: `
-            linear-gradient(135deg, #0A0A0A 0%, #111111 50%, #0A0A0A 100%)`}}>
+      <div
+        style={{
+          minHeight: "100vh",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "linear-gradient(135deg, #0A0A0A 0%, #111111 50%, #0A0A0A 100%)",
+        }}
+      >
         <span style={{ fontSize: 14, color: "#A0AEC0" }}>Checking authentication…</span>
       </div>
     );
@@ -1832,26 +2164,66 @@ useEffect(() => {
     <div className="app-container app-container-with-bg">
       <BackgroundLayer theme={theme} />
       {/* Content above background (MainLayout-style) */}
-      <div className="app-content-wrapper">
+      <div
+        className={
+          !historyLoading && isLanding
+            ? "app-content-wrapper app-content-wrapper--landing-start"
+            : "app-content-wrapper"
+        }
+      >
       {/* ── Sidebar ─────────────────────────────────────────────────────── */}
-      <div className="sidebar-shell">
+      <div 
+        className="sidebar-shell" 
+        style={{ 
+          display: sidebarOpen ? 'flex' : 'none',
+          position: responsive.isMobile && sidebarOpen ? 'fixed' : 'relative',
+          top: 0,
+          left: 0,
+          zIndex: responsive.isMobile && sidebarOpen ? 9999 : 2,
+        }}
+      >
       <aside className="sidebar">
         {/* Sidebar Header with Logo */}
         <div className="sidebar-header">
           
-          <div style={{ display: "flex", alignItems: "center" }}>
+          <div style={{ display: "flex", alignItems: "center", flex: 1 }}>
             <div
               className="brand-box"
               style={loginPageClientLogoPath ? { width: "100%", maxWidth: 220, height: "auto", minHeight: 56, maxHeight: 72, padding: 0, border: "none", borderRadius: 0 } : undefined}
             >
               {loginPageClientLogoPath ? (
-                <img src={loginPageClientLogoPath} alt="Client logo" style={{ width: "100%", maxWidth: 220, height: "auto", maxHeight: 72, objectFit: "contain", display: "block" }} />
+                <img
+                  src={loginPageClientLogoPath}
+                  alt="Client logo"
+                  style={{ width: "100%", maxWidth: 220, height: "auto", maxHeight: 72, objectFit: "contain", display: "block" }}
+                />
               ) : (
-                <Image src="/icon.png" alt="Nanosoft Ask AI" width={20} height={20} style={{ borderRadius: 0 }}/>
+                <Image src="/icon.png" alt="Nanosoft Ask AI" width={20} height={20} style={{ borderRadius: 0 }} />
               )}
             </div>
           </div>
-          <div />
+          {/* Close button on mobile */}
+          {responsive.isMobile && !showManageAccount && !showUpgradePlan && (
+            <button
+              className="sidebar-close-btn"
+              onClick={() => setSidebarOpen(false)}
+              title="Close sidebar"
+              aria-label="Close sidebar"
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: 'var(--color-text)',
+                cursor: 'pointer',
+                padding: '8px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              <IconX size={24} />
+            </button>
+          )}
           <div className="hamburger-wrapper" ref={menuRef}>
             <button
               className="hamburger-btn"
@@ -1878,6 +2250,44 @@ useEffect(() => {
                 </div>
                 <div className="profile-divider" />
                 <button
+                  className="profile-dropdown-item profile-action-btn"
+                  onClick={() => {
+                    setShowUpgradePlan(true);
+                    setMenuOpen(false);
+                    setSidebarOpen(false);
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px',
+                    color: '#d4af37',
+                    fontWeight: 600,
+                  }}
+                >
+                  <IconCrown size={18} />
+                  <span>Upgrade Plan</span>
+                </button>
+                <div className="profile-divider" />
+                <button
+                  className="profile-dropdown-item profile-action-btn"
+                  onClick={() => {
+                    setShowManageAccount(true);
+                    setMenuOpen(false);
+                    setSidebarOpen(false);
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px',
+                    color: 'var(--color-primary)',
+                    fontWeight: 600,
+                  }}
+                >
+                  <IconUser size={18} />
+                  <span>Manage Account</span>
+                </button>
+                <div className="profile-divider" />
+                <button
                   className="profile-dropdown-item profile-action-btn profile-logout"
                   onClick={handleLogout}
                 >
@@ -1894,6 +2304,7 @@ useEffect(() => {
 
         </div>
         {/* <div className={`sidebar-profile-card ${menuOpen ? "open" : ""}`} ref={menuRef}> */}
+         
          
            
         {/* </div> */}
@@ -1987,6 +2398,7 @@ useEffect(() => {
 
         {/* Profile Card - Toggle on Hamburger Click */}
        
+       
 
         {/* Beta Version Disclaimer */}
         <div className="sidebar-disclaimer">
@@ -2002,7 +2414,103 @@ useEffect(() => {
       </div>
 
       {/* ── Main Content ─────────────────────────────────────────────────── */}
-      <div className="main-content">
+      <div
+        className={
+          !historyLoading && isLanding
+            ? "main-content main-content--landing-start"
+            : "main-content"
+        }
+      >
+
+        {/* Mobile Header with Menu Button - sticky at top (hidden while sidebar is open) */}
+        {isMobileHeaderVisible && (
+          <div
+            style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              height: '36px',
+              background: 'var(--color-bg-alt)',
+              borderBottom: '1px solid var(--color-border)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              paddingLeft: '12px',
+              paddingRight: '12px',
+              zIndex: 10000,
+              backdropFilter: 'blur(10px)',
+            }}
+          >
+            <button
+              onClick={() => setSidebarOpen(true)}
+              title="Open sidebar"
+              aria-label="Open sidebar"
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: 'var(--color-text)',
+                cursor: 'pointer',
+                padding: '8px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              <IconMenu2 size={24} />
+            </button>
+            <div style={{ fontSize: '14px', fontWeight: '500', flex: 1, textAlign: 'center' }}>
+              Ask AI
+            </div>
+            <div style={{ width: '40px' }} />
+          </div>
+        )}
+
+        {/* Mobile Menu Button - legacy, disabled when header is shown */}
+        {false && responsive.isMobile && (
+          <button
+            className="mobile-menu-btn"
+            onClick={() => setSidebarOpen(true)}
+            title="Open sidebar"
+            aria-label="Open sidebar"
+            style={{
+              position: 'fixed',
+              top: 16,
+              left: 16,
+              zIndex: 1000,
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--color-text)',
+              cursor: 'pointer',
+              padding: '8px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'all 0.2s ease',
+              opacity: sidebarOpen ? 0 : 1,
+              pointerEvents: sidebarOpen ? 'none' : 'auto',
+            }}
+          >
+            <IconMenu2 size={24} />
+          </button>
+        )}
+
+        {/* Overlay when sidebar is open on mobile */}
+        {(responsive.isMobile || responsive.isTablet) && sidebarOpen && (
+          <div
+            style={{
+              position: 'fixed',
+              inset: 0,
+              zIndex: 9997,
+              // Blur the background behind the sidebar (mobile/tablet "max blur")
+              backgroundColor: 'rgba(0, 0, 0, 0.35)',
+              backdropFilter: 'blur(30px) saturate(130%)',
+              WebkitBackdropFilter: 'blur(30px) saturate(130%)',
+            }}
+            onClick={() => setSidebarOpen(false)}
+          />
+        )}
 
         {/* History loading spinner */}
         {historyLoading && (
@@ -2022,31 +2530,33 @@ useEffect(() => {
           </div>
         )}
 
-        {/* Landing */}
+        {/* Landing — welcome shifted up; input vertically centered (only before first message) */}
         {!historyLoading && isLanding && (
-          <div className="landing-container">
-            {/* <div style={{ marginBottom: 24, opacity: 0.5 }}>
-              <Image src="/nanosoft_logo.png" alt="" width={560} height={200}
-                style={{ width: "auto", height: "auto", maxWidth: "min(600px,90vw)", maxHeight: 200, objectFit: "contain" }}/>
-            </div> */}
-            <div className="landing-card">
-              <h1 style={{
-                fontSize: 32,
-                fontWeight: 700,
-                marginBottom: 16,
-                background: "linear-gradient(180deg, #AE8625 0%, #F7EF8A 35%, #D2AC47 65%, #EDC967 100%)",
-                backgroundSize: "200% 200%",
-                WebkitBackgroundClip: "text",
-                backgroundClip: "text",
-                WebkitTextFillColor: "transparent",
-                animation: "goldShine 3s ease-in-out infinite"
-              }}>
-                Welcome to Ask AI
-              </h1>
-              <p className="landing-subtitle">
-                Let's work together buddy
-              </p>
+          <div className="landing-start-column">
+            <div className="landing-start-spacer-top" aria-hidden />
+            <div className="landing-container landing-container--start">
+              <div className="landing-card">
+                <h1
+                  style={{
+                    fontSize: 32,
+                    fontWeight: 700,
+                    marginBottom: 16,
+                    background:
+                      "linear-gradient(180deg, #AE8625 0%, #F7EF8A 35%, #D2AC47 65%, #EDC967 100%)",
+                    backgroundSize: "200% 200%",
+                    WebkitBackgroundClip: "text",
+                    backgroundClip: "text",
+                    WebkitTextFillColor: "transparent",
+                    animation: "goldShine 3s ease-in-out infinite",
+                  }}
+                >
+                  Welcome to Ask AI
+                </h1>
+                <p className="landing-subtitle">{"Let's work together buddy"}</p>
+              </div>
             </div>
+            {renderChatInputFooter("landing")}
+            <div className="landing-start-spacer-bottom" aria-hidden />
           </div>
         )}
 
@@ -2091,7 +2601,7 @@ useEffect(() => {
                       <div className="avatar-box"><IconAI/></div>
                     )}
 
-                    <div className={`message-bubble ${msg.role}`}>
+                    <div className={`message-bubble ${msg.role}${isGraphMsg ? ' graph-message' : ''}`}>
 
                       {isAudio ? (
                     /* ── Audio Message: Show player UI ── */
@@ -2109,7 +2619,13 @@ useEffect(() => {
                       };
 
                       return (
-                        <div className="voice-message-container">
+                        <div className="voice-message-container" style={{
+                          fontSize: responsive.isMobile ? '12px' : responsive.isTablet ? '13px' : '14px',
+                          display: 'flex',
+                          gap: responsive.isMobile ? '8px' : '12px',
+                          alignItems: 'center',
+                          width: '100%',
+                        }}>
                           <button
                             className="voice-message-play-btn"
                             onClick={() => handleAudioPlayback(idx, msg.audioUrl, msg.audioDuration || 0)}
@@ -2128,7 +2644,9 @@ useEffect(() => {
                               />
                             </div>
                             {/* BUG 1 FIX: show real duration; if playing show currentTime / total */}
-                            <div className="voice-message-duration">
+                            <div className="voice-message-duration" style={{
+                              fontSize: responsive.isMobile ? '11px' : responsive.isTablet ? '12px' : '13px',
+                            }}>
                               {audioPlayingIndex === idx
                                 ? `${fmtSec(currentSec)} / ${fmtSec(realDur)}`
                                 : fmtSec(realDur)
@@ -2152,32 +2670,72 @@ useEffect(() => {
                       ) : isGraphMsg && graphData ? (
                         /* ── Graph: Render chart with per-message type switcher ── */
                         (() => {
-                          const msgChartType = msg.chartType || 'vertical-bar';
+                          const chartSize = getResponsivePieChartSize(responsive.screen);
+                          return (
+                        <div style={{
+                          display: 'flex',
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                          width: '100%',
+                          maxWidth: chartSize.containerMaxWidth,
+                          marginTop: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
+                          marginBottom: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
+                          marginLeft: 'auto',
+                          marginRight: 'auto',
+                          overflow: responsive.isMobile ? 'visible' : 'visible',
+                          paddingLeft: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
+                          paddingRight: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
+                          paddingTop: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
+                          paddingBottom: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
+                        }}>
+                          {(() => {
+                            const msgChartType = msg.chartType || 'vertical-bar';
 
-                          const handleChartTypeChange = (newType: ChartType) => {
-                            setChartType(newType);
-                            setMessages(prev => {
-                              const updated = [...prev];
-                              updated[idx] = { ...updated[idx], chartType: newType };
-                              return updated;
-                            });
-                          };
+                            const handleChartTypeChange = (newType: ChartType) => {
+                              setChartType(newType);
+                              setMessages(prev => {
+                                const updated = [...prev];
+                                updated[idx] = { ...updated[idx], chartType: newType };
+                                return updated;
+                              });
+                            };
 
-                          if (msgChartType === 'horizontal-bar') {
-                            return <HorizontalBarChartRenderer key={`hbar-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
-                          } else if (msgChartType === 'pie') {
-                            return <PieChartRenderer key={`pie-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
-                          } else if (msgChartType === 'line') {
-                            return <LineChartRenderer key={`line-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
-                          } else {
-                            return <BarChartRenderer key={`bar-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
-                          }
-                        })()
+                            if (msgChartType === 'horizontal-bar') {
+                              return <HorizontalBarChartRenderer key={`hbar-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
+                            } else if (msgChartType === 'pie') {
+                              return <PieChartRenderer key={`pie-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
+                            } else if (msgChartType === 'line') {
+                              return <LineChartRenderer key={`line-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
+                            } else {
+                              return <BarChartRenderer key={`bar-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
+                            }
+                          })()}
+                        </div>
+                          );
+                        })()  
+
+                      ) : msg.tableData && msg.tableData.length > 0 ? (
+                        /* ── Table: Render with TableWithTile component with toggle buttons for table/tile views ── */
+                        <TableWithTile 
+                          rows={msg.tableData}
+                          title={msg.tableTitle || "Data"}
+                          htmlTableContent={msg.text}
+                        />
 
                       ) : (
                         /* ── Complete: already formatted at [DONE] time ── */
-                        <div className="ai-bubble">
-                          <div dangerouslySetInnerHTML={{ __html: msg.text }} />
+                        <div className="ai-bubble" style={{
+                          fontSize: responsive.isMobile ? '13px' : responsive.isTablet ? '14px' : '15px',
+                          lineHeight: 1.5,
+                          maxWidth: responsive.isMobile ? '90%' : responsive.isTablet ? '85%' : '75%',
+                          display: 'flex',
+                          justifyContent: 'center',
+                          alignItems: 'flex-start',
+                        }}>
+                          <div dangerouslySetInnerHTML={{ __html: msg.text }} style={{
+                            width: '100%',
+                            textAlign: 'left',
+                          }} />
                         </div>
                       )}
 
@@ -2205,77 +2763,124 @@ useEffect(() => {
           </div>
         )}
 
-        {/* Input footer */}
-        <div className="input-footer">
-          {voiceRecorder.isRecording && (
-            <div className={`voice-recording-overlay${voiceRecorder.closingRecording ? ' closing' : ''}`}>
-              <RecordingInterface
-                recordingTime={voiceRecorder.recordingTime}
-                onCancel={voiceRecorder.cancelRecording}
-                formatTime={voiceRecorder.formatTime}
+        {/* Input footer — bottom bar after chat starts or while history loads (not duplicated on landing) */}
+        {(historyLoading || !isLanding) && renderChatInputFooter("default")}
+
+        {/* Upgrade Plan Modal */}
+        {showUpgradePlan && (
+          <div 
+            className="upgrade-plan-backdrop"
+            style={{
+              position: 'fixed',
+              inset: 0,
+              background: 'rgba(0, 0, 0, 0.60)',
+              backdropFilter: 'blur(12px) saturate(120%)',
+              WebkitBackdropFilter: 'blur(12px) saturate(120%)',
+              zIndex: 10010,
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+            }}
+            onClick={() => setShowUpgradePlan(false)}
+          >
+            <div 
+              className="upgrade-plan-modal"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                onClick={() => setShowUpgradePlan(false)}
+                className="upgrade-plan-close-btn"
+              >
+                ×
+              </button>
+              <UpgradePlan 
+                onManageAccountClick={() => {
+                  setShowUpgradePlan(false);
+                  setShowManageAccount(true);
+                }}
+                onPlanChange={(planName) => {
+                  setCurrentPlan(planName);
+                }}
               />
             </div>
-          )}
-         
-          {voiceRecorder.recordedAudioBlob ? (
-            <VoicePreviewBar
-              isPlaying={voiceRecorder.isPlaying}
-              playbackTime={voiceRecorder.playbackTime}
-              totalDuration={voiceRecorder.totalDuration}
-              displayTimeText={voiceRecorder.displayTimeText}
-              onTogglePlayback={voiceRecorder.togglePlayback}
-              onDelete={voiceRecorder.deleteRecording}
-              onSend={voiceRecorder.sendVoiceMessage}
-              isLoading={isLoading}
-              wsConnectionState={wsConnectionState}
-            />
-          ) : (
-            <div className="input-wrapper">
-              <textarea
-                ref={inputRef}
-                className="main-input"
-                value={input}
-                onChange={e => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                disabled={isLoading || wsConnectionState !== 'connected'}
-                placeholder={wsConnectionState === 'connected' ? "Ask Anything..." : "Waiting for connection…"}
-                rows={1}
-              />
-              <VoiceMicButton
-                forwardedRef={voiceRecorder.micButtonRef}
-                onClick={voiceRecorder.toggleRecording}
-                disabled={isLoading || wsConnectionState !== 'connected' || voiceRecorder.recordedAudioBlob !== null}
-              />
-              <button
-                onClick={() => setIsGraphMode(p => !p)}
-                title={isGraphMode ? "Graph mode ON — click to turn off" : "Click for graph output"}
-                style={{
-                  background: isGraphMode
-                    ? "linear-gradient(135deg, #d4af37, #f5c249)"
-                    : "transparent",
-                  border: isGraphMode
-                    ? "1px solid #d4af37"
-                    : "1px solid rgba(255,255,255,0.15)",
-                  borderRadius: 8,
-                  padding: "6px 8px",
+          </div>
+        )}
+
+        {/* Manage Account Full-Screen Page */}
+        {showManageAccount && (
+          <div 
+            style={{
+              position: "fixed",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              width: "100vw",
+              height: "100vh",
+              background: "var(--color-bg)",
+              zIndex: 10000,
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            {!isManageAccountMenuOpen && (
+              <div style={{
+                position: "absolute",
+                top: "20px",
+                right: "20px",
+                zIndex: 10001,
+              }}>
+                <button
+                  onClick={() => {
+                    setShowManageAccount(false);
+                    setIsManageAccountMenuOpen(false);
+                  }}
+                  style={{
+                  width: "40px",
+                  height: "40px",
+                  borderRadius: "6px",
+                  border: "1.5px solid var(--color-primary)",
+                  background: "transparent",
+                  color: "var(--color-primary)",
                   cursor: "pointer",
-                  color: isGraphMode ? "#000" : "#9CA3AF",
-                  transition: "all 0.2s ease",
+                  fontSize: "24px",
+                  fontWeight: 600,
+                  transition: "all 0.3s ease",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
                 }}
+                onMouseEnter={(e) => {
+                  const btn = e.currentTarget as HTMLElement;
+                  btn.style.background = "var(--color-primary)";
+                  btn.style.color = "var(--color-text)";
+                }}
+                onMouseLeave={(e) => {
+                  const btn = e.currentTarget as HTMLElement;
+                  btn.style.background = "transparent";
+                  btn.style.color = "var(--color-primary)";
+                }}
               >
-                <IconChartBar size={18} stroke={1.5} />
-              </button>
-              <button className="send-btn" onClick={sendMessage} disabled={isLoading || wsConnectionState !== 'connected' || !input.trim()}>
-                <IconArrowUp size={16} color="white" stroke={2}/>
+                ×
               </button>
             </div>
           )}
-          <p className="footer-disclaimer">NanoSoft Ask AI can make mistakes. Verify important legal information.</p>
-        </div>
-
+            <div style={{
+              flex: 1,
+              width: "100%",
+              height: "100%",
+            }}>
+              <ManageAccount
+                currentPlan={currentPlan}
+                profileName={loggedInUser || "My Account"}
+                onMenuToggle={setIsManageAccountMenuOpen}
+              />
+            </div>
+          </div>
+        )}
+        
+        {/* Walkthrough Popup */}
+        <WalkthroughPopup />
       </div>
       </div>
     </div>

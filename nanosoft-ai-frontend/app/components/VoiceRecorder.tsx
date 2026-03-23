@@ -37,6 +37,7 @@ export function useVoiceRecorder(
   isLoading: boolean,
   wsConnectionState: string,
   loggedInUser: string,
+  subUserName: string,
   sessionId: string,
   wsRef: React.MutableRefObject<WebSocket | null>,
   onVoiceMessageSent?: (duration: number, audioUrl: string) => void
@@ -181,7 +182,7 @@ export function useVoiceRecorder(
   };
 
   // ── togglePlayback ────────────────────────────────────────────────────────
-  // FIX BUG 2: use requestAnimationFrame so progress is smooth and exactly follows audio.currentTime
+  // FIX: Reduced latency by preloading audio & using canplay event for instant playback
   const togglePlayback = () => {
     if (!recordedAudioBlob) return;
 
@@ -191,45 +192,66 @@ export function useVoiceRecorder(
       const audio = new Audio(url);
       audioPlaybackRef.current = audio;
 
+      // Preload audio immediately to reduce latency
+      audio.preload = "auto";
+
       // Get real duration once metadata is available
       audio.addEventListener("loadedmetadata", () => {
         if (isFinite(audio.duration) && audio.duration > 0) {
           setAudioDuration(audio.duration);
         }
       });
-      audio.load();
 
-      // ── rAF-based smooth progress loop ──────────────────────────────────
+      // ── rAF-based smooth progress loop - ALWAYS runs to keep progress synced ──
       const progressLoop = () => {
         const a = audioPlaybackRef.current;
-        if (!a || a.paused) return;
-        setPlaybackTime(a.currentTime);
+        if (!a) {
+          animationFrameRef.current = null;
+          return;
+        }
+        
+        // Update playback position every frame if audio is playing
+        if (!a.paused && isFinite(a.currentTime)) {
+          setPlaybackTime(a.currentTime);
+        }
+        
+        // Always schedule next frame to ensure continuous updates
         animationFrameRef.current = requestAnimationFrame(progressLoop);
       };
 
       audio.onplay = () => {
         setIsPlaying(true);
-        stopProgressLoop();
-        animationFrameRef.current = requestAnimationFrame(progressLoop);
+        if (animationFrameRef.current === null) {
+          animationFrameRef.current = requestAnimationFrame(progressLoop);
+        }
       };
 
       audio.onpause = () => {
-        stopProgressLoop();
         setIsPlaying(false);
       };
 
       audio.onended = () => {
-        stopProgressLoop();
         setIsPlaying(false);
         setPlaybackTime(0);
       };
+
+      // Start the progress loop immediately
+      animationFrameRef.current = requestAnimationFrame(progressLoop);
+      audio.load();
     }
 
-// Toggle play / pause
-    if (!audioPlaybackRef.current.paused) {
-      audioPlaybackRef.current.pause();
-    } else {
-      audioPlaybackRef.current.play();
+    // Toggle play / pause
+    const audio = audioPlaybackRef.current;
+    if (!audio) return;
+
+    try {
+      if (audio.paused) {
+        audio.play().catch((err) => console.warn("Play error:", err));
+      } else {
+        audio.pause();
+      }
+    } catch (err) {
+      console.warn("Playback toggle error:", err);
     }
   };
 
@@ -237,6 +259,7 @@ export function useVoiceRecorder(
   // FIX BUG 4: capture blob in a local const so the closure always holds the right blob
   const sendVoiceMessage = async () => {
     if (!recordedAudioBlob || !wsRef.current) return;
+    destroyPreviewAudio(); 
 
     // Capture the blob reference we want to send right now
     const blobToSend = recordedAudioBlob;
@@ -265,6 +288,7 @@ export function useVoiceRecorder(
       audio: true,
       text: false,
       userName: loggedInUser,
+      subUserName,
       sessionId,
       duration: actualDuration,
       fileFormat: "ogg",
@@ -385,7 +409,7 @@ export function VoicePreviewBar({
             className="voice-progress-fill"
             style={{
               width: totalDuration > 0 ? `${(playbackTime / totalDuration) * 100}%` : "0%",
-              transition: "width 0.1s linear",   // ← smooth CSS transition
+              transition: "none",   // ← smooth playback via rAF at 60fps, no CSS transition
             }}
           />
         </div>

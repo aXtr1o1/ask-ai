@@ -9,6 +9,7 @@ from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 
 from app.config import settings
 from app.tools.facility_tools import ASSETS, PPM, BDM
+from app.services.quota_service import quota_fallback_service
 
 import json
 
@@ -36,9 +37,7 @@ class LangChainService:
             logger.info("🚀 LangChainService initialized with ASSETS, PPM, BDM tools")
         except Exception as e:
             logger.error(f"❌ LangChainService init failed: {e}", exc_info=True)
-            # In test/CI environments there may be no valid API key.
-            # Defer hard failure until the model is actually used.
-            self.model = None
+            raise
 
     # ── Accumulate tokens from each model call ───────────────────────────────
     # ── Called after every model.invoke() to add up tokens for this query
@@ -101,6 +100,52 @@ class LangChainService:
         )
 
         return json.dumps(graph_response)
+    def _build_final_prompt(
+                self,
+                is_count_query: bool,
+                is_aggregate_query: bool,
+                user_query: str,
+                display_count: int,
+                p_list_for_model: list
+            ) -> str:
+                """
+                Build the prompt for final model call.
+                - count  → one sentence answer, no table ever
+                - aggregate/list → context/summary ONLY, no table
+                                followed by a question asking if user wants the table
+                """
+                if is_count_query:
+                    return (
+                        "Use the above tool results and give the final answer. "
+                        "Reply in one crisp and friendly sentence using the total_count. "
+                        "Include what was asked (e.g. 'There are X open complaints.'). "
+                        "Do not render any table."
+                    )
+
+                elif is_aggregate_query:
+                    return (
+                        f"USER QUERY: {user_query}\n"
+                        f"SYSTEM DATA: {display_count} grouped summary rows.\n\n"
+                        "TASK: Write ONLY a 2-4 sentence insight summary. "
+                        "Summarize the overall distribution. "
+                        "Highlight the highest/most significant values and any notable trends. "
+                        "Do NOT mention internal database IDs or technical tool names. "
+                        "Do NOT render any table. Do NOT include any markdown table. "
+                        "End your response with exactly this line:\n"
+                        "**Would you like to see the detailed breakdown table for a better understanding?**"
+                    )
+
+                else:
+                    return (
+                        f"USER QUERY: {user_query}\n"
+                        f"SYSTEM DATA: {display_count} records found (showing {len(p_list_for_model)}).\n\n"
+                        "TASK: Write ONLY a 2-3 sentence friendly summary of what was found. "
+                        "Identify patterns if any (e.g. 'Most items are in Pending status'). "
+                        "Mention if results are a subset of a larger total. "
+                        "Do NOT render any table. Do NOT include markdown. "
+                        "End your response with exactly this line:\n"
+                        "**Would you like to see the full table for a better understanding?**"
+                    )
 
 
     # ──  return type is now tuple[str, str, list] used for the chat memory and the db memory .
@@ -173,7 +218,13 @@ class LangChainService:
                         args["limit"] = None
                         logger.info("📋 List query detected — clearing limit=%s", old_limit)
 
-                    tool_result = tool_fn.invoke(dict(args))
+                    try:
+                        tool_result = tool_fn.invoke(dict(args))
+                        logger.info(f"✅ Tool call succeeded on first try | {tool_name}")
+
+                    except Exception as e:
+                        logger.error(f"❌ Tool call failed: {e}")
+                        raise e
 
                     # Parse tool result — tools return JSON string, not dict
 
@@ -277,7 +328,7 @@ class LangChainService:
                     else:
                         logger.info("📋 Intent=LIST — sending full records to model | query='%s'", user_query)
 
-                    MAX_DISPLAY = 100
+                    MAX_DISPLAY = 25
                     p_list_for_model = p_list if len(p_list) <= MAX_DISPLAY else p_list[:MAX_DISPLAY]
                     is_large_result = len(p_list) > MAX_DISPLAY
 
@@ -338,30 +389,33 @@ class LangChainService:
                 #  STEP 3 — Call model again to generate final answe
                 if is_count_query:
                     logger.info("🔢 Sending count-only prompt to model")
-                    messages.append(HumanMessage(content=(
-                        "Use the above tool results and give the final answer. "
-                        "Reply in one crisp and friendly sentence using the total_count. "
-                        "Include what was asked (e.g. 'There are X open complaints.'). "
-                        "Do not render any table."
+                    messages.append(HumanMessage(content=self._build_final_prompt(
+                        is_count_query,
+                        is_aggregate_query,
+                        user_query,
+                        display_count,
+                        p_list_for_model
                     )))
 
-                # aggregate gets its own clear prompt
-                # tells the model exactly what the data is and how to render it
                 elif is_aggregate_query:
                     logger.info("📊 Sending aggregate prompt to model")
-                    messages.append(HumanMessage(content=(
-                        f"The user asked: '{user_query}'. "
-                        f"The system returned {display_count} grouped summary rows. "
-                        "Summarize and render the results as a Markdown table."
-                    )))
-                
+                    messages.append(HumanMessage(content=self._build_final_prompt(
+                    is_count_query,
+                    is_aggregate_query,
+                    user_query,
+                    display_count,
+                    p_list_for_model
+                )))
+
                 else:
-                    logger.info("📋 Sending table prompt to model")
-                    messages.append(HumanMessage(content=(
-                        f"The user asked: '{user_query}'. "
-                        f"The system found {display_count} records and is displaying {len(p_list_for_model)} of them. "
-                        "Write 1 friendly sentence summarizing what was found, then render all records as a Markdown table below it."
-                    )))
+                    logger.info("📋 Sending list prompt to model")
+                    messages.append(HumanMessage(content=self._build_final_prompt(
+                    is_count_query,
+                    is_aggregate_query,
+                    user_query,
+                    display_count,
+                    p_list_for_model
+                )))
 
                  # CALL 4 — Final answer generation
                 final_ai_msg = self.model.invoke(messages)
@@ -382,25 +436,58 @@ class LangChainService:
                 elif is_aggregate_query:
                     #take first line as context summary
                     # full grouped table is too large for lc_memory
-                    first_line = final_content.split("\n")[0].strip()
-                    context_summary = first_line if first_line else f"Found grouped summary with {display_count} rows."
-                    logger.info("🧠 Aggregate query context_summary='%s'", context_summary[:80])
-                    if is_graph:
+                        lines = final_content.split("\n")
+                        summary_lines = []
+                        for line in lines:
+                            stripped = line.strip()
+                            # Stop when we hit the table (starts with |)
+                            if stripped.startswith("|"):
+                                break
+                            # Collect non-empty lines
+                            if stripped:
+                                summary_lines.append(stripped)
+                        
+                        context_summary = " ".join(summary_lines) if summary_lines else f"Found grouped summary with {display_count} rows."
+                        logger.info("🧠 Aggregate query context_summary='%s'", context_summary[:80])
                         # ── Only build graph if tool actually ran in aggregate mode ──
-                        if tool_was_aggregate:
+                        if tool_was_aggregate and is_graph:  # ← ADD is_graph CHECK
                             logger.info("📊 [GRAPH] Wrapping aggregate as graph JSON | records=%d", len(p_list_for_model))
-                            graph_response = self.build_graph_response(context_summary, p_list_for_model)
+                            graph_context = f"Here is the graph result for your query."
+                            graph_response = self.build_graph_response(graph_context, p_list_for_model)
                             self._log_query_summary(current_user_query)
                             return graph_response, context_summary, messages
                         else:
-                            logger.warning("⚠️ [GRAPH] Intent=AGGREGATE but tool ran in RAW mode — skipping graph, returning text")
+                            if tool_was_aggregate:
+                                logger.info("📊 [AGGREGATE] Tool ran in aggregate mode but is_graph=False → returning as text+table")
+                            else:
+                                logger.warning("⚠️ [GRAPH] Intent=AGGREGATE but tool ran in RAW mode — skipping graph, returning text")
 
                     
                 else:
-                    
-                    first_line = final_content.split("\n")[0].strip()
-                    context_summary = first_line if first_line else f"Found {display_count} records for your request."
-                    logger.info("🧠 Small list context_summary='%s'", context_summary[:80])
+                    # Extract everything BEFORE the table as context summary
+                    lines = final_content.split("\n")
+                    summary_lines = []
+                    for line in lines:
+                        stripped = line.strip()
+                        # Stop when we hit the table
+                        if stripped.startswith("|"):
+                            break
+                        if stripped:
+                            summary_lines.append(stripped)
+                   
+                    context_summary = " ".join(summary_lines) if summary_lines else f"Found {display_count} records for your request."
+                    logger.info("🧠 List query context_summary='%s'", context_summary[:80])
+
+                # ── Stash table data for two-step yes/no flow ──
+                if not is_count_query:
+                    self._last_pending_table = p_list_for_model
+                    logger.info("📋 [NORMAL PATH] Stashed pending_table | records=%d", len(p_list_for_model))
+                else:
+                    self._last_pending_table = None
+
+                # logger.info("✅ Final response generated after tool execution")
+                # self._log_query_summary(current_user_query)
+                
 
                 logger.info("✅ Final response generated after tool execution")
                 self._log_query_summary(current_user_query)
@@ -449,9 +536,17 @@ class LangChainService:
                         "limit": None,
                         "is_aggregate": any(kw in user_query.lower() for kw in aggregate_keywords)
                     }
+        
                     logger.info("🔍 Calling forced tool | tool=%s | user_name=%s", tool_name, user_name)
-                    tool_result = tool_fn.invoke(dict(args))
 
+                    try:
+                        tool_result = tool_fn.invoke(dict(args))
+                        logger.info(f"✅ Forced tool call succeeded | {tool_name}")
+
+                    except Exception as e:
+                        logger.error(f"❌ Forced tool call failed: {e}")
+                        raise e
+                    
                     try:
                         parsed = json.loads(tool_result) if isinstance(tool_result, str) else tool_result
                     except json.JSONDecodeError:
@@ -531,7 +626,7 @@ class LangChainService:
                     else:
                         logger.info("📋 Intent=LIST [FORCED] | query='%s'", user_query)
 
-                    MAX_DISPLAY = 100
+                    MAX_DISPLAY = 25
                     p_list_for_model = p_list if len(p_list) <= MAX_DISPLAY else p_list[:MAX_DISPLAY]
                     is_large_result = len(p_list) > MAX_DISPLAY
 
@@ -587,54 +682,66 @@ class LangChainService:
                     #  CALL 7 Final answer generation FORCED path
 
                     if is_count_query:
-                        messages.append(HumanMessage(content=(
-                            "Use the above tool results and give the final answer. "
-                            "Reply in one crisp and friendly sentence using the total_count. "
-                            "Do not render any table."
+                        logger.info("🔢 Sending count-only prompt to model")
+                        messages.append(HumanMessage(content=self._build_final_prompt(
+                            is_count_query,
+                            is_aggregate_query,
+                            user_query,
+                            display_count,
+                            p_list_for_model
                         )))
                     elif is_aggregate_query:
                         
-                        messages.append(HumanMessage(content=(
-                            f"The user asked: '{user_query}'. "
-                            f"The system returned {display_count} grouped summary rows. "
-                            "Summarize and render the results as a Markdown table."
-                        )))
+                        messages.append(HumanMessage(content=self._build_final_prompt(
+                        is_count_query,
+                        is_aggregate_query,
+                        user_query,
+                        display_count,
+                        p_list_for_model
+                    )))
+
                         
                     else:
-                        messages.append(HumanMessage(content=(
-                            f"The user asked: '{user_query}'. "
-                            f"The system found {display_count} records and is displaying {len(p_list_for_model)} of them. "
-                            "Write 1 friendly sentence summarizing what was found, then render all records as a Markdown table below it."
-                        )))
+                        messages.append(HumanMessage(content=self._build_final_prompt(
+                        is_count_query,
+                        is_aggregate_query,
+                        user_query,
+                        display_count,
+                        p_list_for_model
+                    )))
 
                     final_ai_msg = self.model.invoke(messages)
                     self._accumulate_tokens(final_ai_msg)
                     content = final_ai_msg.content or "No results found for the given query."
-                    logger.info("✅ Response after forced tool call")
-
-                  
+                    logger.info("✅ Response after forced tool call")                  
                     if is_count_query:
-                        context_summary = content
+                        context_summary = content   
                         logger.info("🧠 [FORCED] Count context_summary='%s'", context_summary[:80])
                     elif is_aggregate_query:
                         first_line = content.split("\n")[0].strip()
                         context_summary = first_line if first_line else f"Found grouped summary with {display_count} rows."
                         logger.info("🧠 [FORCED] Aggregate context_summary='%s'", context_summary[:80])
-                        if is_graph:
-                            # ── Only build graph if tool actually ran in aggregate mode ──
-                            tool_was_aggregate = args.get("is_aggregate") is True
-                            if tool_was_aggregate:
-                                logger.info("📊 [GRAPH FORCED] Wrapping aggregate as graph JSON | records=%d", len(p_list_for_model))
-                                graph_response = self.build_graph_response(context_summary, p_list_for_model)
-                                self._log_query_summary(current_user_query)
-                                return graph_response, context_summary, messages
-                            else:
-                                logger.warning("⚠️ [GRAPH FORCED] Intent=AGGREGATE but tool ran in RAW mode — skipping graph, returning text")                            
+                        if is_graph and tool_was_aggregate:  # ← BOTH conditions must be true
+                            logger.info("📊 [GRAPH FORCED] Wrapping aggregate as graph JSON...")
+                            graph_context = f"Here is the graph result for your query."
+                            graph_response = self.build_graph_response(graph_context, p_list_for_model)
+                            return graph_response, context_summary, messages
+                        
                                                     
                     else:
                         first_line = content.split("\n")[0].strip()
                         context_summary = first_line if first_line else f"Found {display_count} records for your request."
                         logger.info("🧠 [FORCED] List context_summary='%s'", context_summary[:80])
+
+                    # ── Stash table data for two-step yes/no flow ──
+                    if not is_count_query:
+                        self._last_pending_table = p_list_for_model
+                        logger.info("📋 [FORCED PATH] Stashed pending_table | records=%d", len(p_list_for_model))
+                    else:
+                        self._last_pending_table = None
+
+                    self._log_query_summary(current_user_query)
+                    entity = "data"
 
                     self._log_query_summary(current_user_query)
                     entity = "data"
