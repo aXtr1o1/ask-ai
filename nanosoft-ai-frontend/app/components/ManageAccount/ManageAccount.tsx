@@ -35,6 +35,14 @@ export default function ManageAccount({
   const router = useRouter();
   const responsive = useResponsive();
   const { theme } = useTheme();
+  const isDark = theme === "dark";
+  const headerColor = isDark ? "#ffffff" : "#0f172a";
+  const subheaderColor = isDark ? "rgba(255,255,255,0.75)" : "rgba(15,23,42,0.8)";
+  const sidebarText = isDark ? "#F8FAFC" : "#0f172a";
+  const sidebarTextMuted = isDark ? "rgba(248, 250, 252, 0.72)" : "rgba(15, 23, 42, 0.7)";
+  const sidebarTextActive = isDark ? "#FFFFFF" : "#0f172a";
+  const bodyText = isDark ? "#f8fafc" : "#0f172a";
+  const bodyTextMuted = isDark ? "rgba(248, 250, 252, 0.7)" : "rgba(15, 23, 42, 0.68)";
   const [activeSection, setActiveSection] = useState<NavSection>("dashboard");
   const [dashboardView, setDashboardView] = useState<DashboardView>("usage");
   const [showMobileSidebar, setShowMobileSidebar] = useState(false);
@@ -43,7 +51,7 @@ export default function ManageAccount({
     {
       id: "1",
       name: profileName,
-      email: "user@example.com",
+      email: "v4demo@example.com",
       plan: currentPlan,
       createdAt: "2026-01-15",
     },
@@ -51,7 +59,7 @@ export default function ManageAccount({
 
   const handleBackToDashboard = () => {
     if (responsive.isMobile || responsive.isTablet) {
-      setShowMobileSidebar(!showMobileSidebar);
+      updateMobileSidebar(true);
     } else {
       router.back();
     }
@@ -84,7 +92,7 @@ const queryExternalUser = externalUserId || profileName;  // ← ADD
       {/* Mobile Backdrop */}
       {responsive.isMobile && showMobileSidebar && (
         <div
-          onClick={() => setShowMobileSidebar(false)}
+          onClick={() => updateMobileSidebar(false)}
           style={{
             position: "fixed",
             inset: 0,
@@ -150,8 +158,8 @@ const queryExternalUser = externalUserId || profileName;  // ← ADD
                   }
                 }}
                 style={{
-                  width: "calc(100% - 16px)",
-                  marginLeft: "8px",
+                  width: "100%",
+                  margin: "0",
                   padding: "12px 16px",
                   border: activeSection === id
                     ? "1.5px solid var(--color-primary)"
@@ -177,21 +185,25 @@ const queryExternalUser = externalUserId || profileName;  // ← ADD
                 <span>{label}</span>
               </button>
 
-              {/* Dashboard Submenu */}
+              {/* Dashboard Header + Tabs */}
               {id === "dashboard" && (
                 <div style={{
                   display: "flex",
                   flexDirection: "column",
-                  gap: "4px",
+                  gap: "10px",
                   marginTop: "8px",
                   paddingLeft: "8px",
                   borderLeft: "2px solid rgba(var(--color-primary-rgb), 0.3)",
                   marginLeft: "16px",
                   paddingTop: "8px",
                 }}>
-                  {dashboardMenuItems.map((item) => (
+                  <div style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "stretch",
+                    gap: "8px",
+                  }}>
                     <button
-                      key={item.id}
                       type="button"
                       onClick={() => {
                         setActiveSection("dashboard");
@@ -199,7 +211,8 @@ const queryExternalUser = externalUserId || profileName;  // ← ADD
                         if (responsive.isMobile) setShowMobileSidebar(false);
                       }}
                       style={{
-                        padding: "10px 14px",
+                        width: "100%",
+                        padding: "10px 12px",
                         borderRadius: "8px",
                         background: dashboardView === item.id
                           ? "linear-gradient(135deg, rgba(var(--color-primary-rgb), 0.2) 0%, rgba(var(--color-primary-rgb), 0.1) 100%)"
@@ -212,15 +225,16 @@ const queryExternalUser = externalUserId || profileName;  // ← ADD
                           : "var(--color-text)",
                         cursor: "pointer",
                         fontSize: "12px",
-                        fontWeight: dashboardView === item.id ? 700 : 500,
+                        fontWeight: isUsageActive ? 700 : 500,
                         textAlign: "left",
                         width: "100%",
                         transition: "all 0.3s ease",
                       }}
                     >
-                      {item.label}
+                      <IconSettings size={16} strokeWidth={1.5} />
+                      Settings
                     </button>
-                  ))}
+                  </div>
                 </div>
               )}
             </div>
@@ -270,7 +284,7 @@ const queryExternalUser = externalUserId || profileName;  // ← ADD
             <h1 style={{
               fontSize: responsive.isMobile ? "24px" : "40px",
               fontWeight: 700,
-              color: "#ffffff",
+              color: headerColor,
               margin: 0,
               marginBottom: "12px",
             }}>

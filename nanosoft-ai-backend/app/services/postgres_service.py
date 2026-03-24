@@ -171,3 +171,59 @@ async def save_session_to_postgres_service(session_id: str, user_name: str, hist
                 conn.rollback()
         except Exception:
             pass
+
+# added by sudharshan for updating the session title when the user renames the session
+async def update_session_title(session_id: str, user_name: str, title: str) -> bool:
+    """Update the title for an existing session. Returns True on success."""
+    try:
+        conn = get_pool()
+        conn.rollback()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE chat_sessions
+                SET title = %s, updated_at = NOW()
+                WHERE session_id = %s AND user_name = %s
+                """,
+                (title, session_id, user_name),
+            )
+            # If no row was updated, do nothing
+            conn.commit()
+        logger.info(f"✅ Session title updated | session_id={session_id} | title='{title}'")
+        return True
+    except Exception as e:
+        logger.error(f"❌ Failed to update session title | session_id={session_id} | error={e}", exc_info=True)
+        try:
+            conn = get_pool()
+            if conn and not conn.closed:
+                conn.rollback()
+        except Exception:
+            pass
+        return False
+
+# added by sudharshan for deleting the session when the user deletes the session from UI
+async def delete_session_from_postgres(session_id: str, user_name: str) -> bool:
+    """Delete a chat session for a user. Returns True on success."""
+    try:
+        conn = get_pool()
+        conn.rollback()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                DELETE FROM chat_sessions
+                WHERE session_id = %s AND user_name = %s
+                """,
+                (session_id, user_name),
+            )
+            conn.commit()
+        logger.info(f"✅ Session deleted | session_id={session_id}")
+        return True
+    except Exception as e:
+        logger.error(f"❌ Failed to delete session | session_id={session_id} | error={e}", exc_info=True)
+        try:
+            conn = get_pool()
+            if conn and not conn.closed:
+                conn.rollback()
+        except Exception:
+            pass
+        return False

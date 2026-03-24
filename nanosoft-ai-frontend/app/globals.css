@@ -33,6 +33,16 @@
   --tile-label-color: #a88840;
   --tile-value-color: #2d3748;
 
+  /* Tile card CSS variables used in TableWithTile */
+  --tile-card-bg: #ffffff;
+  --tile-card-border: 1px solid rgba(0, 0, 0, 0.08);
+  --tile-card-text: #0f172a;
+  --tile-card-text-muted: rgba(31, 41, 55, 0.7);
+  --tile-field-bg: rgba(255, 255, 255, 0.9);
+  --tile-field-border: 1px solid rgba(148, 163, 184, 0.25);
+  --tile-field-label: #0f172a;
+  --tile-field-value: #1f2937;
+
   /* Sidebar Theme Variables - Light Mode */
   --sidebar-bg: #ffffff;
   --sidebar-text: #5a3e36; /* Brown color for visible text */
@@ -80,6 +90,16 @@
   --tile-card-bg-end-hover: rgba(30, 30, 30, 1);
   --tile-label-color: #f7ef8a;
   --tile-value-color: #f0f0f0;
+
+  /* Tile card CSS variables used in TableWithTile */
+  --tile-card-bg: #1d1d1d2f; /* dark gray bg (not blue) */
+  --tile-card-border: 1px solid rgba(255, 255, 255, 0.15);
+  --tile-card-text: #f8fafc;
+  --tile-card-text-muted: rgba(248, 250, 252, 0.7);
+  --tile-field-bg:#1d1d1d2f;
+  --tile-field-border: 1px solid rgba(148, 163, 184, 0.5);
+  --tile-field-label: #e5e7eb;
+  --tile-field-value: #cbd5e1;
 
   /* Legacy support (will be removed in future) */
   --background: var(--color-bg);
@@ -258,9 +278,9 @@ html, body {
 
 /* ─── 5. SIDEBAR ─── */
 .sidebar {
-  width: 260px;
-  min-width: 260px;
-  max-width: 260px;
+  width: 240px;
+  min-width: 240px;
+  max-width: 240px;
   flex-shrink: 0;
   backdrop-filter: blur(25px);
   -webkit-backdrop-filter: blur(25px);
@@ -714,6 +734,78 @@ html, body {
   opacity: 1;
 }
 
+/* Session menu rendered as fixed element (appears outside scroll containers and above content) */
+.session-menu {
+  position: fixed;
+  animation: dropdownOpen 120ms ease-out;
+  background: var(--color-bg-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 6px 8px;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.45);
+  z-index: 20000;
+  min-width: 140px;
+  white-space: nowrap;
+}
+.session-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 8px;
+  background: transparent;
+  border: none;
+  color: var(--color-text);
+  cursor: pointer;
+}
+.session-menu button:hover {
+  background: rgba(212,175,55,0.06);
+}
+
+/* Modal backdrop and confirm dialog for delete */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0,0,0,0.55);
+  backdrop-filter: blur(4px) saturate(120%);
+  -webkit-backdrop-filter: blur(4px) saturate(120%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10020;
+}
+.confirm-delete-modal {
+  background: var(--color-bg-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 18px;
+  min-width: 320px;
+  max-width: 92vw;
+  color: var(--color-text);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+}
+.confirm-delete-modal h3 {
+  margin: 0 0 8px 0;
+  font-size: 15px;
+}
+.confirm-delete-modal p {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+.btn { padding: 8px 12px; border-radius: 8px; border: none; cursor: pointer; }
+.btn-secondary { background: transparent; border: 1px solid var(--color-border); color: var(--color-text); }
+.btn-danger { background: var(--color-error); color: #fff; }
+
+/* Fallback full-page blur for devices without backdrop-filter support */
+.modal-open-blur .app-content-wrapper,
+.modal-open-blur .sidebar,
+.modal-open-blur .bg-gradient,
+.modal-open-blur .messages-container,
+.modal-open-blur .chat-history-box {
+  -webkit-filter: blur(6px) saturate(110%);
+  filter: blur(6px) saturate(110%);
+  transition: filter 180ms ease, -webkit-filter 180ms ease;
+}
+
 .new-chat-container {
   padding: 12px;
   border-top: 1px solid var(--color-border);
@@ -776,6 +868,10 @@ html, body {
 }
 
 /* ─── 6. MAIN CONTENT ─── */
+:root {
+  --header-height: 56px;
+}
+
 .main-content {
   flex: 1;
   display: flex;
@@ -787,11 +883,13 @@ html, body {
   position: relative;
   overflow: hidden;
   background: transparent;
+  padding-top: 0; /* no offset for desktop by default */
 }
 
 /* Welcome card uses translateY up; don’t clip it at the main pane edge */
 .main-content.main-content--landing-start {
   overflow: visible;
+  padding-top: 0;
 }
 
 /* ─── 7. HEADER ─── */
@@ -805,6 +903,35 @@ html, body {
   z-index: 200;
   overflow: visible;
 }
+
+@media (max-width: 1024px) {
+  .chat-header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+    height: var(--header-height);
+    z-index: 10000;
+    background: var(--color-bg-alt);
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .main-content {
+    padding-top: var(--header-height);
+  }
+
+  .main-content.main-content--landing-start {
+    padding-top: var(--header-height);
+  }
+
+  .chat-scroll-area {
+    margin-top: 0;
+    max-height: calc(var(--vh, 1vh) * 100 - var(--header-height));
+    padding-top: 8px;
+  }
+}
+
 
 .chat-header-transparent {
   background: transparent;
@@ -1088,12 +1215,14 @@ html, body {
 }
 
 .landing-container--start .landing-card {
-  transform: translateY(-28px);
+  /* Moved two steps upward per user request (visual only, no size change) */
+  transform: translateY(-110px);
 }
 
 @media (max-width: 640px) {
   .landing-container--start .landing-card {
-    transform: translateY(-16px);
+    /* Mobile: move up by two steps as well */
+    transform: translateY(-94px);
   }
 
   .landing-container.landing-container--start {
@@ -1337,12 +1466,18 @@ html, body {
   width: 100%;
   min-width: 0;
   background: transparent;
+  margin-top: 0;
+  padding-top: 8px;
+  box-sizing: border-box;
+  max-height: calc(var(--vh, 1vh) * 100 - var(--header-height));
 }
 
 /* Mobile: account for sticky header */
 @media (max-width: 640px) {
   .chat-scroll-area {
-    max-height: calc(100vh - 36px);  /* 56px header height */
+    max-height: calc(var(--vh, 1vh) * 100 - var(--header-height));
+    margin-top: 0;
+    padding-top: 8px;
   }
 }
 
@@ -1791,7 +1926,7 @@ font-size: 15px;
 .input-footer {
   width: 100%;
   padding: 12px 20px 12px;
-  margin-bottom: 72px; /* lift chat bar up to make room for feature below */
+  margin-bottom: 0;
   flex-shrink: 0;
   background: transparent;
   border: none;
@@ -1806,6 +1941,13 @@ font-size: 15px;
   padding-top: 4px;
   padding-bottom: 16px;
   overflow: visible;
+}
+
+/* Nudge the landing input upward to sit closer to the translated welcome card. */
+.input-footer.input-footer--start {
+  position: relative;
+  transform: translateY(-90px);
+  z-index: 60;
 }
 
 /* Suggested questions (landing only) — pill chips under input, grouped by query type */
@@ -1987,6 +2129,16 @@ font-size: 15px;
 .landing-suggested-panel-list {
   display: flex;
   flex-direction: column;
+  max-height: 220px;
+  overflow-y: auto;
+  scroll-behavior: smooth;
+  -ms-overflow-style: none; /* IE and Edge */
+  scrollbar-width: none; /* Firefox */
+}
+
+.landing-suggested-panel-list::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 .landing-suggested-panel-item {
@@ -3232,17 +3384,19 @@ textarea:focus-visible {
 .tile-card {
   width: 100%;
   border-radius: 18px;
-  background: linear-gradient(135deg, var(--tile-card-bg-start, rgba(30, 30, 30, 0.95)) 0%, var(--tile-card-bg-end, rgba(20, 20, 20, 0.98)) 100%);
+  background: none;
+  background-color: var(--tile-card-bg, rgba(31, 41, 55, 0.65));
   box-shadow: 0 4px 16px var(--tile-card-shadow, rgba(0, 0, 0, 0.8)), inset 0 1px 0 rgba(212, 175, 55, 0.08);
   overflow: visible;
-  transition: all 0.2s ease;
+  transition: box-shadow 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
   border: 1.5px solid rgba(212, 175, 55, 0.2);
   min-height: 100px;
   padding: 14px 18px 16px;
 }
 
 .tile-card:hover {
-  background: linear-gradient(135deg, var(--tile-card-bg-start-hover, rgba(65, 65, 65, 0.95)) 0%, var(--tile-card-bg-end-hover, rgba(55, 55, 55, 1)) 100%);
+  background: none;
+  background-color: var(--tile-card-bg-hover, var(--tile-card-bg, rgba(31, 41, 55, 0.65)));
   box-shadow: 0 6px 16px rgba(212, 175, 55, 0.25), inset 0 1px 0 rgba(212, 175, 55, 0.12);
   border-color: rgba(212, 175, 55, 0.4);
   transform: translateY(-1px);
@@ -3333,6 +3487,36 @@ textarea:focus-visible {
   background: #f9fafb;
 }
 
+@media (min-width: 768px) and (max-width: 1024px) {
+  /* iPad/tablet: compact sidebar to fit table/tile area and keep main content usable */
+  .sidebar-shell {
+    width: 240px !important;
+    max-width: 240px !important;
+    min-width: 240px !important;
+    height: 100%;
+    padding: 12px;
+    box-sizing: border-box;
+  }
+
+  .sidebar {
+    width: 240px !important;
+    max-width: 240px !important;
+    min-width: 240px !important;
+    overflow: hidden;
+  }
+
+  .main-content {
+    max-width: calc(100vw - 240px) !important;
+    width: calc(100vw - 240px) !important;
+    padding: 12px 12px !important;
+  }
+
+  .chat-scroll-area,
+  .sidebar-scroll {
+    max-height: calc(100vh - 88px);
+  }
+}
+
 @media (max-width: 640px) {
   /* Reduce sidebar width on mobile to prevent cramping */
   .sidebar-shell {
@@ -3362,11 +3546,14 @@ textarea:focus-visible {
     min-height: 0;
     display: flex;
     flex-direction: column;  /* Stack header above chat area */
+    padding-top: var(--header-height); /* ensure fixed mobile header does not overlap chat */
   }
 
   .chat-scroll-area {
     width: 100%;
-    max-height: calc(100vh - 56px);  /* Account for sticky header (56px) */
+    max-height: calc(var(--vh, 1vh) * 100 - var(--header-height));  /* account for sticky header height */
+    margin-top: 0;
+    padding-top: calc(var(--header-height) + 1px);
   }
 
   .messages-container {
@@ -3384,7 +3571,7 @@ textarea:focus-visible {
   }
 
   .table-with-tile {
-    padding-top: px;
+    padding-top: 12px;
   }
 
   .data-view-tile {
@@ -3392,6 +3579,19 @@ textarea:focus-visible {
     right: 12px;
     gap: 4px;
     padding: 4px;
+  }
+
+  /* Mobile: make the toggle flow above the table to avoid overlap */
+  .table-with-tile .data-view-tile,
+  .data-view-tile {
+    position: static !important;
+    display: inline-flex !important;
+    margin: 8px 0 12px 0 !important;
+    box-shadow: none !important;
+    right: auto !important;
+    top: auto !important;
+    align-self: flex-end !important;
+    z-index: 30 !important;
   }
 
   .data-view-option {
@@ -3477,6 +3677,18 @@ textarea:focus-visible {
     width: 100%;
     max-width: calc(100vw - 180px - 24px);  /* Account for sidebar (180px) + padding (12px*2) */
     min-height: 0;
+    padding-top: var(--header-height); /* ensure mobile/tablet fixed header does not overlap message area */
+  }
+
+  .chat-scroll-area {
+    max-height: calc(var(--vh, 1vh) * 100 - var(--header-height));
+    margin-top: 0;
+    padding-top: calc(var(--header-height) + 8px);
+  }
+
+  /* Tablet: keep toggle absolute but ensure it sits above content */
+  .data-view-tile {
+    z-index: 60;
   }
 
   .tile-card > div[style*="grid"] {
@@ -3542,6 +3754,31 @@ textarea:focus-visible {
   padding: 6px;
   position: relative;
   box-sizing: border-box;
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .graph-chart-container,
+  .graph-context-summary,
+  .graph-footer,
+  .chart-dropdown,
+  .chart-dropdown-button,
+  .chart-dropdown-menu {
+    user-select: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+  }
+}
+
+.graph-context-summary,
+.graph-footer,
+.chart-dropdown,
+.chart-dropdown-button,
+.chart-dropdown-menu {
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
 }
 
 /* Horizontal bar layout: height set inline from row count */

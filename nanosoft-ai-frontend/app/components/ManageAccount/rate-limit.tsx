@@ -22,6 +22,11 @@ const { stats, loading, error, refetch } = useUsageStats(externalUserId, subUser
     setAnimated(true);
   }, []);
 
+  const isDark = theme === "dark";
+  const textColor = isDark ? "#ffffff" : "#0f172a";
+  const textMuted = isDark ? "rgba(255,255,255,0.7)" : "rgba(15,23,42,0.8)";
+  const textFaint = isDark ? "rgba(255,255,255,0.5)" : "rgba(15,23,42,0.6)";
+
   const styles = `
     @keyframes slideInUp {
       from { opacity: 0; transform: translateY(30px); }

@@ -973,6 +973,37 @@ async def sessions_endpoint(request: SessionRequest):
         "type":          "history",
         "chat_history":  history
     }
+#added by sudharshan for renmaing the session
+
+@api_router.post("/session/rename")
+async def rename_session_endpoint(payload: dict):
+    user_name = str(payload.get("userName", "")).strip()
+    session_id = str(payload.get("sessionId", "")).strip()
+    title = str(payload.get("title", "")).strip()
+
+    if not user_name or not session_id or not title:
+        raise HTTPException(status_code=400, detail="userName, sessionId and title are required")
+
+    from app.services.postgres_service import update_session_title
+    ok = await update_session_title(session_id, user_name, title)
+    if not ok:
+        raise HTTPException(status_code=500, detail="Failed to update session title")
+    return {"status": "ok", "sessionId": session_id, "title": title}
+
+#added by sudharshan for deleting the session
+@api_router.post("/session/delete")
+async def delete_session_endpoint(payload: dict):
+    user_name = str(payload.get("userName", "")).strip()
+    session_id = str(payload.get("sessionId", "")).strip()
+
+    if not user_name or not session_id:
+        raise HTTPException(status_code=400, detail="userName and sessionId are required")
+
+    from app.services.postgres_service import delete_session_from_postgres
+    ok = await delete_session_from_postgres(session_id, user_name)
+    if not ok:
+        raise HTTPException(status_code=500, detail="Failed to delete session")
+    return {"status": "ok", "sessionId": session_id}
     
 @api_router.post("/client_insertion")
 async def client_insertion(request: ClientInsertionRequest):

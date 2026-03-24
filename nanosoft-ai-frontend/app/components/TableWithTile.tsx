@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { IconList, IconLayoutGrid } from "@tabler/icons-react";
+import { useTheme } from "@/app/components/useTheme";
 import { useResponsive, getResponsiveTable, getResponsiveTileDisplay, getSmartVisibleColumns } from "@/app/hooks/useResponsive";
 
 export type TableWithTileRow = Record<string, string>;
@@ -22,6 +23,17 @@ export default function TableWithTile({
   const responsive = useResponsive();
   const tableConfig = getResponsiveTable(responsive.screen);
   const tileConfig = getResponsiveTileDisplay(responsive.screen);
+  const { theme } = useTheme();
+  const isDark = theme === "dark";
+  // Use CSS variables set by root theme in globals.css
+  const tileBackground = "var(--tile-card-bg, #ffffff)";
+  const tileBorder = "var(--tile-card-border, 1px solid rgba(0, 0, 0, 0.08))";
+  const tileText = "var(--tile-card-text, #0f172a)";
+  const tileTextMuted = "var(--tile-card-text-muted, rgba(31, 41, 55, 0.7))";
+  const tileFieldBackground = "var(--tile-field-bg, rgba(255, 255, 255, 0.9))";
+  const tileFieldBorder = "var(--tile-field-border, 1px solid rgba(148, 163, 184, 0.25))";
+  const tileFieldLabelColor = "var(--tile-field-label, #0f172a)";
+  const tileFieldValueColor = "var(--tile-field-value, #1f2937)";
   const [viewMode, setViewMode] = useState<"table" | "tile">("table");
 
   // Automatically detect columns from rows
@@ -33,21 +45,25 @@ export default function TableWithTile({
     return Array.from(cols);
   })();
 
+  // Toggle container style: absolute on larger screens, inline/static on mobile
+  const toggleContainerStyle = {
+    position: responsive.isMobile ? 'static' as const : 'absolute' as const,
+    top: responsive.isMobile ? undefined : 12,
+    right: responsive.isMobile ? undefined : 12,
+    display: 'flex',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: responsive.isMobile ? 6 : 2,
+    zIndex: 1000,
+    marginBottom: responsive.isMobile ? 8 : 0,
+  };
+
   return (
     <div style={{ width: '100%' }}>
       {/* Table content with buttons inside */}
       <div className="table-with-tile" style={{ marginTop: 0, position: 'relative' }}>
         {/* Toggle buttons positioned at top - right corner INSIDE the border */}
-        <div style={{
-          position: 'absolute',
-          top: 12,
-          right: 12,
-          display: 'flex',
-          justifyContent: 'flex-end',
-          alignItems: 'center',
-          gap: 2,
-          zIndex: 1000
-        }}>
+        <div style={toggleContainerStyle}>
           {/* Table View Button (Left) - Toggle to Table */}
           <button
             onClick={() => setViewMode("table")}
@@ -208,6 +224,11 @@ export default function TableWithTile({
                     <div key={rowIdx} className="tile-card" style={{
                       padding: responsive.isMobile ? '8px' : responsive.isTablet ? tileConfig.cardPadding : '12px',
                       minHeight: responsive.isMobile ? '120px' : responsive.isTablet ? tileConfig.cardHeight : '280px',
+                      backgroundColor: tileBackground,
+                      border: tileBorder,
+                      color: tileText,
+                      boxShadow: isDark ? '0 8px 20px rgba(0,0,0,0.35)' : '0 8px 20px rgba(0,0,0,0.07)',
+                      transition: 'border 0.2s ease, box-shadow 0.2s ease, color 0.2s ease',
                     }}>
                       {/* Top colored strip */}
                       <div className="tile-card-header" />
@@ -254,6 +275,8 @@ export default function TableWithTile({
                                 display: 'flex',
                                 flexDirection: 'column',
                                 gap: responsive.isMobile ? '4px' : '6px',
+                                backgroundColor: tileFieldBackground,
+                                border: tileFieldBorder,
                               }}
                             >
                               <div className="tile-field-label" style={{
