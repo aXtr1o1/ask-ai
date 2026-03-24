@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useLayoutEffect } from "react";
+import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { ThemeToggle } from "./components/ThemeToggle";
@@ -1022,14 +1023,55 @@ export default function Home() {
   const [activeFeature, setActiveFeature] = useState<'chat' | 'archived' | 'library'>('chat');
   const [showFeaturePlaceholder, setShowFeaturePlaceholder] = useState<boolean>(false);
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
+  const [sessionMenuOpen, setSessionMenuOpen] = useState<string | null>(null);
+  const [sessionMenuPos, setSessionMenuPos] = useState<{ top: number; left: number; placement?: 'above' | 'below'; buttonRectTop?: number; buttonRectBottom?: number } | null>(null);
+  const sessionMenuRef = useRef<HTMLDivElement | null>(null);
+  const [sessionMenuVisible, setSessionMenuVisible] = useState<boolean>(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [audioPlayingIndex, setAudioPlayingIndex] = useState<number | null>(null);
+
+  // Inline edit state for renaming sessions
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState<string>("");
+  const editingInputRef = useRef<HTMLInputElement | null>(null);
+  // Archived sessions (store only id/title client-side)
+  const [archivedSessions, setArchivedSessions] = useState<ChatSession[]>([]);
+  // Delete confirmation modal state
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteSessionId, setDeleteSessionId] = useState<string | null>(null);
+  const [deleteSessionTitle, setDeleteSessionTitle] = useState<string>("");
+
+  // Helper to toggle a global body class used for applying a full-page blur fallback
+  const setGlobalBackdropBlur = (enable: boolean) => {
+    if (typeof document === "undefined") return;
+    try {
+      if (enable) document.body.classList.add("modal-open-blur");
+      else document.body.classList.remove("modal-open-blur");
+    } catch (e) { /* ignore */ }
+  };
+
+  // Keep body class in sync with modal visibility (works across devices)
+  useEffect(() => {
+    setGlobalBackdropBlur(showDeleteModal);
+    return () => { setGlobalBackdropBlur(false); };
+  }, [showDeleteModal]);
 
   useEffect(() => {
     if (!showManageAccount) {
       setIsManageAccountMenuOpen(false);
     }
   }, [showManageAccount]);
+
+  // Load archived sessions from localStorage on mount
+  // useEffect(() => {
+  //   try {
+  //     const raw = localStorage.getItem('archivedSessions');
+  //     if (raw) {
+  //       const parsed = JSON.parse(raw) as ChatSession[];
+  //       if (Array.isArray(parsed)) setArchivedSessions(parsed);
+  //     }
+  //   } catch (e) { /* ignore */ }
+  // }, []);
   const [audioProgressMap,  setAudioProgressMap]  = useState<Record<number, number>>({});
   const [audioDurationMap,  setAudioDurationMap]  = useState<Record<number, number>>({});
   const audioDurationMapRef = useRef<Record<number, number>>({});
@@ -1323,6 +1365,176 @@ export default function Home() {
   const saveChatHistoryRef = useRef(saveChatHistory);
   useEffect(() => { saveChatHistoryRef.current = saveChatHistory; });
 
+  // Start inline rename flow for a session (shows input in-place)
+  const handleRenameSession = async (sid: string) => {
+    const existing = chatSessions.find(s => s.id === sid);
+    const currentTitle = existing?.title ?? "";
+    setEditingSessionId(sid);
+    setEditingTitle(currentTitle);
+    setSessionMenuOpen(null);
+    setSessionMenuPos(null);
+    // focus will be set via effect when input is rendered
+  };
+
+  // Compute smart menu position so the popup appears inside viewport and chooses above/below placement
+  const computeSessionMenuPos = (btn: HTMLElement, menuMinWidth = 140) => {
+    const rect = btn.getBoundingClientRect();
+    const viewportW = window.innerWidth;
+    const viewportH = window.innerHeight;
+    const spaceBelow = viewportH - rect.bottom;
+    const spaceAbove = rect.top;
+    // prefer below unless not enough space and above has more room
+    const placement: 'above' | 'below' = (spaceBelow < 220 && spaceAbove > spaceBelow) ? 'above' : 'below';
+    // keep left inside viewport, leave 12px padding
+    const left = Math.max(8, Math.min(rect.left, viewportW - menuMinWidth - 12));
+    const top = rect.bottom + 6; // initial top is below; we'll flip to above after measuring menu height if needed
+    return { top, left, placement, buttonRectTop: rect.top, buttonRectBottom: rect.bottom };
+  };
+
+  // After menu mounts, measure its height and flip placement if it would overflow.
+  useLayoutEffect(() => {
+    if (!sessionMenuOpen || !sessionMenuPos || !sessionMenuRef.current) return;
+    const menuEl = sessionMenuRef.current;
+    const menuH = menuEl.offsetHeight;
+    const viewportH = window.innerHeight;
+    const btnBottom = sessionMenuPos.buttonRectBottom ?? (sessionMenuPos.top || 0);
+    const btnTop = sessionMenuPos.buttonRectTop ?? (sessionMenuPos.top || 0);
+
+    // If not enough space below and more space above, flip
+    if ((btnBottom + menuH) > viewportH && btnTop > (viewportH - btnBottom)) {
+      // place above
+      setSessionMenuPos(pos => pos ? { ...pos, placement: 'above', top: (pos.buttonRectTop ?? btnTop) - 6 } : pos);
+      return;
+    }
+
+    // If placement was above but now not enough space above, ensure below
+    if ((sessionMenuPos.placement === 'above') && ((btnTop - menuH) < 0)) {
+      setSessionMenuPos(pos => pos ? { ...pos, placement: 'below', top: (pos.buttonRectBottom ?? btnBottom) + 6 } : pos);
+      return;
+    }
+  }, [sessionMenuOpen, sessionMenuPos]);
+
+  // When placement is finalized, reveal the menu (avoid flicker)
+  useEffect(() => {
+    if (!sessionMenuOpen) {
+      setSessionMenuVisible(false);
+      return;
+    }
+    // Small async tick to ensure layout effect ran and sessionMenuPos updated
+    const t = setTimeout(() => setSessionMenuVisible(true), 0);
+    return () => clearTimeout(t);
+  }, [sessionMenuOpen, sessionMenuPos]);
+
+  // Close session menu when clicking/tapping outside or pressing Escape
+  useEffect(() => {
+    if (!sessionMenuOpen) return;
+    const onOutside = (e: Event) => {
+      const tgt = e.target as Node;
+      if (sessionMenuRef.current && sessionMenuRef.current.contains(tgt)) return;
+      // clicked outside menu -> close
+      setSessionMenuOpen(null);
+      setSessionMenuPos(null);
+      setSessionMenuVisible(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setSessionMenuOpen(null);
+        setSessionMenuPos(null);
+        setSessionMenuVisible(false);
+      }
+    };
+    document.addEventListener('mousedown', onOutside);
+    document.addEventListener('touchstart', onOutside);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onOutside);
+      document.removeEventListener('touchstart', onOutside);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [sessionMenuOpen]);
+
+  // Archive a session title (client-side only). Do NOT move chat history in DB.
+  // const handleArchiveSession = (sid: string) => {
+  //   const existing = chatSessions.find(s => s.id === sid);
+  //   if (!existing) return;
+  //   // Add minimal record to archivedSessions
+  //   setArchivedSessions(prev => {
+  //     const next = [...prev.filter(a => a.id !== sid), { id: existing.id, title: existing.title, createdAt: existing.createdAt }];
+  //     try { localStorage.setItem('archivedSessions', JSON.stringify(next)); } catch (e) { /* ignore */ }
+  //     return next;
+  //   });
+  //   // Remove from visible active list (history), but do not delete messages in DB
+  //   setChatSessions(prev => prev.filter(s => s.id !== sid));
+  //   setSessionMenuOpen(null);
+  //   setSessionMenuPos(null);
+  // };
+
+  // Commit inline rename (optimistic update + backend request)
+  const commitRename = async (sid: string) => {
+    const trimmed = editingTitle.trim();
+    if (!trimmed) {
+      setEditingSessionId(null);
+      setEditingTitle("");
+      return;
+    }
+    // optimistic UI update
+    setChatSessions(prev => prev.map(s => s.id === sid ? { ...s, title: trimmed } : s));
+    setEditingSessionId(null);
+    try {
+      await fetch(`${baseUrl}/api/session/rename`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userName: userIdFromUrl ?? loggedInUser, sessionId: sid, title: trimmed }),
+      });
+    } catch (err) {
+      console.warn("Failed to update session title on server:", err);
+    } finally {
+      setEditingTitle("");
+    }
+  };
+
+  // Open delete confirmation modal for a session
+  const handleDeleteSession = async (sid: string) => {
+    const existing = chatSessions.find(s => s.id === sid);
+    setDeleteSessionId(sid);
+    setDeleteSessionTitle(existing?.title ?? "Chat");
+    setSessionMenuOpen(null);
+    setSessionMenuPos(null);
+    setShowDeleteModal(true);
+  };
+
+  // Perform deletion after confirmation (optimistic + backend)
+  const performDeleteSession = async () => {
+    const sid = deleteSessionId;
+    if (!sid) {
+      setShowDeleteModal(false);
+      return;
+    }
+    // optimistic UI update
+    setChatSessions(prev => prev.filter(s => s.id !== sid));
+    sessionMessagesRef.current.delete(sid);
+    // If we're viewing the deleted session, switch to a new chat
+    if (sessionIdRef.current === sid) {
+      const newSid = generateSessionId();
+      setSessionId(newSid);
+      sessionIdRef.current = newSid;
+      setMessages([]);
+    }
+    setShowDeleteModal(false);
+    setDeleteSessionId(null);
+    setDeleteSessionTitle("");
+
+    try {
+      await fetch(`${baseUrl}/api/session/delete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userName: userIdFromUrl ?? loggedInUser, sessionId: sid }),
+      });
+    } catch (err) {
+      console.warn("Failed to delete session on server:", err);
+    }
+  };
+
   // ── User activity detection ───────────────────────────────────────────────
   const markUserActive = () => {
     userActiveRef.current = true;
@@ -1585,7 +1797,7 @@ export default function Home() {
   }, [authChecked, loggedInUser]);
 
   const handleFeatureClick = (featureName: 'chat' | 'archived' | 'library') => {
-    // Chat is the primary active feature, so don't show the "yet to be implemented" placeholder
+    // Chat and Archived have real views implemented; only Library shows placeholder
     if (featureName === 'chat') {
       setShowFeaturePlaceholder(false);
       return;
@@ -2365,6 +2577,56 @@ export default function Home() {
             </div>
           )}
 
+          {/* Archived view */}
+          {activeFeature === 'archived' && (
+            <div className="chat-history-box" style={{ marginTop: 24, display: "flex", flexDirection: "column", minHeight: 0 }}>
+              <div className="chat-history-scroll">
+                {archivedSessions.map(a => (
+                  <div
+                    key={a.id}
+                    className="sidebar-item"
+                    onClick={() => {
+                      // Open archived session history while staying in Archived view
+                      // Do NOT switch the sidebar to Chat or add title back to chatSessions
+                      void switchSession(a.id);
+                    }}
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
+                  >
+                    <div className="content" style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <IconArchive width={16} height={16}/>
+                      <span title={a.title} style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{a.title}</span>
+                    </div>
+                    <div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          // Unarchive: remove from archived list
+                          setArchivedSessions(prev => {
+                            const next = prev.filter(x => x.id !== a.id);
+                            try { localStorage.setItem('archivedSessions', JSON.stringify(next)); } catch {};
+                            return next;
+                          });
+                          // Restore to chatSessions list with same title; avoid duplicates by filtering existing id
+                          setChatSessions(prev => {
+                            const without = prev.filter(s => s.id !== a.id);
+                            return [{ id: a.id, title: a.title, createdAt: a.createdAt }, ...without];
+                          });
+                        }}
+                        title="Unarchive"
+                        style={{ background: 'transparent', border: 'none', color: 'var(--color-text)', cursor: 'pointer', padding: 6, borderRadius: 6 }}
+                      >Unarchive</button>
+                    </div>
+                  </div>
+                ))}
+                {archivedSessions.length === 0 && (
+                  <div style={{ padding: "12px 16px", fontSize: 12, color: "#7a8f75", fontStyle: "italic" }}>
+                    No archived chats
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Chat History – only visible when Chat feature is active */}
           {activeFeature === 'chat' && (
             
@@ -2375,13 +2637,104 @@ export default function Home() {
                     key={s.id}
                     className={`sidebar-item${s.id === sessionId ? " active" : ""}`}
                     onClick={() => switchSession(s.id)}
-                    style={{ cursor: "pointer" }}
+                    style={{ cursor: "pointer", display: 'flex', alignItems: 'center', gap: 8 }}
                   >
-                    <div className="content">
+                    <div className="content" style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
                       <IconChat width={16} height={16}/>
-                      <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {s.title}
-                      </span>
+                      {editingSessionId === s.id ? (
+                        <input
+                          ref={(el) => { editingInputRef.current = el; if (el) el.focus(); }}
+                          value={editingTitle}
+                          onChange={(e) => setEditingTitle(e.target.value)}
+                          onBlur={() => commitRename(s.id)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") { e.preventDefault(); commitRename(s.id); }
+                            if (e.key === "Escape") { setEditingSessionId(null); setEditingTitle(""); }
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          title={s.title}
+                          style={{
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            borderRadius: 6,
+                            padding: "6px 8px",
+                            border: "1px solid var(--color-border)",
+                            background: "var(--color-bg-alt)",
+                            color: "var(--color-text)",
+                            width: '100%'
+                          }}
+                        />
+                      ) : (
+                        <span
+                          title={s.title}
+                          style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                        >
+                          {previewTitle(s.title, 2)}
+                        </span>
+                      )}
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center' }}>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const btn = e.currentTarget as HTMLElement;
+                          const pos = computeSessionMenuPos(btn, 140);
+                          const willOpen = sessionMenuOpen !== s.id;
+                          setSessionMenuOpen(willOpen ? s.id : null);
+                          setSessionMenuPos(willOpen ? pos : null);
+                          setSessionMenuVisible(false);
+                        }}
+                        aria-label="Session options"
+                        title="Options"
+                        style={{
+                          background: 'transparent',
+                          border: 'none',
+                          color: 'var(--color-text)',
+                          cursor: 'pointer',
+                          padding: '6px',
+                          borderRadius: 6,
+                        }}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+                      </button>
+
+                      {sessionMenuOpen === s.id && sessionMenuPos && (
+                        <div
+                          ref={(el) => { sessionMenuRef.current = el; }}
+                          onClick={(e) => e.stopPropagation()}
+                          className="session-menu"
+                          style={{
+                            position: 'fixed',
+                            top: `${sessionMenuPos.top}px`,
+                            transform: sessionMenuPos.placement === 'above' ? 'translateY(-100%)' : 'none',
+                            left: `${sessionMenuPos.left}px`,
+                            background: 'var(--color-bg-alt)',
+                            border: '1px solid var(--color-border)',
+                            borderRadius: 8,
+                            padding: '6px 8px',
+                            boxShadow: '0 6px 18px rgba(0,0,0,0.4)',
+                            zIndex: 20000,
+                            minWidth: 140,
+                            whiteSpace: 'nowrap',
+                            visibility: sessionMenuVisible ? 'visible' : 'hidden',
+                            pointerEvents: sessionMenuVisible ? 'auto' : 'none',
+                          }}>
+                          <button
+                            onClick={() => { setSessionMenuOpen(null); setSessionMenuPos(null); handleRenameSession(s.id); }}
+                            style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 8px', background: 'transparent', border: 'none', color: 'var(--color-text)', cursor: 'pointer' }}
+                          >Rename</button>
+                          {/* <button
+                            onClick={() => { handleArchiveSession(s.id); }}
+                            style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 8px', background: 'transparent', border: 'none', color: 'var(--color-text)', cursor: 'pointer' }}
+                          >Archive</button> */}
+                          <button
+                            onClick={() => { setSessionMenuOpen(null); setSessionMenuPos(null); handleDeleteSession(s.id); }}
+                            style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 8px', background: 'transparent', border: 'none', color: 'var(--color-text)', cursor: 'pointer' }}
+                          >Delete</button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -2806,6 +3159,24 @@ export default function Home() {
           </div>
         )}
 
+        {/* Delete Confirmation Modal (rendered via portal to avoid being blurred) */}
+        {typeof document !== 'undefined' && showDeleteModal && createPortal(
+          <div
+            className="modal-backdrop"
+            onClick={() => { setShowDeleteModal(false); setDeleteSessionId(null); setDeleteSessionTitle(""); }}
+          >
+            <div className="confirm-delete-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+              <h3>Delete chat?</h3>
+              <p>This will delete <strong>{deleteSessionTitle}</strong>.</p>
+              <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 12 }}>
+                <button className="btn btn-secondary" onClick={() => { setShowDeleteModal(false); setDeleteSessionId(null); setDeleteSessionTitle(""); }}>Cancel</button>
+                <button className="btn btn-danger" onClick={() => performDeleteSession()}>Delete</button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
         {/* Manage Account Full-Screen Page */}
         {showManageAccount && (
           <div 
@@ -2885,4 +3256,29 @@ export default function Home() {
       </div>
     </div>
   );
+}
+
+// Return the first `n` words of a title, adding an ellipsis if truncated
+function previewTitle(title: string | undefined | null, n = 2): string {
+  if (!title) return "Chat";
+  const words = title.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return "Chat";
+
+  // If there's only one word, return it (or 'Chat' fallback)
+  if (words.length === 1) return words[0];
+
+  const first = words[0];
+  const second = words[1] ?? "";
+
+  // Preferred: show two words only when they fit a reasonable length
+  const combinedLen = first.length + 1 + second.length;
+  const MAX_COMBINED = 20;   // max characters for two-word preview
+  const MAX_SECOND = 12;     // max chars allowed for second word
+
+  if (combinedLen <= MAX_COMBINED && second.length <= MAX_SECOND) {
+    return first + " " + second + (words.length > 2 ? "…" : "");
+  }
+
+  // Otherwise show only the first word with an ellipsis if there's more
+  return first + (words.length > 1 ? "…" : "");
 }

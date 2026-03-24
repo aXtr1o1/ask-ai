@@ -734,6 +734,78 @@ html, body {
   opacity: 1;
 }
 
+/* Session menu rendered as fixed element (appears outside scroll containers and above content) */
+.session-menu {
+  position: fixed;
+  animation: dropdownOpen 120ms ease-out;
+  background: var(--color-bg-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 6px 8px;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.45);
+  z-index: 20000;
+  min-width: 140px;
+  white-space: nowrap;
+}
+.session-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 8px;
+  background: transparent;
+  border: none;
+  color: var(--color-text);
+  cursor: pointer;
+}
+.session-menu button:hover {
+  background: rgba(212,175,55,0.06);
+}
+
+/* Modal backdrop and confirm dialog for delete */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0,0,0,0.55);
+  backdrop-filter: blur(4px) saturate(120%);
+  -webkit-backdrop-filter: blur(4px) saturate(120%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10020;
+}
+.confirm-delete-modal {
+  background: var(--color-bg-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 18px;
+  min-width: 320px;
+  max-width: 92vw;
+  color: var(--color-text);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+}
+.confirm-delete-modal h3 {
+  margin: 0 0 8px 0;
+  font-size: 15px;
+}
+.confirm-delete-modal p {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+.btn { padding: 8px 12px; border-radius: 8px; border: none; cursor: pointer; }
+.btn-secondary { background: transparent; border: 1px solid var(--color-border); color: var(--color-text); }
+.btn-danger { background: var(--color-error); color: #fff; }
+
+/* Fallback full-page blur for devices without backdrop-filter support */
+.modal-open-blur .app-content-wrapper,
+.modal-open-blur .sidebar,
+.modal-open-blur .bg-gradient,
+.modal-open-blur .messages-container,
+.modal-open-blur .chat-history-box {
+  -webkit-filter: blur(6px) saturate(110%);
+  filter: blur(6px) saturate(110%);
+  transition: filter 180ms ease, -webkit-filter 180ms ease;
+}
+
 .new-chat-container {
   padding: 12px;
   border-top: 1px solid var(--color-border);
@@ -1143,12 +1215,14 @@ html, body {
 }
 
 .landing-container--start .landing-card {
-  transform: translateY(-28px);
+  /* Moved two steps upward per user request (visual only, no size change) */
+  transform: translateY(-110px);
 }
 
 @media (max-width: 640px) {
   .landing-container--start .landing-card {
-    transform: translateY(-16px);
+    /* Mobile: move up by two steps as well */
+    transform: translateY(-94px);
   }
 
   .landing-container.landing-container--start {
@@ -1867,6 +1941,13 @@ font-size: 15px;
   padding-top: 4px;
   padding-bottom: 16px;
   overflow: visible;
+}
+
+/* Nudge the landing input upward to sit closer to the translated welcome card. */
+.input-footer.input-footer--start {
+  position: relative;
+  transform: translateY(-90px);
+  z-index: 60;
 }
 
 /* Suggested questions (landing only) — pill chips under input, grouped by query type */
