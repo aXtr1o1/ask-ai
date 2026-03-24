@@ -138,14 +138,23 @@ class LangChainService:
                 else:
                     return (
                         f"USER QUERY: {user_query}\n"
-                        f"SYSTEM DATA: {display_count} records found (showing {len(p_list_for_model)}).\n\n"
-                        "TASK: Write ONLY a 2-3 sentence friendly summary of what was found. "
-                        "Identify patterns if any (e.g. 'Most items are in Pending status'). "
-                        "Mention if results are a subset of a larger total. "
-                        "Do NOT render any table. Do NOT include markdown. "
-                        "End your response with exactly this line:\n"
+                        f"TOTAL RECORDS: {display_count}\n"
+                        f"DISPLAYED RECORDS: {len(p_list_for_model)}\n"
+                        f"DATA PREVIEW: {p_list_for_model}\n\n"
+                        "TASK: Act as a technical building analyst. Summarize the findings in 2-3 friendly, "
+                        "grammatically professional sentences. Focus on synthesizing patterns—like shared "
+                        "locations, identical statuses, or equipment types—rather than listing items one by one. "
+                        "If the displayed records are fewer than the total found, explicitly mention that "
+                        "this is a partial view of the total data. "
+                        "STRICT RULES:\n"
+                        "1. Do NOT start with 'Here are' or 'Here is'.\n"
+                        "2. Start with 'I found...', 'I've retrieved...', or 'Your search returned...'.\n"
+                        "3. Use NO markdown (no bold, no italics) in the summary text.\n"
+                        "4. Do NOT include a table.\n"
+                        "5. Use clear, active-voice grammar.\n\n"
+                        "FINAL LINE (MUST BE EXACT):\n"
                         "**Would you like to see the full table for a better understanding?**"
-                    )
+                                        )
 
 
     # ──  return type is now tuple[str, str, list] used for the chat memory and the db memory .

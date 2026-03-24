@@ -14,7 +14,7 @@ from .config import log, REQUEST_TIMEOUT, MAX_RETRIES, PAGE_SIZE
 def fetch_single_page(base_url: str, jwt_token: str, user_id: int,
                       endpoint: str, last_synced_at, page_index: int) -> list:
 
-    url = f"{base_url}/askmeapi{endpoint}"
+    url = f"{base_url}{endpoint}"
 
     if last_synced_at is not None:
         if hasattr(last_synced_at, "astimezone"):

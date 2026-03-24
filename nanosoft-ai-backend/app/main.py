@@ -8,8 +8,10 @@ import logging
 import asyncio
 import json
 from fastapi import WebSocket, WebSocketDisconnect
+from app.services.sync.migrate_user import migrate_user
 
 from app.models.schemas import ChatRequest
+import re
 import base64 
 from app.config import settings
 from app.services.langchain_service import langchain_service
@@ -18,6 +20,8 @@ from app.services.user_profile_service import (
     get_credits_remaining,
     consume_audio_seconds_if_available,
     get_graph_count_and_limit,
+    get_user_usage_stats,      
+    update_daily_history,      
 )
 from app.prompts.system_prompt import get_system_prompt
 from app.services.postgres_service import save_session_to_postgres_service
@@ -72,12 +76,44 @@ MAX_HISTORY =  settings.MAX_HISTORY
 memory_store = {}
 MAX_AUDIO_BYTES = 500 * 1024  # 500 KB
 
-YES_WORDS = {"yes", "yeah", "yep", "yup", "correct", "right",
-             "ok", "okay", "sure", "confirmed", "proceed", "go ahead",
-             "that's right", "thats right", "yes that's correct"}
+YES_WORDS = {
+    "yes", "yeah", "yep", "yup", "ya", "y",
+    "correct", "right", "true", "exactly","give me",
+    "ok", "okay", "okey", "k", "kk","kkkk",
+    "sure", "surely", "of course",
+    "confirmed", "confirm", "confirmation",
+    "proceed", "go ahead", "continue",
+    "please proceed", "you can proceed",
+    "yes please", "go on", "carry on",
+    "that's right", "thats right",
+    "yes that's correct", "yes thats correct",
+    "sounds good", "looks good", "all good",
+    "fine", "works", "works for me",
+    "perfect", "great", "nice",
+    "yess", "yea", "yaah", "yup yup",
+    "indeed", "absolutely", "definitely",
+    "affirmative", "roger", "approved",
+    "do it", "let's go", "lets go"
+}
 
-NO_WORDS  = {"no", "nope", "nah", "wrong", "incorrect", "not right",
-             "that's wrong", "thats wrong", "not correct"}
+NO_WORDS = {
+    "no", "nope", "nah", "n",
+    "wrong", "incorrect", "not correct", "not right",
+    "that's wrong", "thats wrong",
+    "no that's wrong", "no thats wrong",
+    "not really", "not exactly",
+    "don't", "do not", "dont",
+    "stop", "hold on", "wait",
+    "cancel", "abort", "skip",
+    "no thanks", "no thank you",
+    "negative", "decline", "rejected",
+    "not good", "bad", "doesn't work", "doesnt work",
+    "not fine", "not okay", "not ok",
+    "change it", "modify", "edit this",
+    "try again", "redo", "recheck",
+    "nah bro", "no way", "never",
+    "i disagree", "disagree", "not agreed"
+}
 
 #Track sessions already saved by frontend HTTP POST
 # So WebSocketDisconnect does NOT save again (prevents double save)
@@ -185,6 +221,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
             current_session_id = session_id
             audio_base64   = None   # will hold base64 string if audio
             query_to_store = None
+            audio_seconds_effective = 0
             # ==================================================================
             # ── CONFIRMATION REPLY CHECK
             # ── If pending_transcription exists → user is replying yes/no
@@ -241,8 +278,11 @@ async def ws_chat_endpoint(websocket: WebSocket):
                                 continue
 
                         transcribed = await convert_audio_to_text(audio_bytes)
-                        reply_text  = transcribed["transcription"].strip().lower()
-                        logger.info(f"🎙️ Audio confirmation reply: '{reply_text}'")
+                        raw_reply   = transcribed["transcription"].strip().lower()
+                        
+                        reply_text  = re.sub(r'[^\w\s]', '', raw_reply).strip()
+                        logger.info(f"🎙️ Audio confirmation reply: '{reply_text}' (raw='{raw_reply}')")
+                        
                     except Exception as e:
                         logger.error(f"❌ Confirmation audio failed: {e}")
                         reply_text = ""
@@ -251,15 +291,17 @@ async def ws_chat_endpoint(websocket: WebSocket):
 
                 # Clear pending immediately
                 memory_store[session_id]["pending_transcription"] = None
+                # ── Check if reply contains any yes/no word ──
+                reply_words = set(reply_text.split())
+                is_yes = reply_text in YES_WORDS or bool(reply_words & YES_WORDS)
+                is_no  = reply_text in NO_WORDS  or bool(reply_words & NO_WORDS)
 
-                if reply_text in YES_WORDS:
-                    # User confirmed → run original transcription
+                if is_yes:
                     user_query     = pending_transcription
-                    query_to_store =  reply_text
+                    query_to_store = reply_text
                     logger.info(f"✅ User confirmed → running: '{user_query}'")
 
-                elif reply_text in NO_WORDS:
-                    # User said no → ask to rephrase
+                elif is_no:
                     msg = "No problem! Could you please tell me what you meant? I'll try again."
                     await websocket.send_text(json.dumps({
                         "session_id": session_id,
@@ -276,7 +318,6 @@ async def ws_chat_endpoint(websocket: WebSocket):
                     continue
 
                 else:
-                    # User gave corrected query directly
                     user_query     = data.get("query", "").strip() if not is_audio else reply_text
                     query_to_store = user_query
                     logger.info(f"🔄 User gave correction → running: '{user_query}'")
@@ -304,6 +345,70 @@ async def ws_chat_endpoint(websocket: WebSocket):
                         }))
                         continue
 
+                    # ── Check if user is replying yes/no to pending_table via audio ──
+                    session_data_audio = memory_store.get(session_id, {})
+                    pending_table_audio = session_data_audio.get("pending_table")
+
+                    if pending_table_audio:
+                        # Transcribe the audio reply
+                        transcribed_reply = await convert_audio_to_text(audio_bytes)
+                        raw_reply_table   = transcribed_reply["transcription"].strip().lower()
+                        reply_table       = re.sub(r'[^\w\s]', '', raw_reply_table).strip()
+                        logger.info(f"🎙️ Audio table reply: '{reply_table}' (raw='{raw_reply_table}')")
+
+                        if reply_table in YES_WORDS:
+                            table_response = json.dumps({
+                                "context_summary": "Here is the detailed table you requested.",
+                                "records": pending_table_audio
+                            })
+                            memory_store[session_id]["pending_table"] = None
+
+                            await websocket.send_text(json.dumps({
+                                "session_id": session_id,
+                                "response": table_response
+                            }))
+                            await websocket.send_text("[DONE]")
+
+                            memory_store[session_id]["lc_memory"].append(HumanMessage(content=reply_table))
+                            memory_store[session_id]["lc_memory"].append(AIMessage(content="Table displayed."))
+                            memory_store[session_id]["history"].append({
+                                "query":     reply_table,
+                                "assistant": table_response,
+                                "context":   "Table displayed on user audio request.",
+                                "is_audio":  True
+                            })
+                            logger.info("✅ Table sent on user audio YES | records=%d", len(pending_table_audio))
+                            print_memory(session_id)
+                            continue
+
+                        elif reply_table in NO_WORDS:
+                            memory_store[session_id]["pending_table"] = None
+                            no_msg = "No problem! Let me know if you have any other questions."
+
+                            await websocket.send_text(json.dumps({
+                                "session_id": session_id,
+                                "response": no_msg
+                            }))
+                            await websocket.send_text("[DONE]")
+
+                            memory_store[session_id]["lc_memory"].append(HumanMessage(content=reply_table))
+                            memory_store[session_id]["lc_memory"].append(AIMessage(content=no_msg))
+                            memory_store[session_id]["history"].append({
+                                "query":     reply_table,
+                                "assistant": no_msg,
+                                "context":   no_msg,
+                                "is_audio":  True
+                            })
+                            logger.info("✅ User declined table via audio")
+                            print_memory(session_id)
+                            continue
+
+                        else:
+                            # Not yes/no — clear pending table and treat as new audio query
+                            memory_store[session_id]["pending_table"] = None
+                            logger.info("⚠️ Audio reply not yes/no — clearing pending_table, processing as new query")
+
+                    
 
 # Changes done by sanjeevan
                     # ── Audio credits check + consume ───────────────────────
@@ -349,6 +454,20 @@ async def ws_chat_endpoint(websocket: WebSocket):
                             })
                             continue
 
+                        # ✅ Update usage_history immediately when audio is sent
+                        try:
+                            await asyncio.to_thread(
+                                update_daily_history,
+                                external_user_id=user_name,
+                                name=sub_user_name,
+                                credits_delta=0,
+                                audio_seconds_delta=int(audio_seconds_effective),
+                                graph_delta=0,
+                                request_delta=0,
+                            )
+                            logger.info("✅ usage_history audio saved immediately | audio=%s", audio_seconds_effective)
+                        except Exception as e:
+                            logger.warning("⚠️ update_daily_history audio failed: %s", str(e)[:200])
                     audio_base64   = "data:audio/ogg;base64," + base64.b64encode(audio_bytes).decode("utf-8")
                     query_to_store = audio_base64
 
@@ -399,6 +518,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
 
                         # ── Save original transcription for yes/no handling ───
                         memory_store[session_id]["pending_transcription"] = user_query
+                        memory_store[session_id]["pending_audio_seconds"] = audio_seconds_effective
                         logger.info(f"💾 Saved pending_transcription: '{user_query}'")
 
                         memory_store[session_id]["history"].append({
@@ -509,6 +629,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
 
                 if pending_table:
                     reply = user_query.strip().lower()
+                    logger.info(f"🔍 pending_table check | reply='{reply}' | in_YES_WORDS={reply in YES_WORDS} | in_NO_WORDS={reply in NO_WORDS}")
 
                     if reply in YES_WORDS:
                         table_response = json.dumps({
@@ -707,6 +828,21 @@ async def ws_chat_endpoint(websocket: WebSocket):
                 )
             except Exception as e:
                 logger.warning("⚠️ user_profile update failed: %s", str(e)[:200])
+             # ── Update daily history for trend charts ─────────────
+            try:
+                await asyncio.to_thread(
+                    update_daily_history,
+                    external_user_id=user_name,
+                    name=sub_user_name,
+                    credits_delta=1,
+                    audio_seconds_delta=0,
+                    graph_delta=graph_delta,
+                    request_delta=1,
+                    tokens_delta=tokens_delta,
+                )
+            except Exception as e:
+                logger.warning("⚠️ update_daily_history failed: %s", str(e)[:200])
+                
 
             # ── CHANGED: TWO SEPARATE MEMORIES
             # ── lc_memory → stores context_summary ONLY (sent to model as past context)
@@ -838,39 +974,39 @@ async def sessions_endpoint(request: SessionRequest):
         "chat_history":  history
     }
     
-from app.services.sync.engine import run_sync
 @api_router.post("/client_insertion")
 async def client_insertion(request: ClientInsertionRequest):
-    userId = request.userId.strip()
-    userName = request.userName.strip()
-    service = request.service.strip()
+    userId     = request.userId.strip()
+    userName   = request.userName.strip()
+    service    = request.service.strip()
     client_name = request.clientName.strip()
-    token = request.token.strip()
+    token      = request.token.strip()
+
     if not userId or not userName:
         logger.info("invalid client insertion payload")
         raise HTTPException(status_code=400, detail="userId and userName are required")
-
+    
     conn = None
     try:
         conn = get_pool()
-        conn.rollback()  # clear any previous failed transaction
+        conn.rollback()
         cursor = conn.cursor()
 
         cursor.execute(
             """
             SELECT client_name, base_url, user_id, user_name, jwt_token, last_synced_at
             FROM client_sync_config
-            WHERE user_id = %s AND user_name = %s
+            WHERE client_name = %s
             LIMIT 1
             """,
-            (userId, userName),
+            (client_name,),
         )
-
         row = cursor.fetchone()
+        cursor.close()
 
     except Exception as e:
         logger.error(
-            f"❌ Failed to check client_sync_config | user_id={userId} | user_name={userName} | error={e}",
+            f"❌ Failed to check client_sync_config | client_name = {client_name} | error={e}",
             exc_info=True,
         )
         try:
@@ -880,56 +1016,85 @@ async def client_insertion(request: ClientInsertionRequest):
             pass
         raise HTTPException(status_code=500, detail="Database error while checking client configuration")
 
+    # ── Old client — already exists ──
     if row:
         client_name, base_url, db_user_id, db_user_name, db_jwt_token, last_synced_at = row
-        cursor.close()
         return {
             "client_type": "old",
             "exists": True,
             "client": {
                 "client_name": client_name,
-                "base_url": base_url,
-                "user_id": db_user_id,
-                "user_name": db_user_name,
-                "token": db_jwt_token,
+                "base_url":    base_url,
+                "user_id":     db_user_id,
+                "user_name":   db_user_name,
+                "token":       db_jwt_token,
             },
         }
 
-    # No existing client — insert new row into client_sync_config
-    cursor.execute(
-        """
-        INSERT INTO client_sync_config
-        (client_name, base_url, user_id, user_name, jwt_token, last_synced_at)
-        VALUES (%s, %s, %s, %s, %s, NOW())
-        RETURNING id, client_name, base_url, user_id, user_name, jwt_token, last_synced_at
-        """,
-        (client_name, service, userId, userName, token),
-    )
+    # ── New client — call migrate_user which handles insert + full data sync ──
+    try:
+        result = await asyncio.to_thread(
+            migrate_user,
+            client_name = client_name,
+            base_url    = service,
+            user_id     = int(userId),
+            user_name   = userName,
+            jwt_token   = token,
+        )
+        logger.info(f"✅ migrate_user completed | client={client_name} | status={result.get('status')}")
 
-    new_row = cursor.fetchone()
-    conn.commit()
-    cursor.close()
+        return {
+            "client_type": "new",
+            "exists":      False,
+            "client": {
+                "client_name": client_name,
+                "base_url":    service,
+                "user_id":     userId,
+                "user_name":   userName,
+                "service":     service,
+                "token":       token,
+            },
+            "migration": result,
+        }
 
-    new_id, client_name, base_url, db_user_id, db_user_name, db_jwt_token, last_synced_at = new_row
+    except Exception as e:
+        logger.error(f"❌ migrate_user failed | client={client_name} | error={e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Client migration failed. Please try again.")
 
-    return {
-        "client_type": "new",
-        "exists": False,
-        "client": {
-            "id": new_id,
-            "client_name": client_name,
-            "base_url": base_url,
-            "user_id": db_user_id,
-            "user_name": db_user_name,
-            "service": service,
-            "token": db_jwt_token,
-        },
-    }
+
+@api_router.get("/usage/{external_user_id}/{user_name}", tags=["usage"])
+async def get_usage_stats(external_user_id: str, user_name: str):
+
+    if not external_user_id or not user_name:
+        raise HTTPException(status_code=400, detail="external_user_id and user_name are required")
+
+    try:
+        stats = await asyncio.to_thread(
+            get_user_usage_stats,
+            external_user_id.strip(),  # ✅ pass both
+            user_name.strip()
+        )
+
+        if not stats:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No usage data found for user: {user_name}"
+            )
+
+        return stats
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            "❌ get_usage_stats failed | external_user_id=%s user_name=%s | error=%s",
+            external_user_id, user_name, e
+        )
+        raise HTTPException(status_code=500, detail="Failed to fetch usage stats")
 
 @api_router.get("/health", tags=["Health"])
 def api_health():
     return {"status": "ok", "service": "Facility Management AI Assistant"}
-
 
 chatbot_app.include_router(api_router)
 

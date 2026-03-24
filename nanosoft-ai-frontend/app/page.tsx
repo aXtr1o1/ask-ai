@@ -2832,7 +2832,12 @@ export default function Home() {
               width: "100%",
               height: "100%",
             }}>
-              <ManageAccount currentPlan={currentPlan} profileName={loggedInUser || "My Account"} />
+               <ManageAccount
+              currentPlan={currentPlan}
+              profileName={loggedInUser || "My Account"}
+              subUserName={userIdFromUrl ?? loggedInUser ?? ""}
+              externalUserId={loggedInUser ?? ""}
+            />
             </div>
           </div>
         )}
