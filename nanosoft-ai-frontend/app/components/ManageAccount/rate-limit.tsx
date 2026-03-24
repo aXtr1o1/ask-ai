@@ -58,7 +58,7 @@ const { stats, loading, error, refetch } = useUsageStats(externalUserId, subUser
     return                       { color: "#d4af37", status: "Healthy",  bgColor: "rgba(212,175,55,0.12)"  };
   };
 
-  const isDark = theme === "dark";
+  
 
   // ── Loading state ─────────────────────────────────────────
   if (loading) {

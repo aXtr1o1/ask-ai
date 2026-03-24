@@ -59,7 +59,7 @@ export default function ManageAccount({
 
   const handleBackToDashboard = () => {
     if (responsive.isMobile || responsive.isTablet) {
-      updateMobileSidebar(true);
+      setShowMobileSidebar(true);
     } else {
       router.back();
     }
@@ -92,7 +92,7 @@ const queryExternalUser = externalUserId || profileName;  // ← ADD
       {/* Mobile Backdrop */}
       {responsive.isMobile && showMobileSidebar && (
         <div
-          onClick={() => updateMobileSidebar(false)}
+          onClick={() => setShowMobileSidebar(false)}
           style={{
             position: "fixed",
             inset: 0,
@@ -203,37 +203,38 @@ const queryExternalUser = externalUserId || profileName;  // ← ADD
                     alignItems: "stretch",
                     gap: "8px",
                   }}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setActiveSection("dashboard");
-                        setDashboardView(item.id);
-                        if (responsive.isMobile) setShowMobileSidebar(false);
-                      }}
-                      style={{
-                        width: "100%",
-                        padding: "10px 12px",
-                        borderRadius: "8px",
-                        background: dashboardView === item.id
-                          ? "linear-gradient(135deg, rgba(var(--color-primary-rgb), 0.2) 0%, rgba(var(--color-primary-rgb), 0.1) 100%)"
-                          : "transparent",
-                        border: dashboardView === item.id
-                          ? "1.5px solid var(--color-primary)"
-                          : "1px solid transparent",
-                        color: dashboardView === item.id
-                          ? "var(--color-primary)"
-                          : "var(--color-text)",
-                        cursor: "pointer",
-                        fontSize: "12px",
-                        fontWeight: isUsageActive ? 700 : 500,
-                        textAlign: "left",
-                        width: "100%",
-                        transition: "all 0.3s ease",
-                      }}
-                    >
-                      <IconSettings size={16} strokeWidth={1.5} />
-                      Settings
-                    </button>
+                    {dashboardMenuItems.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => {
+                          setActiveSection("dashboard");
+                          setDashboardView(item.id);
+                          if (responsive.isMobile) setShowMobileSidebar(false);
+                        }}
+                        style={{
+                          padding: "10px 12px",
+                          borderRadius: "8px",
+                          background: dashboardView === item.id
+                            ? "linear-gradient(135deg, rgba(var(--color-primary-rgb), 0.2) 0%, rgba(var(--color-primary-rgb), 0.1) 100%)"
+                            : "transparent",
+                          border: dashboardView === item.id
+                            ? "1.5px solid var(--color-primary)"
+                            : "1px solid transparent",
+                          color: dashboardView === item.id
+                            ? "var(--color-primary)"
+                            : "var(--color-text)",
+                          cursor: "pointer",
+                          fontSize: "12px",
+                          fontWeight: dashboardView === item.id ? 700 : 500,
+                          textAlign: "left",
+                          width: "100%",
+                          transition: "all 0.3s ease",
+                        }}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
                   </div>
                 </div>
               )}
