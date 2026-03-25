@@ -74,7 +74,7 @@ const { stats, loading, error, refetch } = useUsageStats(externalUserId, subUser
               }} />
             ))}
           </div>
-          <span style={{ fontSize: 13, color: "#A0AEC0" }}>Loading rate limits…</span>
+          <span style={{ fontSize: 13, color: "var(--tile-card-text-muted)" }}>Loading rate limits…</span>
         </div>
       </div>
     );
@@ -84,7 +84,7 @@ const { stats, loading, error, refetch } = useUsageStats(externalUserId, subUser
   if (error || !stats) {
     return (
       <div style={{ padding: "40px 0", textAlign: "center" }}>
-        <p style={{ color: "rgba(255,255,255,0.5)", fontSize: 14 }}>
+        <p style={{ color: "var(--tile-card-text-muted)", fontSize: 14 }}>
           {error || "No rate limit data available"}
         </p>
         <button
@@ -216,7 +216,7 @@ const { stats, loading, error, refetch } = useUsageStats(externalUserId, subUser
                   <div style={{ flex: 1 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px" }}>
                       <p style={{
-                        fontSize: "12px", color: "rgba(255,255,255,0.6)", margin: 0,
+                        fontSize: "12px", color: "var(--tile-card-text-muted)", margin: 0,
                         fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.7px",
                       }}>
                         {metric.label}
@@ -232,19 +232,21 @@ const { stats, loading, error, refetch } = useUsageStats(externalUserId, subUser
                     <div style={{ display: "flex", alignItems: "baseline", gap: "10px", marginBottom: "8px" }}>
                       <p style={{
                         fontSize: "36px", fontWeight: 800, margin: 0,
-                        background: `linear-gradient(135deg, ${metric.progressColor}, #ffffff)`,
-                        backgroundClip: "text",
-                        WebkitBackgroundClip: "text",
-                        WebkitTextFillColor: "transparent",
+                        color: isDark ? "transparent" : "var(--tile-card-text)",
+                        background: isDark ? `linear-gradient(135deg, ${metric.progressColor}, #ffffff)` : "none",
+                        backgroundClip: isDark ? "text" : "unset",
+                        WebkitBackgroundClip: isDark ? "text" : "unset",
+                        WebkitTextFillColor: isDark ? "transparent" : "initial",
+                        animation: `fadeIn 1s ease-out ${index * 0.15}s both`,
                       }}>
                         {metric.current}
                       </p>
-                      <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.5)", margin: 0, fontWeight: 500 }}>
+                      <p style={{ fontSize: "12px", color: "var(--tile-card-text-muted)", margin: 0, fontWeight: 500 }}>
                         / {metric.limit}
                       </p>
                     </div>
 
-                    <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.5)", margin: 0, fontWeight: 500 }}>
+                    <p style={{ fontSize: "11px", color: "var(--tile-card-text-muted)", margin: 0, fontWeight: 500 }}>
                       {metric.unit}
                     </p>
                   </div>
@@ -299,7 +301,7 @@ const { stats, loading, error, refetch } = useUsageStats(externalUserId, subUser
                   </div>
 
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.5)", margin: 0, fontWeight: 500 }}>
+                    <p style={{ fontSize: "12px", color: "var(--tile-card-text-muted)", margin: 0, fontWeight: 500 }}>
                       Usage
                     </p>
                     <p style={{ fontSize: "14px", color: status.color, margin: 0, fontWeight: 700 }}>

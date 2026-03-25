@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { IconX, IconSettings, IconArrowLeft, IconChartBar } from "@tabler/icons-react";
+import { IconMenu2, IconSettings, IconArrowLeft, IconChartBar } from "@tabler/icons-react";
 import { useResponsive } from "@/app/hooks/useResponsive";
 import { useTheme } from "@/app/components/useTheme";
 import Usage from "./usage";
@@ -36,13 +36,13 @@ export default function ManageAccount({
   const responsive = useResponsive();
   const { theme } = useTheme();
   const isDark = theme === "dark";
-  const headerColor = isDark ? "#ffffff" : "#0f172a";
-  const subheaderColor = isDark ? "rgba(255,255,255,0.75)" : "rgba(15,23,42,0.8)";
-  const sidebarText = isDark ? "#F8FAFC" : "#0f172a";
-  const sidebarTextMuted = isDark ? "rgba(248, 250, 252, 0.72)" : "rgba(15, 23, 42, 0.7)";
-  const sidebarTextActive = isDark ? "#FFFFFF" : "#0f172a";
-  const bodyText = isDark ? "#f8fafc" : "#0f172a";
-  const bodyTextMuted = isDark ? "rgba(248, 250, 252, 0.7)" : "rgba(15, 23, 42, 0.68)";
+  const headerColor = "var(--color-text)";
+  const subheaderColor = "var(--color-text-muted)";
+  const sidebarText = "var(--sidebar-text)";
+  const sidebarTextMuted = "var(--color-text-muted)";
+  const sidebarTextActive = "var(--color-text)";
+  const bodyText = "var(--color-text)";
+  const bodyTextMuted = "var(--color-text-muted)";
   const [activeSection, setActiveSection] = useState<NavSection>("dashboard");
   const [dashboardView, setDashboardView] = useState<DashboardView>("usage");
   const [showMobileSidebar, setShowMobileSidebar] = useState(false);
@@ -103,6 +103,32 @@ const queryExternalUser = externalUserId || profileName;  // ← ADD
         />
       )}
 
+      {(showMobileSidebar && responsive.isMobile && activeSection !== "dashboard") && (
+        <button
+          onClick={() => setShowMobileSidebar(false)}
+          aria-label="Close sidebar"
+          style={{
+            position: "fixed",
+            top: 14,
+            right: 14,
+            zIndex: 1200,
+            width: 44,
+            height: 44,
+            borderRadius: 10,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "rgba(255, 255, 255, 0.25)",
+            border: "1px solid var(--manageaccount-border)",
+            color: "var(--manageaccount-highlight)",
+            cursor: "pointer",
+            padding: 0,
+          }}
+        >
+          <IconMenu2 size={20} strokeWidth={2} />
+        </button>
+      )}
+
       {/* Left Sidebar Navigation */}
       {(!responsive.isMobile || showMobileSidebar) && (
         <div style={{
@@ -123,30 +149,7 @@ const queryExternalUser = externalUserId || profileName;  // ← ADD
           top: responsive.isMobile ? 0 : "auto",
           zIndex: responsive.isMobile ? 1000 : "auto",
         }}>
-          {/* Mobile Close Button */}
-          {responsive.isMobile && (
-            <div style={{
-              display: "flex",
-              justifyContent: "flex-end",
-              paddingRight: "16px",
-              paddingBottom: "8px",
-              borderBottom: "1px solid rgba(255, 255, 255, 0.1)",
-            }}>
-              <button
-                onClick={() => setShowMobileSidebar(false)}
-                style={{
-                  background: "rgba(255, 255, 255, 0.1)",
-                  border: "1px solid rgba(255, 255, 255, 0.2)",
-                  borderRadius: "8px",
-                  padding: "8px",
-                  cursor: "pointer",
-                  color: "#ffffff",
-                }}
-              >
-                <IconX size={20} strokeWidth={2} />
-              </button>
-            </div>
-          )}
+          {/* Mobile Close Button removed — UI simplified */}
 
           {navItems.map(({ id, label, icon: Icon }) => (
             <div key={id}>
@@ -267,13 +270,13 @@ const queryExternalUser = externalUserId || profileName;  // ← ADD
             {!responsive.isDesktop && (
               <button
                 onClick={handleBackToDashboard}
-                style={{
-                  background: "rgba(255, 255, 255, 0.1)",
-                  border: "1px solid rgba(255, 255, 255, 0.2)",
+                  style={{
+                  background: "rgba(255, 255, 255, 0.08)",
+                  border: "1px solid rgba(0,0,0,0.06)",
                   borderRadius: "8px",
                   padding: "8px",
                   cursor: "pointer",
-                  color: "#ffffff",
+                  color: headerColor,
                   marginBottom: "12px",
                   display: "flex",
                   alignItems: "center",
@@ -295,7 +298,7 @@ const queryExternalUser = externalUserId || profileName;  // ← ADD
             </h1>
             <p style={{
               fontSize: responsive.isMobile ? "13px" : "15px",
-              color: "rgba(255, 255, 255, 0.6)",
+              color: subheaderColor,
               margin: 0,
             }}>
               {activeSection === "dashboard" && dashboardView === "usage"      && "Monitor your API usage, request counts, and resource consumption over time."}
@@ -345,7 +348,7 @@ const queryExternalUser = externalUserId || profileName;  // ← ADD
                 <h2 style={{
                   fontSize: responsive.isMobile ? "20px" : "24px",
                   fontWeight: 700,
-                  color: "#ffffff",
+                  color: headerColor,
                   margin: 0,
                   marginBottom: "16px",
                 }}>
@@ -362,10 +365,10 @@ const queryExternalUser = externalUserId || profileName;  // ← ADD
                     {accounts[0]?.plan || "Free"}
                   </span>
                 </h2>
-                <p style={{ fontSize: "14px", color: "rgba(255,255,255,0.8)", margin: 0 }}>
+                <p style={{ fontSize: "14px", color: bodyTextMuted, margin: 0 }}>
                   {accounts[0]?.email}
                 </p>
-                <p style={{ fontSize: "13px", color: "rgba(255,255,255,0.6)", margin: "8px 0 0" }}>
+                <p style={{ fontSize: "13px", color: bodyTextMuted, margin: "8px 0 0" }}>
                   Created on {accounts[0]?.createdAt}
                 </p>
               </div>
