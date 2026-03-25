@@ -136,7 +136,7 @@ const queryExternalUser = externalUserId || profileName;  // ← ADD
           <div style={{ padding: "0 16px 8px" }}>
             <div
               style={{
-                fontSize: 20,
+                fontSize: 20  ,
                 fontWeight: 900,
                 letterSpacing: 0.8,
                 textTransform: "uppercase",
