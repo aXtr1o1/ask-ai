@@ -129,8 +129,10 @@ export default function UpgradePlan({ onManageAccountClick, onPlanChange }: Upgr
       {/* Header - Fixed */}
       <div style={{
         width: "100%",
-        padding: responsive.isMobile ? "14px" : responsive.isTablet ? "20px" : "28px",
+        paddingTop: responsive.isMobile ? "14px" : responsive.isTablet ? "20px" : "28px",
+        paddingRight: responsive.isMobile ? "14px" : responsive.isTablet ? "20px" : "28px",
         paddingBottom: responsive.isMobile ? "10px" : "14px",
+        paddingLeft: responsive.isMobile ? "14px" : responsive.isTablet ? "20px" : "28px",
         boxSizing: "border-box",
         textAlign: "center",
         flexShrink: 0,
@@ -246,9 +248,10 @@ export default function UpgradePlan({ onManageAccountClick, onPlanChange }: Upgr
         className="upgrade-plan-scroll-container"
         style={{
           width: "100%",
-          padding: responsive.isMobile ? "14px" : responsive.isTablet ? "20px" : "28px",
           paddingTop: responsive.isMobile ? "10px" : responsive.isTablet ? "14px" : "14px",
+          paddingRight: responsive.isMobile ? "14px" : responsive.isTablet ? "20px" : "28px",
           paddingBottom: responsive.isMobile ? "20px" : "28px",
+          paddingLeft: responsive.isMobile ? "14px" : responsive.isTablet ? "20px" : "28px",
           boxSizing: "border-box",
           flex: 1,
           minHeight: 0,
@@ -527,8 +530,10 @@ export default function UpgradePlan({ onManageAccountClick, onPlanChange }: Upgr
       {/* Footer Note */}
       <div style={{
         width: "100%",
-        padding: responsive.isMobile ? "14px" : responsive.isTablet ? "20px" : "28px",
         paddingTop: responsive.isMobile ? "10px" : "14px",
+        paddingRight: responsive.isMobile ? "14px" : responsive.isTablet ? "20px" : "28px",
+        paddingBottom: responsive.isMobile ? "14px" : responsive.isTablet ? "20px" : "28px",
+        paddingLeft: responsive.isMobile ? "14px" : responsive.isTablet ? "20px" : "28px",
         boxSizing: "border-box",
         borderTop: "1px solid var(--color-border)",
         flexShrink: 0,

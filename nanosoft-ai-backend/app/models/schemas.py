@@ -158,6 +158,7 @@ class ClientInsertionRequest(BaseModel):
 class ClientInsertionRequest(BaseModel):
     """Request schema for client insertion"""
     userId: str
+    clientName: str
     userName: str
     service: str
     token: str

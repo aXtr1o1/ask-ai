@@ -4,11 +4,20 @@ import React, { useState, useEffect } from "react";
 import { useResponsive } from "@/app/hooks/useResponsive";
 import { useTheme } from "@/app/components/useTheme";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import { useUsageStats } from "@/app/hooks/useUsageStats";
 
-export default function Usage() {
+interface UsageProps {
+  externalUserId: string;  // ← ADD
+  subUserName: string;
+}
+
+export default function Usage({ externalUserId, subUserName }: UsageProps) {
   const responsive = useResponsive();
   const { theme } = useTheme();
   const [animated, setAnimated] = useState(false);
+
+  // ── Fetch real data from backend ──────────────────────────
+  const { stats, loading, error, refetch } = useUsageStats(externalUserId, subUserName);  
 
   useEffect(() => {
     setAnimated(true);
@@ -16,178 +25,158 @@ export default function Usage() {
 
   const styles = `
     @keyframes slideInUp {
-      from {
-        opacity: 0;
-        transform: translateY(30px);
-      }
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
+      from { opacity: 0; transform: translateY(30px); }
+      to   { opacity: 1; transform: translateY(0);    }
     }
-
     @keyframes fadeIn {
       from { opacity: 0; }
-      to { opacity: 1; }
+      to   { opacity: 1; }
     }
-
-    @keyframes glow {
-      0%, 100% {
-        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 currentColor;
-      }
-      50% {
-        box-shadow: 0 12px 48px rgba(0, 0, 0, 0.6), inset 0 1px 0 currentColor;
-      }
-    }
-
-    @keyframes shimmer {
-      0% {
-        background-position: -1000px 0;
-      }
-      100% {
-        background-position: 1000px 0;
-      }
-    }
-
     @keyframes pulse-dot {
-      0%, 100% { opacity: 0.8; transform: scale(1); }
-      50% { opacity: 0.4; transform: scale(1.2); }
+      0%, 100% { opacity: 0.8; transform: scale(1);   }
+      50%       { opacity: 0.4; transform: scale(1.2); }
     }
 
-    @keyframes float-up {
-      0% {
-        transform: translateY(0px);
-        opacity: 0;
-      }
-      50% {
-        opacity: 1;
-      }
-      100% {
-        transform: translateY(-20px);
-        opacity: 0;
-      }
+    /* prevent focus outline/box on chart clicks */
+    .recharts-wrapper,
+    .recharts-wrapper *,
+    .recharts-wrapper :focus {
+      outline: none !important;
+      box-shadow: none !important;
+    }
+
+    .recharts-surface,
+    .recharts-curve,
+    .recharts-layer,
+    .recharts-wrapper svg {
+      outline: none !important;
     }
   `;
 
-  // Chart data for metrics
-  const textRequestsData = [
-    { date: "Day 1", value: 249 },
-    { date: "Day 2", value: 498 },
-    { date: "Day 3", value: 872 },
-    { date: "Day 4", value: 1245 },
-  ];
-
-  const textUsageData = [
-    { date: "Day 1", value: 575000 },
-    { date: "Day 2", value: 1150000 },
-    { date: "Day 3", value: 1725000 },
-    { date: "Day 4", value: 2300000 },
-  ];
-
-  const audioRequestsData = [
-    { date: "Day 1", value: 31 },
-    { date: "Day 2", value: 62 },
-    { date: "Day 3", value: 109 },
-    { date: "Day 4", value: 156 },
-  ];
-
-  const audioUsageData = [
-    { date: "Day 1", value: 39 },
-    { date: "Day 2", value: 78 },
-    { date: "Day 3", value: 117 },
-    { date: "Day 4", value: 156 },
-  ];
-
-  const graphOperationsData = [
-    { date: "Day 1", value: 8 },
-    { date: "Day 2", value: 16 },
-    { date: "Day 3", value: 28 },
-    { date: "Day 4", value: 42 },
-  ];
-
   const formatNumber = (num: number) => {
-    if (num >= 1000000) {
-      return ((num / 1000000).toFixed(1)).replace(/\.0$/, "") + "M";
-    }
-    if (num >= 1000) {
-      return ((num / 1000).toFixed(1)).replace(/\.0$/, "") + "K";
-    }
+    if (num >= 1_000_000) return (num / 1_000_000).toFixed(1).replace(/\.0$/, "") + "M";
+    if (num >= 1_000)     return (num / 1_000).toFixed(1).replace(/\.0$/, "")     + "K";
     return num.toLocaleString();
   };
 
-  const calculatePercentage = (used: number, limit: number) => {
-    if (limit === 0) return 0;
-    return Math.round((used / limit) * 100);
+  const isDark    = theme === "dark";
+  const textMuted = isDark ? "rgba(255,255,255,0.6)" : "rgba(0,0,0,0.55)";
+  const textFaint = isDark ? "rgba(255,255,255,0.45)" : "rgba(0,0,0,0.40)";
+
+  // ── Loading state ─────────────────────────────────────────
+  if (loading) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "60px 0" }}>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ display: "flex", gap: 6, justifyContent: "center", marginBottom: 8 }}>
+            {[0, 1, 2].map(i => (
+              <span key={i} style={{
+                display: "inline-block", width: 8, height: 8,
+                borderRadius: "50%", background: "#d4af37",
+                animation: `bounce 1.2s ease-in-out ${i * 0.2}s infinite`,
+              }} />
+            ))}
+          </div>
+          <span style={{ fontSize: 13, color: "var(--tile-card-text-muted)" }}>Loading usage stats…</span>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Error state ───────────────────────────────────────────
+  if (error || !stats) {
+    return (
+      <div style={{ padding: "40px 0", textAlign: "center" }}>
+        <p style={{ color: "rgba(255,255,255,0.5)", fontSize: 14 }}>
+          {error || "No usage data available"}
+        </p>
+        <button
+          onClick={refetch}
+          style={{
+            marginTop: 12,
+            padding: "8px 20px",
+            borderRadius: 8,
+            border: "1px solid var(--color-primary)",
+            background: "transparent",
+            color: "var(--color-primary)",
+            cursor: "pointer",
+            fontSize: 13,
+          }}
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  // ── Build chart data from history ─────────────────────────
+  // history is array of { date, credits_used, audio_seconds, graph_count, request_count }
+  const history = stats.history || [];
+
+  // Format date label: "2026-03-20" → "Mar 20"
+  const formatDateLabel = (dateStr: string) => {
+    try {
+      const d = new Date(dateStr);
+      return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    } catch {
+      return dateStr;
+    }
   };
 
-  const usageMetrics = [
+  const creditsChartData  = history.map(h => ({ date: formatDateLabel(h.date), value: h.credits_used  }));
+  const audioChartData    = history.map(h => ({ date: formatDateLabel(h.date), value: h.audio_seconds }));
+  const graphChartData    = history.map(h => ({ date: formatDateLabel(h.date), value: h.graph_count   }));
+  const requestChartData  = history.map(h => ({ date: formatDateLabel(h.date), value: h.request_count }));
+  const tokensChartData   = history.map(h => ({ date: formatDateLabel(h.date), value: h.tokens_used   }));
+
+  // ── KPI cards ─────────────────────────────────────────────
+  const kpiMetrics = [
     {
-      id: "text-request",
-      label: "Text API Request",
-      value: "1.2K",
-      unit: "requests",
-      subtext: "This month",
-      color: "rgba(100, 150, 255, 0.3)",
-      borderColor: "rgba(100, 150, 255, 0.5)",
+      id:         "credits",
+      label:      "Credits Used",
+      value:      formatNumber(stats.credits_used),
+      unit:       "credits",
+      subtext:    `${stats.credits_remaining} remaining`,
       chartColor: "#6496ff",
-      data: textRequestsData,
+      data:       creditsChartData,
     },
     {
-      id: "text-usage",
-      label: "Text Usage",
-      value: "2.3M",
-      unit: "tokens",
-      subtext: "65% of limit",
-      color: "rgba(100, 200, 150, 0.3)",
-      borderColor: "rgba(100, 200, 150, 0.5)",
-      chartColor: "#64c896",
-      data: textUsageData,
-    },
-    {
-      id: "audio-request",
-      label: "Audio API Request",
-      value: "342",
-      unit: "requests",
-      subtext: "This month",
-      color: "rgba(255, 150, 100, 0.3)",
-      borderColor: "rgba(255, 150, 100, 0.5)",
+      id:         "audio",
+      label:      "Audio Usage",
+      value:      formatNumber(stats.audio_seconds),
+      unit:       "seconds",
+      subtext:    `of ${formatNumber(stats.audio_limit)} limit`,
       chartColor: "#ff9664",
-      data: audioRequestsData,
+      data:       audioChartData,
     },
     {
-      id: "audio-usage",
-      label: "Audio Usage",
-      value: "156",
-      unit: "minutes",
-      subtext: "42% of limit",
-      color: "rgba(200, 100, 255, 0.3)",
-      borderColor: "rgba(200, 100, 255, 0.5)",
-      chartColor: "#c864ff",
-      data: audioUsageData,
-    },
-    {
-      id: "graph-operations",
-      label: "Graph Operations",
-      value: "42",
-      unit: "operations",
-      subtext: "This month",
-      color: "rgba(255, 200, 100, 0.3)",
-      borderColor: "rgba(255, 200, 100, 0.5)",
+      id:         "graph",
+      label:      "Graph Operations",
+      value:      formatNumber(stats.graph_count),
+      unit:       "operations",
+      subtext:    `of ${formatNumber(stats.graph_limit)} limit`,
       chartColor: "#ffc864",
-      data: graphOperationsData,
+      data:       graphChartData,
+    },
+    {
+      id:         "tokens",
+      label:      "Tokens Available",
+      value:      formatNumber(stats.tokens_remaining),
+      unit:       "tokens",
+      subtext:    `of ${formatNumber(stats.token_limit)} limit`,
+      chartColor: "#64c896",
+      data:       tokensChartData,
     },
   ];
 
-  const kpiMetrics = usageMetrics.filter((m) =>
-    ["text-request", "text-usage", "audio-request", "audio-usage"].includes(m.id)
-  );
-  const textUsageMetric = usageMetrics.find((m) => m.id === "text-usage")!;
-  const audioUsageMetric = usageMetrics.find((m) => m.id === "audio-usage")!;
-  const breakdownMetrics = kpiMetrics;
+  // Trend charts — credits and audio
+  const trendMetrics = [
+    { ...kpiMetrics[0], trendLabel: "Credits Usage Trend"  },
+    { ...kpiMetrics[1], trendLabel: "Audio Usage Trend"    },
+  ];
 
-  const isDark = theme === "dark";
-  const textMuted = isDark ? "rgba(255, 255, 255, 0.6)" : "rgba(0, 0, 0, 0.55)";
-  const textFaint = isDark ? "rgba(255, 255, 255, 0.45)" : "rgba(0, 0, 0, 0.40)";
+  // Breakdown metrics for day-by-day table
+  const breakdownMetrics = kpiMetrics;
 
   return (
     <>
@@ -198,16 +187,13 @@ export default function Usage() {
         gap: "32px",
         background: "transparent",
         color: "var(--manageaccount-text)",
-        border: `1px solid var(--manageaccount-border)`,
+        border: "1px solid var(--manageaccount-border)",
         minHeight: 0,
         width: "100%",
       }}>
-        <div style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: "16px",
-        }}>
-          {/* KPI strip */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+
+          {/* ── KPI Strip ────────────────────────────────────── */}
           <div style={{
             display: "grid",
             gridTemplateColumns: responsive.isDesktop ? "repeat(4, 1fr)" : "repeat(2, 1fr)",
@@ -217,242 +203,218 @@ export default function Usage() {
               <div
                 key={metric.id}
                 style={{
-                  background: `linear-gradient(135deg, rgba(212, 175, 55, ${isDark ? 0.12 : 0.22}) 0%, rgba(255, 255, 255, 0.02) 100%)`,
-                  border: `1.5px solid rgba(212, 175, 55, ${isDark ? 0.35 : 0.30})`,
+                  background: `linear-gradient(135deg, rgba(212,175,55,${isDark ? 0.12 : 0.22}) 0%, rgba(255,255,255,0.02) 100%)`,
+                  border: `1.5px solid rgba(212,175,55,${isDark ? 0.35 : 0.30})`,
                   borderRadius: "18px",
                   padding: "16px 16px 14px",
                   position: "relative",
                   overflow: "hidden",
                   backdropFilter: "blur(10px)",
-                  boxShadow: `0 10px 36px rgba(0, 0, 0, ${isDark ? 0.35 : 0.18})`,
-                  cursor: "default",
+                  boxShadow: `0 10px 36px rgba(0,0,0,${isDark ? 0.35 : 0.18})`,
                   animation: animated ? `slideInUp 0.55s ease-out ${index * 0.08}s both` : "none",
                 }}
               >
-                <div
-                  style={{
-                    position: "absolute",
-                    inset: 0,
-                    background: `radial-gradient(circle at 30% 10%, ${metric.chartColor}18 0%, transparent 55%)`,
-                    pointerEvents: "none",
-                  }}
-                />
+                <div style={{
+                  position: "absolute", inset: 0,
+                  background: `radial-gradient(circle at 30% 10%, ${metric.chartColor}18 0%, transparent 55%)`,
+                  pointerEvents: "none",
+                }} />
 
-                <div style={{ position: "relative", zIndex: 1, display: "flex", gap: "12px", alignItems: "flex-start" }}>
+                <div style={{ position: "relative", zIndex: 1, display: "flex", flexDirection: "column", gap: "10px" }}>
+                  <p style={{
+                    fontSize: "11px", color: textMuted, margin: 0,
+                    fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.6px",
+                    whiteSpace: "normal", overflow: "visible", textOverflow: "unset",
+                    lineHeight: "1.2",
+                  }}>
+                    {metric.label}
+                  </p>
+
+                  {/* Mini sparkline chart under the graph header (full width) */}
+                  {metric.data.length > 0 && (
+                    <div style={{ width: "100%", height: "70px" }}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart
+                          data={metric.data}
+                          margin={{ top: 4, right: 8, left: 8, bottom: 4 }}
+                        >
+                          <XAxis dataKey="date" hide />
+                          <YAxis hide />
+                          <Line
+                            type="monotone" dataKey="value"
+                            stroke={metric.chartColor} strokeWidth={2.5}
+                            dot={false} isAnimationActive={false}
+                            strokeLinejoin="round"
+                            strokeLinecap="round"
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
+
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <p style={{
-                      fontSize: "11px",
-                      color: textMuted,
-                      margin: 0,
-                      fontWeight: 700,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.6px",
-                      whiteSpace: "normal",
-                      overflow: "visible",
-                      textOverflow: "unset",
-                      wordBreak: "break-word",
-                    }}>
-                      {metric.label}
-                    </p>
-
-                    <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginTop: "8px" }}>
+                    <div style={{ display: "flex", alignItems: "baseline", gap: "8px" }}>
                       <p style={{
-                        fontSize: "26px",
-                        fontWeight: 900,
-                        margin: 0,
-                        letterSpacing: "-0.4px",
-                        color: isDark ? "transparent" : "#0f172a",
-                        background: isDark ? `linear-gradient(135deg, ${metric.chartColor}, #ffffff)` : "none",
-                        backgroundClip: isDark ? "text" : "unset",
-                        WebkitBackgroundClip: isDark ? "text" : "unset",
-                        WebkitTextFillColor: isDark ? "transparent" : "initial",
+                        fontSize: "26px", fontWeight: 900, margin: 0,
+                        color: "var(--tile-card-text)",
                       }}>
                         {metric.value}
                       </p>
-                      <p style={{
-                        fontSize: "12px",
-                        fontWeight: 800,
-                        margin: 0,
-                        color: metric.borderColor,
-                        opacity: 0.95,
-                      }}>
+                      <p style={{ fontSize: "12px", fontWeight: 800, margin: 0, color: metric.chartColor, opacity: 0.95 }}>
                         {metric.unit}
                       </p>
                     </div>
-
-                    <p style={{
-                      fontSize: "11px",
-                      color: textFaint,
-                      margin: "6px 0 0",
-                      fontWeight: 600,
-                    }}>
+                    <p style={{ fontSize: "11px", color: textFaint, margin: "6px 0 0", fontWeight: 600 }}>
                       {metric.subtext}
                     </p>
-                  </div>
-
-                  <div style={{ width: "96px", height: "46px", flexShrink: 0 }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={metric.data}>
-                        <XAxis dataKey="date" hide />
-                        <YAxis hide />
-                        <Line
-                          type="linear"
-                          dataKey="value"
-                          stroke={metric.chartColor}
-                          strokeWidth={2.5}
-                          dot={false}
-                          isAnimationActive={false}
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
                   </div>
                 </div>
               </div>
             ))}
           </div>
 
-          {/* Trends */}
+          {/* ── Trend Charts ──────────────────────────────────── */}
           <div style={{
             display: "grid",
             gridTemplateColumns: responsive.isDesktop ? "repeat(2, 1fr)" : "1fr",
             gap: "16px",
           }}>
-            {[textUsageMetric, audioUsageMetric].map((metric, index) => (
+            {trendMetrics.map((metric, index) => (
               <div
-                key={metric.id}
+                key={metric.id + "-trend"}
                 style={{
-                  background: `linear-gradient(135deg, rgba(212, 175, 55, ${isDark ? 0.10 : 0.20}) 0%, rgba(255, 255, 255, 0.02) 100%)`,
-                  border: `1.5px solid rgba(212, 175, 55, ${isDark ? 0.35 : 0.30})`,
+                  background: `linear-gradient(135deg, rgba(212,175,55,${isDark ? 0.10 : 0.20}) 0%, rgba(255,255,255,0.02) 100%)`,
+                  border: `1.5px solid rgba(212,175,55,${isDark ? 0.35 : 0.30})`,
                   borderRadius: "18px",
                   padding: "16px",
                   backdropFilter: "blur(10px)",
-                  boxShadow: `0 14px 52px rgba(0, 0, 0, ${isDark ? 0.34 : 0.18})`,
-                  overflow: "hidden",
                   animation: animated ? `slideInUp 0.6s ease-out ${0.15 + index * 0.12}s both` : "none",
                 }}
               >
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" }}>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <div>
                     <p style={{ margin: 0, fontSize: 12, fontWeight: 800, color: textMuted, textTransform: "uppercase", letterSpacing: "0.6px" }}>
                       Trend
                     </p>
-                    <p style={{ margin: 0, fontSize: 18, fontWeight: 900, color: isDark ? "#ffffff" : "#0f172a" }}>
-                      {metric.label}
+                    <p style={{ margin: 0, fontSize: 18, fontWeight: 900, color: "var(--tile-card-text)" }}>
+                      {metric.trendLabel}
                     </p>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <div style={{ width: 9, height: 9, borderRadius: 999, background: metric.chartColor, boxShadow: `0 0 18px ${metric.chartColor}aa` }} />
-                    <p style={{ margin: 0, fontSize: 11, fontWeight: 800, color: textMuted, textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                    <p style={{ margin: 0, fontSize: 11, fontWeight: 800, color: textMuted, textTransform: "uppercase" }}>
                       Active
                     </p>
                   </div>
                 </div>
 
-                <div style={{ height: 260 }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={metric.data}>
-                      <CartesianGrid
-                        strokeDasharray="4 4"
-                        stroke={isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.08)"}
-                        vertical={false}
-                      />
-                      <XAxis
-                        dataKey="date"
-                        tick={{ fontSize: 11, fill: isDark ? "rgba(255,255,255,0.55)" : "rgba(0,0,0,0.55)" }}
-                        axisLine={{ stroke: isDark ? "rgba(255,255,255,0.10)" : "rgba(0,0,0,0.10)" }}
-                        tickLine={false}
-                      />
-                      <YAxis
-                        tick={{ fontSize: 11, fill: isDark ? "rgba(255,255,255,0.55)" : "rgba(0,0,0,0.55)" }}
-                        axisLine={false}
-                        tickLine={false}
-                        width={42}
-                        domain={["auto", "auto"]}
-                      />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: isDark ? "rgba(20, 20, 25, 0.95)" : "rgba(240, 240, 245, 0.95)",
-                          border: `1px solid rgba(212, 175, 55, ${isDark ? 0.40 : 0.35})`,
-                          borderRadius: "10px",
-                          color: isDark ? "#ffffff" : "#000000",
-                        }}
-                        cursor={{ stroke: metric.chartColor, strokeOpacity: 0.35 }}
-                        formatter={(val: unknown) => [formatNumber(Number(val)), metric.unit]}
-                      />
-                      <Line
-                        type="linear"
-                        dataKey="value"
-                        stroke={metric.chartColor}
-                        strokeWidth={2.8}
-                        dot={{ r: 3, fill: metric.chartColor }}
-                        activeDot={{ r: 6 }}
-                        isAnimationActive={false}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
+                {metric.data.length === 0 ? (
+                  <div style={{ height: 260, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <p style={{ color: textFaint, fontSize: 13 }}>No history data yet</p>
+                  </div>
+                ) : (
+                  <div style={{ height: 260 }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={metric.data}>
+                        <CartesianGrid
+                          strokeDasharray="4 4"
+                          stroke="var(--color-border)"
+                          vertical={false}
+                        />
+                        <XAxis
+                          dataKey="date"
+                          tick={{ fontSize: 11, fill: "var(--tile-card-text-muted)" }}
+                          axisLine={{ stroke: "var(--color-border)" }}
+                          tickLine={false}
+                        />
+                        <YAxis
+                          tick={{ fontSize: 11, fill: "var(--tile-card-text-muted)" }}
+                          axisLine={false} tickLine={false} width={42}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: isDark ? "rgba(20,20,25,0.95)" : "rgba(240,240,245,0.95)",
+                            border: `1px solid rgba(212,175,55,${isDark ? 0.40 : 0.35})`,
+                            borderRadius: "10px",
+                            color: "var(--tile-card-text)",
+                          }}
+                          formatter={(val: unknown) => [formatNumber(Number(val)), metric.unit]}
+                        />
+                        <Line
+                          type="monotone" dataKey="value"
+                          stroke={metric.chartColor} strokeWidth={2.8}
+                          dot={{ r: 3, fill: metric.chartColor }}
+                          activeDot={{ r: 6 }}
+                          isAnimationActive={false}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
               </div>
             ))}
           </div>
 
-          {/* Compact day breakdown */}
+          {/* ── Day-by-day Breakdown ──────────────────────────── */}
           <div style={{
-            background: `linear-gradient(135deg, rgba(212, 175, 55, ${isDark ? 0.08 : 0.18}) 0%, rgba(255, 255, 255, 0.02) 100%)`,
-            border: `1.5px solid rgba(212, 175, 55, ${isDark ? 0.35 : 0.30})`,
+            background: `linear-gradient(135deg, rgba(212,175,55,${isDark ? 0.08 : 0.18}) 0%, rgba(255,255,255,0.02) 100%)`,
+            border: `1.5px solid rgba(212,175,55,${isDark ? 0.35 : 0.30})`,
             borderRadius: "18px",
             padding: "16px",
             backdropFilter: "blur(10px)",
-            boxShadow: `0 12px 44px rgba(0, 0, 0, ${isDark ? 0.30 : 0.18})`,
-            overflow: "hidden",
           }}>
-            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, marginBottom: 12 }}>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 12 }}>
               <div>
                 <p style={{ margin: 0, fontSize: 12, fontWeight: 900, color: textMuted, textTransform: "uppercase", letterSpacing: "0.6px" }}>
-                  Last 4 Days
+                  Last {history.length} Days
                 </p>
-                <p style={{ margin: "6px 0 0", fontSize: 16, fontWeight: 900, color: isDark ? "#ffffff" : "#0f172a" }}>
+                <p style={{ margin: "6px 0 0", fontSize: 16, fontWeight: 900, color: "var(--tile-card-text)" }}>
                   Day-by-day breakdown
                 </p>
               </div>
-              <p style={{ margin: 0, fontSize: 11, color: textFaint, fontWeight: 700 }}>
-                Demo values
-              </p>
             </div>
 
-            <div style={{
-              display: "grid",
-              gridTemplateColumns: responsive.isDesktop ? "repeat(4, 1fr)" : "repeat(2, 1fr)",
-              gap: 12,
-            }}>
-              {breakdownMetrics.map((metric) => (
-                <div
-                  key={metric.id}
-                  style={{
-                    borderRadius: 14,
-                    padding: 12,
-                    border: `1.5px solid rgba(212, 175, 55, ${isDark ? 0.22 : 0.18})`,
-                    background: `linear-gradient(180deg, rgba(0,0,0,${isDark ? 0.08 : 0.04}) 0%, rgba(255,255,255,0.01) 100%)`,
-                  }}
-                >
-                  <p style={{ margin: 0, fontSize: 12, fontWeight: 900, color: textMuted, textTransform: "uppercase", letterSpacing: "0.55px" }}>
-                    {metric.label}
-                  </p>
-                  <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
-                    {metric.data.map((row: { date: string; value: number }) => (
-                      <div key={row.date} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-                        <span style={{ fontSize: 11, fontWeight: 800, color: textFaint }}>{row.date}</span>
-                        <span style={{ fontSize: 11, fontWeight: 900, color: metric.chartColor }}>
-                          {formatNumber(row.value)}
-                        </span>
-                      </div>
-                    ))}
+            {history.length === 0 ? (
+              <p style={{ color: textFaint, fontSize: 13, textAlign: "center", padding: "20px 0" }}>
+                No history data yet — will populate as you use the app
+              </p>
+            ) : (
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: responsive.isDesktop ? "repeat(4, 1fr)" : "repeat(2, 1fr)",
+                gap: 12,
+              }}>
+                {breakdownMetrics.map((metric) => (
+                  <div
+                    key={metric.id + "-breakdown"}
+                    style={{
+                      borderRadius: 14,
+                      padding: 12,
+                      border: `1.5px solid rgba(212,175,55,${isDark ? 0.22 : 0.18})`,
+                      background: `linear-gradient(180deg, rgba(0,0,0,${isDark ? 0.08 : 0.04}) 0%, rgba(255,255,255,0.01) 100%)`,
+                    }}
+                  >
+                    <p style={{ margin: 0, fontSize: 12, fontWeight: 900, color: textMuted, textTransform: "uppercase", letterSpacing: "0.55px" }}>
+                      {metric.label}
+                    </p>
+                    <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+                      {metric.data.map((row) => (
+                        <div key={row.date} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                          <span style={{ fontSize: 11, fontWeight: 800, color: textFaint }}>{row.date}</span>
+                          <span style={{ fontSize: 11, fontWeight: 900, color: metric.chartColor }}>
+                            {formatNumber(row.value)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
+
         </div>
-    </div>
+      </div>
     </>
   );
 }

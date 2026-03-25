@@ -125,6 +125,10 @@ export function useVoiceRecorder(
         // togglePlayback checks audioPlaybackRef and if null → creates fresh Audio from new blob
         audioPlaybackRef.current = null;
         setRecordedAudioBlob(blob);
+        // Compute final duration from recording start timestamp to be robust on touch devices
+        const finalDuration = recordingStartTimeRef.current ? Math.floor((Date.now() - recordingStartTimeRef.current) / 1000) : recordingTime;
+        setRecordingTime(finalDuration);
+        setAudioDuration(finalDuration); // Ensure time is available right after recording stops
         stream.getTracks().forEach(t => t.stop());
       };
       recorder.start();
@@ -145,6 +149,11 @@ export function useVoiceRecorder(
       mediaRecorderRef.current.stop();
       setIsRecording(false);
       if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+
+      // Ensure the final recorded length is available immediately after recording stops
+      const finalDuration = recordingStartTimeRef.current ? Math.floor((Date.now() - recordingStartTimeRef.current) / 1000) : recordingTime;
+      setRecordingTime(finalDuration);
+      setAudioDuration(finalDuration);
     }
   };
 
@@ -281,6 +290,24 @@ export function useVoiceRecorder(
       });
     }
 
+    // Preserve the recorded blob's MIME type/codec — do NOT convert format.
+    const blobType = blobToSend.type || "";
+    let fileFormat = "unknown";
+    let codec = "unknown";
+    try {
+      // blobType examples: 'audio/ogg;codecs=opus', 'audio/webm;codecs=opus', 'audio/wav'
+      const parts = blobType.split('/');
+      if (parts.length > 1) {
+        const rest = parts[1];
+        fileFormat = rest.split(';')[0] || rest;
+        const codecMatch = blobType.match(/codecs=([^;]+)/i);
+        if (codecMatch && codecMatch[1]) codec = codecMatch[1];
+        else if (fileFormat === 'wav') codec = 'pcm16';
+      }
+    } catch (e) {
+      // fallback values already set
+    }
+
     const metadata = {
       type: "message",
       messageType: "audio",
@@ -291,8 +318,8 @@ export function useVoiceRecorder(
       subUserName,
       sessionId,
       duration: actualDuration,
-      fileFormat: "ogg",
-      codec: "opus",
+      fileFormat,
+      codec,
       timestamp: Date.now(),
     };
 

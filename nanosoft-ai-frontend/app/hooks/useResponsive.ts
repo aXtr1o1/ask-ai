@@ -8,9 +8,51 @@ interface ResponsiveInfo {
   isMobile: boolean;      // width ≤ 640px — narrow phones, single column layout
   isTablet: boolean;      // 641px ≤ width ≤ 1024px — tablets, two-column layout
   isDesktop: boolean;     // width > 1024px — desktop/laptop, full layout
+  isTouch: boolean;       // true when device uses touch input (mobile/tablet/touchscreen)
   screen: ScreenType;     // Current screen type for conditional rendering
+  isDesktopLayout?: boolean; // true for desktop-like layout (desktop + tablet)
+  sizingScreen?: ScreenType; // screen used for sizing helpers (tablet -> mobile)
   width: number;          // Actual window.innerWidth for custom calculations
   height: number;         // Actual window.innerHeight for custom calculations
+}
+
+// Map screen type directly (tablet uses tablet sizing now)
+export function normalizeSizing(screen: ScreenType): ScreenType {
+  return screen;
+}
+
+// Detect touch-capable devices. Uses multiple heuristics for robustness.
+export function detectTouchDevice(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const hasTouchEvents = 'ontouchstart' in window;
+    const hasMaxTouchPoints = typeof navigator !== 'undefined' && (navigator as any).maxTouchPoints > 0;
+    const coarsePointer = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+    return !!hasTouchEvents || !!hasMaxTouchPoints || !!coarsePointer;
+  } catch (e) {
+    return false;
+  }
+}
+
+export function isDesktopLike(screen: ScreenType): boolean {
+  return screen === 'desktop' || screen === 'tablet';
+}
+
+// Tablet/iPad hybrid mapping: desktop-layout for 641-1024 and tablet sizing, not mobile auto size
+export function getHybridResponsiveState(width: number): {
+  screen: ScreenType;
+  isDesktopLayout: boolean;
+  sizingScreen: ScreenType;
+} {
+  if (width <= 640) {
+    return { screen: 'mobile', isDesktopLayout: false, sizingScreen: 'mobile' };
+  }
+
+  if (width <= 1024) {
+    return { screen: 'tablet', isDesktopLayout: true, sizingScreen: 'tablet' };
+  }
+
+  return { screen: 'desktop', isDesktopLayout: true, sizingScreen: 'desktop' };
 }
 
 
@@ -19,11 +61,15 @@ export function useResponsive(): ResponsiveInfo {
   const getInitialState = (): ResponsiveInfo => {
     if (typeof window === 'undefined') {
       // SSR: default to desktop for initial render
+      const screen: ScreenType = 'desktop';
       return {
         isMobile: false,
         isTablet: false,
         isDesktop: true,
-        screen: 'desktop',
+        isTouch: false,
+        isDesktopLayout: true,
+        screen,
+        sizingScreen: normalizeSizing(screen),
         width: 1024,
         height: 768,
       };
@@ -31,35 +77,19 @@ export function useResponsive(): ResponsiveInfo {
 
     const width = window.innerWidth;
     const height = window.innerHeight;
-    
-    if (width <= 640) {
-      return {
-        isMobile: true,
-        isTablet: false,
-        isDesktop: false,
-        screen: 'mobile',
-        width,
-        height,
-      };
-    } else if (width <= 1024) {
-      return {
-        isMobile: false,
-        isTablet: true,
-        isDesktop: false,
-        screen: 'tablet',
-        width,
-        height,
-      };
-    } else {
-      return {
-        isMobile: false,
-        isTablet: false,
-        isDesktop: true,
-        screen: 'desktop',
-        width,
-        height,
-      };
-    }
+    const hybrid = getHybridResponsiveState(width);
+
+    return {
+      isMobile: hybrid.screen === 'mobile' && !hybrid.isDesktopLayout,
+      isTablet: hybrid.screen === 'tablet',
+      isDesktop: hybrid.screen === 'desktop',
+      isTouch: detectTouchDevice(),
+      isDesktopLayout: hybrid.isDesktopLayout,
+      screen: hybrid.screen,
+      sizingScreen: hybrid.sizingScreen,
+      width,
+      height,
+    };
   };
 
   const [responsive, setResponsive] = useState<ResponsiveInfo>(getInitialState());
@@ -73,35 +103,16 @@ export function useResponsive(): ResponsiveInfo {
       debounceTimer = setTimeout(() => {
         const width = window.innerWidth;
         const height = window.innerHeight;
-
-        let screen: ScreenType;
-        let isMobile: boolean;
-        let isTablet: boolean;
-        let isDesktop: boolean;
-
-        // Determine screen type based on width
-        if (width <= 640) {  // Changed from < 640 to <= 640 to match CSS @media (max-width: 640px)
-          screen = 'mobile';
-          isMobile = true;
-          isTablet = false;
-          isDesktop = false;
-        } else if (width <= 1024) {  // Changed to match @media (max-width: 1024px)
-          screen = 'tablet';
-          isMobile = false;
-          isTablet = true;
-          isDesktop = false;
-        } else {
-          screen = 'desktop';
-          isMobile = false;
-          isTablet = false;
-          isDesktop = true;
-        }
+        const hybrid = getHybridResponsiveState(width);
 
         setResponsive({
-          isMobile,
-          isTablet,
-          isDesktop,
-          screen,
+          isMobile: hybrid.screen === 'mobile' && !hybrid.isDesktopLayout,
+          isTablet: hybrid.screen === 'tablet',
+          isDesktop: hybrid.screen === 'desktop',
+          isTouch: detectTouchDevice(),
+          isDesktopLayout: hybrid.isDesktopLayout,
+          screen: hybrid.screen,
+          sizingScreen: hybrid.sizingScreen,
           width,
           height,
         });
@@ -169,7 +180,8 @@ export function getResponsiveFontSizes(screen: ScreenType): {
   small: string;
   caption: string;
 } {
-  switch (screen) {
+  const s = normalizeSizing(screen);
+  switch (s) {
     case 'mobile':
       return {
         heading: '20px',
@@ -208,7 +220,8 @@ export function getResponsiveSpacing(screen: ScreenType): {
   lg: string;
   xl: string;
 } {
-  switch (screen) {
+  const s = normalizeSizing(screen);
+  switch (s) {
     case 'mobile':
       return {
         xs: '4px',
@@ -245,7 +258,8 @@ export function getResponsiveTileGrid(screen: ScreenType): {
   gap: string;
   minWidth: string;
 } {
-  switch (screen) {
+  const s = normalizeSizing(screen);
+  switch (s) {
     case 'mobile':
       return {
         columns: 'repeat(auto-fit, minmax(100px, 1fr))',
@@ -277,7 +291,8 @@ export function getResponsiveMessageBubble(screen: ScreenType): {
   borderRadius: string;
   maxWidth: string;
 } {
-  switch (screen) {
+  const s = normalizeSizing(screen);
+  switch (s) {
     case 'mobile':
       return {
         fontSize: '13px',
@@ -313,7 +328,8 @@ export function getResponsiveChart(screen: ScreenType): {
   titleSize: string;
   showLegend: boolean;
 } {
-  switch (screen) {
+  const s = normalizeSizing(screen);
+  switch (s) {
     case 'mobile':
       return {
         maxWidth: '100%',
@@ -350,7 +366,8 @@ export function getResponsiveContainer(screen: ScreenType): {
   padding: string;
   borderRadius: string;
 } {
-  switch (screen) {
+  const s = normalizeSizing(screen);
+  switch (s) {
     case 'mobile':
       return {
         maxWidth: '100%',
@@ -382,7 +399,8 @@ export function getResponsiveTable(screen: ScreenType): {
   compactMode: boolean;
   columnsVisible: number;
 } {
-  switch (screen) {
+  const s = normalizeSizing(screen);
+  switch (s) {
     case 'mobile':
       return {
         fontSize: '12px',
@@ -426,8 +444,9 @@ export function getResponsiveSidebar(screen: ScreenType): {
         position: 'fixed',
       };
     case 'tablet':
+      // Use desktop width for tablet so sidebar matches desktop sizing
       return {
-        width: '180px',
+        width: '260px',
         isVisible: true,
         isOverlay: false,
         position: 'relative',
@@ -454,7 +473,8 @@ export function getResponsiveTileDataConfig(screen: ScreenType): {
   compact: boolean;          // Compact value display (abbreviated on mobile)
   truncateLength: number;    // Max characters for values
 } {
-  switch (screen) {
+  const s = normalizeSizing(screen);
+  switch (s) {
     case 'mobile':
       return {
         showFields: ['label', 'value', 'status'],  // Show only essential fields
@@ -496,7 +516,8 @@ export function getResponsiveTableColumns(screen: ScreenType): {
   fontSize: string;
   abbreviateHeaders: boolean;      // Use short column names
 } {
-  switch (screen) {
+  const s = normalizeSizing(screen);
+  switch (s) {
     case 'mobile':
       return {
         visibleColumns: ['name', 'value', 'status'],  // Show only essential columns
@@ -541,7 +562,8 @@ export function getResponsiveChartDisplay(screen: ScreenType): {
   responsiveWidth: string;                          // Chart container width
   containerJustify: 'center' | 'flex-start' | 'space-between';
 } {
-  switch (screen) {
+  const s = normalizeSizing(screen);
+  switch (s) {
     case 'mobile':
       return {
         alignment: 'flex-start',                     // Align to left on mobile
@@ -592,7 +614,8 @@ export function getResponsivePieChartSize(screen: ScreenType): {
   chartWidth: string;
   chartHeight: number;
 } {
-  switch (screen) {
+  const s = normalizeSizing(screen);
+  switch (s) {
     case 'mobile':
       return {
         containerMaxWidth: '100%',
@@ -632,7 +655,8 @@ export function getResponsiveDataFormat(screen: ScreenType): {
   abbreviateUnits: boolean;                  // "hrs" vs "hours"
   showFullLabels: boolean;                   // Full text vs abbreviations
 } {
-  switch (screen) {
+  const s = normalizeSizing(screen);
+  switch (s) {
     case 'mobile':
       return {
         numberFormat: 'compact',              // 1.2K, 3.5M, etc
@@ -677,7 +701,8 @@ export function getResponsiveTileDisplay(screen: ScreenType): {
   cardHeight: string;
   cardPadding: string;
 } {
-  switch (screen) {
+  const s = normalizeSizing(screen);
+  switch (s) {
     case 'mobile':
       return {
         fieldsPerTile: 2,                              // Label + Value only
@@ -906,4 +931,24 @@ export function getSmartFormattedNumber(
   
   // Full format with commas
   return value.toLocaleString('en-US', { maximumFractionDigits: decimals || 2 });
+}
+
+// Returns the sidebar width for desktop and tablet (same as desktop)
+export function getDesktopSidebarWidth(screen: ScreenType): string {
+  // Always use desktop width for desktop and tablet
+  return (screen === 'desktop' || screen === 'tablet') ? '260px' : '180px';
+}
+
+// Returns a style object to center content horizontally and vertically for the current screen size
+export function getCenteredContentStyle(screen: ScreenType): React.CSSProperties {
+  return {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: '100vh',
+    width: screen === 'mobile' ? '100vw' : screen === 'tablet' ? '100vw' : '100vw',
+    margin: 0,
+    padding: 0,
+  };
 }

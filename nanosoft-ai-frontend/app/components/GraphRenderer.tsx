@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { 
   BarChart, 
   Bar, 
@@ -194,8 +194,43 @@ function ChartTypeDropdown({ currentType, onTypeChange }: ChartTypeDropdownProps
   );
 }
 
+// Reusable hook: prevent focus/outline and mousedown focus inside chart containers
+function usePreventChartFocus() {
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+
+    const onFocus = () => {
+      try {
+        const active = document.activeElement as HTMLElement | null;
+        if (active && active !== document.body) active.blur();
+      } catch (e) {
+        // ignore
+      }
+    };
+
+    const onMouseDown = (e: MouseEvent) => {
+      // Prevent mouse/touch from focusing SVG/graphic elements which show outlines
+      e.preventDefault();
+    };
+
+    el.addEventListener('focus', onFocus, true);
+    el.addEventListener('mousedown', onMouseDown, true);
+
+    return () => {
+      el.removeEventListener('focus', onFocus, true);
+      el.removeEventListener('mousedown', onMouseDown, true);
+    };
+  }, []);
+
+  return ref;
+}
+
 // ─── Vertical Bar Chart Component ────────────────────────────────────────────
 export function BarChartRenderer({ graphData, currentChartType, onChartTypeChange }: { graphData: GraphData; currentChartType?: ChartType; onChartTypeChange?: (type: ChartType) => void }) {
+  const chartRef = usePreventChartFocus();
   const tooltipStyle = { 
     background: 'var(--color-bg-alt)', 
     border: '1px solid var(--color-border)', 
@@ -214,7 +249,7 @@ export function BarChartRenderer({ graphData, currentChartType, onChartTypeChang
       </div>
 
       {/* Bar chart fits container width (no forced minWidth — avoids clipped bars + broken scroll) */}
-      <div className="graph-chart-container" style={{ position: 'relative' }}>
+      <div ref={chartRef} className="graph-chart-container" style={{ position: 'relative' }}>
         <div style={{ width: "100%", minWidth: 0, height: "100%", minHeight: 0 }}>
           <ResponsiveContainer width="100%" height="100%">
             <BarChart
@@ -289,6 +324,7 @@ export function BarChartRenderer({ graphData, currentChartType, onChartTypeChang
 
 // ─── Horizontal Bar Chart Component ──────────────────────────────────────────
 export function HorizontalBarChartRenderer({ graphData, currentChartType, onChartTypeChange }: { graphData: GraphData; currentChartType?: ChartType; onChartTypeChange?: (type: ChartType) => void }) {
+  const chartRef = usePreventChartFocus();
   const tooltipStyle = { 
     background: 'var(--color-bg-alt)', 
     border: '1px solid var(--color-border)', 
@@ -307,6 +343,7 @@ export function HorizontalBarChartRenderer({ graphData, currentChartType, onChar
 
       {/* Bar chart container — enlarged & optimized */}
       <div
+        ref={chartRef}
         className="graph-chart-container graph-chart-container--horizontal"
         style={{ position: 'relative', height: chartHeight, maxHeight: '72vh' }}
       >
@@ -385,6 +422,7 @@ export function HorizontalBarChartRenderer({ graphData, currentChartType, onChar
 
 // ─── Line Chart Component ───────────────────────────────────────────────────
 export function LineChartRenderer({ graphData, currentChartType, onChartTypeChange }: { graphData: GraphData; currentChartType?: ChartType; onChartTypeChange?: (type: ChartType) => void }) {
+  const chartRef = usePreventChartFocus();
   const tooltipStyle = { 
     background: 'var(--color-bg-alt)', 
     border: '1px solid var(--color-border)', 
@@ -398,7 +436,7 @@ export function LineChartRenderer({ graphData, currentChartType, onChartTypeChan
       </div>
 
       {/* Line chart container — enlarged & optimized */}
-      <div className="graph-chart-container" style={{ position: 'relative' }}>
+      <div ref={chartRef} className="graph-chart-container" style={{ position: 'relative' }}>
         <div style={{ width: "100%", minWidth: 0, height: "100%", minHeight: 0 }}>
           <ResponsiveContainer width="100%" height="100%">
             <LineChart
@@ -472,13 +510,19 @@ export function LineChartRenderer({ graphData, currentChartType, onChartTypeChan
 // ─── Pie Chart Component ────────────────────────────────────────────────────
 export function PieChartRenderer({ graphData, currentChartType, onChartTypeChange }: { graphData: GraphData; currentChartType?: ChartType; onChartTypeChange?: (type: ChartType) => void }) { 
     const [activeIndex, setActiveIndex] = useState<number | null>(null);
+    const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
     const responsive = useResponsive();
     const chartSize = getResponsivePieChartSize(responsive.screen);
     const tooltipStyle = { 
-    background: 'var(--color-bg-alt)', 
-    border: '1px solid var(--color-border)', 
-    color: 'var(--color-text)' 
-  };
+      background: 'var(--color-bg-alt)', 
+      border: '1px solid var(--color-border)', 
+      color: 'var(--color-text)' 
+    };
+    const minSliceAngle = responsive.isMobile ? 8 : responsive.isTablet ? 5 : 3;
+    const outerRadius = responsive.isMobile ? 98 : responsive.isTablet ? 110 : 120;
+    const innerRadius = responsive.isMobile ? 45 : responsive.isTablet ? 48 : 50;
+    const highlightedIndex = activeIndex !== null ? activeIndex : selectedIndex;
+
     // Prepare pie chart data — limit to top 8 slices for readability
   const pieData = graphData.records.slice(0, 8).map((record) => ({
     name: record[graphData.label_key],
@@ -498,7 +542,11 @@ export function PieChartRenderer({ graphData, currentChartType, onChartTypeChang
       </div>
 
       {/* Pie chart container — responsive size based on screen */}
-      <div className="graph-chart-container" style={{ position: 'relative', maxWidth: chartSize.containerMaxWidth, margin: '0 auto', border: 'none', boxShadow: 'none', overflow: 'hidden' }}>
+      <div
+        ref={usePreventChartFocus()}
+        className="graph-chart-container"
+        style={{ position: 'relative', maxWidth: chartSize.containerMaxWidth, margin: '0 auto', border: 'none', boxShadow: 'none', overflow: 'hidden' }}
+      >
         <div style={{ width: chartSize.chartWidth, minWidth: chartSize.containerMinWidth, height: chartSize.height, display: 'flex', justifyContent: 'center', alignItems: 'center', border: 'none' }}>
           <ResponsiveContainer width="100%" height={chartSize.chartHeight}>
             <PieChart margin={{ top: 10, right: 80, bottom: 10, left: 80 }}>

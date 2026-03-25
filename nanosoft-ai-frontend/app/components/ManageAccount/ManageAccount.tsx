@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { IconSettings, IconMenu2, IconChartBar } from "@tabler/icons-react";
+import { IconMenu2 } from "@tabler/icons-react";
 import { useResponsive } from "@/app/hooks/useResponsive";
 import { useTheme } from "@/app/components/useTheme";
 import Usage from "./usage";
@@ -19,34 +19,44 @@ interface Account {
 interface ManageAccountProps {
   currentPlan?: string;
   profileName?: string;
-  onMenuToggle?: (isOpen: boolean) => void;
+  subUserName?: string;
+  externalUserId?: string;  
+  // When the mobile sidebar (inside ManageAccount) is opened/closed,
+  // inform the parent so it can hide unrelated UI (e.g. the overlay close X).
+  onMobileSidebarOpenChange?: (open: boolean) => void;
 }
 
 type NavSection = "dashboard" | "settings";
 type DashboardView = "usage" | "rate-limit";
 
-export default function ManageAccount({ currentPlan = "Pro", profileName = "My Account", onMenuToggle }: ManageAccountProps) {
+export default function ManageAccount({
+  currentPlan = "Pro",
+  profileName = "My Account",
+  subUserName, // ← NEW prop received
+  externalUserId,           
+  onMobileSidebarOpenChange,
+}: ManageAccountProps) {
   const router = useRouter();
   const responsive = useResponsive();
   const { theme } = useTheme();
   const isDark = theme === "dark";
-  const headerColor = isDark ? "#ffffff" : "#0f172a";
-  const subheaderColor = isDark ? "rgba(255,255,255,0.75)" : "rgba(15,23,42,0.8)";
-  const sidebarText = isDark ? "#F8FAFC" : "#0f172a";
-  const sidebarTextMuted = isDark ? "rgba(248, 250, 252, 0.72)" : "rgba(15, 23, 42, 0.7)";
-  const sidebarTextActive = isDark ? "#FFFFFF" : "#0f172a";
-  const bodyText = isDark ? "#f8fafc" : "#0f172a";
-  const bodyTextMuted = isDark ? "rgba(248, 250, 252, 0.7)" : "rgba(15, 23, 42, 0.68)";
+  const headerColor = "var(--color-text)";
+  const subheaderColor = "var(--color-text-muted)";
+  const sidebarText = "var(--sidebar-text)";
+  const sidebarTextMuted = "var(--color-text-muted)";
+  const sidebarTextActive = "var(--color-text)";
+  const bodyText = "var(--color-text)";
+  const bodyTextMuted = "var(--color-text-muted)";
   const [activeSection, setActiveSection] = useState<NavSection>("dashboard");
   const [dashboardView, setDashboardView] = useState<DashboardView>("usage");
   const [showMobileSidebar, setShowMobileSidebar] = useState(false);
 
-  const updateMobileSidebar = (isOpen: boolean) => {
-    setShowMobileSidebar(isOpen);
-    if (onMenuToggle) onMenuToggle(isOpen);
+  const setMobileSidebarOpen = (open: boolean) => {
+    setShowMobileSidebar(open);
+    onMobileSidebarOpenChange?.(open);
   };
 
-  const [accounts, setAccounts] = useState<Account[]>([
+  const [accounts] = useState<Account[]>([
     {
       id: "1",
       name: profileName,
@@ -56,72 +66,23 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
     },
   ]);
 
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editName, setEditName] = useState("");
-  const [isAddingNew, setIsAddingNew] = useState(false);
-  const [newAccountName, setNewAccountName] = useState("");
-
-  const handleEdit = (account: Account) => {
-    setEditingId(account.id);
-    setEditName(account.name);
-  };
-
-  const handleSaveEdit = (accountId: string) => {
-    if (editName.trim()) {
-      setAccounts(accounts.map(acc => 
-        acc.id === accountId ? { ...acc, name: editName } : acc
-      ));
-      setEditingId(null);
-      setEditName("");
-    }
-  };
-
-  const handleCancelEdit = () => {
-    setEditingId(null);
-    setEditName("");
-  };
-
-  const handleAddAccount = () => {
-    if (newAccountName.trim()) {
-      const newAccount: Account = {
-        id: String(Date.now()),
-        name: newAccountName,
-        email: `${newAccountName.toLowerCase().replace(/\s+/g, '.')}@nanosoft.com`,
-        plan: "Free",
-        createdAt: new Date().toISOString().split('T')[0],
-      };
-      setAccounts([...accounts, newAccount]);
-      setNewAccountName("");
-      setIsAddingNew(false);
-    }
-  };
-
-  const handleDeleteAccount = (accountId: string) => {
-    if (accounts.length > 1) {
-      setAccounts(accounts.filter(acc => acc.id !== accountId));
-    }
-  };
-
   const handleBackToDashboard = () => {
-    // On mobile and tablet, open the sidebar and keep the close button hidden
     if (responsive.isMobile || responsive.isTablet) {
-      updateMobileSidebar(true);
+      setMobileSidebarOpen(true);
     } else {
-      // On desktop, navigate back to the previous page
       router.back();
     }
   };
 
-  const navItems = [{ id: "dashboard" as NavSection, label: "Dashboard", icon: IconChartBar }];
-
   const dashboardMenuItems = [
-    { id: "usage" as DashboardView, label: "Usage" },
+    { id: "usage"      as DashboardView, label: "Usage"      },
     { id: "rate-limit" as DashboardView, label: "Rate Limit" },
   ];
 
-  const isUsageActive = activeSection === "dashboard" && dashboardView === "usage";
-  const isRateLimitActive = activeSection === "dashboard" && dashboardView === "rate-limit";
-  const isSettingsActive = activeSection === "settings";
+  // ── The actual username to query user_profile
+  // prefer subUserName prop, fall back to profileName
+const queryUserName     = subUserName || profileName;
+const queryExternalUser = externalUserId || profileName;  // ← ADD
 
   return (
     <div style={{
@@ -135,7 +96,7 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
       {/* Mobile Backdrop */}
       {responsive.isMobile && showMobileSidebar && (
         <div
-          onClick={() => updateMobileSidebar(false)}
+          onClick={() => setMobileSidebarOpen(false)}
           style={{
             position: "fixed",
             inset: 0,
@@ -145,15 +106,16 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
           }}
         />
       )}
+
       {/* Left Sidebar Navigation */}
       {(!responsive.isMobile || showMobileSidebar) && (
         <div style={{
           width: responsive.isTablet ? "200px" : "240px",
           minWidth: responsive.isTablet ? "200px" : "240px",
           height: "100%",
-          background: "var(--sidebar-bg)",
+          background: isDark ? "rgba(0, 0, 0, 0.72)" : "var(--sidebar-bg)",
           color: "var(--color-text)",
-          borderRight: `1px solid var(--sidebar-border)`,
+          borderRight: "1px solid var(--sidebar-border)",
           overflowY: "auto",
           padding: "24px 0",
           boxSizing: "border-box",
@@ -164,183 +126,98 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
           left: responsive.isMobile ? 0 : "auto",
           top: responsive.isMobile ? 0 : "auto",
           zIndex: responsive.isMobile ? 1000 : "auto",
+          ...(isDark
+            ? {
+                backdropFilter: "blur(14px)",
+                WebkitBackdropFilter: "blur(14px)",
+              }
+            : null),
         }}>
-
-          {navItems.map(({ id, label, icon: Icon }) => (
-            <div key={id}>
-              <button
-                onClick={() => {
-                  if (id === "dashboard") {
-                    setActiveSection("dashboard");
-                    if (responsive.isMobile || responsive.isTablet) {
-                      updateMobileSidebar(false);
-                    }
-                    // Optionally, keep last selection or reset
-                    // setDashboardView("usage");
-                  } else {
-                    setActiveSection(id);
-                    if (responsive.isMobile || responsive.isTablet) {
-                      updateMobileSidebar(false);
-                    }
-                  }
-                }}
-                style={{
-                  width: "100%",
-                  margin: "0",
-                  padding: "12px 16px",
-                  border: activeSection === id 
-                    ? "1.5px solid var(--color-primary)" 
-                    : "1px solid transparent",
-                  background: activeSection === id 
-                    ? "linear-gradient(135deg, var(--color-primary) 0%, rgba(var(--color-primary-rgb), 0.25) 100%)"
-                    : "transparent",
-                  color: activeSection === id ? "var(--color-primary-strong)" : "var(--color-text)",
-                  cursor: "pointer",
-                  textAlign: "left",
-                  transition: "all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)",
-                  fontWeight: activeSection === id ? 600 : 500,
-                  fontSize: "14px",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "12px",
-                  borderRadius: "10px",
-                  boxShadow: activeSection === id ? "0 8px 24px rgba(var(--color-primary-rgb), 0.25)" : "none",
-                }}
-                onMouseEnter={(e) => {
-                  if (activeSection !== id) {
-                    const btn = e.currentTarget as HTMLElement;
-                    btn.style.background = "rgba(var(--color-primary-rgb), 0.12)";
-                    btn.style.color = "var(--color-primary)";
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (activeSection !== id) {
-                    const btn = e.currentTarget as HTMLElement;
-                    btn.style.background = "transparent";
-                    btn.style.color = "var(--color-text-muted)";
-                  }
-                }}
-              >
-                <Icon size={20} strokeWidth={1.5} />
-                <span>{label}</span>
-              </button>
-
-              {/* Dashboard Header + Tabs */}
-              {id === "dashboard" && (
-                <div style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "10px",
-                  marginTop: "8px",
-                  paddingLeft: "8px",
-                  borderLeft: "2px solid rgba(var(--color-primary-rgb), 0.3)",
-                  marginLeft: "16px",
-                  paddingTop: "8px",
-                }}>
-                  <div style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "stretch",
-                    gap: "8px",
-                  }}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setActiveSection("dashboard");
-                        setDashboardView("usage");
-                        if (responsive.isMobile || responsive.isTablet) {
-                          updateMobileSidebar(false);
-                        }
-                      }}
-                      style={{
-                        width: "100%",
-                        padding: "10px 12px",
-                        borderRadius: "8px",
-                        background: isUsageActive
-                          ? "linear-gradient(135deg, rgba(var(--color-primary-rgb), 0.2) 0%, rgba(var(--color-primary-rgb), 0.1) 100%)"
-                          : "transparent",
-                        border: isUsageActive
-                          ? "1.5px solid var(--color-primary)"
-                          : "1px solid transparent",
-                        color: isUsageActive ? "var(--color-primary)" : "var(--color-text)",
-                        cursor: "pointer",
-                        fontSize: "12px",
-                        fontWeight: isUsageActive ? 700 : 500,
-                        textAlign: "left",
-                        transition: "all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)",
-                      }}
-                    >
-                      Usage
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setActiveSection("dashboard");
-                        setDashboardView("rate-limit");
-                        if (responsive.isMobile || responsive.isTablet) {
-                          updateMobileSidebar(false);
-                        }
-                      }}
-                      style={{
-                        width: "100%",
-                        padding: "10px 12px",
-                        borderRadius: "8px",
-                        background: isRateLimitActive
-                          ? "linear-gradient(135deg, rgba(var(--color-primary-rgb), 0.2) 0%, rgba(var(--color-primary-rgb), 0.1) 100%)"
-                          : "transparent",
-                        border: isRateLimitActive
-                          ? "1.5px solid var(--color-primary)"
-                          : "1px solid transparent",
-                        color: isRateLimitActive ? "var(--color-primary)" : "var(--color-text)",
-                        cursor: "pointer",
-                        fontSize: "12px",
-                        fontWeight: isRateLimitActive ? 700 : 500,
-                        textAlign: "left",
-                        transition: "all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)",
-                      }}
-                    >
-                      Rate Limit
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setActiveSection("settings");
-                        if (responsive.isMobile || responsive.isTablet) {
-                          updateMobileSidebar(false);
-                        }
-                      }}
-                      style={{
-                        width: "100%",
-                        padding: "10px 12px",
-                        borderRadius: "8px",
-                        background: isSettingsActive
-                          ? "linear-gradient(135deg, rgba(var(--color-primary-rgb), 0.2) 0%, rgba(var(--color-primary-rgb), 0.1) 100%)"
-                          : "transparent",
-                        border: isSettingsActive
-                          ? "1.5px solid var(--color-primary)"
-                          : "1px solid transparent",
-                        color: isSettingsActive ? "var(--color-primary)" : "var(--color-text)",
-                        cursor: "pointer",
-                        fontSize: "12px",
-                        fontWeight: isSettingsActive ? 700 : 500,
-                        textAlign: "left",
-                        transition: "all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "flex-start",
-                        gap: "8px",
-                      }}
-                    >
-                      <IconSettings size={16} strokeWidth={1.5} />
-                      Settings
-                    </button>
-                  </div>
-                </div>
-              )}
+          <div style={{ padding: "0 16px 8px" }}>
+            <div
+              style={{
+                fontSize: 20,
+                fontWeight: 900,
+                letterSpacing: 0.8,
+                textTransform: "uppercase",
+                color: "var(--color-primary)",
+                padding: "10px 12px",
+                borderRadius: 10,
+                border: "1.5px solid rgba(var(--color-primary-rgb), 0.7)",
+                background:
+                  "linear-gradient(135deg, rgba(var(--color-primary-rgb), 0.28) 0%, rgba(var(--color-primary-rgb), 0.10) 100%)",
+                display: "inline-flex",
+                alignItems: "center",
+                boxShadow: "0 0 0 1px rgba(0,0,0,0.25), 0 10px 24px rgba(0,0,0,0.35)",
+              }}
+            >
+              Dashboard
             </div>
-          ))}
+          </div>
+
+          <div style={{ padding: "0 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+            {dashboardMenuItems.map((item) => {
+              const isActive =
+                activeSection === "dashboard" && dashboardView === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => {
+                    setActiveSection("dashboard");
+                    setDashboardView(item.id);
+                    if (responsive.isMobile) setMobileSidebarOpen(false);
+                  }}
+                  style={{
+                    padding: "10px 12px",
+                    borderRadius: "8px",
+                    background: isActive
+                      ? "linear-gradient(135deg, rgba(var(--color-primary-rgb), 0.2) 0%, rgba(var(--color-primary-rgb), 0.1) 100%)"
+                      : "transparent",
+                    border: isActive
+                      ? "1.5px solid var(--color-primary)"
+                      : "1px solid transparent",
+                    color: isActive ? "var(--color-primary)" : "var(--color-text)",
+                    cursor: "pointer",
+                    fontSize: "12px",
+                    fontWeight: isActive ? 700 : 500,
+                    textAlign: "left",
+                    width: "100%",
+                    transition: "all 0.3s ease",
+                  }}
+                >
+                  {item.label}
+                </button>
+              );
+            })}
+
+            <button
+              type="button"
+              onClick={() => {
+                setActiveSection("settings");
+                if (responsive.isMobile) setMobileSidebarOpen(false);
+              }}
+              style={{
+                padding: "10px 12px",
+                borderRadius: "8px",
+                background: activeSection === "settings"
+                  ? "linear-gradient(135deg, rgba(var(--color-primary-rgb), 0.2) 0%, rgba(var(--color-primary-rgb), 0.1) 100%)"
+                  : "transparent",
+                border: activeSection === "settings"
+                  ? "1.5px solid var(--color-primary)"
+                  : "1px solid transparent",
+                color: activeSection === "settings" ? "var(--color-primary)" : "var(--color-text)",
+                cursor: "pointer",
+                fontSize: "12px",
+                fontWeight: activeSection === "settings" ? 700 : 500,
+                textAlign: "left",
+                width: "100%",
+                transition: "all 0.3s ease",
+              }}
+            >
+              Settings
+            </button>
+          </div>
         </div>
       )}
 
@@ -351,80 +228,58 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
         flexDirection: "column",
         width: "100%",
         minHeight: 0,
-        opacity: responsive.isMobile && showMobileSidebar ? 0.7 : 1,
-        transition: "opacity 0.3s ease",
-        pointerEvents: responsive.isMobile && showMobileSidebar ? "none" : "auto",
       }}>
         {/* Header */}
         <div style={{
           width: "100%",
-          paddingTop: responsive.isMobile ? "20px" : responsive.isTablet ? "28px" : "36px",
-          paddingRight: responsive.isMobile ? "16px" : responsive.isTablet ? "24px" : "32px",
+          paddingTop: responsive.isMobile ? "20px" : "36px",
+          paddingRight: responsive.isMobile ? "16px" : "32px",
           paddingBottom: responsive.isMobile ? "16px" : "20px",
-          paddingLeft: responsive.isMobile ? "16px" : responsive.isTablet ? "24px" : "32px",
+          paddingLeft: responsive.isMobile ? "16px" : "32px",
           boxSizing: "border-box",
           borderBottom: "1px solid rgba(255, 255, 255, 0.1)",
           flexShrink: 0,
           background: "linear-gradient(135deg, rgba(var(--color-primary-rgb), 0.08) 0%, rgba(var(--color-primary-rgb), 0.02) 100%)",
         }}>
           <div style={{ maxWidth: "900px" }}>
-            <div style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "12px",
-              marginBottom: "12px",
-            }}>
-              {!responsive.isDesktop && (
-                <button
-                  onClick={handleBackToDashboard}
+            {!responsive.isDesktop && (
+              <button
+                onClick={handleBackToDashboard}
                   style={{
-                    background: "rgba(255, 255, 255, 0.1)",
-                    border: "1px solid rgba(255, 255, 255, 0.2)",
-                    borderRadius: "8px",
-                    padding: "8px 8px",
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    color: isDark ? "#ffffff" : "#000000",
-                    transition: "all 0.2s ease",
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = "rgba(255, 255, 255, 0.15)";
-                    e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.3)";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = "rgba(255, 255, 255, 0.1)";
-                    e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.2)";
-                  }}
-                  aria-label="Open menu"
-                >
-                  <IconMenu2 size={20} strokeWidth={2} />
-                </button>
-              )}
-            </div>
+                  background: "rgba(255, 255, 255, 0.08)",
+                  border: "1px solid rgba(0,0,0,0.06)",
+                  borderRadius: "8px",
+                  padding: "8px",
+                  cursor: "pointer",
+                  color: headerColor,
+                  marginBottom: "12px",
+                  display: "flex",
+                  alignItems: "center",
+                }}
+                aria-label="Open menu"
+              >
+                <IconMenu2 size={20} strokeWidth={2} />
+              </button>
+            )}
             <h1 style={{
-              fontSize: responsive.isMobile ? "24px" : responsive.isTablet ? "32px" : "40px",
+              fontSize: responsive.isMobile ? "24px" : "40px",
               fontWeight: 700,
               color: headerColor,
               margin: 0,
               marginBottom: "12px",
-              letterSpacing: "-0.5px",
-              textShadow: isDark ? "0 2px 8px rgba(0, 0, 0, 0.2)" : "none",
             }}>
-              {activeSection === "dashboard" && dashboardView === "usage" && "Usage Statistics"}
+              {activeSection === "dashboard" && dashboardView === "usage"      && "Usage Statistics"}
               {activeSection === "dashboard" && dashboardView === "rate-limit" && "Rate Limit"}
-              {activeSection === "settings" && "Account Settings"}
+              {activeSection === "settings"                                    && "Account Settings"}
             </h1>
             <p style={{
-              fontSize: responsive.isMobile ? "13px" : responsive.isTablet ? "14px" : "15px",
+              fontSize: responsive.isMobile ? "13px" : "15px",
               color: subheaderColor,
               margin: 0,
-              fontWeight: 400,
             }}>
-              {activeSection === "dashboard" && dashboardView === "usage" && "Monitor your API usage, request counts, and resource consumption over time."}
+              {activeSection === "dashboard" && dashboardView === "usage"      && "Monitor your API usage, request counts, and resource consumption over time."}
               {activeSection === "dashboard" && dashboardView === "rate-limit" && "View your current rate limits and adjust them based on your subscription plan."}
-              {activeSection === "settings" && "Update your account preferences and settings"}
+              {activeSection === "settings"                                    && "Update your account preferences and settings"}
             </p>
           </div>
         </div>
@@ -435,9 +290,7 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
           minHeight: 0,
           overflowY: "scroll",
           overflowX: "hidden",
-          WebkitOverflowScrolling: "touch",
-          scrollBehavior: "smooth",
-          padding: responsive.isMobile ? "20px 16px" : responsive.isTablet ? "28px 24px" : "32px 32px",
+          padding: responsive.isMobile ? "20px 16px" : "32px 32px",
           boxSizing: "border-box",
         }}>
           {/* Dashboard Section */}
@@ -448,13 +301,9 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
               gap: "20px",
               maxWidth: responsive.isDesktop ? "1400px" : "100%",
             }}>
-              {dashboardView === "usage" && (
-                <Usage />
-              )}
-
-              {dashboardView === "rate-limit" && (
-                <RateLimit />
-              )}
+              {/* ── Pass queryUserName to both Usage and RateLimit ── */}
+              {dashboardView === "usage"      && <Usage      externalUserId={queryExternalUser} subUserName={queryUserName} />}
+              {dashboardView === "rate-limit" && <RateLimit  externalUserId={queryExternalUser} subUserName={queryUserName} />}
             </div>
           )}
 
@@ -466,203 +315,69 @@ export default function ManageAccount({ currentPlan = "Pro", profileName = "My A
               gap: "24px",
               maxWidth: "700px",
             }}>
-              {/* Account Card */}
-              <div
-                style={{
-                  background: "linear-gradient(135deg, rgba(var(--color-primary-rgb), 0.1) 0%, rgba(var(--color-primary-rgb), 0.05) 100%)",
-                  border: "1.5px solid rgba(var(--color-primary-rgb), 0.3)",
-                  borderRadius: "14px",
-                  padding: responsive.isMobile ? "20px" : "28px",
-                  transition: "all 0.3s ease",
-                }}
-              >
-                <div style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "flex-start",
-                  gap: "16px",
-                }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "12px",
-                      marginBottom: "16px",
-                    }}>
-                      <h2 style={{
-                        fontSize: responsive.isMobile ? "20px" : "24px",
-                        fontWeight: 700,
-                        color: isDark ? "#ffffff" : "#0f172a",
-                        margin: 0,
-                      }}>
-                        {accounts[0]?.name || "My Account"}
-                      </h2>
-                      <span style={{
-                        fontSize: "11px",
-                        background: "var(--color-primary)",
-                        color: "#ffffff",
-                        padding: "6px 12px",
-                        borderRadius: "6px",
-                        fontWeight: 700,
-                        boxShadow: "0 4px 12px rgba(var(--color-primary-rgb), 0.3)",
-                        letterSpacing: "0.5px",
-                      }}>
-                        {accounts[0]?.plan || "Free"}
-                      </span>
-                    </div>
-                    <div style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: "8px",
-                    }}>
-                      <p style={{
-                        fontSize: "14px",
-                        color: bodyText,
-                        margin: 0,
-                      }}>
-                        {accounts[0]?.email || "user@example.com"}
-                      </p>
-                      <p style={{
-                        fontSize: "13px",
-                        color: bodyTextMuted,
-                        margin: 0,
-                      }}>
-                        Created on {accounts[0]?.createdAt || "2008-01-15"}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Account Info Grid */}
               <div style={{
-                display: "grid",
-                gridTemplateColumns: responsive.isMobile ? "1fr" : "repeat(2, 1fr)",
-                gap: "16px",
+                background: "linear-gradient(135deg, rgba(var(--color-primary-rgb), 0.1) 0%, rgba(var(--color-primary-rgb), 0.05) 100%)",
+                border: "1.5px solid rgba(var(--color-primary-rgb), 0.3)",
+                borderRadius: "14px",
+                padding: responsive.isMobile ? "20px" : "28px",
               }}>
-                <div style={{
-                  background: "rgba(var(--color-primary-rgb), 0.08)",
-                  border: "1px solid rgba(var(--color-primary-rgb), 0.2)",
-                  borderRadius: "12px",
-                  padding: "18px",
+                <h2 style={{
+                  fontSize: responsive.isMobile ? "20px" : "24px",
+                  fontWeight: 700,
+                  color: headerColor,
+                  margin: 0,
+                  marginBottom: "16px",
                 }}>
-                  <p style={{
-                    fontSize: "12px",
-                    color: isDark ? "rgba(255, 255, 255, 0.6)" : "rgba(15, 23, 42, 0.7)",
-                    margin: 0,
-                    marginBottom: "8px",
-                    fontWeight: 500,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.5px",
-                  }}>
-                    Email Address
-                  </p>
-                  <p style={{
-                    fontSize: "14px",
-                    color: bodyText,
-                    margin: 0,
-                    fontWeight: 600,
-                  }}>
-                    {accounts[0]?.email || "user@example.com"}
-                  </p>
-                </div>
-
-                <div style={{
-                  background: "rgba(var(--color-primary-rgb), 0.08)",
-                  border: "1px solid rgba(var(--color-primary-rgb), 0.2)",
-                  borderRadius: "12px",
-                  padding: "18px",
-                }}>
-                  <p style={{
-                    fontSize: "12px",
-                    color: isDark ? "rgba(255, 255, 255, 0.6)" : "rgba(15, 23, 42, 0.7)",
-                    margin: 0,
-                    marginBottom: "8px",
-                    fontWeight: 500,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.5px",
-                  }}>
-                    Plan Type
-                  </p>
-                  <p style={{
-                    fontSize: "14px",
-                    color: bodyText,
-                    margin: 0,
-                    fontWeight: 600,
+                  {accounts[0]?.name || "My Account"}
+                  <span style={{
+                    fontSize: "11px",
+                    background: "var(--color-primary)",
+                    color: "#ffffff",
+                    padding: "6px 12px",
+                    borderRadius: "6px",
+                    fontWeight: 700,
+                    marginLeft: "12px",
                   }}>
                     {accounts[0]?.plan || "Free"}
-                  </p>
-                </div>
+                  </span>
+                </h2>
+                <p style={{ fontSize: "14px", color: bodyTextMuted, margin: 0 }}>
+                  {accounts[0]?.email}
+                </p>
+                <p style={{ fontSize: "13px", color: bodyTextMuted, margin: "8px 0 0" }}>
+                  Created on {accounts[0]?.createdAt}
+                </p>
+              </div>
 
-                <div style={{
-                  background: "rgba(var(--color-primary-rgb), 0.08)",
-                  border: "1px solid rgba(var(--color-primary-rgb), 0.2)",
-                  borderRadius: "12px",
-                  padding: "18px",
-                }}>
-                  <p style={{
-                    fontSize: "12px",
-                    color: isDark ? "rgba(255, 255, 255, 0.6)" : "rgba(15, 23, 42, 0.7)",
-                    margin: 0,
-                    marginBottom: "8px",
-                    fontWeight: 500,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.5px",
-                  }}>
-                    Member Since
-                  </p>
-                  <p style={{
-                    fontSize: "14px",
-                    color: bodyText,
-                    margin: 0,
-                    fontWeight: 600,
-                  }}>
-                    {accounts[0]?.createdAt || "2008-01-15"}
-                  </p>
-                </div>
-
-                <div style={{
-                  background: "rgba(var(--color-primary-rgb), 0.08)",
-                  border: "1px solid rgba(var(--color-primary-rgb), 0.2)",
-                  borderRadius: "12px",
-                  padding: "18px",
-                }}>
-                  <p style={{
-                    fontSize: "12px",
-                    color: isDark ? "rgba(255, 255, 255, 0.6)" : "rgba(15, 23, 42, 0.7)",
-                    margin: 0,
-                    marginBottom: "8px",
-                    fontWeight: 500,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.5px",
-                  }}>
-                    Account ID
-                  </p>
-                  <p style={{
-                    fontSize: "13px",
-                    color: bodyText,
-                    margin: 0,
-                    fontFamily: "monospace",
-                    fontWeight: 500,
-                  }}>
-                    {accounts[0]?.id || "—"}
-                  </p>
-                </div>
+              {/* Additional settings details */}
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 18,
+                  // Align details with the content inside the top card
+                  paddingLeft: responsive.isMobile ? "20px" : "28px",
+                  paddingRight: responsive.isMobile ? "20px" : "28px",
+                }}
+              >
+                {[
+                  { label: "EMAIL ADDRESS", value: accounts[0]?.email ?? "-" },
+                  { label: "PLAN TYPE", value: accounts[0]?.plan ?? "-" },
+                  { label: "MEMBER SINCE", value: accounts[0]?.createdAt ?? "-" },
+                  { label: "ACCOUNT ID", value: accounts[0]?.id ?? "-" },
+                ].map((row) => (
+                  <div key={row.label} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 0.6, color: bodyTextMuted }}>
+                      {row.label}
+                    </div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: bodyText }}>
+                      {row.value}
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           )}
-        </div>
-
-        {/* Footer Info */}
-        <div style={{
-          width: "100%",
-          padding: responsive.isMobile ? "16px" : "20px",
-          boxSizing: "border-box",
-          borderTop: "1px solid rgba(255, 255, 255, 0.1)",
-          flexShrink: 0,
-          background: "linear-gradient(180deg, transparent 0%, rgba(var(--color-primary-rgb), 0.05) 100%)",
-        }}>
-          
         </div>
       </div>
     </div>

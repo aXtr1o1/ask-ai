@@ -17,7 +17,7 @@ log = logging.getLogger("sync_engine")
 # ─────────────────────────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────────────────────────
-ENDPOINTS       = ["/getAssets", "/getPPM", "/getBDM"]
+ENDPOINTS       = ["getAssets", "getPPM", "getBDM"]
 REQUEST_TIMEOUT = 120
 MAX_RETRIES     = 3
 PAGE_SIZE       = settings.SYNC_PAGE_SIZE
