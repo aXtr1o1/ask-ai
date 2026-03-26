@@ -113,7 +113,7 @@ const queryExternalUser = externalUserId || profileName;  // ← ADD
           width: responsive.isTablet ? "200px" : "240px",
           minWidth: responsive.isTablet ? "200px" : "240px",
           height: "100%",
-          background: "var(--sidebar-bg)",
+          background: isDark ? "rgba(0, 0, 0, 0.72)" : "var(--sidebar-bg)",
           color: "var(--color-text)",
           borderRight: "1px solid var(--sidebar-border)",
           overflowY: "auto",
@@ -126,22 +126,29 @@ const queryExternalUser = externalUserId || profileName;  // ← ADD
           left: responsive.isMobile ? 0 : "auto",
           top: responsive.isMobile ? 0 : "auto",
           zIndex: responsive.isMobile ? 1000 : "auto",
+          ...(isDark
+            ? {
+                backdropFilter: "blur(14px)",
+                WebkitBackdropFilter: "blur(14px)",
+              }
+            : null),
         }}>
           <div style={{ padding: "0 16px 8px" }}>
             <div
               style={{
-                fontSize: 12,
+                fontSize: 20  ,
                 fontWeight: 900,
                 letterSpacing: 0.8,
                 textTransform: "uppercase",
                 color: "var(--color-primary)",
-                padding: "8px 10px",
+                padding: "10px 12px",
                 borderRadius: 10,
-                border: "1px solid rgba(var(--color-primary-rgb), 0.45)",
+                border: "1.5px solid rgba(var(--color-primary-rgb), 0.7)",
                 background:
-                  "linear-gradient(135deg, rgba(var(--color-primary-rgb), 0.18) 0%, rgba(var(--color-primary-rgb), 0.06) 100%)",
+                  "linear-gradient(135deg, rgba(var(--color-primary-rgb), 0.28) 0%, rgba(var(--color-primary-rgb), 0.10) 100%)",
                 display: "inline-flex",
                 alignItems: "center",
+                boxShadow: "0 0 0 1px rgba(0,0,0,0.25), 0 10px 24px rgba(0,0,0,0.35)",
               }}
             >
               Dashboard
