@@ -161,14 +161,14 @@ class LangChainService:
     # ── (final_response_text, context_summary, messages)
     # ── context_summary = short sentence for ALL query types → used by main.py for lc_memory
     # ── final_response_text = full data response → used by main.py for history (DB)
-    async def process_query(self, messages: list, user_name: str = None, session_id: str = None,is_graph: bool = False ) -> tuple[str, str, list]:
+    async def process_query(self, messages: list, user_name: str = None, user_id: str = None, session_id: str = None, is_graph: bool = False) -> tuple[str, str, list]:
         try:
             
             # user_name is always from the frontend request; use it for all tool calls
             
             if not user_name:
                 raise ValueError("user_name is required (from frontend request)")
-            logger.info(f"💬 Processing query for user_name: {user_name}")
+            logger.info(f"💬 Processing query for user_name: {user_name} | user_id: {user_id}")
 
             # ── Reset token counters for this query ──────────────────────────
             self._total_input_tokens  = 0
@@ -204,6 +204,8 @@ class LangChainService:
                     args = dict(tool_call["args"])
                     args.pop("user_id", None)
                     args["user_name"] = user_name
+                    if user_id is not None:
+                        args["user_id"] = str(user_id)
 
                     # Override limit for count queries — LLM often passes limit=1 incorrectly
                     user_query = ""
@@ -298,14 +300,13 @@ class LangChainService:
                         HumanMessage(content=f"""
                         Classify this user query into one of three intents:
                         - "count"     → user wants ONLY a single total number
-                                        (e.g. "how many assets exist?", "total complaints count")
+                                        (e.g. "how many assets exist?", "total complaints count", "how many complaints are open?")
                         - "aggregate" → user wants a grouped summary or breakdown by category
-                                        (e.g. "how many assets per division?", "breakdown by building",
-                                        "total complaints by priority", "summarize by status",
+                                        (e.g. "assets per division?", "breakdown by building",
+                                        "complaints by priority", "summarize by status",
                                         "group by floor and building", "compare by make or model")
                         - "list"      → user wants full records shown as a table
                                         (e.g. "show me assets", "list complaints", "get PPM records")
-
                         IMPORTANT RULES:
                          "how many per X" or "count by X" or "breakdown by X" = aggregate (NOT count)
                         - "how many total" or "how many exist" with no grouping = count
@@ -541,7 +542,8 @@ class LangChainService:
                     tool_fn = self.tool_map[tool_name]
                     aggregate_keywords = ("by ", "per ", "group by", "breakdown", "summarize", "compare")
                     args = {
-                        "user_name": user_name, 
+                        "user_name": user_name,
+                        "user_id": str(user_id) if user_id is not None else None,
                         "limit": None,
                         "is_aggregate": any(kw in user_query.lower() for kw in aggregate_keywords)
                     }
@@ -596,10 +598,10 @@ class LangChainService:
                         HumanMessage(content=f"""
                         Classify this user query into one of three intents:
                         - "count"     → user wants ONLY a single total number
-                                        (e.g. "how many assets exist?", "total complaints count")
+                                        (e.g. "how many assets exist?", "total complaints count", "how many complaints are open?")
                         - "aggregate" → user wants a grouped summary or breakdown by category
-                                        (e.g. "how many assets per division?", "breakdown by building",
-                                        "total complaints by priority", "summarize by status",
+                                        (e.g. "assets per division?", "breakdown by building",
+                                        "complaints by priority", "summarize by status",
                                         "group by floor and building", "compare by make or model")
                         - "list"      → user wants full records shown as a table
                                         (e.g. "show me assets", "list complaints", "get PPM records")
