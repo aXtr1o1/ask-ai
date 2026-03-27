@@ -36,6 +36,21 @@ export default function Usage({ externalUserId, subUserName }: UsageProps) {
       0%, 100% { opacity: 0.8; transform: scale(1);   }
       50%       { opacity: 0.4; transform: scale(1.2); }
     }
+
+    /* prevent focus outline/box on chart clicks */
+    .recharts-wrapper,
+    .recharts-wrapper *,
+    .recharts-wrapper :focus {
+      outline: none !important;
+      box-shadow: none !important;
+    }
+
+    .recharts-surface,
+    .recharts-curve,
+    .recharts-layer,
+    .recharts-wrapper svg {
+      outline: none !important;
+    }
   `;
 
   const formatNumber = (num: number) => {
@@ -62,7 +77,7 @@ export default function Usage({ externalUserId, subUserName }: UsageProps) {
               }} />
             ))}
           </div>
-          <span style={{ fontSize: 13, color: "#A0AEC0" }}>Loading usage stats…</span>
+          <span style={{ fontSize: 13, color: "var(--tile-card-text-muted)" }}>Loading usage stats…</span>
         </div>
       </div>
     );
@@ -205,19 +220,43 @@ export default function Usage({ externalUserId, subUserName }: UsageProps) {
                   pointerEvents: "none",
                 }} />
 
-                <div style={{ position: "relative", zIndex: 1, display: "flex", gap: "12px", alignItems: "flex-start" }}>
+                <div style={{ position: "relative", zIndex: 1, display: "flex", flexDirection: "column", gap: "10px" }}>
+                  <p style={{
+                    fontSize: "11px", color: textMuted, margin: 0,
+                    fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.6px",
+                    whiteSpace: "normal", overflow: "visible", textOverflow: "unset",
+                    lineHeight: "1.2",
+                  }}>
+                    {metric.label}
+                  </p>
+
+                  {/* Mini sparkline chart under the graph header (full width) */}
+                  {metric.data.length > 0 && (
+                    <div style={{ width: "100%", height: "70px" }}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart
+                          data={metric.data}
+                          margin={{ top: 4, right: 8, left: 8, bottom: 4 }}
+                        >
+                          <XAxis dataKey="date" hide />
+                          <YAxis hide />
+                          <Line
+                            type="monotone" dataKey="value"
+                            stroke={metric.chartColor} strokeWidth={2.5}
+                            dot={false} isAnimationActive={false}
+                            strokeLinejoin="round"
+                            strokeLinecap="round"
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
+
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <p style={{
-                      fontSize: "11px", color: textMuted, margin: 0,
-                      fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.6px",
-                      whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-                    }}>
-                      {metric.label}
-                    </p>
-                    <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginTop: "8px" }}>
+                    <div style={{ display: "flex", alignItems: "baseline", gap: "8px" }}>
                       <p style={{
                         fontSize: "26px", fontWeight: 900, margin: 0,
-                        color: isDark ? "#ffffff" : "#0f172a",
+                        color: "var(--tile-card-text)",
                       }}>
                         {metric.value}
                       </p>
@@ -229,23 +268,6 @@ export default function Usage({ externalUserId, subUserName }: UsageProps) {
                       {metric.subtext}
                     </p>
                   </div>
-
-                  {/* Mini sparkline chart */}
-                  {metric.data.length > 0 && (
-                    <div style={{ width: "96px", height: "46px", flexShrink: 0 }}>
-                      <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={metric.data}>
-                          <XAxis dataKey="date" hide />
-                          <YAxis hide />
-                          <Line
-                            type="monotone" dataKey="value"
-                            stroke={metric.chartColor} strokeWidth={2.5}
-                            dot={false} isAnimationActive={false}
-                          />
-                        </LineChart>
-                      </ResponsiveContainer>
-                    </div>
-                  )}
                 </div>
               </div>
             ))}
@@ -274,7 +296,7 @@ export default function Usage({ externalUserId, subUserName }: UsageProps) {
                     <p style={{ margin: 0, fontSize: 12, fontWeight: 800, color: textMuted, textTransform: "uppercase", letterSpacing: "0.6px" }}>
                       Trend
                     </p>
-                    <p style={{ margin: 0, fontSize: 18, fontWeight: 900, color: isDark ? "#ffffff" : "#0f172a" }}>
+                    <p style={{ margin: 0, fontSize: 18, fontWeight: 900, color: "var(--tile-card-text)" }}>
                       {metric.trendLabel}
                     </p>
                   </div>
@@ -296,17 +318,17 @@ export default function Usage({ externalUserId, subUserName }: UsageProps) {
                       <LineChart data={metric.data}>
                         <CartesianGrid
                           strokeDasharray="4 4"
-                          stroke={isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.08)"}
+                          stroke="var(--color-border)"
                           vertical={false}
                         />
                         <XAxis
                           dataKey="date"
-                          tick={{ fontSize: 11, fill: isDark ? "rgba(255,255,255,0.55)" : "rgba(0,0,0,0.55)" }}
-                          axisLine={{ stroke: isDark ? "rgba(255,255,255,0.10)" : "rgba(0,0,0,0.10)" }}
+                          tick={{ fontSize: 11, fill: "var(--tile-card-text-muted)" }}
+                          axisLine={{ stroke: "var(--color-border)" }}
                           tickLine={false}
                         />
                         <YAxis
-                          tick={{ fontSize: 11, fill: isDark ? "rgba(255,255,255,0.55)" : "rgba(0,0,0,0.55)" }}
+                          tick={{ fontSize: 11, fill: "var(--tile-card-text-muted)" }}
                           axisLine={false} tickLine={false} width={42}
                         />
                         <Tooltip
@@ -314,7 +336,7 @@ export default function Usage({ externalUserId, subUserName }: UsageProps) {
                             backgroundColor: isDark ? "rgba(20,20,25,0.95)" : "rgba(240,240,245,0.95)",
                             border: `1px solid rgba(212,175,55,${isDark ? 0.40 : 0.35})`,
                             borderRadius: "10px",
-                            color: isDark ? "#ffffff" : "#000000",
+                            color: "var(--tile-card-text)",
                           }}
                           formatter={(val: unknown) => [formatNumber(Number(val)), metric.unit]}
                         />
@@ -346,7 +368,7 @@ export default function Usage({ externalUserId, subUserName }: UsageProps) {
                 <p style={{ margin: 0, fontSize: 12, fontWeight: 900, color: textMuted, textTransform: "uppercase", letterSpacing: "0.6px" }}>
                   Last {history.length} Days
                 </p>
-                <p style={{ margin: "6px 0 0", fontSize: 16, fontWeight: 900, color: isDark ? "#ffffff" : "#0f172a" }}>
+                <p style={{ margin: "6px 0 0", fontSize: 16, fontWeight: 900, color: "var(--tile-card-text)" }}>
                   Day-by-day breakdown
                 </p>
               </div>

@@ -3253,6 +3253,7 @@ export default function Home() {
               profileName={loggedInUser || "My Account"}
               subUserName={userIdFromUrl ?? loggedInUser ?? ""}
               externalUserId={loggedInUser ?? ""}
+              onMobileSidebarOpenChange={(open) => setIsManageAccountMenuOpen(open)}
             />
             </div>
           </div>

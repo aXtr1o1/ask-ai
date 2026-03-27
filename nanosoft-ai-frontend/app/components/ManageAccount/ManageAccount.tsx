@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { IconX, IconSettings, IconArrowLeft, IconChartBar } from "@tabler/icons-react";
+import { IconMenu2 } from "@tabler/icons-react";
 import { useResponsive } from "@/app/hooks/useResponsive";
 import { useTheme } from "@/app/components/useTheme";
 import Usage from "./usage";
@@ -21,6 +21,9 @@ interface ManageAccountProps {
   profileName?: string;
   subUserName?: string;
   externalUserId?: string;  
+  // When the mobile sidebar (inside ManageAccount) is opened/closed,
+  // inform the parent so it can hide unrelated UI (e.g. the overlay close X).
+  onMobileSidebarOpenChange?: (open: boolean) => void;
 }
 
 type NavSection = "dashboard" | "settings";
@@ -31,21 +34,27 @@ export default function ManageAccount({
   profileName = "My Account",
   subUserName, // ← NEW prop received
   externalUserId,           
+  onMobileSidebarOpenChange,
 }: ManageAccountProps) {
   const router = useRouter();
   const responsive = useResponsive();
   const { theme } = useTheme();
   const isDark = theme === "dark";
-  const headerColor = isDark ? "#ffffff" : "#0f172a";
-  const subheaderColor = isDark ? "rgba(255,255,255,0.75)" : "rgba(15,23,42,0.8)";
-  const sidebarText = isDark ? "#F8FAFC" : "#0f172a";
-  const sidebarTextMuted = isDark ? "rgba(248, 250, 252, 0.72)" : "rgba(15, 23, 42, 0.7)";
-  const sidebarTextActive = isDark ? "#FFFFFF" : "#0f172a";
-  const bodyText = isDark ? "#f8fafc" : "#0f172a";
-  const bodyTextMuted = isDark ? "rgba(248, 250, 252, 0.7)" : "rgba(15, 23, 42, 0.68)";
+  const headerColor = "var(--color-text)";
+  const subheaderColor = "var(--color-text-muted)";
+  const sidebarText = "var(--sidebar-text)";
+  const sidebarTextMuted = "var(--color-text-muted)";
+  const sidebarTextActive = "var(--color-text)";
+  const bodyText = "var(--color-text)";
+  const bodyTextMuted = "var(--color-text-muted)";
   const [activeSection, setActiveSection] = useState<NavSection>("dashboard");
   const [dashboardView, setDashboardView] = useState<DashboardView>("usage");
   const [showMobileSidebar, setShowMobileSidebar] = useState(false);
+
+  const setMobileSidebarOpen = (open: boolean) => {
+    setShowMobileSidebar(open);
+    onMobileSidebarOpenChange?.(open);
+  };
 
   const [accounts] = useState<Account[]>([
     {
@@ -59,16 +68,11 @@ export default function ManageAccount({
 
   const handleBackToDashboard = () => {
     if (responsive.isMobile || responsive.isTablet) {
-      setShowMobileSidebar(true);
+      setMobileSidebarOpen(true);
     } else {
       router.back();
     }
   };
-
-  const navItems = [
-    { id: "dashboard" as NavSection, label: "Dashboard", icon: IconChartBar },
-    { id: "settings"  as NavSection, label: "Settings",  icon: IconSettings  },
-  ];
 
   const dashboardMenuItems = [
     { id: "usage"      as DashboardView, label: "Usage"      },
@@ -92,7 +96,7 @@ const queryExternalUser = externalUserId || profileName;  // ← ADD
       {/* Mobile Backdrop */}
       {responsive.isMobile && showMobileSidebar && (
         <div
-          onClick={() => setShowMobileSidebar(false)}
+          onClick={() => setMobileSidebarOpen(false)}
           style={{
             position: "fixed",
             inset: 0,
@@ -109,7 +113,7 @@ const queryExternalUser = externalUserId || profileName;  // ← ADD
           width: responsive.isTablet ? "200px" : "240px",
           minWidth: responsive.isTablet ? "200px" : "240px",
           height: "100%",
-          background: "var(--sidebar-bg)",
+          background: isDark ? "rgba(0, 0, 0, 0.72)" : "var(--sidebar-bg)",
           color: "var(--color-text)",
           borderRight: "1px solid var(--sidebar-border)",
           overflowY: "auto",
@@ -122,124 +126,98 @@ const queryExternalUser = externalUserId || profileName;  // ← ADD
           left: responsive.isMobile ? 0 : "auto",
           top: responsive.isMobile ? 0 : "auto",
           zIndex: responsive.isMobile ? 1000 : "auto",
+          ...(isDark
+            ? {
+                backdropFilter: "blur(14px)",
+                WebkitBackdropFilter: "blur(14px)",
+              }
+            : null),
         }}>
-          {/* Mobile Close Button */}
-          {responsive.isMobile && (
-            <div style={{
-              display: "flex",
-              justifyContent: "flex-end",
-              paddingRight: "16px",
-              paddingBottom: "8px",
-              borderBottom: "1px solid rgba(255, 255, 255, 0.1)",
-            }}>
-              <button
-                onClick={() => setShowMobileSidebar(false)}
-                style={{
-                  background: "rgba(255, 255, 255, 0.1)",
-                  border: "1px solid rgba(255, 255, 255, 0.2)",
-                  borderRadius: "8px",
-                  padding: "8px",
-                  cursor: "pointer",
-                  color: "#ffffff",
-                }}
-              >
-                <IconX size={20} strokeWidth={2} />
-              </button>
+          <div style={{ padding: "0 16px 8px" }}>
+            <div
+              style={{
+                fontSize: 20  ,
+                fontWeight: 900,
+                letterSpacing: 0.8,
+                textTransform: "uppercase",
+                color: "var(--color-primary)",
+                padding: "10px 12px",
+                borderRadius: 10,
+                border: "1.5px solid rgba(var(--color-primary-rgb), 0.7)",
+                background:
+                  "linear-gradient(135deg, rgba(var(--color-primary-rgb), 0.28) 0%, rgba(var(--color-primary-rgb), 0.10) 100%)",
+                display: "inline-flex",
+                alignItems: "center",
+                boxShadow: "0 0 0 1px rgba(0,0,0,0.25), 0 10px 24px rgba(0,0,0,0.35)",
+              }}
+            >
+              Dashboard
             </div>
-          )}
+          </div>
 
-          {navItems.map(({ id, label, icon: Icon }) => (
-            <div key={id}>
-              <button
-                onClick={() => {
-                  setActiveSection(id);
-                  if (responsive.isMobile && id === "settings") {
-                    setShowMobileSidebar(false);
-                  }
-                }}
-                style={{
-                  width: "100%",
-                  margin: "0",
-                  padding: "12px 16px",
-                  border: activeSection === id
-                    ? "1.5px solid var(--color-primary)"
-                    : "1px solid transparent",
-                  background: activeSection === id
-                    ? "linear-gradient(135deg, var(--color-primary) 0%, rgba(var(--color-primary-rgb), 0.25) 100%)"
-                    : "transparent",
-                  color: activeSection === id
-                    ? "var(--color-primary-strong)"
-                    : "var(--color-text)",
-                  cursor: "pointer",
-                  textAlign: "left",
-                  fontWeight: activeSection === id ? 600 : 500,
-                  fontSize: "14px",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "12px",
-                  borderRadius: "10px",
-                  transition: "all 0.3s ease",
-                }}
-              >
-                <Icon size={20} strokeWidth={1.5} />
-                <span>{label}</span>
-              </button>
+          <div style={{ padding: "0 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+            {dashboardMenuItems.map((item) => {
+              const isActive =
+                activeSection === "dashboard" && dashboardView === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => {
+                    setActiveSection("dashboard");
+                    setDashboardView(item.id);
+                    if (responsive.isMobile) setMobileSidebarOpen(false);
+                  }}
+                  style={{
+                    padding: "10px 12px",
+                    borderRadius: "8px",
+                    background: isActive
+                      ? "linear-gradient(135deg, rgba(var(--color-primary-rgb), 0.2) 0%, rgba(var(--color-primary-rgb), 0.1) 100%)"
+                      : "transparent",
+                    border: isActive
+                      ? "1.5px solid var(--color-primary)"
+                      : "1px solid transparent",
+                    color: isActive ? "var(--color-primary)" : "var(--color-text)",
+                    cursor: "pointer",
+                    fontSize: "12px",
+                    fontWeight: isActive ? 700 : 500,
+                    textAlign: "left",
+                    width: "100%",
+                    transition: "all 0.3s ease",
+                  }}
+                >
+                  {item.label}
+                </button>
+              );
+            })}
 
-              {/* Dashboard Header + Tabs */}
-              {id === "dashboard" && (
-                <div style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "10px",
-                  marginTop: "8px",
-                  paddingLeft: "8px",
-                  borderLeft: "2px solid rgba(var(--color-primary-rgb), 0.3)",
-                  marginLeft: "16px",
-                  paddingTop: "8px",
-                }}>
-                  <div style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "stretch",
-                    gap: "8px",
-                  }}>
-                    {dashboardMenuItems.map((item) => (
-                      <button
-                        key={item.id}
-                        type="button"
-                        onClick={() => {
-                          setActiveSection("dashboard");
-                          setDashboardView(item.id);
-                          if (responsive.isMobile) setShowMobileSidebar(false);
-                        }}
-                        style={{
-                          padding: "10px 12px",
-                          borderRadius: "8px",
-                          background: dashboardView === item.id
-                            ? "linear-gradient(135deg, rgba(var(--color-primary-rgb), 0.2) 0%, rgba(var(--color-primary-rgb), 0.1) 100%)"
-                            : "transparent",
-                          border: dashboardView === item.id
-                            ? "1.5px solid var(--color-primary)"
-                            : "1px solid transparent",
-                          color: dashboardView === item.id
-                            ? "var(--color-primary)"
-                            : "var(--color-text)",
-                          cursor: "pointer",
-                          fontSize: "12px",
-                          fontWeight: dashboardView === item.id ? 700 : 500,
-                          textAlign: "left",
-                          width: "100%",
-                          transition: "all 0.3s ease",
-                        }}
-                      >
-                        {item.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          ))}
+            <button
+              type="button"
+              onClick={() => {
+                setActiveSection("settings");
+                if (responsive.isMobile) setMobileSidebarOpen(false);
+              }}
+              style={{
+                padding: "10px 12px",
+                borderRadius: "8px",
+                background: activeSection === "settings"
+                  ? "linear-gradient(135deg, rgba(var(--color-primary-rgb), 0.2) 0%, rgba(var(--color-primary-rgb), 0.1) 100%)"
+                  : "transparent",
+                border: activeSection === "settings"
+                  ? "1.5px solid var(--color-primary)"
+                  : "1px solid transparent",
+                color: activeSection === "settings" ? "var(--color-primary)" : "var(--color-text)",
+                cursor: "pointer",
+                fontSize: "12px",
+                fontWeight: activeSection === "settings" ? 700 : 500,
+                textAlign: "left",
+                width: "100%",
+                transition: "all 0.3s ease",
+              }}
+            >
+              Settings
+            </button>
+          </div>
         </div>
       )}
 
@@ -267,19 +245,20 @@ const queryExternalUser = externalUserId || profileName;  // ← ADD
             {!responsive.isDesktop && (
               <button
                 onClick={handleBackToDashboard}
-                style={{
-                  background: "rgba(255, 255, 255, 0.1)",
-                  border: "1px solid rgba(255, 255, 255, 0.2)",
+                  style={{
+                  background: "rgba(255, 255, 255, 0.08)",
+                  border: "1px solid rgba(0,0,0,0.06)",
                   borderRadius: "8px",
                   padding: "8px",
                   cursor: "pointer",
-                  color: "#ffffff",
+                  color: headerColor,
                   marginBottom: "12px",
                   display: "flex",
                   alignItems: "center",
                 }}
+                aria-label="Open menu"
               >
-                <IconArrowLeft size={20} strokeWidth={2} />
+                <IconMenu2 size={20} strokeWidth={2} />
               </button>
             )}
             <h1 style={{
@@ -295,7 +274,7 @@ const queryExternalUser = externalUserId || profileName;  // ← ADD
             </h1>
             <p style={{
               fontSize: responsive.isMobile ? "13px" : "15px",
-              color: "rgba(255, 255, 255, 0.6)",
+              color: subheaderColor,
               margin: 0,
             }}>
               {activeSection === "dashboard" && dashboardView === "usage"      && "Monitor your API usage, request counts, and resource consumption over time."}
@@ -345,7 +324,7 @@ const queryExternalUser = externalUserId || profileName;  // ← ADD
                 <h2 style={{
                   fontSize: responsive.isMobile ? "20px" : "24px",
                   fontWeight: 700,
-                  color: "#ffffff",
+                  color: headerColor,
                   margin: 0,
                   marginBottom: "16px",
                 }}>
@@ -362,12 +341,40 @@ const queryExternalUser = externalUserId || profileName;  // ← ADD
                     {accounts[0]?.plan || "Free"}
                   </span>
                 </h2>
-                <p style={{ fontSize: "14px", color: "rgba(255,255,255,0.8)", margin: 0 }}>
+                <p style={{ fontSize: "14px", color: bodyTextMuted, margin: 0 }}>
                   {accounts[0]?.email}
                 </p>
-                <p style={{ fontSize: "13px", color: "rgba(255,255,255,0.6)", margin: "8px 0 0" }}>
+                <p style={{ fontSize: "13px", color: bodyTextMuted, margin: "8px 0 0" }}>
                   Created on {accounts[0]?.createdAt}
                 </p>
+              </div>
+
+              {/* Additional settings details */}
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 18,
+                  // Align details with the content inside the top card
+                  paddingLeft: responsive.isMobile ? "20px" : "28px",
+                  paddingRight: responsive.isMobile ? "20px" : "28px",
+                }}
+              >
+                {[
+                  { label: "EMAIL ADDRESS", value: accounts[0]?.email ?? "-" },
+                  { label: "PLAN TYPE", value: accounts[0]?.plan ?? "-" },
+                  { label: "MEMBER SINCE", value: accounts[0]?.createdAt ?? "-" },
+                  { label: "ACCOUNT ID", value: accounts[0]?.id ?? "-" },
+                ].map((row) => (
+                  <div key={row.label} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 0.6, color: bodyTextMuted }}>
+                      {row.label}
+                    </div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: bodyText }}>
+                      {row.value}
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           )}
