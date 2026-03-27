@@ -996,6 +996,7 @@ export default function Home() {
   // const searchParams  = useSearchParams();
   const responsive    = useResponsive();  // Auto-detect screen size
   const [userIdFromUrl, setUserIdFromUrl] = useState<string | null>(null); // display name
+  const [userIdInt, setUserIdInt] = useState<number | null>(null); // integer user_id for filtering
   const [clientNameFromUrl, setClientNameFromUrl] = useState<string | null>(null); // backend username
   const [input,        setInput]        = useState<string>("");
   const [messages,     setMessages]     = useState<Message[]>([]);
@@ -1109,22 +1110,22 @@ export default function Home() {
     sessionId,
     wsRef,
     (duration: number, audioUrl: string) => {
-      setIsGraphMode(false);
-      setMessages(prev => {
-        const updated = [...prev, {
-          role: "user" as const,
-          text: "Voice message",
-          isAudio: true,
-          audioDuration: duration,
-          audioUrl: audioUrl
-        }];
-        sessionMessagesRef.current.set(sessionId, updated);
-        return updated;
-      });
-      setIsLoading(true);
-      accRef.current = "";
-      setTimeout(() => inputRef.current?.focus(), 100);
-    }
+  setIsGraphMode(false);
+  setMessages(prev => {
+    const updated = [...prev, {
+      role: "user" as const,
+      text: "Voice message",
+      isAudio: true,
+      audioDuration: duration,
+      audioUrl: audioUrl
+    }];
+    sessionMessagesRef.current.set(sessionId, updated);
+    return updated;
+  });
+  setIsLoading(true);
+  accRef.current = "";
+  setTimeout(() => inputRef.current?.focus(), 100);
+}
   );
 
   // Sync sidebarOpen with responsive.isMobile - ensures sidebar closes on mobile detection
@@ -1140,7 +1141,11 @@ export default function Home() {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
       const userName = params.get("userName") ?? params.get("userId"); // display only
-      const clientName = params.get("clientName"); // backend username
+        const clientName = params.get("clientName"); // backend username
+        const userIdParam = params.get("userId");
+        if (userIdParam) {
+          setUserIdInt(parseInt(userIdParam, 10));
+        }
       const clientLogo = params.get("loginPageClientLogoPath");
       const footerLogo = params.get("loginFooterLogoPath");
       setUserIdFromUrl(userName);
@@ -2240,10 +2245,12 @@ export default function Home() {
     query: userText,
     userName: loggedInUser,
     subUserName: userIdFromUrl ?? loggedInUser,
+    userId: userIdInt !== null ? String(userIdInt) : undefined,
     sessionId,
     timestamp: Date.now()
   }));
-};
+};  // ← THIS CLOSING BRACE WAS MISSING
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   };

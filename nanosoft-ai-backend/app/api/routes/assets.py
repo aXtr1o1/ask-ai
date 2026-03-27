@@ -60,6 +60,7 @@ def get_assets(req: AssetRequest):
             #Call the aggregate SP with filters + group by params
             cursor.callproc("sp_asset_aggregate", [
                 req.user_name,    # p_user_name
+                req.user_id,      # p_user_id
                 req.division,     # p_division     — optional filter before grouping
                 req.discipline,   # p_discipline   — optional filter before grouping
                 req.building,     # p_building     — optional filter before grouping
@@ -102,6 +103,7 @@ def get_assets(req: AssetRequest):
 
         cursor.callproc("sp_asset_query", [
             req.user_name,
+            req.user_id,
             req.asset_tag_no,
             req.status,
             req.condition,

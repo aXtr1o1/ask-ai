@@ -144,14 +144,14 @@ export default function Usage({ externalUserId, subUserName }: UsageProps) {
       data:       graphChartData,
     },
     {
-      id:         "tokens",
-      label:      "Tokens Available",
-      value:      formatNumber(stats.tokens_remaining),
-      unit:       "tokens",
-      subtext:    `of ${formatNumber(stats.token_limit)} limit`,
-      chartColor: "#64c896",
-      data:       tokensChartData,
-    },
+  id:         "tokens",
+  label:      "Tokens Used",
+  value:      formatNumber(stats.tokens_used),   
+  unit:       "tokens",
+  subtext:    `of ${formatNumber(stats.token_limit)} limit`,
+  chartColor: "#64c896",
+  data:       tokensChartData,
+  },
   ];
 
   // Trend charts — credits and audio
