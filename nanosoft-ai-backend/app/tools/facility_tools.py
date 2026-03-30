@@ -167,6 +167,7 @@ def ASSETS(
     
     payload = {
         "user_name":    user_name,
+        "user_id":      user_id,
         "asset_tag_no": asset_tag_no,
         "status":       status,
         "condition":    condition,
@@ -328,6 +329,7 @@ def PPM(
 
     payload = {
         "user_name":    user_name,
+        "user_id":      user_id,
         "work_order":   work_order,
         "asset_tag_no": asset_tag_no,
         "status":       status,
@@ -485,6 +487,7 @@ def BDM(
 
     payload = {
         "user_name":        user_name,
+        "user_id":      user_id,
         "complaint_no":     complaint_no,
         "status":           status,
         "priority":         priority,

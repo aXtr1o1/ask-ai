@@ -25,6 +25,11 @@ from .upsert_ppm import upsert_ppm
 from .upsert_bdm import upsert_bdm
 
 log = logging.getLogger("migrate_user")
+log.setLevel(logging.INFO)
+_ch = logging.StreamHandler()
+_ch.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+if not log.handlers:
+    log.addHandler(_ch)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -232,42 +237,43 @@ def migrate_user(
     cursor.close()
     conn.close()
     return summary
+#you can use this function directly  for checking. direct file call .
+# if __name__ == "__main__":
+#     import sys
+#     import logging
 
-if __name__ == "__main__":
-    import sys
-    import logging
+#     logging.basicConfig(
+#         level=logging.INFO,
+#         format="%(asctime)s | %(levelname)-8s | %(message)s",
+#         datefmt="%Y-%m-%d %H:%M:%S",
+#         handlers=[
+#             logging.StreamHandler(),
+#             logging.FileHandler("migrate_user.log", mode="a", encoding="utf-8"),
+#         ],
+#     )
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s | %(levelname)-8s | %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-        handlers=[
-            logging.StreamHandler(),
-            logging.FileHandler("migrate_user.log", mode="a", encoding="utf-8"),
-        ],
-    )
+#     result = migrate_user(
+#         client_name = "v4demo",
+#         base_url    = "https://v4demo.smartfm.cloud/askmeapi/",
+#         user_id     = 101,
+#         user_name   = "v4demo",
+#         jwt_token   = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjEwMSwiaWF0IjoxNzc0MzQ5ODU2LCJleHAiOjE3NzQ0MzYyNTZ9.qMTAhrhbMqjuCUAMf9WtH1Fzi-QphZhBEz7yOdRF6GQ",
+        
+#     )
 
-    result = migrate_user(
-        client_name = "poc",
-        base_url    = "https://poc.smartfm.cloud",
-        user_id     = 102,
-        user_name   = "poc",
-        jwt_token   = "alpha",
-    )
-
-    print("\n" + "=" * 60)
-    print("MIGRATION RESULT SUMMARY")
-    print("=" * 60)
-    print(f"Client     : {result.get('client_name')}")
-    print(f"Status     : {result.get('status')}")
-    print(f"Synced At  : {result.get('synced_at')}")
-    print(f"Elapsed    : {result.get('elapsed_seconds')}s")
-    print("\nEndpoint Breakdown:")
-    for endpoint, stats in result.get("endpoints", {}).items():
-        print(f"  {endpoint}")
-        print(f"    fetched  : {stats.get('records_fetched')}")
-        print(f"    inserted : {stats.get('inserted')}")
-        print(f"    updated  : {stats.get('updated')}")
-        print(f"    errors   : {stats.get('errors')}")
-        print(f"    status   : {stats.get('status')}")
-    print("=" * 60)
+#     print("\n" + "=" * 60)
+#     print("MIGRATION RESULT SUMMARY")
+#     print("=" * 60)
+#     print(f"Client     : {result.get('client_name')}")
+#     print(f"Status     : {result.get('status')}")
+#     print(f"Synced At  : {result.get('synced_at')}")
+#     print(f"Elapsed    : {result.get('elapsed_seconds')}s")
+#     print("\nEndpoint Breakdown:")
+#     for endpoint, stats in result.get("endpoints", {}).items():
+#         print(f"  {endpoint}")
+#         print(f"    fetched  : {stats.get('records_fetched')}")
+#         print(f"    inserted : {stats.get('inserted')}")
+#         print(f"    updated  : {stats.get('updated')}")
+#         print(f"    errors   : {stats.get('errors')}")
+#         print(f"    status   : {stats.get('status')}")
+#     print("=" * 60)

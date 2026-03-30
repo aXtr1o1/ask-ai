@@ -233,4 +233,194 @@ def consume_audio_seconds_if_available(
         )
         conn.rollback()
         return None
+"""
 
+"""
+
+# CHANGE function signature to accept both
+def get_user_usage_stats(
+    external_user_id: str,
+    name: str
+) -> dict:
+
+    if not external_user_id or not name:
+        raise ValueError("external_user_id and name are required")
+
+    conn = get_pool()
+    conn.rollback()
+
+    with conn.cursor() as cur:
+
+        # ── Query 1: user_profile ────────────────────────────
+        cur.execute(
+            """
+            SELECT
+                credits_limit,
+                credits_used,
+                credits_remaining,
+                audio_seconds,
+                audio_limit,
+                graph_count,
+                graph_limit,
+                request_count,
+                request_limit,
+                tokens_used,
+                token_limit
+            FROM user_profile
+            WHERE external_user_id = %s AND name = %s
+            LIMIT 1
+            """,
+            (external_user_id, name)
+        )
+        row = cur.fetchone()
+
+        if not row:
+            logger.warning(
+                "⚠️ user_profile missing for external_user_id=%s name=%s",
+                external_user_id, name,
+            )
+            return {}
+
+        (
+            credits_limit,
+            credits_used,
+            credits_remaining,
+            audio_seconds,
+            audio_limit,
+            graph_count,
+            graph_limit,
+            request_count,
+            request_limit,
+            tokens_used,
+            token_limit,
+        ) = row
+
+        # ── Query 2: usage_history ───────────────────────────
+        cur.execute(
+            """
+            SELECT
+                date,
+                credits_used,
+                audio_seconds,
+                graph_count,
+                request_count,
+                tokens_used
+            FROM usage_history
+            WHERE external_user_id = %s AND name = %s
+            ORDER BY date DESC
+            LIMIT 7
+            """,
+            (external_user_id, name)
+        )
+        history_rows = cur.fetchall()
+
+        history = [
+            {
+                "date":          str(r[0]),
+                "credits_used":  int(r[1] or 0),
+                "audio_seconds": int(r[2] or 0),
+                "graph_count":   int(r[3] or 0),
+                "request_count": int(r[4] or 0),
+                "tokens_used":   int(r[5] or 0),
+            }
+            for r in reversed(history_rows)
+        ]
+
+        logger.info(
+            "✅ get_user_usage_stats | external_user_id=%s name=%s | history_days=%s",
+            external_user_id, name, len(history)
+        )
+
+        return {
+            "credits_limit":     int(credits_limit     or 0),
+            "credits_used":      int(credits_used      or 0),
+            "credits_remaining": int(credits_remaining or 0),
+            "audio_seconds":     int(audio_seconds     or 0),
+            "audio_limit":       int(audio_limit       or 0),
+            "graph_count":       int(graph_count       or 0),
+            "graph_limit":       int(graph_limit       or 0),
+            "request_count":     int(request_count     or 0),
+            "request_limit":     int(request_limit     or 0),
+            "tokens_used":       int(tokens_used       or 0),
+            "token_limit":       int(token_limit       or 0),
+            "tokens_remaining":  max(int(token_limit or 0) - int(tokens_used or 0), 0),
+            "history":           history,
+        }
+
+def update_daily_history(
+    *,
+    external_user_id: str,   
+    name: str,
+    credits_delta: int = 0,
+    audio_seconds_delta: int = 0,
+    graph_delta: int = 0,
+    request_delta: int = 1,
+    tokens_delta: int = 0,
+) -> None:
+
+    if not external_user_id or not name:
+        logger.warning("⚠️ update_daily_history — missing external_user_id or name")
+        return
+
+    credits_delta       = int(credits_delta       or 0)
+    audio_seconds_delta = int(audio_seconds_delta or 0)
+    graph_delta         = int(graph_delta         or 0)
+    request_delta       = int(request_delta       or 0)
+    tokens_delta        = int(tokens_delta        or 0)
+
+    conn = get_pool()
+    conn.rollback()
+
+    with conn.cursor() as cur:
+        # ── Guard: skip if user_profile row doesn't exist ──
+        cur.execute(
+            "SELECT 1 FROM user_profile WHERE external_user_id = %s AND name = %s",
+            (external_user_id, name),
+        )
+        if not cur.fetchone():
+            logger.warning(
+                "⚠️ update_daily_history skipped — user_profile missing for external_user_id=%s name=%s",
+                external_user_id, name,
+            )
+            conn.rollback()
+            return
+
+        cur.execute(
+            """
+            INSERT INTO usage_history
+                (external_user_id, name, date, credits_used,
+                 audio_seconds, graph_count, request_count, tokens_used, updated_at)
+            VALUES
+                (%s, %s, CURRENT_DATE, %s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (external_user_id, name, date) DO UPDATE SET
+                credits_used  = usage_history.credits_used  + EXCLUDED.credits_used,
+                audio_seconds = usage_history.audio_seconds + EXCLUDED.audio_seconds,
+                graph_count   = usage_history.graph_count   + EXCLUDED.graph_count,
+                request_count = usage_history.request_count + EXCLUDED.request_count,
+                tokens_used   = usage_history.tokens_used   + EXCLUDED.tokens_used,
+                updated_at    = NOW()
+            """,
+            (
+                external_user_id,
+                name,
+                max(credits_delta, 0),
+                max(audio_seconds_delta, 0),
+                max(graph_delta, 0),
+                max(request_delta, 0),
+                max(tokens_delta, 0),
+            )
+        )
+        if cur.rowcount == 0:
+            logger.warning(
+                "⚠️ update_daily_history did not affect rows | external_user_id=%s name=%s",
+                external_user_id, name,
+            )
+            conn.rollback()
+            return
+
+    conn.commit()
+    logger.info(
+        "✅ update_daily_history | external_user_id=%s name=%s | credits=%s audio=%s graph=%s reqs=%s",
+        external_user_id, name,
+        credits_delta, audio_seconds_delta, graph_delta, request_delta
+    )

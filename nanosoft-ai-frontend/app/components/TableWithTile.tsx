@@ -45,21 +45,25 @@ export default function TableWithTile({
     return Array.from(cols);
   })();
 
+  // Toggle container style: absolute on larger screens, inline/static on mobile
+  const toggleContainerStyle = {
+    position: responsive.isMobile ? 'static' as const : 'absolute' as const,
+    top: responsive.isMobile ? undefined : 12,
+    right: responsive.isMobile ? undefined : 12,
+    display: 'flex',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: responsive.isMobile ? 6 : 2,
+    zIndex: 1000,
+    marginBottom: responsive.isMobile ? 8 : 0,
+  };
+
   return (
     <div style={{ width: '100%' }}>
       {/* Table content with buttons inside */}
       <div className="table-with-tile" style={{ marginTop: 0, position: 'relative' }}>
         {/* Toggle buttons positioned at top - right corner INSIDE the border */}
-        <div style={{
-          position: 'absolute',
-          top: 12,
-          right: 12,
-          display: 'flex',
-          justifyContent: 'flex-end',
-          alignItems: 'center',
-          gap: 2,
-          zIndex: 1000
-        }}>
+        <div style={toggleContainerStyle}>
           {/* Table View Button (Left) - Toggle to Table */}
           <button
             onClick={() => setViewMode("table")}
