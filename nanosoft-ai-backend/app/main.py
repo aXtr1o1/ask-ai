@@ -194,6 +194,11 @@ async def ws_chat_endpoint(websocket: WebSocket):
             logger.info(f"📊 user_name={user_name}")
             sub_user_name = str(data.get("subUserName", ""))
             logger.info(f"📊 sub_user_name={sub_user_name}")
+            try:
+                user_id = int(data.get("userId")) if data.get("userId") is not None else None
+            except (ValueError, TypeError):
+                user_id = None
+            logger.info(f"📊 user_id={user_id}")
             session_id = str(data.get("sessionId", ""))
             is_audio   = bool(data.get("isAudio", False))  # ── NEW: audio flag
             logger.info(f"📊 isAudio flag received: {is_audio}")
@@ -742,17 +747,19 @@ async def ws_chat_endpoint(websocket: WebSocket):
                             )
                         else:
                             final_response_text, context_summary, _ = await langchain_service.process_query(
-                                messages,
-                                user_name=user_name,
-                                session_id=session_id,
-                                is_graph=is_graph,  # graph flag passed here
-                            )
+                            messages,
+                            user_name=user_name,
+                            user_id=user_id,
+                            session_id=session_id,
+                            is_graph=is_graph,
+                        )
                     else:
                         final_response_text, context_summary, _ = await langchain_service.process_query(
                             messages,
                             user_name=user_name,
+                            user_id=user_id,
                             session_id=session_id,
-                            is_graph=is_graph,  # graph flag passed here
+                            is_graph=is_graph,
                         )
 
                     logger.info(f"✅ Response generated for session_id: {session_id}")
@@ -824,7 +831,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
                     request_delta=1,
                     graph_delta=graph_delta,
                     credits_per_request=1,
-                    audio_seconds_delta=0,
+                    audio_seconds_delta=audio_seconds_effective,
                 )
             except Exception as e:
                 logger.warning("⚠️ user_profile update failed: %s", str(e)[:200])
@@ -835,7 +842,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
                     external_user_id=user_name,
                     name=sub_user_name,
                     credits_delta=1,
-                    audio_seconds_delta=0,
+                    audio_seconds_delta=audio_seconds_effective,
                     graph_delta=graph_delta,
                     request_delta=1,
                     tokens_delta=tokens_delta,

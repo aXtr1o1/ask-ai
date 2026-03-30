@@ -55,6 +55,7 @@ def get_bdm(req: BDMRequest):
             # Call aggregate SP with filters + group by
             cursor.callproc("sp_bdm_aggregate", [
                 req.user_name,       # p_user_name
+                req.user_id,         # p_user_id
                 req.division,        # p_division
                 req.discipline,      # p_discipline
                 req.building,        # p_building
@@ -93,6 +94,7 @@ def get_bdm(req: BDMRequest):
 
         cursor.callproc("sp_bdm_query", [
             req.user_name,
+            req.user_id,
             req.complaint_no,
             req.status,
             req.priority,
