@@ -298,10 +298,10 @@ class LangChainService:
                         HumanMessage(content=f"""
                         Classify this user query into one of three intents:
                         - "count"     → user wants ONLY a single total number
-                                        (e.g. "how many assets exist?", "total complaints count")
+                                        (e.g. "how many assets exist?", "total complaints count", "how many complaints are open?")
                         - "aggregate" → user wants a grouped summary or breakdown by category
-                                        (e.g. "how many assets per division?", "breakdown by building",
-                                        "total complaints by priority", "summarize by status",
+                                        (e.g. "assets per division?", "breakdown by building",
+                                        "complaints by priority", "summarize by status",
                                         "group by floor and building", "compare by make or model")
                         - "list"      → user wants full records shown as a table
                                         (e.g. "show me assets", "list complaints", "get PPM records")
@@ -508,7 +508,7 @@ class LangChainService:
                 elif "ppm" in final_content.lower():
                     entity = "ppm tasks"
 
-                if is_graph and not is_aggregate_query:
+                if is_graph and not is_aggregate_query and not is_count_query:
                     final_content = (
                         f"Here are the results for your query:\n\n{final_content}\n\n"
                         f"**Graph not available for this query**\n"
@@ -594,9 +594,10 @@ class LangChainService:
                     #  updated to 3 intents same as CALL 2 above
                     intent_msg = self.model.invoke([
                         HumanMessage(content=f"""
+                        IMPORTANT: If the query asks only for a total (e.g., 'how many', 'total') and contains no grouping keywords like 'by' or 'per', reply with exactly: count
                         Classify this user query into one of three intents:
                         - "count"     → user wants ONLY a single total number
-                                        (e.g. "how many assets exist?", "total complaints count")
+                                        (e.g. "how many assets exist?", "what is the total complaints count", "how many complaints are open?")
                         - "aggregate" → user wants a grouped summary or breakdown by category
                                         (e.g. "how many assets per division?", "breakdown by building",
                                         "total complaints by priority", "summarize by status",
@@ -605,7 +606,7 @@ class LangChainService:
                                         (e.g. "show me assets", "list complaints", "get PPM records")
 
                         IMPORTANT RULES:
-                        - "how many per X" or "count by X" or "breakdown by X" = aggregate (NOT count)
+                        - " per X" or "count by X" or "breakdown by X" = aggregate (NOT count)
                         - "how many total" or "how many exist" with no grouping = count
                         - "show", "list", "display", "get", "fetch" = list
                         - "give me X", "show X", "get X" where X is a number = list (NOT count)
@@ -761,7 +762,7 @@ class LangChainService:
                     elif "ppm" in content.lower():
                         entity = "ppm tasks"
 
-                    if is_graph and not is_aggregate_query:
+                    if is_graph and not is_aggregate_query :
                         content = (
                         f"Here are the results for your query:\n\n{content}\n\n"
                         f"**Graph not available for this query**\n"
