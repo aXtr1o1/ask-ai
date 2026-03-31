@@ -218,69 +218,6 @@ const queryExternalUser = externalUserId || profileName;  // ← ADD
               Settings
             </button>
           </div>
-          <div style={{ padding: "0 16px", display: "flex", flexDirection: "column", gap: 10 }}>
-            {dashboardMenuItems.map((item) => {
-              const isActive =
-                activeSection === "dashboard" && dashboardView === item.id;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => {
-                    setActiveSection("dashboard");
-                    setDashboardView(item.id);
-                    if (responsive.isMobile) setMobileSidebarOpen(false);
-                  }}
-                  style={{
-                    padding: "10px 12px",
-                    borderRadius: "8px",
-                    background: isActive
-                      ? "linear-gradient(135deg, rgba(var(--color-primary-rgb), 0.2) 0%, rgba(var(--color-primary-rgb), 0.1) 100%)"
-                      : "transparent",
-                    border: isActive
-                      ? "1.5px solid var(--color-primary)"
-                      : "1px solid transparent",
-                    color: isActive ? "var(--color-primary)" : "var(--color-text)",
-                    cursor: "pointer",
-                    fontSize: "12px",
-                    fontWeight: isActive ? 700 : 500,
-                    textAlign: "left",
-                    width: "100%",
-                    transition: "all 0.3s ease",
-                  }}
-                >
-                  {item.label}
-                </button>
-              );
-            })}
-
-            <button
-              type="button"
-              onClick={() => {
-                setActiveSection("settings");
-                if (responsive.isMobile) setMobileSidebarOpen(false);
-              }}
-              style={{
-                padding: "10px 12px",
-                borderRadius: "8px",
-                background: activeSection === "settings"
-                  ? "linear-gradient(135deg, rgba(var(--color-primary-rgb), 0.2) 0%, rgba(var(--color-primary-rgb), 0.1) 100%)"
-                  : "transparent",
-                border: activeSection === "settings"
-                  ? "1.5px solid var(--color-primary)"
-                  : "1px solid transparent",
-                color: activeSection === "settings" ? "var(--color-primary)" : "var(--color-text)",
-                cursor: "pointer",
-                fontSize: "12px",
-                fontWeight: activeSection === "settings" ? 700 : 500,
-                textAlign: "left",
-                width: "100%",
-                transition: "all 0.3s ease",
-              }}
-            >
-              Settings
-            </button>
-          </div>
         </div>
       )}
 
