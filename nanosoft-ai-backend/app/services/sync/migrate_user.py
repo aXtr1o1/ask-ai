@@ -254,10 +254,10 @@ def migrate_user(
 
 #     result = migrate_user(
 #         client_name = "v4demo",
-#         base_url    = "https://v4demo.smartfm.cloud/askmeapi/",
-#         user_id     = 101,
+#         base_url    = "",
+#         user_id     = 1,
 #         user_name   = "v4demo",
-#         jwt_token   = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjEwMSwiaWF0IjoxNzc0MzQ5ODU2LCJleHAiOjE3NzQ0MzYyNTZ9.qMTAhrhbMqjuCUAMf9WtH1Fzi-QphZhBEz7yOdRF6GQ",
+#         jwt_token   = "",
         
 #     )
 

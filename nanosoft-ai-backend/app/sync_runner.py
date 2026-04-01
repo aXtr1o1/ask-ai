@@ -1,16 +1,18 @@
 """
 Standalone sync runner — called by Windows Task Scheduler / Linux Cron
-Zero changes to sync_service.py — just calls run_sync() and measures memory
+Loops every SYNC_INTERVAL_MINUTES minutes automatically.
 """
 import logging
 import sys
 import os
+import time
 import tracemalloc
 
 # ── so imports like 'app.services...' work ──
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.services.sync.engine import run_sync
+from app.config import settings
 
 # ─────────────────────────────────────────────────────────────
 # LOGGING SETUP
@@ -24,24 +26,28 @@ logging.basicConfig(
         logging.FileHandler("sync_engine.log", mode="a", encoding="utf-8"),
     ],
 )
-log = logging.getLogger("sync_engine")
+log = logging.getLogger("sync_runner")
 
 
 if __name__ == "__main__":
 
-    # ── start memory tracking ──
-    tracemalloc.start()
-    log.info("🧠 Memory tracking started")
+    log.info(f"🔁 Sync runner started — every {settings.SYNC_INTERVAL_MINUTES} minute(s)")
 
-    # ── run sync ──
-    run_sync()
+    while True:
+        # ── memory tracking ──
+        tracemalloc.start()
 
-    # ── measure memory after sync ──
-    current, peak = tracemalloc.get_traced_memory()
-    tracemalloc.stop()
+        # ── run sync ──
+        run_sync()
 
-    log.info(f"🧠 Memory CURRENT : {current / 1024 / 1024:.2f} MB")
-    log.info(f"🧠 Memory PEAK    : {peak    / 1024 / 1024:.2f} MB")
+        # ── memory report ──
+        current, peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+        log.info(f"🧠 Memory CURRENT : {current / 1024 / 1024:.2f} MB")
+        log.info(f"🧠 Memory PEAK    : {peak    / 1024 / 1024:.2f} MB")
 
-    if peak / 1024 / 1024 > 300:
-        log.warning(f"⚠️  Memory spike detected! PEAK exceeded 300MB — check upsert batch sizes")
+        if peak / 1024 / 1024 > 300:
+            log.warning("⚠️  Memory spike! PEAK exceeded 300MB — check upsert batch sizes")
+
+        # ── sleep until next sync ──
+        time.sleep(settings.SYNC_INTERVAL_MINUTES * 60)

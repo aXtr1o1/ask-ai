@@ -44,6 +44,7 @@ def upsert_ppm(cursor, records: list, user_id: int, user_name: str):
                 "LastStandByRemarks", "PPMPendingPeriod", "SLADuration"
             ) VALUES %s
             ON CONFLICT ("WorkOrder") DO UPDATE SET
+                user_id         = EXCLUDED.user_id,
                 user_name             = EXCLUDED.user_name,
                 "PPMStatus"           = EXCLUDED."PPMStatus",
                 "PPMStageName"        = EXCLUDED."PPMStageName",

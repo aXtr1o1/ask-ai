@@ -194,9 +194,9 @@ def run_sync() -> dict:
     next_sync_time = (datetime.now(timezone.utc) + timedelta(minutes=settings.SYNC_INTERVAL_MINUTES)).strftime("%Y-%m-%d %H:%M:%S UTC")
 
     log.info(f"\n{'='*60}")
-    log.info(f"✅ SYNC COMPLETED in {round(elapsed, 2)}s")
-    log.info(f"😴 Sync engine SLEEPING — next sync in {settings.SYNC_INTERVAL_MINUTES} minute(s)")
-    log.info(f"⏰ Next sync at: {next_sync_time}")
+    log.info(f" SYNC COMPLETED in {round(elapsed, 2)}s")
+    log.info(f" Sync engine SLEEPING — next sync in {settings.SYNC_INTERVAL_MINUTES} minute(s)")
+    log.info(f" Next sync at: {next_sync_time}")
     log.info(f"{'='*60}\n")
 
     summary["elapsed_seconds"] = round(elapsed, 2)

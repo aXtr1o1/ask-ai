@@ -56,6 +56,7 @@ def upsert_assets(cursor, records: list, user_id: int, user_name: str):
                 "ServiceAreaName", "TradeGroupName", "DrawingNo", "Remarks"
             ) VALUES %s
             ON CONFLICT ("AssetTagNo") DO UPDATE SET
+                user_id         = EXCLUDED.user_id,
                 user_name       = EXCLUDED.user_name,
                 "StatusName"    = EXCLUDED."StatusName",
                 "ConditionName" = EXCLUDED."ConditionName",

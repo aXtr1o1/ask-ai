@@ -37,6 +37,7 @@ def fetch_single_page(base_url: str, jwt_token: str, user_id: int,
         "data": {
             "PageIndex": page_index,
             "PageSize":  PAGE_SIZE,
+            "UserID":    user_id, 
             "DateTime":  synced_ts,
         }
     }

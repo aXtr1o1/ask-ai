@@ -56,6 +56,7 @@ def upsert_bdm(cursor, records: list, user_id: int, user_name: str):
                 "StandByRemarks"
             ) VALUES %s
             ON CONFLICT (user_id, "ComplaintNo") DO UPDATE SET
+                user_id         = EXCLUDED.user_id,
                 user_name            = EXCLUDED.user_name,
                 "WoStatus"           = EXCLUDED."WoStatus",
                 "StageName"          = EXCLUDED."StageName",
