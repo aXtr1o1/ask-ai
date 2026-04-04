@@ -9,6 +9,8 @@ from .fetcher import fetch_single_page
 from .upsert_assets import upsert_assets
 from .upsert_ppm import upsert_ppm
 from .upsert_bdm import upsert_bdm
+from .upsert_fa import upsert_fa
+from .upsert_sb import upsert_sb
 
 
 # ─────────────────────────────────────────────────────────────
@@ -22,9 +24,9 @@ def _dedup(records: list, key: str) -> list:
 
 
 # ─────────────────────────────────────────────────────────────
-# CORE SYNC LOGIC
-# 1. Read jwt_token + user_id directly from DB (no login call)
-# 2. Skip user if jwt_token is NULL or empty in DB
+# CORE SYNC LOGIC — 5 endpoints: Assets, PPM, BDM, FA, SB
+# 1. Read jwt_token + user_id directly from DB
+# 2. Skip user if jwt_token is NULL or empty
 # 3. Use jwt + user_id for fetching data from API
 # 4. Use db user_id + user_name for upserting into tables
 # Collects ALL pages first → global dedup → single upsert
@@ -51,12 +53,12 @@ def run_sync() -> dict:
         log.info(f"\n{'─'*55}")
         log.info(f"👤 Client: {client_name} | user_id={user_id} | user_name={user_name} | {base_url}")
 
-        # ── SKIP user if jwt_token is NULL or empty in DB ─────
+        # ── SKIP user if jwt_token is NULL or empty ────────────
         if not jwt_token or not str(jwt_token).strip():
             log.warning(f"  ⚠️  Skipping [{client_name}] — jwt_token is NULL or empty in DB.")
             summary["clients"].append({
-                "client":  client_name,
-                "status":  "skipped_no_jwt",
+                "client": client_name,
+                "status": "skipped_no_jwt",
             })
             continue
 
@@ -126,6 +128,10 @@ def run_sync() -> dict:
                 all_records = _dedup(all_records, "WorkOrder")
             elif endpoint == "/getBDM":
                 all_records = _dedup(all_records, "ComplaintNo")
+            elif endpoint == "/getFA":
+                all_records = _dedup(all_records, "RMComplaintNo")
+            elif endpoint == "/getSB":
+                all_records = _dedup(all_records, "SBCreWorkOrder")
 
             dedup_count   = len(all_records)
             dupes_removed = raw_count - dedup_count
@@ -142,6 +148,10 @@ def run_sync() -> dict:
                     ins, upd, err = upsert_ppm(cursor, all_records, user_id, user_name)
                 elif endpoint == "/getBDM":
                     ins, upd, err = upsert_bdm(cursor, all_records, user_id, user_name)
+                elif endpoint == "/getFA":
+                    ins, upd, err = upsert_fa(cursor, all_records, user_id, user_name)
+                elif endpoint == "/getSB":
+                    ins, upd, err = upsert_sb(cursor, all_records, user_id, user_name)
                 else:
                     log.warning(f"  Unknown endpoint {endpoint} — skipping.")
                     del all_records
@@ -168,7 +178,10 @@ def run_sync() -> dict:
                 "errors":          err,
                 "status":          "ok" if endpoint_ok else "error",
             }
-            log.info(f"  [{endpoint}] ✅ Total: fetched={dedup_count} | inserted={ins} | updated={upd} | errors={err}")
+            log.info(
+                f"  [{endpoint}] ✅ Total: fetched={dedup_count} | "
+                f"inserted={ins} (new) | updated={upd} (existing) | errors={err}"
+            )
 
         # ── commit all endpoints for this client ───────────────
         if synced_any:

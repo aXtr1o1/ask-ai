@@ -1,13 +1,28 @@
 import psycopg2.extras
 from .config import log
+
+
+# ─────────────────────────────────────────────────────────────
+# UPSERT — BDM
+# Uses COUNT before/after to accurately split insert vs update
+# ─────────────────────────────────────────────────────────────
 def upsert_bdm(cursor, records: list, user_id: int, user_name: str):
     inserted = updated = errors = 0
     try:
+        # ── Deduplicate by ComplaintNo — keep last occurrence ─
         seen = {}
         for r in records:
             key = r.get("ComplaintNo") or ""
             seen[key] = r
         records = list(seen.values())
+
+        # ── COUNT before upsert ───────────────────────────────
+        cursor.execute(
+            'SELECT COUNT(*) FROM public.bdm WHERE user_name = %s',
+            (user_name,)
+        )
+        before_count = cursor.fetchone()[0]
+        log.info(f"    [BDM] Records in DB before upsert: {before_count}")
 
         rows = [
             (
@@ -37,7 +52,7 @@ def upsert_bdm(cursor, records: list, user_id: int, user_name: str):
         ]
 
         psycopg2.extras.execute_values(cursor, """
-            INSERT INTO bdm (
+            INSERT INTO public.bdm (
                 user_id, user_name,
                 "ComplaintNo", "AssetTagNo", "AssetBarcode", "ClientWoNo",
                 "WoStatus", "PriorityName", "StageName",
@@ -55,8 +70,8 @@ def upsert_bdm(cursor, records: list, user_id: int, user_name: str):
                 "ExecutionStartTime", "ExecutionEndTime",
                 "StandByRemarks"
             ) VALUES %s
-            ON CONFLICT (user_id, "ComplaintNo") DO UPDATE SET
-                user_id         = EXCLUDED.user_id,
+            ON CONFLICT (user_name, "ComplaintNo") DO UPDATE SET
+                user_id              = EXCLUDED.user_id,
                 user_name            = EXCLUDED.user_name,
                 "WoStatus"           = EXCLUDED."WoStatus",
                 "StageName"          = EXCLUDED."StageName",
@@ -73,11 +88,26 @@ def upsert_bdm(cursor, records: list, user_id: int, user_name: str):
                 updated_at           = NOW()
         """, rows, page_size=1000)
 
-        inserted = len(records)
+        # ── COUNT after upsert ────────────────────────────────
+        cursor.execute(
+            'SELECT COUNT(*) FROM public.bdm WHERE user_name = %s',
+            (user_name,)
+        )
+        after_count = cursor.fetchone()[0]
+        log.info(f"    [BDM] Records in DB after upsert: {after_count}")
+
+        # ── Accurate split ────────────────────────────────────
+        inserted = after_count - before_count
+        updated  = len(records) - inserted
 
     except Exception as e:
         log.error(f"    ⚠️  BDM batch upsert failed: {e}")
         errors = len(records)
 
-    log.info(f"    BDM → Upserted: {inserted} | Errors: {errors}")
+    log.info(
+        f"    BDM → Sent={len(records)} | "
+        f"Inserted={inserted} (new rows) | "
+        f"Updated={updated} (existing rows) | "
+        f"Errors={errors}"
+    )
     return inserted, updated, errors

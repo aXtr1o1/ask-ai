@@ -8,9 +8,13 @@ import logging
 from app.models.schemas import AssetsInput, PPMInput, BDMInput
 from fastapi import HTTPException
 from app.api.models.schemas import AssetRequest, PPMRequest, BDMRequest
+from app.models.schemas import FAInput, SBInput
 from app.api.routes.assets import get_assets
 from app.api.routes.ppm import get_ppm
 from app.api.routes.bdm import get_bdm
+from app.api.models.schemas import FARequest, SBRequest
+from app.api.routes.fa import get_fa
+from app.api.routes.sb import get_sb
 from datetime import date, timedelta
 
 
@@ -541,3 +545,350 @@ def BDM(
     except Exception as e:
         logger.error(f"❌ BDM tool error: {e}", exc_info=True)
         return f"Error calling BDM: {str(e)}"
+    
+
+ 
+# =====================================================
+# ✅ TOOL 4: FA — Facility Audit
+# =====================================================
+@tool(
+    description="""
+Use this tool ONLY for Facility Audit (FA) records — system-generated scheduled inspection complaints.
+ 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STRICT ROUTING RULE — WHEN TO USE THIS TOOL:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ USE this tool when user mentions ANY of these:
+  - "FA", "facility audit", "audit complaints", "audit requests"
+  - "pest control", "pest control checks", "rodent activity", "RODENT ACTIVITY"
+  - "facility audit request raised" (stage name)
+  - "scheduled inspection complaints"
+  - "system-generated complaints"
+  - "housekeeping audit", "audit category", "audit sub-category"
+  - "how many FA", "show FA", "list FA"
+ 
+ NEVER use this tool when user mentions:
+  - "breakdown", "heater", "HVAC failure", "equipment fault"
+  - "who reported", "complainer", "tenant complaint"
+  - "reactive maintenance", "corrective maintenance"
+  - "BDM", "breakdown complaint"
+  - "PPM", "preventive maintenance", "scheduled maintenance"
+  - "SB", "schedule based", "work order AA-"
+ 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+KEY DIFFERENTIATORS vs BDM:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  FA = System-generated audit | No human complainer | Has category/sub-category
+  BDM = Human-reported breakdown | Has complainer | Has complaint type/mode
+ 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+AMBIGUOUS QUERIES — DO NOT GUESS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+If user asks a generic complaint question with NO FA/BDM keyword:
+  e.g. "how many complaints are raised?" or "show all complaints"
+→ DO NOT call this tool. Ask the user:
+  "Do you mean Facility Audit (FA) complaints or Breakdown Maintenance (BDM) complaints?"
+ 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PARAMETERS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- user_name: Always required (from authenticated session)
+- complaint_no: FA complaint number
+- priority: e.g. "P2 High"
+- stage: e.g. "Facility Audit Request Raised"
+- category: e.g. "Pest Control Checks"
+- category_sub: e.g. "RODENT ACTIVITY"
+- division: e.g. "Housekeeping"
+- locality, building, floor, spot_name: Location filters
+- contract: Contract name
+- tech: Technician name
+- frequency: e.g. "MONTHLY", "WEEKLY"
+- request_desc: e.g. "Pest Control"
+- is_withdraw, is_rework, is_active: Boolean flags
+- date_from, date_to: Date range (YYYY-MM-DD)
+- comp_from, comp_to: Completion date range
+- limit, offset: Pagination
+ 
+AGGREGATE / GROUP BY:
+- is_aggregate=True for "how many FA per division", "breakdown by category"
+- group_by_columns: DivisionName, BuildingName, FloorName, LocalityName,
+                    PriorityName, RMStageName, RMCategoryName, RMCategorySubName,
+                    FrequencyName, ContractName, SpotName
+- aggregate_function: COUNT / SUM / AVG
+""",
+    args_schema=FAInput
+)
+def FA(
+    user_name=None,
+    user_id=None,
+    complaint_no=None,
+    priority=None,
+    stage=None,
+    category=None,
+    category_sub=None,
+    division=None,
+    locality=None,
+    building=None,
+    floor=None,
+    spot_name=None,
+    contract=None,
+    tech=None,
+    frequency=None,
+    request_desc=None,
+    is_withdraw=None,
+    is_rework=None,
+    is_active=None,
+    keyword=None,
+    date_from=None,
+    date_to=None,
+    comp_from=None,
+    comp_to=None,
+    limit=None,
+    offset=None,
+    is_aggregate=False,
+    group_by_columns=None,
+    aggregate_function=None,
+) -> str:
+    if not user_name:
+        logger.error("❌ FA called without user_name")
+        return "Error: user_name is required."
+ 
+    logger.info(f"📋 FA TOOL TRIGGERED for user_name: {user_name}")
+ 
+    today = date.today()
+    if date_from is None and date_to is None:
+        resolved_date_from = (today - timedelta(days=6)).isoformat()
+        resolved_date_to   = today.isoformat()
+    elif date_from is None:
+        resolved_date_from = (today - timedelta(days=6)).isoformat()
+        resolved_date_to   = date_to
+    elif date_to is None:
+        resolved_date_from = date_from
+        resolved_date_to   = today.isoformat()
+    else:
+        resolved_date_from = date_from
+        resolved_date_to   = date_to
+ 
+    payload = {
+        "user_name":          user_name,
+        "user_id":            user_id,
+        "complaint_no":       complaint_no,
+        "priority":           priority,
+        "stage":              stage,
+        "category":           category,
+        "category_sub":       category_sub,
+        "division":           division,
+        "locality":           locality,
+        "building":           building,
+        "floor":              floor,
+        "spot_name":          spot_name,
+        "contract":           contract,
+        "tech":               tech,
+        "frequency":          frequency,
+        "request_desc":       request_desc,
+        "is_withdraw":        is_withdraw,
+        "is_rework":          is_rework,
+        "is_active":          is_active,
+        "keyword":            keyword,
+        "date_from":          resolved_date_from,
+        "date_to":            resolved_date_to,
+        "comp_from":          comp_from,
+        "comp_to":            comp_to,
+        "limit":              limit,
+        "offset":             0,
+        "is_aggregate":       is_aggregate,
+        "group_by_columns":   group_by_columns,
+        "aggregate_function": aggregate_function,
+    }
+ 
+    clean_payload = {k: v for k, v in payload.items() if v is not None}
+    if "offset" not in clean_payload:
+        clean_payload["offset"] = 0
+ 
+    if is_aggregate:
+        logger.info("📊 FA AGGREGATE MODE | group_by=%s | function=%s", group_by_columns, aggregate_function)
+ 
+    logger.info("📋 [FA PAYLOAD FROM AI]:\n%s", json.dumps(clean_payload, indent=2, default=str))
+ 
+    try:
+        req    = FARequest(**clean_payload)
+        result = get_fa(req)
+        logger.info("✅ FA data successfully processed")
+        return json.dumps(result)
+    except HTTPException as e:
+        logger.error("❌ FA API error: %s", e.detail)
+        return f"❌ API Error: {e.detail}"
+    except Exception as e:
+        logger.error(f"❌ FA tool error: {e}", exc_info=True)
+        return f"Error calling FA: {str(e)}"
+ 
+ 
+# =====================================================
+# ✅ TOOL 5: SB — Schedule Based
+# =====================================================
+@tool(
+    description="""
+Use this tool ONLY for Schedule Based (SB) maintenance work orders — system-generated scheduled service work orders.
+ 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STRICT ROUTING RULE — WHEN TO USE THIS TOOL:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+USE this tool when user mentions ANY of these:
+  - "SB", "schedule based", "schedule-based work orders"
+  - "SB work orders", "scheduled work orders"
+  - work order numbers like "AA-1-2026" (format: code-number-year)
+  - "environmental services work orders", "landscaping work orders"
+  - "staff yet to be allocated" (SB stage name)
+  - "how many SB", "show SB", "list SB work orders"
+  - "service type" work orders (Environmental Services, Landscaping)
+ 
+  NEVER use this tool when user mentions:
+  - "PPM", "preventive maintenance", "planned maintenance", "chiller inspection"
+  - "breakdown", "complaint", "heater", "equipment failure"
+  - "FA", "facility audit", "pest control audit", "rodent activity"
+  - "BDM", "corrective maintenance"
+  - "asset", "equipment tag", "barcode"
+ 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+KEY DIFFERENTIATORS vs PPM:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SB = Schedule-based work orders | Has ServiceTypeName | Has DisciplineName
+       Work order format: AA-1-2026 | No asset tag linked
+  PPM = Preventive maintenance | Has AssetTagNo | Has equipment name
+        Work order format: AMC-2023-0002-RAE-19366-2025
+ 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+AMBIGUOUS QUERIES — DO NOT GUESS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+If user asks a generic maintenance query with NO SB/PPM keyword:
+  e.g. "how many scheduled tasks?" or "show maintenance work orders"
+→ DO NOT call this tool. Ask the user:
+  "Do you mean PPM (Preventive Maintenance) work orders or SB (Schedule Based) work orders?"
+ 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PARAMETERS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- user_name: Always required (from authenticated session)
+- work_order: Work order number e.g. "AA-1-2026"
+- stage: e.g. "Staff Yet to be Allocated"
+- division: e.g. "Environmental Services"
+- discipline: e.g. "Landscaping"
+- locality, building, floor, spot_name: Location filters
+- contract: Contract name
+- frequency: e.g. "MONTHLY"
+- service_type: e.g. "Environmental Services"
+- tech: Technician name
+- is_withdraw, is_reschedule, is_rework, is_active: Boolean flags
+- date_from, date_to: Date range (YYYY-MM-DD)
+- comp_from, comp_to: Completion date range
+- limit, offset: Pagination
+ 
+AGGREGATE / GROUP BY:
+- is_aggregate=True for "how many SB per division", "breakdown by frequency"
+- group_by_columns: DivisionName, DisciplineName, BuildingName, FloorName,
+                    LocalityName, PPMStageName, FrequencyName, ServiceTypeName, ContractName
+- aggregate_function: COUNT / SUM / AVG
+""",
+    args_schema=SBInput
+)
+def SB(
+    user_name=None,
+    user_id=None,
+    work_order=None,
+    stage=None,
+    division=None,
+    discipline=None,
+    locality=None,
+    building=None,
+    floor=None,
+    spot_name=None,
+    contract=None,
+    frequency=None,
+    service_type=None,
+    tech=None,
+    is_withdraw=None,
+    is_reschedule=None,
+    is_rework=None,
+    is_active=None,
+    keyword=None,
+    date_from=None,
+    date_to=None,
+    comp_from=None,
+    comp_to=None,
+    limit=None,
+    offset=None,
+    is_aggregate=False,
+    group_by_columns=None,
+    aggregate_function=None,
+) -> str:
+    if not user_name:
+        logger.error("❌ SB called without user_name")
+        return "Error: user_name is required."
+ 
+    logger.info(f"🗓️ SB TOOL TRIGGERED for user_name: {user_name}")
+ 
+    today = date.today()
+    if date_from is None and date_to is None:
+        resolved_date_from = (today - timedelta(days=6)).isoformat()
+        resolved_date_to   = today.isoformat()
+    elif date_from is None:
+        resolved_date_from = (today - timedelta(days=6)).isoformat()
+        resolved_date_to   = date_to
+    elif date_to is None:
+        resolved_date_from = date_from
+        resolved_date_to   = today.isoformat()
+    else:
+        resolved_date_from = date_from
+        resolved_date_to   = date_to
+ 
+    payload = {
+        "user_name":          user_name,
+        "user_id":            user_id,
+        "work_order":         work_order,
+        "stage":              stage,
+        "division":           division,
+        "discipline":         discipline,
+        "locality":           locality,
+        "building":           building,
+        "floor":              floor,
+        "spot_name":          spot_name,
+        "contract":           contract,
+        "frequency":          frequency,
+        "service_type":       service_type,
+        "tech":               tech,
+        "is_withdraw":        is_withdraw,
+        "is_reschedule":      is_reschedule,
+        "is_rework":          is_rework,
+        "is_active":          is_active,
+        "keyword":            keyword,
+        "date_from":          resolved_date_from,
+        "date_to":            resolved_date_to,
+        "comp_from":          comp_from,
+        "comp_to":            comp_to,
+        "limit":              limit,
+        "offset":             0,
+        "is_aggregate":       is_aggregate,
+        "group_by_columns":   group_by_columns,
+        "aggregate_function": aggregate_function,
+    }
+ 
+    clean_payload = {k: v for k, v in payload.items() if v is not None}
+    if "offset" not in clean_payload:
+        clean_payload["offset"] = 0
+ 
+    if is_aggregate:
+        logger.info("📊 SB AGGREGATE MODE | group_by=%s | function=%s", group_by_columns, aggregate_function)
+ 
+    logger.info("📋 [SB PAYLOAD FROM AI]:\n%s", json.dumps(clean_payload, indent=2, default=str))
+ 
+    try:
+        req    = SBRequest(**clean_payload)
+        result = get_sb(req)
+        logger.info("✅ SB data successfully processed")
+        return json.dumps(result)
+    except HTTPException as e:
+        logger.error("❌ SB API error: %s", e.detail)
+        return f"❌ API Error: {e.detail}"
+    except Exception as e:
+        logger.error(f"❌ SB tool error: {e}", exc_info=True)
+        return f"Error calling SB: {str(e)}"
