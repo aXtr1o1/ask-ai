@@ -3,12 +3,12 @@ LangChain Service — AI model with tool support
 """
 import logging
 from typing import Any
-
+import re as _re
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 
 from app.config import settings
-from app.tools.facility_tools import ASSETS, PPM, BDM
+from app.tools.facility_tools import ASSETS, PPM, BDM, FA, SB
 from app.services.quota_service import quota_fallback_service
 
 import json
@@ -20,19 +20,42 @@ ch.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(me
 if not logger.handlers:
     logger.addHandler(ch)
 
-
+def extract_date_from_query(query: str):
+    """Extract date keyword from user query for forced tool calls."""
+    q = query.lower()
+    # ORDER MATTERS — check longer phrases first
+    if "last week" in q:
+        return "last week", "last week"
+    elif "this week" in q:
+        return "this week", "today"
+    elif "last month" in q:
+        return "last month", "last month"
+    elif "this month" in q:
+        return "this month", "today"
+    elif "this year" in q:
+        return "this year", "today"
+    elif "last year" in q:
+        return "last year", "last year"
+    elif "yesterday" in q:
+        return "yesterday", "yesterday"
+    elif "today" in q:
+        return "today", "today"
+    else:
+        return None, None  # Let getTime default to last 7 days
 class LangChainService:
     def __init__(self):
         try:
             self.model = ChatGoogleGenerativeAI(
                 model=settings.GOOGLE_AI_MODEL,
                 google_api_key=settings.GOOGLE_API_KEY
-            ).bind_tools([ASSETS, PPM, BDM])
+            ).bind_tools([ASSETS, PPM, BDM, FA, SB])
 
             self.tool_map = {
                 "ASSETS": ASSETS,
-                "PPM": PPM,
-                "BDM": BDM,
+                "PPM":    PPM,
+                "BDM":    BDM,
+                "FA":     FA,
+                "SB":     SB,
             }
             logger.info("🚀 LangChainService initialized with ASSETS, PPM, BDM tools")
         except Exception as e:
@@ -174,7 +197,7 @@ class LangChainService:
             self._total_input_tokens  = 0
             self._total_output_tokens = 0
             self._total_tokens        = 0
-
+            
             # ── Get current user query for summary log ───────────────────────
             current_user_query = ""
             for m in reversed(messages):
@@ -182,8 +205,38 @@ class LangChainService:
                     current_user_query = (m.content or "") if isinstance(m.content, str) else ""
                     break
 
-             # CALL 1 — First model call
+            # ── AMBIGUITY PRE-CHECK (runs before model, before lc_memory influence) ──
+            import re as _re
+
+            _q = current_user_query.lower()
+
+            # complaint ambiguity check
+            _complaint_ambiguous = bool(_re.search(r'\bcomplaints?\b', _q))
+            _complaint_clear     = bool(_re.search(r'\b(fa|bdm|facility audit|breakdown)\b', _q))
+
+            # work order ambiguity check
+            _workorder_ambiguous = bool(_re.search(r'\b(work\s*orders?|scheduled|compliance|work\s*order)\b', _q))
+            _workorder_clear     = bool(_re.search(r'\b(ppm|sb|preventive|schedule[\s\-]based)\b', _q))
+
+            if _complaint_ambiguous and not _complaint_clear:
+                logger.info("🔀 Ambiguous complaint query intercepted before model | query='%s'", current_user_query)
+                clarification = (
+                    "Do you mean Facility Audit (FA) complaints or Breakdown Maintenance (BDM) complaints?\n"
+                    "Please clarify so I can fetch the correct data."
+                )
+                return clarification, clarification, messages
+
+            if _workorder_ambiguous and not _workorder_clear:
+                logger.info("🔀 Ambiguous work order query intercepted before model | query='%s'", current_user_query)
+                clarification = (
+                    "Do you mean PPM (Preventive Maintenance) work orders or SB (Schedule Based) work orders?\n"
+                    "Please clarify so I can fetch the correct data."
+                )
+                return clarification, clarification, messages
+
+            # CALL 1 — First model call
             ai_msg = self.model.invoke(messages)
+            
             self._accumulate_tokens(ai_msg)
             logger.info("🤖 First model call | tool_calls=%s", bool(ai_msg.tool_calls))
 
@@ -222,12 +275,18 @@ class LangChainService:
 
                     #previously limit was only cleared for count queries now i cleared for the list queries also. 
 
+                    
                     list_patterns = ("list", "show me", "get ", "fetch ", "display",
-                                     "all assets", "all complaints", "all bdm", "all ppm")
-                    if any(p in user_query.lower() for p in list_patterns):
+                                    "give me", "provide", "retrieve", "show ",
+                                    "all assets", "all complaints", "all bdm", "all ppm",
+                                    "all fa", "all sb")
+                    _has_number = bool(_re.search(r'\b\d+\b', user_query))
+                    if any(p in user_query.lower() for p in list_patterns) and not _has_number:
                         old_limit = args.get("limit")
                         args["limit"] = None
                         logger.info("📋 List query detected — clearing limit=%s", old_limit)
+                    elif _has_number:
+                        logger.info("📋 List query with specific number detected — keeping limit as-is | limit=%s", args.get("limit"))
 
                     try:
                         tool_result = tool_fn.invoke(dict(args))
@@ -280,10 +339,17 @@ class LangChainService:
                     # ── If tool actually ran in aggregate mode → force aggregate intent
                     # This overrides whatever the intent classifier says later
                     tool_was_aggregate = args.get("is_aggregate") is True
+                    tool_has_groupby = bool(args.get("group_by_columns"))
+
                     if tool_was_aggregate:
-                        logger.info("📊 Tool ran in aggregate mode → forcing AGGREGATE intent (skipping classifier)")
-                        is_aggregate_query = True
-                        is_count_query = False
+                        if tool_has_groupby:
+                            logger.info("📊 Tool ran in aggregate mode WITH group_by → forcing AGGREGATE intent")
+                            is_aggregate_query = True
+                            is_count_query = False
+                        else:
+                            logger.info("🔢 Tool ran in aggregate mode WITHOUT group_by → treating as COUNT intent")
+                            is_aggregate_query = False
+                            is_count_query = True
 
                     
                     if p_count == 0 and total_for_count == 0:
@@ -296,6 +362,31 @@ class LangChainService:
 
                     
                     #  call 2 -updated from 2 intents (count/list) to 3 intents (count/aggregate/list)
+                    # ── Build combined query using previous human message for intent context ──
+                    # ── Build combined query ONLY if previous AI response was a clarification ──
+                    import re as _re
+                    clarification_markers = ["do you mean", "please clarify"]
+                    previous_ai_was_clarification = False
+                    ai_messages_list = [m for m in messages if isinstance(m, AIMessage)]
+                    if ai_messages_list:
+                        last_ai_content = ai_messages_list[-1].content or ""
+                        previous_ai_was_clarification = any(
+                            kw in last_ai_content.lower()
+                            for kw in clarification_markers
+                        )
+
+                    if previous_ai_was_clarification:
+                        human_messages_list = [m for m in messages if isinstance(m, HumanMessage)]
+                        previous_query = ""
+                        if len(human_messages_list) >= 2:
+                            prev = human_messages_list[-2].content
+                            previous_query = prev if isinstance(prev, str) else ""
+                        combined_query_for_intent = f"{previous_query} {user_query}".strip()
+                        logger.info(f"🔍 Intent classification (clarification reply) | combined='{combined_query_for_intent}'")
+                    else:
+                        combined_query_for_intent = user_query
+                        logger.info(f"🔍 Intent classification (normal) | query='{combined_query_for_intent}'")
+
                     intent_msg = self.model.invoke([
                         HumanMessage(content=f"""
                         Classify this user query into one of three intents:
@@ -311,14 +402,13 @@ class LangChainService:
                         - "list"      → user wants full records shown as a table
                                         (e.g. "show me assets", "list complaints", "get PPM records")
                         IMPORTANT RULES:
-                         "how many per X" or "count by X" or "breakdown by X" = aggregate (NOT count)
+                        - "how many per X" or "count by X" or "breakdown by X" = aggregate (NOT count)
                         - "how many total" or "how many exist" with no grouping = count
                         - "show", "list", "display", "get", "fetch" = list
                         - "give me X", "show X", "get X" where X is a number = list (NOT count)
                           The number means a limit — user wants to SEE records, not count them.
-                        
 
-                        Query: "{user_query}"
+                        Query: "{combined_query_for_intent}"
 
                         Reply with ONLY one word: count or aggregate or list
                         """)
@@ -332,8 +422,9 @@ class LangChainService:
                         is_count_query     = intent == "count"
                         is_aggregate_query = intent == "aggregate"
                     else:
-                        intent = "aggregate"  # already forced above
-
+                        # intent already set above by tool_has_groupby check — do NOT override
+                        intent = "count" if is_count_query else "aggregate"
+                        
                     if is_count_query:
                         logger.info("🔢 Intent=COUNT — sending count only to model | query='%s'", user_query)
                     elif is_aggregate_query:
@@ -534,23 +625,48 @@ class LangChainService:
                         user_query = (m.content or "") if isinstance(m.content, str) else ""
                         break
                 q = user_query.lower()
-                data_patterns = ("how many", "list", "count", "total", "number of", "show me", "get ", "fetch ")
-                needs_bdm    = any(w in q for w in ("complaint", "bdm", "breakdown"))
-                needs_assets = any(w in q for w in ("asset", "equipment"))
-                needs_ppm    = any(w in q for w in ("ppm", "preventive", "planned", "scheduled"))
+                data_patterns = ("how many", "list", "show me", "get ", "fetch ", "display",
+                 "give me", "provide", "retrieve", "show", "tell me how many",
+                 "all assets", "all complaints", "all bdm", "all ppm",
+                 "all fa", "all sb", "all ppm")
+                needs_bdm    = any(w in q for w in ("breakdown", "bdm", "corrective"))
+                needs_assets = any(w in q for w in ("asset", "equipment", "barcode"))
+                needs_ppm    = any(w in q for w in ("ppm", "preventive", "planned"))
+                needs_fa     = any(w in q for w in ("fa", "facility audit", "audit", "pest control", "rodent"))
+                needs_sb     = any(w in q for w in ("sb", "schedule based", "schedule-based", "environmental services", "landscaping"))
 
-                if any(p in q for p in data_patterns) and (needs_bdm or needs_assets or needs_ppm):
-                    tool_name = "BDM" if needs_bdm else ("ASSETS" if needs_assets else "PPM")
+                if any(p in q for p in data_patterns) and (needs_bdm or needs_assets or needs_ppm or needs_fa or needs_sb):
+                    if needs_fa:
+                        tool_name = "FA"
+                    elif needs_sb:
+                        tool_name = "SB"
+                    elif needs_bdm:
+                        tool_name = "BDM"
+                    elif needs_assets:
+                        tool_name = "ASSETS"
+                    else:
+                        tool_name = "PPM"
                     logger.warning("⚠️ Model skipped tool for data query — forcing %s", tool_name)
                     tool_fn = self.tool_map[tool_name]
                     aggregate_keywords = ("by ", "per ", "group by", "breakdown", "summarize", "compare")
+
+                    # ✅ Extract date keywords from query before forcing tool call
+                    forced_date_from, forced_date_to = extract_date_from_query(user_query)
+                    logger.info("📅 Forced tool date extraction | date_from=%s | date_to=%s", forced_date_from, forced_date_to)
+
                     args = {
                         "user_name": user_name,
                         "user_id": str(user_id) if user_id is not None else None,
                         "limit": None,
                         "is_aggregate": any(kw in user_query.lower() for kw in aggregate_keywords)
                     }
-        
+
+                    # ✅ Only add dates if found in query
+                    if forced_date_from is not None:
+                        args["date_from"] = forced_date_from
+                    if forced_date_to is not None:
+                        args["date_to"] = forced_date_to
+
                     logger.info("🔍 Calling forced tool | tool=%s | user_name=%s", tool_name, user_name)
 
                     try:
@@ -597,6 +713,30 @@ class LangChainService:
 
                     #  CALL 5 — Intent check for FORCED path
                     #  updated to 3 intents same as CALL 2 above
+                    # ── Build combined query using previous human message for intent context ──
+                    # ── Build combined query ONLY if previous AI response was a clarification ──
+                    import re as _re
+                    clarification_markers = ["do you mean", "please clarify"]
+                    previous_ai_was_clarification_forced = False
+                    ai_messages_forced_list = [m for m in messages if isinstance(m, AIMessage)]
+                    if ai_messages_forced_list:
+                        last_ai_content_forced = ai_messages_forced_list[-1].content or ""
+                        previous_ai_was_clarification_forced = any(
+                            kw in last_ai_content_forced.lower()
+                            for kw in clarification_markers
+                        )
+
+                    if previous_ai_was_clarification_forced:
+                        human_messages_forced = [m for m in messages if isinstance(m, HumanMessage)]
+                        previous_query_forced = ""
+                        if len(human_messages_forced) >= 2:
+                            prev_f = human_messages_forced[-2].content
+                            previous_query_forced = prev_f if isinstance(prev_f, str) else ""
+                        combined_query_forced = f"{previous_query_forced} {user_query}".strip()
+                        logger.info(f"🔍 [FORCED] Intent classification (clarification reply) | combined='{combined_query_forced}'")
+                    else:
+                        combined_query_forced = user_query
+                        logger.info(f"🔍 [FORCED] Intent classification (normal) | query='{combined_query_forced}'")
                     intent_msg = self.model.invoke([
                         HumanMessage(content=f"""
                         IMPORTANT: If the query asks only for a total (e.g., 'how many', 'total') and contains no grouping keywords like 'by' or 'per', reply with exactly: count
@@ -616,8 +756,8 @@ class LangChainService:
                         - "show", "list", "display", "get", "fetch" = list
                         - "give me X", "show X", "get X" where X is a number = list (NOT count)
                           The number means a limit — user wants to SEE records, not count them
-                          
-                        Query: "{user_query}"
+
+                        Query: "{combined_query_forced}"
 
                         Reply with ONLY one word: count or aggregate or list
                         """)
@@ -626,14 +766,23 @@ class LangChainService:
 
                     #  — 3 intents for forced path same as normal path
                     tool_was_aggregate = args.get("is_aggregate") is True
+                    tool_has_groupby = bool(args.get("group_by_columns"))
+
                     if not tool_was_aggregate:
                         intent = intent_msg.content.strip().lower()
                         is_count_query     = intent == "count"
                         is_aggregate_query = intent == "aggregate"
                     else:
-                        intent = "aggregate"
-                        is_aggregate_query = True
-                        is_count_query = False
+                        if tool_has_groupby:
+                            logger.info("📊 [FORCED] Tool ran in aggregate mode WITH group_by → forcing AGGREGATE intent")
+                            intent = "aggregate"
+                            is_aggregate_query = True
+                            is_count_query = False
+                        else:
+                            logger.info("🔢 [FORCED] Tool ran in aggregate mode WITHOUT group_by → treating as COUNT intent")
+                            intent = "count"
+                            is_aggregate_query = False
+                            is_count_query = True
                     if is_count_query:
                         logger.info("🔢 Intent=COUNT [FORCED] | query='%s'", user_query)
                     elif is_aggregate_query:

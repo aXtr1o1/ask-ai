@@ -7,10 +7,12 @@ import re
 import json
 from typing import Optional, Tuple, Dict, Any
 
-from app.api.models.schemas import AssetRequest, PPMRequest, BDMRequest
+from app.api.models.schemas import AssetRequest, PPMRequest, BDMRequest, FARequest, SBRequest
 from app.api.routes.assets import get_assets
 from app.api.routes.ppm import get_ppm
 from app.api.routes.bdm import get_bdm
+from app.api.routes.fa import get_fa
+from app.api.routes.sb import get_sb
 from fastapi import HTTPException
 from app.tools.facility_tools import getTime
 
@@ -30,8 +32,10 @@ class QuotaFallbackService:
     
     # Keywords to detect query type
     ASSET_KEYWORDS = ["asset", "assets", "equipment"]
-    PPM_KEYWORDS = ["ppm", "preventive", "maintenance", "planned"]
-    BDM_KEYWORDS = ["bdm", "breakdown", "complaint", "complaints", "reactive"]
+    PPM_KEYWORDS = ["ppm", "preventive", "planned"]
+    BDM_KEYWORDS = ["bdm", "breakdown", "corrective"]
+    FA_KEYWORDS  = ["fa", "facility audit", "audit", "pest control", "rodent"]
+    SB_KEYWORDS  = ["sb", "schedule based", "schedule-based", "environmental", "landscaping"]
     
     def __init__(self):
         logger.info("🔄 QuotaFallbackService initialized")
@@ -59,6 +63,8 @@ class QuotaFallbackService:
             "• **Assets** - Equipment and asset information\n"
             "• **PPM** - Preventive maintenance tasks\n"
             "• **BDM** - Breakdown/complaint records\n\n"
+            "• **FA** - Facility audit inspection records\n"
+            "• **SB** - Schedule based work orders\n\n"
             "**Please reply with which table you'd like to see:**\n"
             "Examples:\n"
             "- 'show me assets'\n"
@@ -83,7 +89,13 @@ class QuotaFallbackService:
         query_lower = query.lower()
         
         # Check for each type
-        if any(keyword in query_lower for keyword in self.ASSET_KEYWORDS):
+        if any(keyword in query_lower for keyword in self.FA_KEYWORDS):
+            logger.info(f"✅ Detected query type: FA")
+            return "FA"
+        elif any(keyword in query_lower for keyword in self.SB_KEYWORDS):
+            logger.info(f"✅ Detected query type: SB")
+            return "SB"
+        elif any(keyword in query_lower for keyword in self.ASSET_KEYWORDS):
             logger.info(f"✅ Detected query type: ASSETS")
             return "ASSETS"
         elif any(keyword in query_lower for keyword in self.PPM_KEYWORDS):
@@ -204,6 +216,12 @@ class QuotaFallbackService:
             elif query_type == "BDM":
                 req = BDMRequest(**payload)
                 result = get_bdm(req)
+            elif query_type == "FA":
+                req = FARequest(**payload)
+                result = get_fa(req)
+            elif query_type == "SB":
+                req = SBRequest(**payload)
+                result = get_sb(req)
             else:
                 raise ValueError(f"Unknown query type: {query_type}")
             
@@ -249,7 +267,11 @@ class QuotaFallbackService:
         elif entity_name == "ppm":
             entity_display = "PPM tasks"
         elif entity_name == "bdm":
-            entity_display = "complaints"
+            entity_display = "breakdown complaints"
+        elif entity_name == "fa":
+            entity_display = "facility audit complaints"
+        elif entity_name == "sb":
+            entity_display = "schedule based work orders"
         else:
             entity_display = "records"
         

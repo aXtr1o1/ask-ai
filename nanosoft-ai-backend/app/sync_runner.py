@@ -31,7 +31,7 @@ if __name__ == "__main__":
 
     # ── start memory tracking ──
     tracemalloc.start()
-    log.info("🧠 Memory tracking started")
+    log.info(" Memory tracking started")
 
     # ── run sync ──
     run_sync()
@@ -40,8 +40,8 @@ if __name__ == "__main__":
     current, peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()
 
-    log.info(f"🧠 Memory CURRENT : {current / 1024 / 1024:.2f} MB")
-    log.info(f"🧠 Memory PEAK    : {peak    / 1024 / 1024:.2f} MB")
+    log.info(f" Memory CURRENT : {current / 1024 / 1024:.2f} MB")
+    log.info(f" Memory PEAK    : {peak    / 1024 / 1024:.2f} MB")
 
     if peak / 1024 / 1024 > 300:
-        log.warning(f"⚠️  Memory spike detected! PEAK exceeded 300MB — check upsert batch sizes")
+        log.warning(f" Memory spike detected! PEAK exceeded 300MB — check upsert batch sizes")
