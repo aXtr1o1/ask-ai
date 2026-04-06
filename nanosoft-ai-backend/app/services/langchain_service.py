@@ -3,7 +3,7 @@ LangChain Service — AI model with tool support
 """
 import logging
 from typing import Any
-
+import re as _re
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 
@@ -20,7 +20,28 @@ ch.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(me
 if not logger.handlers:
     logger.addHandler(ch)
 
-
+def extract_date_from_query(query: str):
+    """Extract date keyword from user query for forced tool calls."""
+    q = query.lower()
+    # ORDER MATTERS — check longer phrases first
+    if "last week" in q:
+        return "last week", "last week"
+    elif "this week" in q:
+        return "this week", "today"
+    elif "last month" in q:
+        return "last month", "last month"
+    elif "this month" in q:
+        return "this month", "today"
+    elif "this year" in q:
+        return "this year", "today"
+    elif "last year" in q:
+        return "last year", "last year"
+    elif "yesterday" in q:
+        return "yesterday", "yesterday"
+    elif "today" in q:
+        return "today", "today"
+    else:
+        return None, None  # Let getTime default to last 7 days
 class LangChainService:
     def __init__(self):
         try:
@@ -254,14 +275,18 @@ class LangChainService:
 
                     #previously limit was only cleared for count queries now i cleared for the list queries also. 
 
+                    
                     list_patterns = ("list", "show me", "get ", "fetch ", "display",
-                    "give me", "provide", "retrieve", "show ",
-                    "all assets", "all complaints", "all bdm", "all ppm",
-                    "all fa", "all sb")
-                    if any(p in user_query.lower() for p in list_patterns):
+                                    "give me", "provide", "retrieve", "show ",
+                                    "all assets", "all complaints", "all bdm", "all ppm",
+                                    "all fa", "all sb")
+                    _has_number = bool(_re.search(r'\b\d+\b', user_query))
+                    if any(p in user_query.lower() for p in list_patterns) and not _has_number:
                         old_limit = args.get("limit")
                         args["limit"] = None
                         logger.info("📋 List query detected — clearing limit=%s", old_limit)
+                    elif _has_number:
+                        logger.info("📋 List query with specific number detected — keeping limit as-is | limit=%s", args.get("limit"))
 
                     try:
                         tool_result = tool_fn.invoke(dict(args))
@@ -624,13 +649,24 @@ class LangChainService:
                     logger.warning("⚠️ Model skipped tool for data query — forcing %s", tool_name)
                     tool_fn = self.tool_map[tool_name]
                     aggregate_keywords = ("by ", "per ", "group by", "breakdown", "summarize", "compare")
+
+                    # ✅ Extract date keywords from query before forcing tool call
+                    forced_date_from, forced_date_to = extract_date_from_query(user_query)
+                    logger.info("📅 Forced tool date extraction | date_from=%s | date_to=%s", forced_date_from, forced_date_to)
+
                     args = {
                         "user_name": user_name,
                         "user_id": str(user_id) if user_id is not None else None,
                         "limit": None,
                         "is_aggregate": any(kw in user_query.lower() for kw in aggregate_keywords)
                     }
-        
+
+                    # ✅ Only add dates if found in query
+                    if forced_date_from is not None:
+                        args["date_from"] = forced_date_from
+                    if forced_date_to is not None:
+                        args["date_to"] = forced_date_to
+
                     logger.info("🔍 Calling forced tool | tool=%s | user_name=%s", tool_name, user_name)
 
                     try:

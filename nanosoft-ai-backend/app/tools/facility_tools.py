@@ -27,35 +27,108 @@ if not logger.handlers:
     logger.addHandler(ch)
 
 
+def resolveDate(date_value, fallback, is_end_date=False):
+    """Resolve relative date keywords to actual dates."""
+    if date_value is None:
+        return None
+
+    today = date.today()
+    val = str(date_value).strip().lower()
+
+    # ── Relative keyword resolution ──
+    if val in ("today",):
+        resolved = today.isoformat()
+        logger.info("📅 Relative keyword '%s' → resolved to %s", date_value, resolved)
+        return resolved
+
+    if val in ("yesterday",):
+        resolved = (today - timedelta(days=1)).isoformat()
+        logger.info("📅 Relative keyword '%s' → resolved to %s", date_value, resolved)
+        return resolved
+
+    if val in ("this week", "thisweek"):
+        if is_end_date:
+            resolved = today.isoformat()
+        else:
+            resolved = (today - timedelta(days=today.weekday())).isoformat()
+        logger.info("📅 Relative keyword '%s' → resolved to %s", date_value, resolved)
+        return resolved
+
+    if val in ("last week", "lastweek"):
+        last_monday = today - timedelta(days=today.weekday() + 7)
+        if is_end_date:
+            resolved = (last_monday + timedelta(days=6)).isoformat()
+        else:
+            resolved = last_monday.isoformat()
+        logger.info("📅 Relative keyword '%s' → resolved to %s", date_value, resolved)
+        return resolved
+
+    if val in ("this month", "thismonth"):
+        if is_end_date:
+            resolved = today.isoformat()
+        else:
+            resolved = today.replace(day=1).isoformat()
+        logger.info("📅 Relative keyword '%s' → resolved to %s", date_value, resolved)
+        return resolved
+
+    if val in ("last month", "lastmonth"):
+        first_of_this_month = today.replace(day=1)
+        last_month_end = first_of_this_month - timedelta(days=1)
+        if is_end_date:
+            resolved = last_month_end.isoformat()
+        else:
+            resolved = last_month_end.replace(day=1).isoformat()
+        logger.info("📅 Relative keyword '%s' → resolved to %s", date_value, resolved)
+        return resolved
+
+    if val in ("this year", "thisyear"):
+        if is_end_date:
+            resolved = today.isoformat()
+        else:
+            resolved = today.replace(month=1, day=1).isoformat()
+        logger.info("📅 Relative keyword '%s' → resolved to %s", date_value, resolved)
+        return resolved
+
+    # ── Validate actual date string ──
+    try:
+        from datetime import datetime
+        datetime.strptime(date_value, "%Y-%m-%d").date()
+        logger.info("📅 Date '%s' validated successfully", date_value)
+        return date_value
+    except Exception:
+        logger.warning("⚠️ Invalid date format '%s' → using fallback %s", date_value, fallback)
+        return fallback
+
+
 def getTime(date_from, date_to):
     today = date.today()
+    today_str = today.isoformat()
+    default_from = (today - timedelta(days=6)).isoformat()
+
+    # ── Resolve relative keywords first ──
+    # ✅ is_end_date=False for date_from, is_end_date=True for date_to
+    date_from = resolveDate(date_from, fallback=default_from, is_end_date=False)
+    date_to   = resolveDate(date_to,   fallback=today_str,    is_end_date=True)
 
     # Case 1: both dates missing → last 7 days
     if date_from is None and date_to is None:
-        resolved_date_from = (today - timedelta(days=6)).isoformat()
-        resolved_date_to = today.isoformat()
-        logger.info(
-            "📅 ASSETS: no dates provided → defaulting to last 7 days: %s to %s",
-            resolved_date_from,
-            resolved_date_to
-        )
+        logger.info("📅 No dates provided → defaulting to last 7 days: %s to %s", default_from, today_str)
+        return default_from, today_str
 
     # Case 2: only from date missing
     elif date_from is None:
-        resolved_date_from = (today - timedelta(days=6)).isoformat()
-        resolved_date_to = date_to
+        logger.info("📅 date_from missing → defaulting to 7 days before date_to: %s to %s", default_from, date_to)
+        return default_from, date_to
 
     # Case 3: only to date missing
     elif date_to is None:
-        resolved_date_from = date_from
-        resolved_date_to = today.isoformat()
+        logger.info("📅 date_to missing → defaulting to today: %s to %s", date_from, today_str)
+        return date_from, today_str
 
     # Case 4: both dates provided
     else:
-        resolved_date_from = date_from
-        resolved_date_to = date_to
-
-    return resolved_date_from, resolved_date_to
+        logger.info("📅 Both dates provided → using as-is: %s to %s", date_from, date_to)
+        return date_from, date_to
 
 
 # =====================================================
@@ -654,20 +727,9 @@ def FA(
         return "Error: user_name is required."
  
     logger.info(f"📋 FA TOOL TRIGGERED for user_name: {user_name}")
- 
-    today = date.today()
-    if date_from is None and date_to is None:
-        resolved_date_from = (today - timedelta(days=6)).isoformat()
-        resolved_date_to   = today.isoformat()
-    elif date_from is None:
-        resolved_date_from = (today - timedelta(days=6)).isoformat()
-        resolved_date_to   = date_to
-    elif date_to is None:
-        resolved_date_from = date_from
-        resolved_date_to   = today.isoformat()
-    else:
-        resolved_date_from = date_from
-        resolved_date_to   = date_to
+
+    # ✅ Use shared getTime so relative keywords resolve correctly
+    resolved_date_from, resolved_date_to = getTime(date_from, date_to)
  
     payload = {
         "user_name":          user_name,
@@ -826,20 +888,9 @@ def SB(
         return "Error: user_name is required."
  
     logger.info(f"🗓️ SB TOOL TRIGGERED for user_name: {user_name}")
- 
-    today = date.today()
-    if date_from is None and date_to is None:
-        resolved_date_from = (today - timedelta(days=6)).isoformat()
-        resolved_date_to   = today.isoformat()
-    elif date_from is None:
-        resolved_date_from = (today - timedelta(days=6)).isoformat()
-        resolved_date_to   = date_to
-    elif date_to is None:
-        resolved_date_from = date_from
-        resolved_date_to   = today.isoformat()
-    else:
-        resolved_date_from = date_from
-        resolved_date_to   = date_to
+
+    # ✅ Use shared getTime so relative keywords resolve correctly
+    resolved_date_from, resolved_date_to = getTime(date_from, date_to)
  
     payload = {
         "user_name":          user_name,
