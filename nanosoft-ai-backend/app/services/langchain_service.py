@@ -176,7 +176,7 @@ class LangChainService:
             self._total_input_tokens  = 0
             self._total_output_tokens = 0
             self._total_tokens        = 0
-
+            
             # ── Get current user query for summary log ───────────────────────
             current_user_query = ""
             for m in reversed(messages):
@@ -184,8 +184,38 @@ class LangChainService:
                     current_user_query = (m.content or "") if isinstance(m.content, str) else ""
                     break
 
-             # CALL 1 — First model call
+            # ── AMBIGUITY PRE-CHECK (runs before model, before lc_memory influence) ──
+            import re as _re
+
+            _q = current_user_query.lower()
+
+            # complaint ambiguity check
+            _complaint_ambiguous = bool(_re.search(r'\bcomplaints?\b', _q))
+            _complaint_clear     = bool(_re.search(r'\b(fa|bdm|facility audit|breakdown)\b', _q))
+
+            # work order ambiguity check
+            _workorder_ambiguous = bool(_re.search(r'\b(work\s*orders?|scheduled|compliance|work\s*order)\b', _q))
+            _workorder_clear     = bool(_re.search(r'\b(ppm|sb|preventive|schedule[\s\-]based)\b', _q))
+
+            if _complaint_ambiguous and not _complaint_clear:
+                logger.info("🔀 Ambiguous complaint query intercepted before model | query='%s'", current_user_query)
+                clarification = (
+                    "Do you mean Facility Audit (FA) complaints or Breakdown Maintenance (BDM) complaints?\n"
+                    "Please clarify so I can fetch the correct data."
+                )
+                return clarification, clarification, messages
+
+            if _workorder_ambiguous and not _workorder_clear:
+                logger.info("🔀 Ambiguous work order query intercepted before model | query='%s'", current_user_query)
+                clarification = (
+                    "Do you mean PPM (Preventive Maintenance) work orders or SB (Schedule Based) work orders?\n"
+                    "Please clarify so I can fetch the correct data."
+                )
+                return clarification, clarification, messages
+
+            # CALL 1 — First model call
             ai_msg = self.model.invoke(messages)
+            
             self._accumulate_tokens(ai_msg)
             logger.info("🤖 First model call | tool_calls=%s", bool(ai_msg.tool_calls))
 
@@ -282,10 +312,17 @@ class LangChainService:
                     # ── If tool actually ran in aggregate mode → force aggregate intent
                     # This overrides whatever the intent classifier says later
                     tool_was_aggregate = args.get("is_aggregate") is True
+                    tool_has_groupby = bool(args.get("group_by_columns"))
+
                     if tool_was_aggregate:
-                        logger.info("📊 Tool ran in aggregate mode → forcing AGGREGATE intent (skipping classifier)")
-                        is_aggregate_query = True
-                        is_count_query = False
+                        if tool_has_groupby:
+                            logger.info("📊 Tool ran in aggregate mode WITH group_by → forcing AGGREGATE intent")
+                            is_aggregate_query = True
+                            is_count_query = False
+                        else:
+                            logger.info("🔢 Tool ran in aggregate mode WITHOUT group_by → treating as COUNT intent")
+                            is_aggregate_query = False
+                            is_count_query = True
 
                     
                     if p_count == 0 and total_for_count == 0:
@@ -355,8 +392,9 @@ class LangChainService:
                         is_count_query     = intent == "count"
                         is_aggregate_query = intent == "aggregate"
                     else:
-                        intent = "aggregate"  # already forced above
-
+                        # intent already set above by tool_has_groupby check — do NOT override
+                        intent = "count" if is_count_query else "aggregate"
+                        
                     if is_count_query:
                         logger.info("🔢 Intent=COUNT — sending count only to model | query='%s'", user_query)
                     elif is_aggregate_query:
@@ -683,14 +721,23 @@ class LangChainService:
 
                     #  — 3 intents for forced path same as normal path
                     tool_was_aggregate = args.get("is_aggregate") is True
+                    tool_has_groupby = bool(args.get("group_by_columns"))
+
                     if not tool_was_aggregate:
                         intent = intent_msg.content.strip().lower()
                         is_count_query     = intent == "count"
                         is_aggregate_query = intent == "aggregate"
                     else:
-                        intent = "aggregate"
-                        is_aggregate_query = True
-                        is_count_query = False
+                        if tool_has_groupby:
+                            logger.info("📊 [FORCED] Tool ran in aggregate mode WITH group_by → forcing AGGREGATE intent")
+                            intent = "aggregate"
+                            is_aggregate_query = True
+                            is_count_query = False
+                        else:
+                            logger.info("🔢 [FORCED] Tool ran in aggregate mode WITHOUT group_by → treating as COUNT intent")
+                            intent = "count"
+                            is_aggregate_query = False
+                            is_count_query = True
                     if is_count_query:
                         logger.info("🔢 Intent=COUNT [FORCED] | query='%s'", user_query)
                     elif is_aggregate_query:

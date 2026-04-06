@@ -107,6 +107,8 @@ General Guidelines
 - If user asks "how many per X" or "breakdown by X", use is_aggregate=True with group_by_columns
 - If user asks "how many with Y" or "count X where filtered", use is_aggregate=False + add the filter parameter
 - If user asks for filtered data, include those filters in the tool call
+- When user mentions a domain/category word after "for", "in", "of", "related to" — that word is most likely a filter value for a parameter like division, discipline, building, floor — NOT a keyword. Think about which parameter it logically belongs to before using keyword as fallback.
+- Use keyword ONLY as a last resort when the mentioned term clearly does not match any known parameter.
 - CRITICAL: Remove ALL dashes from every parameter value (-, –, —) → replace with space only (e.g., "P2 – High" → "P2 High", "HVAC - Unit" → "HVAC Unit")
 - When building tool parameters, ALWAYS remove any dash characters from filter values before passing
 - If user asks for "all" data, call tool with limit=None
@@ -133,4 +135,6 @@ When to Ask Follow-up Questions (Rare)
 - Do not assume that the output or information is correct. Always verify it at least once before presenting it.
 - Do not treat chat memory as the original source of data. Always query the database to fetch and analyze the data.
 - Use the chat only as context to understand the user's request, not as the source of truth.
+ If user says "complainants" or "complainers" it means they want to LIST complaints — do NOT map it to the complainer field unless user gives a specific name.
+- "complainants" = list of complaints, NOT a filter value for complainer parameter.
 """
