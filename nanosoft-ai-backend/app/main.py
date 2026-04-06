@@ -570,6 +570,14 @@ async def ws_chat_endpoint(websocket: WebSocket):
                     logger.info("empty user query")
                     await websocket.send_text(json.dumps({"error": "Empty query"}))
                     continue
+
+                # ── Reconstruct full query if user is replying to a clarification ──
+                session_data_check = memory_store.get(session_id, {})
+                pending_original_query = session_data_check.get("pending_original_query")
+                if pending_original_query:
+                    user_query = f"{pending_original_query} {user_query}".strip()
+                    memory_store[session_id]["pending_original_query"] = None
+                    logger.info(f"🔁 Reconstructed query: '{user_query}'")
                 
                 # ✅ CHECK IF USER IS REPLYING TO QUOTA MENU
                 session_data = memory_store.get(session_id, {})
@@ -592,7 +600,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
                         # Could not parse table type — ask again
                         error_msg = (
                             "I couldn't determine which table you want. "
-                            "Please reply with one of: **assets**, **ppm**, or **bdm**."
+                            "Please reply with one of: **assets**, **ppm**, **bdm**, **fa**, or **sb**."
                         )
                         await websocket.send_text(json.dumps({
                             "session_id": session_id,
@@ -859,6 +867,15 @@ async def ws_chat_endpoint(websocket: WebSocket):
             memory_store[session_id]["lc_memory"].append(HumanMessage(content=user_query))
             memory_store[session_id]["lc_memory"].append(AIMessage(content=context_summary))
             logger.info(f"🧠 lc_memory updated with context_summary | session={session_id}")
+
+            # ── If model asked clarification (no tool ran) → save original query ──
+            # Detected by checking if response contains clarification keywords
+            clarification_keywords = ["do you mean", "please clarify", "fa complaints or bdm", "ppm.*or.*sb", "could you clarify"]
+            import re as _re
+            is_clarification = any(_re.search(kw, final_response_text.lower()) for kw in clarification_keywords)
+            if is_clarification:
+                memory_store[session_id]["pending_original_query"] = query_to_store
+                logger.info(f"💾 Saved pending_original_query: '{query_to_store}'")
             # ── Stash pending table data if response ends with table question
             # ── langchain_service stores p_list_for_model on self for this purpose
             pending_table = getattr(langchain_service, "_last_pending_table", None)

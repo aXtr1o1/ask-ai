@@ -1,17 +1,28 @@
 import psycopg2.extras
 from .config import log
 
-# UPSERT — ppm
-# BATCH insert using execute_values → fast + no memory spike
 
+# ─────────────────────────────────────────────────────────────
+# UPSERT — PPM
+# Uses COUNT before/after to accurately split insert vs update
+# ─────────────────────────────────────────────────────────────
 def upsert_ppm(cursor, records: list, user_id: int, user_name: str):
     inserted = updated = errors = 0
     try:
+        # ── Deduplicate by WorkOrder — keep last occurrence ───
         seen = {}
         for r in records:
             key = r.get("WorkOrder") or ""
             seen[key] = r
         records = list(seen.values())
+
+        # ── COUNT before upsert ───────────────────────────────
+        cursor.execute(
+            'SELECT COUNT(*) FROM public.ppm WHERE user_name = %s',
+            (user_name,)
+        )
+        before_count = cursor.fetchone()[0]
+        log.info(f"    [PPM] Records in DB before upsert: {before_count}")
 
         rows = [
             (
@@ -33,7 +44,7 @@ def upsert_ppm(cursor, records: list, user_id: int, user_name: str):
         ]
 
         psycopg2.extras.execute_values(cursor, """
-            INSERT INTO ppm (
+            INSERT INTO public.ppm (
                 user_id, user_name,
                 "WorkOrder", "AssetTagNo", "EquipmentRefNo",
                 "PPMStatus", "PPMStageName", "FrequencyName",
@@ -44,6 +55,7 @@ def upsert_ppm(cursor, records: list, user_id: int, user_name: str):
                 "LastStandByRemarks", "PPMPendingPeriod", "SLADuration"
             ) VALUES %s
             ON CONFLICT ("WorkOrder") DO UPDATE SET
+                user_id               = EXCLUDED.user_id,
                 user_name             = EXCLUDED.user_name,
                 "PPMStatus"           = EXCLUDED."PPMStatus",
                 "PPMStageName"        = EXCLUDED."PPMStageName",
@@ -57,12 +69,26 @@ def upsert_ppm(cursor, records: list, user_id: int, user_name: str):
                 updated_at            = NOW()
         """, rows, page_size=1000)
 
-        inserted = len(records)
+        # ── COUNT after upsert ────────────────────────────────
+        cursor.execute(
+            'SELECT COUNT(*) FROM public.ppm WHERE user_name = %s',
+            (user_name,)
+        )
+        after_count = cursor.fetchone()[0]
+        log.info(f"    [PPM] Records in DB after upsert: {after_count}")
+
+        # ── Accurate split ────────────────────────────────────
+        inserted = after_count - before_count
+        updated  = len(records) - inserted
 
     except Exception as e:
         log.error(f"    ⚠️  PPM batch upsert failed: {e}")
         errors = len(records)
 
-    log.info(f"    PPM → Upserted: {inserted} | Errors: {errors}")
+    log.info(
+        f"    PPM → Sent={len(records)} | "
+        f"Inserted={inserted} (new rows) | "
+        f"Updated={updated} (existing rows) | "
+        f"Errors={errors}"
+    )
     return inserted, updated, errors
-
