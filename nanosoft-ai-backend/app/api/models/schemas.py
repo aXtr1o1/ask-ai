@@ -108,3 +108,68 @@ class BDMRequest(BaseModel):
     is_aggregate: Optional[bool] = Field(default=False)
     group_by_columns: Optional[List[str]] = Field(default=None)
     aggregate_function: Optional[str] = Field(default=None)
+    
+    
+class FARequest(BaseModel):
+    """Request schema for FA (Facility Audit) endpoint"""
+    user_id: Optional[int] = None
+    user_name: Optional[str] = None
+    complaint_no: Optional[str] = None
+    priority: Optional[str] = None
+    stage: Optional[str] = None
+    category: Optional[str] = None
+    category_sub: Optional[str] = None
+    division: Optional[str] = None
+    locality: Optional[str] = None
+    building: Optional[str] = None
+    floor: Optional[str] = None
+    spot_name: Optional[str] = None
+    contract: Optional[str] = None
+    tech: Optional[str] = None
+    frequency: Optional[str] = None
+    request_desc: Optional[str] = None
+    is_withdraw: Optional[bool] = None
+    is_rework: Optional[bool] = None
+    is_active: Optional[bool] = None
+    keyword: Optional[str] = None
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+    comp_from: Optional[str] = None
+    comp_to: Optional[str] = None
+    limit: Optional[int] = None
+    offset: int = Field(default=0, ge=0)
+    is_aggregate: Optional[bool] = Field(default=False)
+    group_by_columns: Optional[List[str]] = Field(default=None)
+    aggregate_function: Optional[str] = Field(default=None)
+ 
+ 
+class SBRequest(BaseModel):
+    """Request schema for SB (Schedule Based) endpoint"""
+    user_id: Optional[int] = None
+    user_name: Optional[str] = None
+    work_order: Optional[str] = None
+    stage: Optional[str] = None
+    division: Optional[str] = None
+    discipline: Optional[str] = None
+    locality: Optional[str] = None
+    building: Optional[str] = None
+    floor: Optional[str] = None
+    spot_name: Optional[str] = None
+    contract: Optional[str] = None
+    frequency: Optional[str] = None
+    service_type: Optional[str] = None
+    tech: Optional[str] = None
+    is_withdraw: Optional[bool] = None
+    is_reschedule: Optional[bool] = None
+    is_rework: Optional[bool] = None
+    is_active: Optional[bool] = None
+    keyword: Optional[str] = None
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+    comp_from: Optional[str] = None
+    comp_to: Optional[str] = None
+    limit: Optional[int] = None
+    offset: int = Field(default=0, ge=0)
+    is_aggregate: Optional[bool] = Field(default=False)
+    group_by_columns: Optional[List[str]] = Field(default=None)
+    aggregate_function: Optional[str] = Field(default=None)

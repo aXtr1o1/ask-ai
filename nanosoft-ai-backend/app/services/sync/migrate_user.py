@@ -1,17 +1,7 @@
 """
 migrate_user.py — On-demand single user data migration
 Called manually when a new user is added to the system.
-
-Usage:
-    from app.services.sync.migrate_user import migrate_user
-
-    migrate_user(
-        client_name = "ClientA",
-        base_url    = "https://api.clienta.com",
-        user_id     = 101,
-        user_name   = "clienta_user",
-        jwt_token   = "eyJhbGciOi..."
-    )
+Handles all 5 endpoints: Assets, PPM, BDM, FA, SB
 """
 
 import logging
@@ -23,6 +13,8 @@ from .fetcher import fetch_single_page
 from .upsert_assets import upsert_assets
 from .upsert_ppm import upsert_ppm
 from .upsert_bdm import upsert_bdm
+from .upsert_fa import upsert_fa
+from .upsert_sb import upsert_sb
 
 log = logging.getLogger("migrate_user")
 log.setLevel(logging.INFO)
@@ -43,14 +35,13 @@ def _dedup(records: list, key: str) -> list:
 
 
 # ─────────────────────────────────────────────────────────────
-# MIGRATE USER
+# MIGRATE USER — 5 endpoints: Assets, PPM, BDM, FA, SB
 # 1. Insert new row into client_sync_config (last_synced_at = NULL)
 #    → If client_name already exists → skip insert, log warning
-# 2. Fetch ALL data from all 3 endpoints using provided jwt + user_id
-# 3. Upsert records into Asset / ppm / bdm tables
+# 2. Fetch ALL data from all 5 endpoints using provided jwt + user_id
+# 3. Upsert records into respective tables
 # 4. Update last_synced_at = NOW() only after all migrations succeed
 # ─────────────────────────────────────────────────────────────
-
 def migrate_user(
     client_name: str,
     base_url:    str,
@@ -108,7 +99,7 @@ def migrate_user(
         summary["status"] = "insert_failed"
         return summary
 
-    # ── STEP 2 + 3: Fetch + Upsert for all 3 endpoints ───────
+    # ── STEP 2 + 3: Fetch + Upsert for all 5 endpoints ───────
     # last_synced_at = None → fetches ALL records (full initial load)
     last_synced_at = None
     synced_any     = False
@@ -163,6 +154,10 @@ def migrate_user(
             all_records = _dedup(all_records, "WorkOrder")
         elif endpoint == "/getBDM":
             all_records = _dedup(all_records, "ComplaintNo")
+        elif endpoint == "/getFA":
+            all_records = _dedup(all_records, "RMComplaintNo")
+        elif endpoint == "/getSB":
+            all_records = _dedup(all_records, "SBCreWorkOrder")
 
         dedup_count   = len(all_records)
         dupes_removed = raw_count - dedup_count
@@ -179,6 +174,10 @@ def migrate_user(
                 ins, upd, err = upsert_ppm(cursor, all_records, user_id, user_name)
             elif endpoint == "/getBDM":
                 ins, upd, err = upsert_bdm(cursor, all_records, user_id, user_name)
+            elif endpoint == "/getFA":
+                ins, upd, err = upsert_fa(cursor, all_records, user_id, user_name)
+            elif endpoint == "/getSB":
+                ins, upd, err = upsert_sb(cursor, all_records, user_id, user_name)
             else:
                 log.warning(f"  Unknown endpoint {endpoint} — skipping.")
                 del all_records
@@ -205,7 +204,10 @@ def migrate_user(
             "errors":          err,
             "status":          "ok" if endpoint_ok else "error",
         }
-        log.info(f"  [{endpoint}] ✅ fetched={dedup_count} | inserted={ins} | updated={upd} | errors={err}")
+        log.info(
+            f"  [{endpoint}] ✅ fetched={dedup_count} | "
+            f"inserted={ins} (new) | updated={upd} (existing) | errors={err}"
+        )
 
     # ── STEP 4: Update last_synced_at only if all succeeded ───
     if synced_any:
@@ -233,10 +235,11 @@ def migrate_user(
     log.info(f"{'='*60}\n")
 
     summary["elapsed_seconds"] = round(elapsed, 2)
-    
+
     cursor.close()
     conn.close()
     return summary
+
 #you can use this function directly  for checking. direct file call .
 # if __name__ == "__main__":
 #     import sys
@@ -253,11 +256,11 @@ def migrate_user(
 #     )
 
 #     result = migrate_user(
-#         client_name = "v4demo",
-#         base_url    = "https://v4demo.smartfm.cloud/askmeapi/",
-#         user_id     = 101,
-#         user_name   = "v4demo",
-#         jwt_token   = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjEwMSwiaWF0IjoxNzc0MzQ5ODU2LCJleHAiOjE3NzQ0MzYyNTZ9.qMTAhrhbMqjuCUAMf9WtH1Fzi-QphZhBEz7yOdRF6GQ",
+#         client_name = "poc",
+#         base_url    = "",
+#         user_id     = 1,
+#         user_name   = "poc",
+#         jwt_token   = "",
         
 #     )
 
