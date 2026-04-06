@@ -255,7 +255,9 @@ class LangChainService:
                     #previously limit was only cleared for count queries now i cleared for the list queries also. 
 
                     list_patterns = ("list", "show me", "get ", "fetch ", "display",
-                                     "all assets", "all complaints", "all bdm", "all ppm")
+                    "give me", "provide", "retrieve", "show ",
+                    "all assets", "all complaints", "all bdm", "all ppm",
+                    "all fa", "all sb")
                     if any(p in user_query.lower() for p in list_patterns):
                         old_limit = args.get("limit")
                         args["limit"] = None
@@ -595,7 +597,10 @@ class LangChainService:
                         user_query = (m.content or "") if isinstance(m.content, str) else ""
                         break
                 q = user_query.lower()
-                data_patterns = ("how many", "list", "count", "total", "number of", "show me", "get ", "fetch ")
+                data_patterns = ("how many", "list", "show me", "get ", "fetch ", "display",
+                 "give me", "provide", "retrieve", "show", "tell me how many",
+                 "all assets", "all complaints", "all bdm", "all ppm",
+                 "all fa", "all sb", "all ppm")
                 needs_bdm    = any(w in q for w in ("breakdown", "bdm", "corrective"))
                 needs_assets = any(w in q for w in ("asset", "equipment", "barcode"))
                 needs_ppm    = any(w in q for w in ("ppm", "preventive", "planned"))
