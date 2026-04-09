@@ -43,9 +43,20 @@ function extractText(raw: any, depth = 0): string {
   if (depth > 10 || raw == null) return "";
   if (typeof raw === "string") {
     const trimmed = raw.trim();
-    // Only try JSON parse if it looks like JSON AND has no spaces (avoids parsing prose)
-    if ((trimmed.startsWith("{") || trimmed.startsWith("[")) && !trimmed.includes(" ")) {
-      try { return extractText(JSON.parse(trimmed), depth + 1); } catch { return raw; }
+    // If it looks like JSON (starts with { or [), attempt to parse it.
+    // Relaxed rule: JSONB or stringified JSON from backend often contains spaces
+    // so try parsing whenever it appears JSON-like. Fall back to the raw string on error.
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      try {
+        const parsedOnce = JSON.parse(trimmed);
+        // If parsing returns a string containing JSON (double-encoded), try again
+        if (typeof parsedOnce === 'string') {
+          try { return extractText(JSON.parse(parsedOnce), depth + 1); } catch { /* ignore */ }
+        }
+        return extractText(parsedOnce, depth + 1);
+      } catch {
+        // not valid JSON — continue and return raw below
+      }
     }
     return raw;
   }
@@ -998,7 +1009,12 @@ export default function Home() {
   const [userIdFromUrl, setUserIdFromUrl] = useState<string | null>(null); // display name
   const [userIdInt, setUserIdInt] = useState<number | null>(null); // integer user_id for filtering
   const [clientNameFromUrl, setClientNameFromUrl] = useState<string | null>(null); // backend username
+  // `input` is the debounced value (used for heavier work).
   const [input,        setInput]        = useState<string>("");
+  // Use a ref for immediate typing to avoid re-renders on each keystroke
+  const rawInputRef = useRef<string>("");
+  const inputDebounceRef = useRef<number | null>(null);
+  const DEBOUNCE_MS = 400; // 300-500ms recommended
   const [messages,     setMessages]     = useState<Message[]>([]);
   const [isLoading,    setIsLoading]    = useState<boolean>(false);
   const [sessionId,    setSessionId]    = useState<string>(() => generateSessionId());
@@ -1277,7 +1293,7 @@ export default function Home() {
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
     el.style.overflowY = el.scrollHeight > 160 ? "auto" : "hidden";
   };
-  useEffect(() => { resizeTA(); }, [input]);
+  // Auto-resize is called from the onChange handler (direct DOM measurement)
 
   // ── Persistent WebSocket: connect once on mount, stay open all session ───────
   const IDLE_TIMEOUT = 2 * 60 * 1000;  // 2 minutes
@@ -1740,8 +1756,8 @@ export default function Home() {
         wsConnectTimeoutRef.current = null;
       }
       setWsConnectionState('failed');
-      console.error("❌ WebSocket error");
-      setMessages(prev => [...prev, { role: "error", text: "❌ Connection failed. Retrying…" }]);
+      // Log connection error to console only — do not surface as chat bubble
+      console.error("❌ WebSocket error — connection failed, will retry");
       setIsLoading(false);
     };
   };
@@ -2194,8 +2210,9 @@ export default function Home() {
 
   // ── Send message over the persistent WebSocket ────────────────────────────
   const sendMessage = () => {
-  if (!input.trim() || isLoading) return;
-  const userText = input.trim();
+  const domVal = inputRef.current?.value ?? "";
+  if (!domVal.trim() || isLoading) return;
+  const userText = domVal.trim();
 
   const ws = wsRef.current;
 
@@ -2232,6 +2249,9 @@ export default function Home() {
     sessionMessagesRef.current.set(sessionId, updated);
     return updated;
   });
+  // Clear textarea DOM value and debounced state
+  if (inputRef.current) inputRef.current.value = "";
+  rawInputRef.current = "";
   setInput("");
   setIsLoading(true);
   accRef.current = "";
@@ -2295,8 +2315,23 @@ export default function Home() {
           <textarea
             ref={inputRef}
             className="main-input"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
+            defaultValue={input}
+            onChange={(e) => {
+              // Update ref immediately (no re-render)
+              rawInputRef.current = e.target.value;
+              // Resize based on DOM measurements
+              resizeTA();
+
+              // Debounce updating the heavier `input` state
+              if (inputDebounceRef.current) {
+                clearTimeout(inputDebounceRef.current);
+                inputDebounceRef.current = null;
+              }
+              inputDebounceRef.current = window.setTimeout(() => {
+                setInput(rawInputRef.current);
+                inputDebounceRef.current = null;
+              }, DEBOUNCE_MS);
+            }}
             onKeyDown={handleKeyDown}
             disabled={isLoading || wsConnectionState !== "connected"}
             placeholder={
@@ -2338,7 +2373,7 @@ export default function Home() {
           <button
             className="send-btn"
             onClick={sendMessage}
-            disabled={isLoading || wsConnectionState !== "connected" || !input.trim()}
+            disabled={isLoading || wsConnectionState !== "connected" || !(inputRef.current?.value ?? "").trim()}
           >
             <IconArrowUp size={16} color="white" stroke={2} />
           </button>
@@ -2347,6 +2382,11 @@ export default function Home() {
       {variant === "landing" && (
         <LandingSuggestedQueries
           onSelect={(q) => {
+            if (inputDebounceRef.current) { clearTimeout(inputDebounceRef.current); inputDebounceRef.current = null; }
+            if (inputRef.current) {
+              inputRef.current.value = q;
+            }
+            rawInputRef.current = q;
             setInput(q);
             requestAnimationFrame(() => inputRef.current?.focus());
           }}
