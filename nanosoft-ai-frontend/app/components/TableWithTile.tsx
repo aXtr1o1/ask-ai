@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { IconList, IconLayoutGrid } from "@tabler/icons-react";
 import { useTheme } from "@/app/components/useTheme";
 import { useResponsive, getResponsiveTable, getResponsiveTileDisplay, getSmartVisibleColumns } from "@/app/hooks/useResponsive";
 
-export type TableWithTileRow = Record<string, string>;
+export type TableWithTileRow = Record<string, any>;
 
 interface TableWithTileProps {
   rows: TableWithTileRow[];
@@ -35,6 +35,8 @@ export default function TableWithTile({
   const tileFieldLabelColor = "var(--tile-field-label, #0f172a)";
   const tileFieldValueColor = "var(--tile-field-value, #1f2937)";
   const [viewMode, setViewMode] = useState<"table" | "tile">("table");
+  const [page, setPage] = useState(0);
+  const LIMIT = 100;
 
   // Automatically detect columns from rows
   const detectedColumns = columns || (() => {
@@ -44,6 +46,36 @@ export default function TableWithTile({
     });
     return Array.from(cols);
   })();
+
+  // Pagination: compute the slice of rows to display
+  const totalPages = Math.max(1, Math.ceil(rows.length / LIMIT));
+  // Reset to first page when data set changes
+  useEffect(() => {
+    setPage(0);
+  }, [rows.length]);
+  // Clamp page if totalPages shrinks
+  useEffect(() => {
+    if (page > totalPages - 1) setPage(Math.max(0, totalPages - 1));
+  }, [totalPages, page]);
+  const startIdx = page * LIMIT;
+  const pagedRows = rows.slice(startIdx, startIdx + LIMIT);
+
+  // Format cell values safely for JSONB / object values
+  const formatCellValue = (val: any) => {
+    if (val === null || val === undefined) return "—";
+    if (typeof val === 'boolean') return val ? '✓' : '✗';
+    if (typeof val === 'number') return String(val);
+    if (Array.isArray(val)) return val.length === 0 ? '—' : val.map(v => typeof v === 'object' ? JSON.stringify(v) : String(v)).join(', ');
+    if (typeof val === 'object') {
+      try {
+        const s = JSON.stringify(val);
+        return s.length > 120 ? s.slice(0, 120) + '…' : s;
+      } catch {
+        return String(val);
+      }
+    }
+    return String(val);
+  };
 
   // Toggle container style: absolute on larger screens, inline/static on mobile
   const toggleContainerStyle = {
@@ -165,6 +197,8 @@ export default function TableWithTile({
                 <div className="table-scroll" style={{
                   fontSize: tableConfig.fontSize,
                   overflowX: 'auto',
+                  overflowY: 'auto',
+                  maxHeight: '60vh',
                 }}>
                   <table className="table-with-tile" style={{
                     fontSize: tableConfig.fontSize,
@@ -172,7 +206,7 @@ export default function TableWithTile({
                   }}>
                     <thead>
                       <tr>
-                        {detectedColumns.slice(0, tableConfig.columnsVisible).map((col) => (
+                            {detectedColumns.slice(0, tableConfig.columnsVisible).map((col) => (
                           <th key={col} style={{
                             padding: tableConfig.padding,
                             fontSize: tableConfig.fontSize,
@@ -181,15 +215,15 @@ export default function TableWithTile({
                       </tr>
                     </thead>
                     <tbody>
-                      {rows.map((row, rowIdx) => (
-                        <tr key={rowIdx} style={{
+                      {pagedRows.map((row, rowIdx) => (
+                        <tr key={startIdx + rowIdx} style={{
                           height: tableConfig.compactMode ? 'auto' : 'auto',
                         }}>
                           {detectedColumns.slice(0, tableConfig.columnsVisible).map((col) => (
-                            <td key={`${rowIdx}-${col}`} style={{
+                            <td key={`${startIdx + rowIdx}-${col}`} style={{
                               padding: tableConfig.padding,
                               fontSize: tableConfig.fontSize,
-                            }}>{row[col] || "—"}</td>
+                            }}>{formatCellValue(row[col])}</td>
                           ))}
                         </tr>
                       ))}
@@ -205,6 +239,7 @@ export default function TableWithTile({
             <div className="data-view-panel is-active" style={{
               animation: 'fadeIn 0.2s ease-in-out'
             }}>
+              <div className="tile-scroll" style={{ overflow: 'auto', maxHeight: '60vh' }}>
               <div className="tile-cards-grid" style={{
                 gridTemplateColumns: responsive.isMobile 
                   ? 'repeat(5, 1fr)' 
@@ -214,14 +249,35 @@ export default function TableWithTile({
                 gap: responsive.isMobile ? '4px' : responsive.isTablet ? '20px' : '24px',
                 padding: responsive.isMobile ? '8px' : responsive.isTablet ? '20px' : '24px',
               }}>
-                {rows.map((row, rowIdx) => {
+                {pagedRows.map((row, rowIdx) => {
                   // Detect status from row data for status dot color
                   const statusValue = row.status || row.STATUS || row.condition || row.CONDITION || "neutral";
                   const isActive = ["active", "online", "good", "operational"].some(s => statusValue.toLowerCase().includes(s));
                   const statusColor = isActive ? "#10b981" : "#6b7280";
-
+                  // Prepare columns to show for this tile. On non-desktop show up to tileConfig.fieldsPerTile
+                  // but prioritize any column whose value contains the word 'fixed' (case-insensitive)
+                  const allCols = detectedColumns;
+                  let tileCols: string[];
+                  if (responsive.isDesktop) {
+                    tileCols = allCols;
+                  } else {
+                    const maxFields = tileConfig.fieldsPerTile ?? Math.max(3, allCols.length);
+                    tileCols = allCols.slice(0, maxFields);
+                    // Find any column whose value contains 'fixed'
+                    const fixedIndex = allCols.findIndex(c => {
+                      const v = (row[c] ?? "").toString().toLowerCase();
+                      return v.includes("fixed");
+                    });
+                    if (fixedIndex !== -1) {
+                      const fixedCol = allCols[fixedIndex];
+                      // If it's not already displayed, replace the last shown column with it
+                      if (!tileCols.includes(fixedCol)) {
+                        tileCols = [...tileCols.slice(0, Math.max(0, tileCols.length - 1)), fixedCol];
+                      }
+                    }
+                  }
                   return (
-                    <div key={rowIdx} className="tile-card" style={{
+                    <div key={startIdx + rowIdx} className="tile-card" style={{
                       padding: responsive.isMobile ? '8px' : responsive.isTablet ? tileConfig.cardPadding : '12px',
                       minHeight: responsive.isMobile ? '120px' : responsive.isTablet ? tileConfig.cardHeight : '280px',
                       backgroundColor: tileBackground,
@@ -268,7 +324,7 @@ export default function TableWithTile({
                         }}>
                           {(responsive.isDesktop ? detectedColumns : detectedColumns.slice(0, tileConfig.fieldsPerTile)).map((col) => (
                             <div 
-                              key={`${rowIdx}-${col}`} 
+                              key={`${startIdx + rowIdx}-${col}`} 
                               className="tile-field"
                               title={row[col]}
                               style={{
@@ -291,7 +347,7 @@ export default function TableWithTile({
                                 fontWeight: 400,
                                 wordBreak: 'break-word',
                                 lineHeight: 1.4,
-                              }}>{row[col] || "—"}</div>
+                              }}>{formatCellValue(row[col])}</div>
                             </div>
                           ))}
                         </div>
@@ -300,9 +356,62 @@ export default function TableWithTile({
                   );
                 })}
               </div>
+                </div>
             </div>
           )}
         </div>
+          {/* Pagination Controls (table view only) */}
+          {viewMode === "table" && (
+            <div style={{ display: 'flex', gap: responsive.isMobile ? 6 : 8, justifyContent: 'center', alignItems: 'center', marginTop: responsive.isMobile ? 6 : 8 }}>
+              {(() => {
+                const disabledPrev = page <= 0;
+                const disabledNext = page >= totalPages - 1;
+                const navButtonStyle = (disabled: boolean) => ({
+                  padding: responsive.isMobile ? '4px 8px' : responsive.isTablet ? '5px 10px' : '6px 12px',
+                  borderRadius: responsive.isMobile ? 6 : 8,
+                  border: disabled ? '1px solid rgba(212,175,55,0.28)' : '1px solid rgba(212,175,55,0.9)',
+                  cursor: disabled ? 'not-allowed' : 'pointer',
+                  background: disabled
+                    ? 'linear-gradient(180deg, rgba(212,175,55,0.14) 0%, rgba(212,175,55,0.08) 100%)'
+                    : 'linear-gradient(180deg, #ae8625 0%, #f7ef8a 35%, #d2ac47 65%, #edc967 100%)',
+                  color: '#ffffff',
+                  fontWeight: 700,
+                  fontSize: responsive.isMobile ? 12 : 13,
+                  boxShadow: disabled ? 'none' : (isDark ? '0 6px 20px rgba(212,175,55,0.22)' : '0 6px 14px rgba(212,175,55,0.12)'),
+                  transition: 'transform 0.08s ease, box-shadow 0.12s ease, opacity 0.12s ease',
+                  minWidth: responsive.isMobile ? 56 : undefined,
+                } as React.CSSProperties);
+
+                return (
+                  <>
+                    <button
+                      onClick={() => setPage(Math.max(0, page - 1))}
+                      disabled={disabledPrev}
+                      style={navButtonStyle(disabledPrev)}
+                      onMouseDown={e => (e.currentTarget.style.transform = 'scale(0.98)')}
+                      onMouseUp={e => (e.currentTarget.style.transform = 'scale(1)')}
+                    >
+                      Prev
+                    </button>
+
+                    <div style={{ fontSize: responsive.isMobile ? 11 : 12, color: tileTextMuted, padding: responsive.isMobile ? '0 6px' : undefined }}>
+                      Page {page + 1} / {totalPages} — Showing {Math.min((page + 1) * LIMIT, rows.length)} of {rows.length}
+                    </div>
+
+                    <button
+                      onClick={() => setPage(Math.min(totalPages - 1, page + 1))}
+                      disabled={disabledNext}
+                      style={navButtonStyle(disabledNext)}
+                      onMouseDown={e => (e.currentTarget.style.transform = 'scale(0.98)')}
+                      onMouseUp={e => (e.currentTarget.style.transform = 'scale(1)')}
+                    >
+                      Next
+                    </button>
+                  </>
+                );
+              })()}
+            </div>
+          )}
       </div>
       </div>
     </div>
