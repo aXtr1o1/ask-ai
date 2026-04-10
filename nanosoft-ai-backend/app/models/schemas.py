@@ -192,6 +192,8 @@ class ChatRequest(BaseModel):
     query: str
     userName: str
     sessionId: str
+    #for voiceAgent
+    userId: Optional[int] = None
 
 
 class FrontendChatMessage(BaseModel):

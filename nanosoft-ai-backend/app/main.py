@@ -31,6 +31,7 @@ from app.services.session_service import get_sessions_for_user, get_chat_history
 from app.models.schemas import SessionRequest, ClientInsertionRequest
 from app.services.audio_service import convert_audio_to_text, get_audio_duration_seconds
 from app.services.quota_service import quota_fallback_service
+from app.voiceAgent_endpoint import voice_agent_router
 
 
 logger = logging.getLogger("chatbot_app")
@@ -1193,6 +1194,7 @@ def api_health():
     return {"status": "ok", "service": "Facility Management AI Assistant"}
 
 chatbot_app.include_router(api_router)
+chatbot_app.include_router(voice_agent_router)
 
 @chatbot_app.on_event("startup")
 async def startup_event():
