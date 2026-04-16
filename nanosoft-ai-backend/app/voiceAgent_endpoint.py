@@ -1,23 +1,25 @@
+#voice agent endpoint added by sudharshan
+import logging
 from fastapi import APIRouter, HTTPException
 from langchain_core.messages import HumanMessage, AIMessage
 
 from app.models.schemas import ChatRequest
 from app.prompts.system_prompt import get_system_prompt
 from app.services.langchain_service import langchain_service
+from app.state import memory_store, MAX_HISTORY
 
-
+logger = logging.getLogger("chatbot_app")
 voice_agent_router = APIRouter(tags=["voice-agent"])
 
 
 @voice_agent_router.post("/chat")
 async def http_chat_endpoint(request: ChatRequest):
     """HTTP chat endpoint for voice/webhook bridge clients."""
-    from app import main as main_app
 
     user_query = (request.query or "").strip()
-    user_id = request.userId
-    user_name = (request.userName or "").strip()
-    session_id = (request.sessionId or "").strip()
+    user_id = getattr(request, 'userId', None) or getattr(request, 'user_id', None)
+    user_name = (getattr(request, 'userName', None) or getattr(request, 'user_name', None) or "").strip()
+    session_id = (getattr(request, 'sessionId', None) or getattr(request, 'session_id', None) or "").strip()
 
     if not user_query:
         raise HTTPException(status_code=400, detail="query is required")
@@ -26,10 +28,7 @@ async def http_chat_endpoint(request: ChatRequest):
     if not session_id:
         raise HTTPException(status_code=400, detail="sessionId is required")
 
-    memory_store = main_app.memory_store
-    max_history = main_app.MAX_HISTORY
-    logger = main_app.logger
-
+    max_history = MAX_HISTORY
     if session_id not in memory_store:
         memory_store[session_id] = {
             "lc_memory": [],

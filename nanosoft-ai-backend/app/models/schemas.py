@@ -189,12 +189,13 @@ class SBInput(BaseModel):
 
 class ChatRequest(BaseModel):
     """Request schema for chat endpoint"""
-    query: str
-    userName: str
-    sessionId: str
-    #for voiceAgent
-    userId: Optional[int] = None
-
+    query: Optional[str] = None
+    userName: Optional[str] = None
+    user_name: Optional[str] = None
+    userId: Optional[str] = None
+    user_id: Optional[str] = None
+    sessionId: Optional[str] = None
+    session_id: Optional[str] = None
 
 class FrontendChatMessage(BaseModel):
     """Shape of a single chat message sent from frontend when saving history."""

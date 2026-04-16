@@ -9,7 +9,7 @@ from typing import Optional, List
 
 class AssetRequest(BaseModel):
     """Request schema for assets endpoint"""
-    user_id: Optional[int] = None
+    user_id: Optional[str] = None
     user_name: Optional[str] = None
     asset_tag_no: Optional[str] = None
     status: Optional[str] = None
@@ -45,7 +45,7 @@ class AssetRequest(BaseModel):
 
 class PPMRequest(BaseModel):
     """Request schema for PPM (planned preventive maintenance) endpoint"""
-    user_id: Optional[int] = None
+    user_id: Optional[str] = None
     user_name: Optional[str] = None
     work_order: Optional[str] = None
     asset_tag_no: Optional[str] = None
@@ -77,7 +77,7 @@ class PPMRequest(BaseModel):
 
 class BDMRequest(BaseModel):
     """Request schema for BDM (breakdown maintenance / complaints) endpoint"""
-    user_id: Optional[int] = None
+    user_id: Optional[str] = None
     user_name: Optional[str] = None
     complaint_no: Optional[str] = None
     status: Optional[str] = None
@@ -112,7 +112,7 @@ class BDMRequest(BaseModel):
     
 class FARequest(BaseModel):
     """Request schema for FA (Facility Audit) endpoint"""
-    user_id: Optional[int] = None
+    user_id: Optional[str] = None
     user_name: Optional[str] = None
     complaint_no: Optional[str] = None
     priority: Optional[str] = None
@@ -145,7 +145,7 @@ class FARequest(BaseModel):
  
 class SBRequest(BaseModel):
     """Request schema for SB (Schedule Based) endpoint"""
-    user_id: Optional[int] = None
+    user_id: Optional[str] = None
     user_name: Optional[str] = None
     work_order: Optional[str] = None
     stage: Optional[str] = None
