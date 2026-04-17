@@ -69,3 +69,15 @@ nanosoft-ai-backend/tests/api/routes/__pycache__/
 nanosoft-ai-backend/tests/services/__pycache__/
 nanosoft-ai-backend/tests/tools/__pycache__/
 nanosoft-ai-backend/app/services/sync/__pycache__/*
+nanosoft-ai-backend/app/dynamic/__pycache__/*
+nanosoft-ai-backend/app/dynamic/tools/__pycache__/*
+nanosoft-ai-backend/app/dynamic/onboarding/__pycache__/*
+nanosoft-ai-backend/app/dynamic/onboarding/routes/__pycache__/*
+nanosoft-ai-backend/app/endpoints/__pycache__/*
+nanosoft-ai-backend/app/handlers/__pycache__/*
+nanosoft-ai-backend/app/prompts/sections/__pycache__/*
+nanosoft-ai-backend/app/services/ai/__pycache__/*
+nanosoft-ai-backend/app/services/data/__pycache__/*
+nanosoft-ai-backend/app/services/quota/__pycache__/*
+nanosoft-ai-backend/app/user/__pycache__/*
+nanosoft-ai-backend/app/utils/__pycache__/*
