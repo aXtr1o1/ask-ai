@@ -40,8 +40,63 @@ def extract_date_from_query(query: str):
         return "yesterday", "yesterday"
     elif "today" in q:
         return "today", "today"
+    elif "present" in q or "current" in q or "now" in q:
+        # Treat present/current wording as today's data
+        return "today", "today"
     else:
         return None, None  # Let getTime default to last 7 days
+
+
+def _needs_default_last_7_days(query: str) -> bool:
+    q = (query or "").lower()
+    time_keywords = (
+        "today", "yesterday", "last week", "this week", "week",
+        "last month", "this month", "month",
+        "last year", "this year", "year",
+        "day", "days", "date", "present", "current"
+    )
+    if any(k in q for k in time_keywords):
+        return False
+    if _re.search(r"\b\d{4}-\d{2}-\d{2}\b", q):
+        return False
+    return True
+
+
+def _append_default_7days(text: str, query: str) -> str:
+    base = (text or "").strip()
+    if _needs_default_last_7_days(query):
+        if "last 7 days" not in base.lower():
+            suffix = "This is for the last 7 days."
+            return f"{base} {suffix}".strip()
+    return base
+
+
+def _append_explicit_today(text: str, query: str) -> str:
+    """Ensure responses mention the same time wording user asked for."""
+    q = (query or "").lower()
+    if not any(k in q for k in ("today", "present", "current", "now")):
+        return (text or "").strip()
+
+    base = (text or "").strip()
+
+    if "present" in q:
+        if "present" not in base.lower():
+            return f"{base} This is for present data.".strip()
+        return base
+
+    if "current" in q:
+        if "current" not in base.lower():
+            return f"{base} This is for current data.".strip()
+        return base
+
+    if "now" in q:
+        if "now" not in base.lower() and "today" not in base.lower():
+            return f"{base} This is for now.".strip()
+        return base
+
+    if "today" not in base.lower():
+        return f"{base} This is for today.".strip()
+    return base
 class LangChainService:
     def __init__(self):
         try:
@@ -288,6 +343,13 @@ class LangChainService:
                     elif _has_number:
                         logger.info("📋 List query with specific number detected — keeping limit as-is | limit=%s", args.get("limit"))
 
+                    # If model omitted dates, infer from query keywords (e.g., present => today)
+                    inferred_from, inferred_to = extract_date_from_query(user_query)
+                    if args.get("date_from") is None and inferred_from is not None:
+                        args["date_from"] = inferred_from
+                    if args.get("date_to") is None and inferred_to is not None:
+                        args["date_to"] = inferred_to
+
                     try:
                         tool_result = tool_fn.invoke(dict(args))
                         logger.info(f"✅ Tool call succeeded on first try | {tool_name}")
@@ -465,6 +527,8 @@ class LangChainService:
                         context_ai_msg = self.model.invoke(messages)
                         self._accumulate_tokens(context_ai_msg)
                         context_summary = context_ai_msg.content or f"Found {display_count} records for your request."
+                        context_summary = _append_default_7days(context_summary, user_query)
+                        context_summary = _append_explicit_today(context_summary, user_query)
                         logger.info("✅ Context summary generated for large dataset | context='%s'", context_summary[:80])
 
                         large_dataset_response = json.dumps({
@@ -612,6 +676,10 @@ class LangChainService:
                         f"**Tip:** Try modifying your question by adding a category (for example: by type, date, or status) so that I can generate a meaningful chart"
 
                     )
+                final_content = _append_default_7days(final_content, user_query)
+                context_summary = _append_default_7days(context_summary, user_query)
+                final_content = _append_explicit_today(final_content, user_query)
+                context_summary = _append_explicit_today(context_summary, user_query)
                 return final_content, context_summary, messages
 
             else:
@@ -821,6 +889,8 @@ class LangChainService:
                         context_ai_msg = self.model.invoke(messages)
                         self._accumulate_tokens(context_ai_msg)
                         context_summary = context_ai_msg.content or f"Found {display_count} records for your request."
+                        context_summary = _append_default_7days(context_summary, user_query)
+                        context_summary = _append_explicit_today(context_summary, user_query)
 
                         large_dataset_response = json.dumps({
                             "context_summary": context_summary,
@@ -925,6 +995,10 @@ class LangChainService:
                         f"**Tip:** Try modifying your question by adding a category (for example: by type, date, or status) so that I can generate a meaningful chart"
 
                         )
+                    content = _append_default_7days(content, user_query)
+                    context_summary = _append_default_7days(context_summary, user_query)
+                    content = _append_explicit_today(content, user_query)
+                    context_summary = _append_explicit_today(context_summary, user_query)
                     return content, context_summary, messages
                     
                 content = ai_msg.content
