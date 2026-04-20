@@ -31,7 +31,8 @@ from app.services.session_service import get_sessions_for_user, get_chat_history
 from app.models.schemas import SessionRequest, ClientInsertionRequest
 from app.services.audio_service import convert_audio_to_text, get_audio_duration_seconds
 from app.services.quota_service import quota_fallback_service
-
+from app.voiceAgent_endpoint import voice_agent_router
+from app.state import memory_store, MAX_HISTORY, frontend_saved_sessions
 
 logger = logging.getLogger("chatbot_app")
 logger.setLevel(logging.INFO)
@@ -72,8 +73,7 @@ api_router = APIRouter(prefix="/api", tags=["api"])
 #   }
 # }
 # =====================================================
-MAX_HISTORY =  settings.MAX_HISTORY
-memory_store = {}
+
 MAX_AUDIO_BYTES = 500 * 1024  # 500 KB
 
 YES_WORDS = {
@@ -149,7 +149,7 @@ def _build_table_context(context_summary: str, user_query: str) -> str:
 
 #Track sessions already saved by frontend HTTP POST
 # So WebSocketDisconnect does NOT save again (prevents double save)
-frontend_saved_sessions: set = set()
+# frontend_saved_sessions now imported from app.state
 
 
 #chat memory for debugging purpose. 
@@ -1191,8 +1191,9 @@ async def get_usage_stats(external_user_id: str, user_name: str):
 @api_router.get("/health", tags=["Health"])
 def api_health():
     return {"status": "ok", "service": "Facility Management AI Assistant"}
-
+#voice agent endpoint added by sudharshan
 chatbot_app.include_router(api_router)
+chatbot_app.include_router(voice_agent_router)
 
 @chatbot_app.on_event("startup")
 async def startup_event():

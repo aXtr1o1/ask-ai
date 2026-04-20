@@ -20,7 +20,17 @@ def get_pool() -> connection:
     """Get or create the sync PostgreSQL connection."""
     global _client
 
-    if _client is None or _client.closed:
+    # Check if client is None, closed, or if the connection is "dead" (stale/timed out)
+    is_dead = False
+    if _client:
+        try:
+            # Perform a quick liveness check (ping)
+            with _client.cursor() as cur:
+                cur.execute("SELECT 1")
+        except Exception:
+            is_dead = True
+
+    if _client is None or _client.closed or is_dead:
         if not all([settings.PG_HOST, settings.PG_DATABASE, settings.PG_USER, settings.PG_PASSWORD]):
             logger.critical("Database credentials not set in environment variables")
             raise RuntimeError("Database credentials not set in environment variables")
