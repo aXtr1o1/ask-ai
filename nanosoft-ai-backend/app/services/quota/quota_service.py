@@ -43,16 +43,38 @@ class QuotaFallbackService:
 
     def is_quota_error(self, error: Exception) -> bool:
         """
-        Treat ANY model call failure as a quota exceeded trigger.
-
-        Why catch everything:
-            Quota errors manifest as different exception types.
-            Catching all failures ensures the user always gets a helpful fallback
-            instead of a raw error message.
+        Returns True ONLY for genuine quota / rate-limit errors.
+        All other failures (network, DB, auth, etc.) are NOT quota errors
+        and should surface normally instead of triggering the fallback menu.
         """
         error_str = str(error).lower()
-        logger.warning("[QUOTA] Model failure → triggering fallback | error=%s", error_str[:120])
-        return True
+
+        quota_signals = (
+            "quota",
+            "rate limit",
+            "rate_limit",
+            "resource_exhausted",
+            "429",
+            "too many requests",
+            "exhausted",
+            "billing",
+            "exceeded your current quota",
+        )
+
+        matched = any(signal in error_str for signal in quota_signals)
+
+        if matched:
+            logger.warning(
+                "[QUOTA] Genuine quota error detected → triggering fallback | error=%s",
+                error_str[:120],
+            )
+        else:
+            logger.info(
+                "[QUOTA] Non-quota error — NOT triggering fallback | error=%s",
+                error_str[:120],
+            )
+
+        return matched
 
     def get_services_for_client(self, client_name: str) -> List[Dict]:
         """
@@ -99,15 +121,15 @@ class QuotaFallbackService:
             service_lines = "• No services currently available."
 
         message = (
-            "⚠️ **AI Quota Exceeded**\n\n"
-            "Your AI usage quota has been exhausted, but I can still help you view data.\n\n"
-            "**Available services:**\n"
+            "🚦 **High Traffic Detected — Manual Retrieval Mode Active**\n\n"
+            "The AI assistant is temporarily unavailable due to heavy demand, "
+            "but you can still retrieve your data directly.\n\n"
+            "**What would you like to view?**\n"
             f"{service_lines}\n\n"
-            "**Please reply with which service you'd like to see.**\n"
-            "Examples:\n"
-            "- 'show me assets'\n"
-            "- 'give me 50 complaints'\n"
-            "- 'list all ppm'"
+            "Just tell me what you need — for example:\n"
+            "- *'show me assets'*\n"
+            "- *'give me 50 complaints'*\n"
+            "- *'list all ppm'*"
         )
 
         logger.info("[QUOTA] Quota exceeded message generated | client_name=%s", client_name)

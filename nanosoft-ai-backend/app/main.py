@@ -83,7 +83,7 @@ async def startup_event():
 async def shutdown_event():
     """Gracefully close DB pool on app shutdown."""
     close_pool()
-    logger.info("🛑 [MAIN] App shutdown — DB pool closed")
+    logger.info("[MAIN] App shutdown — DB pool closed")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

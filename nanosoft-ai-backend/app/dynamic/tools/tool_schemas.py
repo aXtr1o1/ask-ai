@@ -139,6 +139,25 @@ def build_input_schema(service_key: str, fields_config: dict) -> type:
         Field(None, description="Fallback for specific technical terms not covered by other fields.")
     )
 
+    # DEFAULT date range fields — always present in every tool
+    # All generic relative date queries route here unless user names a specific date field
+    fields["updated_at_from"] = (
+        Optional[str],
+        Field(None, description=(
+            "Use this for ALL generic relative date queries: 'today', 'yesterday', "
+            "'this week', 'last week', 'this month', 'last month', 'this year'. "
+            "Also use for action words like 'registered', 'created', 'added', 'updated' + any time period. "
+            "This is the DEFAULT date field unless user explicitly names another date field."
+        ))
+    )
+    fields["updated_at_to"] = (
+        Optional[str],
+        Field(None, description=(
+            "End of date range for updated_at. Always pair with updated_at_from. "
+            "Use for all generic relative date queries."
+        ))
+    )
+
     # ── GROUP 2: Dynamic fields from fields_config ────────────────────────────
 
     logger.debug("[SCHEMA] Building dynamic fields for service_key=%s", service_key)
@@ -151,14 +170,25 @@ def build_input_schema(service_key: str, fields_config: dict) -> type:
         if is_date:
             # Date fields get a FROM + TO pair for range filtering
             # e.g. PurDate → PurDate_from="2024-01-01", PurDate_to="2024-12-31"
+            # ONLY filled when user explicitly mentions this field name or a direct synonym
             field_desc = field_meta.get("description") or field_name
             fields[f"{field_name}_from"] = (
                 Optional[str],
-                Field(None, description=f"Start range for {field_desc}. Use YYYY-MM-DD.")
+                Field(None, description=(
+                    f"Start range for {field_desc}. Use YYYY-MM-DD. "
+                    f"ONLY fill if user explicitly mentions '{field_name}' or a direct synonym. "
+                    f"Do NOT fill for generic words like 'today', 'yesterday', 'this week', "
+                    f"'registered', 'created', 'added' — those go to updated_at_from."
+                ))
             )
             fields[f"{field_name}_to"] = (
                 Optional[str],
-                Field(None, description=f"End range for {field_desc}. Use YYYY-MM-DD.")
+                Field(None, description=(
+                    f"End range for {field_desc}. Use YYYY-MM-DD. "
+                    f"ONLY fill if user explicitly mentions '{field_name}' or a direct synonym. "
+                    f"Do NOT fill for generic words like 'today', 'yesterday', 'this week', "
+                    f"'registered', 'created', 'added' — those go to updated_at_to."
+                ))
             )
             logger.debug("[SCHEMA] Date field added: %s_from + %s_to", field_name, field_name)
         else:

@@ -6,10 +6,18 @@ Client registry endpoint:
 
 Flow:
     OLD client → just update JWT token in client_registry
+
     NEW client → full onboarding:
-                 1. Insert into client_sync_config (last_synced_at = NULL)
-                 2. Call onboard_service() → migrates all data
-                 3. Update client_sync_config SET last_synced_at = NOW()
+                 1. Save client to client_registry (last_synced_at = NULL)
+                 2. Loop through ALL services from service_catalog.py
+                 3. Save each service config → client_service_registry
+                 4. Sync all data for each service → client_service_data
+                 5. Update last_synced_at = NOW() in client_registry ONCE after all done
+
+NOTE:
+    last_synced_at lives in client_registry — one timestamp per client.
+    No changes to client_service_registry for tracking sync time.
+    Everything is driven dynamically by service_catalog.get_all_services().
 """
 
 import logging
@@ -18,13 +26,12 @@ from fastapi import APIRouter, HTTPException
 
 from app.models.schemas import ClientInsertionRequest
 from app.api.database.postgres_client import get_pool, release_conn
-from app.dynamic.onboarding.schemas import OnboardServiceRequest
 from app.dynamic.service import (
-    get_conn,
     save_client_to_registry,
     save_service_to_registry,
     sync_service_data,
 )
+from app.services.sync.service_catalog import get_all_services
 
 logger = logging.getLogger("endpoints.client")
 
@@ -35,18 +42,20 @@ router = APIRouter(tags=["client"])
 async def client_insertion(request: ClientInsertionRequest):
 
     user_id     = str(request.userId).strip()
-    service     = request.service.strip()
+    service     = request.service.strip()        # base_url
     client_name = request.clientName.strip()
     token       = request.token.strip()
 
     if not user_id:
         raise HTTPException(status_code=400, detail="userId is required")
+
+    # ══════════════════════════════════════════════════════════
+    # CHECK — is this an OLD or NEW client?
+    # ══════════════════════════════════════════════════════════
     conn = None
     try:
         conn = get_pool()
         cursor = conn.cursor()
-
-        # ── Check if client already exists in client_registry ──
         cursor.execute(
             """
             SELECT client_name, base_url, token
@@ -99,10 +108,8 @@ async def client_insertion(request: ClientInsertionRequest):
             )
             conn.commit()
             cursor.close()
-            logger.info(
-                "✅ [CLIENT] Token updated | client=%s",
-                client_name,
-            )
+            logger.info("✅ [CLIENT] Token updated | client=%s", client_name)
+
         except Exception as e:
             logger.error(
                 "[CLIENT] Failed to update token | client=%s | error=%s",
@@ -127,113 +134,103 @@ async def client_insertion(request: ClientInsertionRequest):
         }
 
     # ══════════════════════════════════════════════════════════
-    # CASE 2 — NEW CLIENT → full onboarding + migration
+    # CASE 2 — NEW CLIENT → full onboarding via service_catalog
     # ══════════════════════════════════════════════════════════
     logger.info(
         "[CLIENT] New client | client=%s — starting full onboarding",
         client_name,
     )
 
+    # Load all services from catalog — no hardcoding
+    all_services = get_all_services()
+    logger.info(
+        "[CLIENT] Loaded %d service(s) from catalog | services=%s",
+        len(all_services), [s["service_key"] for s in all_services],
+    )
+
     conn = None
+    total_inserted = 0
+
     try:
         conn = get_pool()
-        cursor = conn.cursor()
 
-        # ── STEP 1: Insert into client_sync_config ─────────────
-        # last_synced_at = NULL → cron will know this is a fresh client
-        logger.info(
-            "[CLIENT] Step 1 → Inserting into client_sync_config | client=%s",
-            client_name,
-        )
-        cursor.execute(
-            """
-            INSERT INTO client_sync_config
-                (client_name, user_id, service_key, last_synced_at, is_active)
-            SELECT %s, %s, service_key, NULL, true
-            FROM   client_service_registry
-            WHERE  client_name = %s
-            ON CONFLICT (client_name, user_id, service_key) DO NOTHING
-            """,
-            (client_name, int(user_id), client_name),
-        )
-        conn.commit()
-        logger.info(
-            "✅ [CLIENT] Step 1 complete — client_sync_config inserted | client=%s",
-            client_name,
-        )
-
-        # ── STEP 2: Save client to client_registry ─────────────
-        logger.info(
-            "[CLIENT] Step 2 → Saving to client_registry | client=%s",
-            client_name,
-        )
+        # ── STEP 1: Save client to client_registry ─────────────────────────
+        # last_synced_at = NULL at this point (set to NOW after all services sync)
+        logger.info("[CLIENT] Step 1 → Saving client to client_registry | client=%s", client_name)
         save_client_to_registry(conn, client_name, token, service)
-        logger.info(
-            "✅ [CLIENT] Step 2 complete — client_registry saved | client=%s",
-            client_name,
-        )
+        logger.info("✅ [CLIENT] Step 1 complete — client_registry saved | client=%s", client_name)
 
-        # ── STEP 3: Sync all service data ──────────────────────
-        # Load all service keys from client_service_registry and sync each
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            SELECT service_key, endpoint, unique_field
-            FROM   client_service_registry
-            WHERE  client_name = %s AND is_active = true
-            """,
-            (client_name,),
-        )
-        services = cursor.fetchall()
-        cursor.close()
+        # ── STEP 2: For each service → register config + sync data ─────────
+        for idx, svc in enumerate(all_services, start=1):
 
-        logger.info(
-            "[CLIENT] Step 3 → Syncing %d service(s) | client=%s | services=%s",
-            len(services), client_name, [s[0] for s in services],
-        )
+            service_key  = svc["service_key"]
+            endpoint     = svc["endpoint"]
+            unique_field = svc["unique_field"]
 
-        total_inserted = 0
-        for service_key, endpoint, unique_field in services:
             logger.info(
-                "[CLIENT] Syncing service | client=%s | service_key=%s",
-                client_name, service_key,
+                "[CLIENT] Step 2.%d → Registering service | client=%s | service_key=%s | endpoint=%s",
+                idx, client_name, service_key, endpoint,
+            )
+
+            # ── 2a: Save service config to client_service_registry ──────────
+            save_service_to_registry(
+                conn             = conn,
+                client_name      = client_name,
+                service_key      = service_key,
+                service_name     = svc["service_name"],
+                description      = svc["description"],
+                routing_keywords = svc["routing_keywords"],
+                fields_config    = svc["fields_config"],
+                endpoint         = endpoint,
+                unique_field     = unique_field,
+            )
+            logger.info(
+                "✅ [CLIENT] Service registered | service_key=%s",
+                service_key,
+            )
+
+            # ── 2b: Sync ALL data for this service ──────────────────────────
+            # last_synced_at = None → full fetch (fresh onboard, get everything)
+            logger.info(
+                "[CLIENT] Syncing data | client=%s | service_key=%s | endpoint=%s",
+                client_name, service_key, endpoint,
             )
             summary = sync_service_data(
-                conn          = conn,
-                client_name   = client_name,
-                user_id       = int(user_id),
-                service_key   = service_key,
-                base_url      = service,
-                jwt_token     = token,
-                endpoint      = endpoint,
-                unique_field  = unique_field,
-                last_synced_at= None,   # NULL → fetch ALL records
+                conn           = conn,
+                client_name    = client_name,
+                user_id        = int(user_id),
+                service_key    = service_key,
+                base_url       = service,
+                jwt_token      = token,
+                endpoint       = endpoint,
+                unique_field   = unique_field,
+                last_synced_at = None,   # NULL → fetch ALL records
             )
             total_inserted += summary["inserted"]
             logger.info(
-                "✅ [CLIENT] Service synced | service_key=%s | inserted=%d | pages=%d",
+                "✅ [CLIENT] Data synced | service_key=%s | inserted=%d | pages=%d",
                 service_key, summary["inserted"], summary["pages_fetched"],
             )
 
-        # ── STEP 4: Update last_synced_at = NOW() ──────────────
+        # ── STEP 3: Update last_synced_at = NOW() in client_registry ONCE ──
+        # Only after ALL services have synced successfully
         logger.info(
-            "[CLIENT] Step 4 → Updating last_synced_at | client=%s",
+            "[CLIENT] Step 3 → Updating last_synced_at in client_registry | client=%s",
             client_name,
         )
         cursor = conn.cursor()
         cursor.execute(
             """
-            UPDATE client_sync_config
+            UPDATE client_registry
             SET    last_synced_at = %s
-            WHERE  client_name = %s
-            AND    user_id     = %s
+            WHERE  client_name   = %s
             """,
-            (datetime.now(timezone.utc), client_name, int(user_id)),
+            (datetime.now(timezone.utc), client_name),
         )
         conn.commit()
         cursor.close()
         logger.info(
-            "✅ [CLIENT] Step 4 complete — last_synced_at updated | client=%s",
+            "✅ [CLIENT] Step 3 complete — last_synced_at updated | client=%s",
             client_name,
         )
 
@@ -250,14 +247,15 @@ async def client_insertion(request: ClientInsertionRequest):
             release_conn(conn)
 
     return {
-        "client_type":     "new",
-        "exists":          False,
-        "message":         "Client onboarded and data migrated successfully",
+        "client_type": "new",
+        "exists":      False,
+        "message":     "Client onboarded and all services synced successfully",
         "client": {
-        "client_name":      client_name,
-        "base_url":         service,
-        "user_id":          user_id,
-        "token":            token,
-        "records_inserted": total_inserted,
-    },
+            "client_name":      client_name,
+            "base_url":         service,
+            "user_id":          user_id,
+            "token":            token,
+            "services_synced":  len(all_services),
+            "records_inserted": total_inserted,
+        },
     }

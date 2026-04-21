@@ -109,6 +109,7 @@ def _build_tool_description(service: dict) -> str:
 # ══════════════════════════════════════════════════════════════════════════════
 # TOOL FUNCTION FACTORY
 # Creates a closure per service — each tool gets its own function
+# dynamically build the tools according to the service's fields_config and routing keywords
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _make_tool_fn(
@@ -167,6 +168,7 @@ def _make_tool_fn(
             "user_name", "user_id", "is_aggregate",
             "group_by_columns", "aggregate_function",
             "limit", "offset", "keyword",
+            "updated_at_from", "updated_at_to",
         }
 
         # Build set of date _from/_to field names to skip in normal filter loop
@@ -193,13 +195,16 @@ def _make_tool_fn(
         # ── Build p_date_filters: date range filters ──────────────────────────
         # Format: { "updated_at": { "from": "2024-01-01", "to": "2024-12-31" } }
         # If LLM passes no date at all → apply default last 7 days on real_date_column
+        # ── Build p_date_filters: date range filters ──────────────────────────
         p_date_filters: dict = {}
-        any_date_provided = any(
-            kwargs.get(f"{df}_from") or kwargs.get(f"{df}_to")
-            for df in date_fields
+        any_date_provided = (
+            kwargs.get("updated_at_from") or kwargs.get("updated_at_to")
+            or any(
+                kwargs.get(f"{df}_from") or kwargs.get(f"{df}_to")
+                for df in date_fields
+            )
         )
         if not any_date_provided and real_date_column:
-            # LLM sent no dates → default to last 7 days on the real date column
             default_from, default_to = _get_time(None, None)
             p_date_filters[real_date_column] = {
                 "from": default_from,
@@ -208,16 +213,63 @@ def _make_tool_fn(
             logger.info("📅 [DATE DEFAULT] No dates from LLM → defaulting | %s: %s → %s",
                         real_date_column, default_from, default_to)
         else:
+            RELATIVE_DATE_KEYWORDS = {
+                "today", "yesterday",
+                "this week", "last week",
+                "this month", "last month",
+                "this year", "last year",
+            }
+
+            def _is_relative(val):
+                return val is not None and str(val).strip().lower() in RELATIVE_DATE_KEYWORDS
+
+            # ── Handle updated_at_from/to directly ───────────────────────────
+            # LLM sends these for all generic relative date queries
+            ua_from = kwargs.get("updated_at_from")
+            ua_to   = kwargs.get("updated_at_to")
+            if ua_from or ua_to:
+                resolved_from, resolved_to = _get_time(ua_from, ua_to)
+                p_date_filters[real_date_column] = {}
+                if resolved_from:
+                    p_date_filters[real_date_column]["from"] = resolved_from
+                if resolved_to:
+                    p_date_filters[real_date_column]["to"] = resolved_to
+                logger.info(
+                    "📅 [DATE updated_at] updated_at_from/to received | from=%s → %s | to=%s → %s",
+                    ua_from, resolved_from, ua_to, resolved_to,
+                )
+
             for df in date_fields:
                 from_val = kwargs.get(f"{df}_from")
                 to_val   = kwargs.get(f"{df}_to")
-                if from_val or to_val:
-                    resolved_from, resolved_to = _get_time(from_val, to_val)
-                    p_date_filters[df] = {}
-                    if resolved_from:
-                        p_date_filters[df]["from"] = resolved_from
-                    if resolved_to:
-                        p_date_filters[df]["to"]   = resolved_to
+
+                if not (from_val or to_val):
+                    continue
+
+                resolved_from, resolved_to = _get_time(from_val, to_val)
+
+                # If relative keyword → ALWAYS route to real_date_column (updated_at)
+                # Never let "today/this week/etc." hit a JSONB field with bad date formats
+                if _is_relative(from_val) or _is_relative(to_val):
+                    target_col = real_date_column
+                    logger.info(
+                        "📅 [DATE REDIRECT] Relative keyword → real column | field=%s → %s | from=%s | to=%s",
+                        df, target_col, resolved_from, resolved_to,
+                    )
+                else:
+                    # Explicit ISO date e.g. "2024-01-01" → use the JSONB field as-is
+                    target_col = df
+                    logger.info(
+                        "📅 [DATE JSONB] Explicit date → JSONB field | field=%s | from=%s | to=%s",
+                        df, resolved_from, resolved_to,
+                    )
+
+                if target_col not in p_date_filters:
+                    p_date_filters[target_col] = {}
+                if resolved_from:
+                    p_date_filters[target_col]["from"] = resolved_from
+                if resolved_to:
+                    p_date_filters[target_col]["to"] = resolved_to
 
         # ── Keyword fallback: map to first string field ───────────────────────
         # If user says a specific technical term not matched by other fields,

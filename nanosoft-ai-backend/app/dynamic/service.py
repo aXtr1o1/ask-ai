@@ -25,6 +25,7 @@ Tables touched:
 import json
 import logging
 import time
+import psycopg2.extras
 import requests
 from datetime import timezone
 from requests.exceptions import RequestException, Timeout
@@ -38,10 +39,7 @@ if not logger.handlers:
     logger.addHandler(ch)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-REQUEST_TIMEOUT = 30    # seconds to wait for client API response
-MAX_RETRIES     = 3     # how many times to retry a failed page fetch
-PAGE_SIZE       = 100   # records per page when fetching from client API
-
+from app.services.sync.config import PAGE_SIZE, MAX_RETRIES, REQUEST_TIMEOUT
 
 # ══════════════════════════════════════════════════════════════════════════════
 # DB HELPER
@@ -204,6 +202,7 @@ def ensure_unique_index(
             service_key,
             (data->>'{unique_field}')
         )
+        WHERE service_key = '{service_key}'
     """)
     conn.commit()
     cursor.close()
@@ -402,17 +401,20 @@ def sync_service_data(
         ]
 
         # ON CONFLICT: if record with same unique_field already exists → update data + timestamp
-        cursor.executemany(
+        psycopg2.extras.execute_values(
+            cursor,
             f"""
             INSERT INTO public.client_service_data
                 (client_name, user_id, service_key, data)
-            VALUES (%s, %s, %s, %s::jsonb)
+            VALUES %s
             ON CONFLICT (client_name, user_id, service_key, (data->>'{unique_field}'))
+            WHERE service_key = '{service_key}'
             DO UPDATE SET
                 data       = EXCLUDED.data,
                 updated_at = now()
             """,
             insert_values,
+            page_size=1000,
         )
         conn.commit()
 
@@ -433,6 +435,7 @@ def sync_service_data(
             )
             break
 
+        time.sleep(0.5)  # prevent server overload (502 errors)
         page_index += 1
 
     cursor.close()
