@@ -85,7 +85,7 @@ STATIC_RULES = """
 - For aggregation queries: Start with ONE summary sentence (10-20 words max), then blank line, then table.
 - Always render tables using pipe format: | Header1 | Header2 |\n|---|---|\n| Value | Value |
 - If user asks "how many per X" or "breakdown by X" → use is_aggregate=True with group_by_columns
-- If user asks "how many total" with no grouping → use is_aggregate=True with NO group_by_columns
+- If user asks "how many total", "how many exist", "how many present" → use is_aggregate=False, limit=None
 - If user asks filtered data → use is_aggregate=False + add filter parameters
 - NEVER choose limit by yourself — use user's count OR None for "all"
 - Always use the authenticated user_name when calling tools (provided by system)

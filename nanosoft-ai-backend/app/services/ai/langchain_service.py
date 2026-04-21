@@ -111,6 +111,8 @@ class LangChainService:
         """
         cache_key = f"{client_name}:{user_id}"
 
+        if cache_key in self._client_tools:
+            del self._client_tools[cache_key]
         if cache_key not in self._client_tools:
             logger.info("[LANGCHAIN] Building tools for new client | client_name=%s | user_id=%s", client_name, user_id)
             tools, tool_map = build_tools_for_client(client_name, user_id)
@@ -595,7 +597,7 @@ class LangChainService:
                     self._last_pending_table = p_list_for_model
 
                 # Add graph unavailable message if frontend wants graph but query isn't aggregate
-                if is_graph and not is_aggregate_query and not is_count_query:
+                if is_graph and not is_aggregate_query:
                     final_content = (
                         f"Here are the results for your query:\n\n{final_content}\n\n"
                         f"**Graph not available for this query**\n"

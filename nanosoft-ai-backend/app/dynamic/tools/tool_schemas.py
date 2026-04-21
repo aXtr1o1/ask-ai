@@ -102,9 +102,18 @@ def build_input_schema(service_key: str, fields_config: dict) -> type:
     # is_aggregate=True triggers the GROUP BY path in the tool function
     # The LLM sets this when user asks "how many per X" or "breakdown by Y"
     fields["is_aggregate"] = (
-        Optional[bool],
-        Field(False, description="Set True for grouping/breakdown queries like 'how many per X', 'breakdown by Y'.")
-    )
+    Optional[bool],
+    Field(False, description=(
+        "Set True ONLY when user explicitly asks for a grouped breakdown or summary by a CATEGORY COLUMN. "
+        "Examples that are True: 'how many per division', 'breakdown by status', 'count by type', 'summarize by location'. "
+        "Set False when user asks for a simple total count OR a list of records with no grouping. "
+        "CRITICAL: Date/time words are NOT grouping categories — always set False for: "
+        "'how many registered today', 'how many added this week', 'how many created last month', "
+        "'how many exist', 'total count', 'how many in last 7 days'. "
+        "RULE: 'by today/yesterday/this week/last month/this year' = date FILTER not grouping → always False. "
+        "RULE: Only set True when 'by X' or 'per X' refers to a DATA COLUMN like division, status, type, location."
+    ))
+)
 
     # group_by_columns is only filled when is_aggregate=True
     # Must contain column names from the aggregatable fields in fields_config
@@ -115,9 +124,13 @@ def build_input_schema(service_key: str, fields_config: dict) -> type:
 
     # aggregate_function: COUNT for counts, SUM for totals, AVG for averages
     fields["aggregate_function"] = (
-        Optional[str],
-        Field(None, description="COUNT for how many, SUM for total, AVG for average. Only when is_aggregate=True.")
-    )
+    Optional[str],
+    Field(None, description=(
+        "ONLY fill when is_aggregate=True AND group_by_columns is set. "
+        "Never set this for plain count queries like 'how many total'. "
+        "Leave None for all count and list queries."
+    ))
+)
 
     # limit: only set when user explicitly asks for a specific number of records
     # For count queries, limit should be None
@@ -135,9 +148,14 @@ def build_input_schema(service_key: str, fields_config: dict) -> type:
     # keyword: loose text search fallback when no specific field matches
     # Routes to the first string field in fields_config
     fields["keyword"] = (
-        Optional[str],
-        Field(None, description="Fallback for specific technical terms not covered by other fields.")
-    )
+    Optional[str],
+    Field(None, description=(
+        "Use this ONLY for data queries. "
+        "Fill this when user mentions an unrecognized term that does not match "
+        "any specific filter field — put that term here as the filter value. "
+        "Leave None for conversational, general, or non-data queries."
+    ))
+)
 
     # DEFAULT date range fields — always present in every tool
     # All generic relative date queries route here unless user names a specific date field
