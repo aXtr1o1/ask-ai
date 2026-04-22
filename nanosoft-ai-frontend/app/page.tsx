@@ -1153,30 +1153,47 @@ export default function Home() {
 
   // Read userName and branding logos from URL (e.g. from autologin redirect); persist logos to localStorage
   useEffect(() => {
-    
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
-      const userName = params.get("userName") ?? params.get("userId"); // display only
-        const clientName = params.get("clientName"); // backend username
-        const userIdParam = params.get("userId");
-        if (userIdParam) {
-          setUserIdInt(parseInt(userIdParam, 10));
-        }
-      const clientLogo = params.get("loginPageClientLogoPath");
-      const footerLogo = params.get("loginFooterLogoPath");
-      setUserIdFromUrl(userName);
-      if (clientName) {
-        setClientNameFromUrl(clientName);
+      
+      // 1. Get values from URL
+      const userNameFromUrlValue = params.get("userName") ?? params.get("userId"); 
+      const clientNameFromUrlValue = params.get("clientName"); 
+      const userIdParam = params.get("userId");
+      const clientLogoFromUrl = params.get("loginPageClientLogoPath");
+      const footerLogoFromUrl = params.get("loginFooterLogoPath");
+
+      // 2. Resolve final values (URL takes priority over localStorage)
+      const finalUserName = userNameFromUrlValue || localStorage.getItem("userName");
+      const finalClientName = clientNameFromUrlValue || localStorage.getItem("clientName") || localStorage.getItem("loggedInUser");
+      const finalUserId = userIdParam || localStorage.getItem("userId");
+
+      // 3. Update state and persist
+      if (finalUserName) {
+        setUserIdFromUrl(finalUserName);
+        localStorage.setItem("userName", finalUserName);
       }
-      if (clientLogo) {
-        setLoginPageClientLogoPath(clientLogo);
-        localStorage.setItem("loginPageClientLogoPath", clientLogo);
+      if (finalClientName) {
+        setClientNameFromUrl(finalClientName);
+        localStorage.setItem("clientName", finalClientName);
+        localStorage.setItem("loggedInUser", finalClientName);
+      }
+      if (finalUserId) {
+        setUserIdInt(parseInt(finalUserId, 10));
+        localStorage.setItem("userId", finalUserId);
+      }
+
+      // Branding logos
+      if (clientLogoFromUrl) {
+        setLoginPageClientLogoPath(clientLogoFromUrl);
+        localStorage.setItem("loginPageClientLogoPath", clientLogoFromUrl);
       } else {
         setLoginPageClientLogoPath(localStorage.getItem("loginPageClientLogoPath"));
       }
-      if (footerLogo) {
-        setLoginFooterLogoPath(footerLogo);
-        localStorage.setItem("loginFooterLogoPath", footerLogo);
+
+      if (footerLogoFromUrl) {
+        setLoginFooterLogoPath(footerLogoFromUrl);
+        localStorage.setItem("loginFooterLogoPath", footerLogoFromUrl);
       } else {
         setLoginFooterLogoPath(localStorage.getItem("loginFooterLogoPath"));
       }
@@ -1222,21 +1239,31 @@ export default function Home() {
   // Auth guard
   useEffect(() => {
     if (typeof window === "undefined") return;
-    // Prefer clientNameFromUrl as backend username; fall back to userIdFromUrl
-    const backendUserName = clientNameFromUrl;
+    
+    // Prefer clientNameFromUrl as backend username; fall back to localStorage
+    const backendUserName = clientNameFromUrl || localStorage.getItem("clientName") || localStorage.getItem("loggedInUser");
+    
     if (backendUserName) {
       localStorage.setItem("loggedInUser", backendUserName);
       setLoggedInUser(backendUserName);
       setAuthChecked(true);
-      router.replace("/");
+      
+      // If there are query parameters in the URL, hide them after processing
+      if (window.location.search) {
+        router.replace("/");
+      }
       return;
     }
+    
     const stored = localStorage.getItem("loggedInUser");
-    if (!stored) { router.replace("/login"); return; }
-    // stored value is backend username (client_name)
+    if (!stored) { 
+      router.replace("/login"); 
+      return; 
+    }
+    
     setLoggedInUser(stored);
     setAuthChecked(true);
-  }, [router, userIdFromUrl]);
+  }, [router, clientNameFromUrl]);
 
   // Keep sessionIdRef in sync with state
   useEffect(() => {
