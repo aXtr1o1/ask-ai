@@ -165,14 +165,17 @@ def build_input_schema(service_key: str, fields_config: dict) -> type:
             "Use this for ALL generic relative date queries: 'today', 'yesterday', "
             "'this week', 'last week', 'this month', 'last month', 'this year'. "
             "Also use for action words like 'registered', 'created', 'added', 'updated' + any time period. "
-            "This is the DEFAULT date field unless user explicitly names another date field."
+            "This is the DEFAULT date field unless user explicitly names another date field. "
+            "CRITICAL: DO NOT use this for ANY specific 4-digit year (e.g., 2020, 2022, 2024, 2025). "
+            "If the user specifies a particular year, DO NOT map it here. Use specific integer fields like YearOfManuf instead."
         ))
     )
     fields["updated_at_to"] = (
         Optional[str],
         Field(None, description=(
             "End of date range for updated_at. Always pair with updated_at_from. "
-            "Use for all generic relative date queries."
+            "Use for all generic relative date queries. "
+            "CRITICAL: DO NOT map specific 4-digit years here."
         ))
     )
 

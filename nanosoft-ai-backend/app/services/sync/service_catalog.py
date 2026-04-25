@@ -183,7 +183,7 @@ _SERVICES = [
             "YearOfManuf": {
                 "type": "integer",
                 "is_date": False,
-                "description": "Year the asset was manufactured by the maker. Example values: 0 (not set), 2018, 2020, 2022. Use for filtering assets by manufacture year.",
+                "description": "Year the asset was manufactured by the maker. Example values: 0 (not set), 2018, 2020, 2022. ALWAYS use this field instead of updated_at_from/to when the user specifies a manufactured year.",
                 "aggregatable": True,
             },
             "AssetBarcode": {

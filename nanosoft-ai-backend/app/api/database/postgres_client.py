@@ -43,11 +43,20 @@ def close_pool() -> None:
 
 
 def get_pool() -> connection:
-    """Get the existing connection, initializing if needed."""
+    """Get the existing connection, initializing if needed. Tests connection validity."""
     global _client
     if _client is None or _client.closed:
         logger.warning("Connection not initialized or closed, re-initializing...")
         init_pool()
+    else:
+        # Ping the server to ensure the connection hasn't been silently dropped by timeout
+        try:
+            with _client.cursor() as cur:
+                cur.execute("SELECT 1")
+        except (psycopg2.OperationalError, psycopg2.InterfaceError):
+            logger.warning("Connection ping failed (likely timed out), re-initializing...")
+            init_pool()
+
     return _client
 
 
