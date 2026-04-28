@@ -32,7 +32,7 @@ cd nanosoft-ai-backend
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
-uvicorn main:app --reload
+uvicorn app.main:chatbot_app --reload --port 8001
 ```
 
 ### Useful scripts
@@ -57,6 +57,11 @@ The system serves as an Intelligent Interface for Service Level Agreements workf
 * UI/UX: Responsive, dark-themed design powered by Tailwind CSS and Lucide React.
 
 * Workflow: Seamlessly handles multi-inputs (text/Audio), transmitting data to the FastAPI backend via secure POST requests.
+* Data visualization: Parses graph output and renders bar, line, pie, and horizontal charts.
+
+* Data tables: Automatically extracts and displays structured table data in a tile-friendly view.
+
+* UI controls: Includes theme toggle support, account/manage account panels, and an upgrade plan component.
 
 * Performance: Features a live typing cursor and markdown formatting for an intuitive user experience.
 * For detailed setup steps and architecture, check the specific folders.
@@ -65,33 +70,32 @@ The system serves as an Intelligent Interface for Service Level Agreements workf
 * The NanoSoft AI Backend is a facility management engine built with FastAPI and LangChain.
 * It bridges the gap between raw operational data and intelligent user interaction by isolating database transactions from AI decision-making.
   
-### Dual-Core Architecture
-The system operates through two specialized services:
-
-* Core API (Port 8000): Manages high-integrity PostgreSQL workflows for Assets, Complaints, and Work Orders, ensuring SLA compliance through structured stored procedures.
+### Core Architecture
+The system operates through One specialized services:
 
 * AI Chat Engine (Port 8001): Integrates Google Gemini with LangChain to provide a data-driven assistant. It uses the ReAct pattern to dynamically trigger backend tools, preventing hallucinations by fetching real-time database records.
 
 ### Modular Structure
-* model.py & tools.py: The "Agentic" layer where LangChain orchestrates natural language processing and tool execution.
+* `nanosoft-ai-backend/app/services/langchain_service.py` and `nanosoft-ai-backend/app/tools/`: The agentic layer where LangChain orchestrates natural language understanding, tool execution, and real-time database actions.
 
-* schemas.py & system_prompt.py: Ensures type-safe Pydantic validation and aligns AI behavior with operational rules.
+* `nanosoft-ai-backend/app/models/schemas.py` and `nanosoft-ai-backend/app/prompts/system_prompt.py`: Type-safe Pydantic validation and system prompt guidance that align the AI assistant with operational rules.
 
-* main.py: The robust RESTful foundation handling the primary facility management.
-* For detailed setup steps and architecture, check the specific folders.
+* `nanosoft-ai-backend/app/main.py`: The FastAPI entrypoint and routing layer that handles REST session APIs, WebSocket chat, and backend orchestration.
+* For detailed setup steps and architecture, review the backend folder structure.
 
 ### Performance & Scalability
-By decoupling the AI reasoning from the core asset management, the system ensures that high-computational LLM tasks do not interfere with critical database transactions. 
-This professional setup allows for independent scaling, reliable testing via pytest, and seamless frontend integration.
+By running a single FastAPI service that separates REST session management from WebSocket-based AI chat, the project keeps AI reasoning and data workflows aligned without adding extra service complexity.
+This architecture supports independent scaling at the frontend/backend boundary, reliable pytest coverage, and a smooth real-time chat experience.
+
 # System Workflow
-The platform operates through a high-speed, four-stage pipeline designed for data integrity and minimal latency:
+* Ingress: The frontend captures user intent via text or optimized audio blobs and submits it to the backend over a persistent WebSocket.
 
-* Ingress: The Frontend captures user intent via text or optimized Audio blobs, transmitting them to the backend central brain.
+* Reasoning: The LangChain agent (powered by Gemini) parses the query, decides if tool execution is needed, and builds the next action.
 
-* Reasoning: The LangChain Agent (powered by Gemini) parses the query using a ReAct loop to determine if database access is required.
+* Extraction: To eliminate hallucinations, the agent invokes specialized SQL tools and backend database services to fetch live records for assets, complaints, or work orders from PostgreSQL.
 
-* Extraction: To eliminate hallucinations, the agent invokes specialized SQL Tools to fetch live records for assets, complaints, or work orders directly from PostgreSQL.
+* Response: The backend streams the assistant reply back over the WebSocket while persisting session history via REST endpoints.
 # Summary
-* NanoSoft Ask AI is a professional facility management platform bridging complex data with intuitive interaction. 
-* It integrates a Next.js 14 frontend with a LangChain-powered Backend to automate SLA-driven workflows. 
-* By replacing hallucinations with factual PostgreSQL insights via audio and text, it delivers accurate, real-time operational intelligence.
+* NanoSoft Ask AI is a professional facility management platform bridging complex data with intuitive interaction.
+* It integrates a Next.js 16 frontend with a LangChain-powered backend to automate SLA-driven workflows.
+* By combining WebSocket-powered AI chat with factual PostgreSQL access, it delivers accurate, real-time operational intelligence via text and audio.
