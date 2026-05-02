@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { IconList, IconLayoutGrid } from "@tabler/icons-react";
 import { useTheme } from "@/app/components/useTheme";
 import { useResponsive, getResponsiveTable, getResponsiveTileDisplay, getSmartVisibleColumns } from "@/app/hooks/useResponsive";
@@ -14,7 +14,7 @@ interface TableWithTileProps {
   htmlTableContent?: string; // Old HTML table format
 }
 
-export default function TableWithTile({
+const TableWithTile = React.memo(function TableWithTile({
   rows,
   columns,
   title = "Data",
@@ -35,17 +35,38 @@ export default function TableWithTile({
   const tileFieldLabelColor = "var(--tile-field-label, #0f172a)";
   const tileFieldValueColor = "var(--tile-field-value, #1f2937)";
   const [viewMode, setViewMode] = useState<"table" | "tile">("table");
+  
+  // Set default view mode based on device on initial load
+  useEffect(() => {
+    if (responsive.isMobile) {
+      setViewMode("tile");
+    }
+  }, [responsive.isMobile]);
+
+  // Extract non-table content from htmlTableContent to show as a header/summary
+  const summaryContent = useMemo(() => {
+    if (!htmlTableContent) return null;
+    // Remove the table part to keep only the summary/context
+    const summary = htmlTableContent.replace(/<div class="large-dataset-wrapper">[\s\S]*?<\/div>/i, "")
+      .replace(/<div class="table-wrapper">[\s\S]*?<\/div>/i, "")
+      .trim();
+    return summary || null;
+  }, [htmlTableContent]);
+
   const [page, setPage] = useState(0);
   const LIMIT = 100;
 
-  // Automatically detect columns from rows
-  const detectedColumns = columns || (() => {
-    const cols = new Set<string>();
-    rows.forEach((row) => {
-      Object.keys(row).forEach((key) => cols.add(key));
-    });
-    return Array.from(cols);
-  })();
+    // Automatically detect columns from rows (scan first 100 for performance)
+    const detectedColumns = useMemo(() => {
+        if (columns) return columns;
+        if (rows.length === 0) return [];
+        const cols = new Set<string>();
+        const sampleRows = rows.slice(0, 100);
+        sampleRows.forEach((row) => {
+            Object.keys(row).forEach((key) => cols.add(key));
+        });
+        return Array.from(cols);
+    }, [columns, rows]);
 
   // Pagination: compute the slice of rows to display
   const totalPages = Math.max(1, Math.ceil(rows.length / LIMIT));
@@ -106,7 +127,7 @@ export default function TableWithTile({
               justifyContent: 'center',
               padding: '4px 8px',
               borderRadius: '6px',
-              background: viewMode === "table" 
+              background: viewMode === "table"
                 ? 'linear-gradient(180deg, #ae8625 0%, #f7ef8a 35%, #d2ac47 65%, #edc967 100%)'
                 : 'rgba(174, 134, 37, 0.3)',
               color: '#1f2937',
@@ -118,7 +139,7 @@ export default function TableWithTile({
               backdropFilter: 'blur(8px)',
               transform: 'scale(1)',
               opacity: viewMode === "table" ? 1 : 0.6,
-              boxShadow: viewMode === "table" 
+              boxShadow: viewMode === "table"
                 ? '0 0 12px rgba(212, 175, 55, 0.6), inset 0 0 8px rgba(255, 255, 255, 0.3)'
                 : 'none',
             }}
@@ -148,7 +169,7 @@ export default function TableWithTile({
               justifyContent: 'center',
               padding: '4px 8px',
               borderRadius: '6px',
-              background: viewMode === "tile" 
+              background: viewMode === "tile"
                 ? 'linear-gradient(180deg, #ae8625 0%, #f7ef8a 35%, #d2ac47 65%, #edc967 100%)'
                 : 'rgba(174, 134, 37, 0.3)',
               color: '#1f2937',
@@ -160,7 +181,7 @@ export default function TableWithTile({
               backdropFilter: 'blur(8px)',
               transform: 'scale(1)',
               opacity: viewMode === "tile" ? 1 : 0.6,
-              boxShadow: viewMode === "tile" 
+              boxShadow: viewMode === "tile"
                 ? '0 0 12px rgba(212, 175, 55, 0.6), inset 0 0 8px rgba(255, 255, 255, 0.3)'
                 : 'none',
             }}
@@ -182,184 +203,193 @@ export default function TableWithTile({
         </div>
 
         <div className="content-shell" style={{ paddingTop: 0 }}>
-        <div className="data-view-shell" style={{ 
-          transition: 'all 0.2s ease-in-out',
-          opacity: 1
-        }}>
-          {/* Table View - Old HTML format */}
-          {viewMode === "table" && (
-            <div className="data-view-panel is-active" style={{
-              animation: 'fadeIn 0.2s ease-in-out'
-            }}>
-              {htmlTableContent ? (
-                <div dangerouslySetInnerHTML={{ __html: htmlTableContent }} />
-              ) : (
-                <div className="table-scroll" style={{
-                  fontSize: tableConfig.fontSize,
-                  overflowX: 'auto',
-                  overflowY: 'auto',
-                  maxHeight: '60vh',
-                }}>
-                  <table className="table-with-tile" style={{
+          <div className="data-view-shell" style={{
+            transition: 'all 0.2s ease-in-out',
+            opacity: 1
+          }}>
+            {/* Table View - Old HTML format */}
+            {viewMode === "table" && (
+              <div className="data-view-panel is-active" style={{
+                animation: 'fadeIn 0.2s ease-in-out'
+              }}>
+                {htmlTableContent ? (
+                  <div dangerouslySetInnerHTML={{ __html: htmlTableContent }} />
+                ) : (
+                  <div className="table-scroll" style={{
                     fontSize: tableConfig.fontSize,
-                    minWidth: responsive.isMobile ? '100%' : 'auto',
+                    overflowX: 'auto',
+                    overflowY: 'auto',
+                    maxHeight: '60vh',
                   }}>
-                    <thead>
-                      <tr>
-                            {detectedColumns.slice(0, tableConfig.columnsVisible).map((col) => (
-                          <th key={col} style={{
-                            padding: tableConfig.padding,
-                            fontSize: tableConfig.fontSize,
-                          }}>{col}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {pagedRows.map((row, rowIdx) => (
-                        <tr key={startIdx + rowIdx} style={{
-                          height: tableConfig.compactMode ? 'auto' : 'auto',
-                        }}>
+                    <table className="table-with-tile" style={{
+                      fontSize: tableConfig.fontSize,
+                      minWidth: responsive.isMobile ? '100%' : 'auto',
+                    }}>
+                      <thead>
+                        <tr>
                           {detectedColumns.slice(0, tableConfig.columnsVisible).map((col) => (
-                            <td key={`${startIdx + rowIdx}-${col}`} style={{
+                            <th key={col} style={{
                               padding: tableConfig.padding,
                               fontSize: tableConfig.fontSize,
-                            }}>{formatCellValue(row[col])}</td>
+                            }}>{col}</th>
                           ))}
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Tile View */}
-          {viewMode === "tile" && (
-            <div className="data-view-panel is-active" style={{
-              animation: 'fadeIn 0.2s ease-in-out'
-            }}>
-              <div className="tile-scroll" style={{ overflow: 'auto', maxHeight: '60vh' }}>
-              <div className="tile-cards-grid" style={{
-                gridTemplateColumns: responsive.isMobile 
-                  ? 'repeat(5, 1fr)' 
-                  : responsive.isTablet 
-                  ? 'repeat(2, 1fr)' 
-                  : 'repeat(3, 1fr)',
-                gap: responsive.isMobile ? '4px' : responsive.isTablet ? '20px' : '24px',
-                padding: responsive.isMobile ? '8px' : responsive.isTablet ? '20px' : '24px',
-              }}>
-                {pagedRows.map((row, rowIdx) => {
-                  // Detect status from row data for status dot color
-                  const statusValue = row.status || row.STATUS || row.condition || row.CONDITION || "neutral";
-                  const isActive = ["active", "online", "good", "operational"].some(s => statusValue.toLowerCase().includes(s));
-                  const statusColor = isActive ? "#10b981" : "#6b7280";
-                  // Prepare columns to show for this tile. On non-desktop show up to tileConfig.fieldsPerTile
-                  // but prioritize any column whose value contains the word 'fixed' (case-insensitive)
-                  const allCols = detectedColumns;
-                  let tileCols: string[];
-                  if (responsive.isDesktop) {
-                    tileCols = allCols;
-                  } else {
-                    const maxFields = tileConfig.fieldsPerTile ?? Math.max(3, allCols.length);
-                    tileCols = allCols.slice(0, maxFields);
-                    // Find any column whose value contains 'fixed'
-                    const fixedIndex = allCols.findIndex(c => {
-                      const v = (row[c] ?? "").toString().toLowerCase();
-                      return v.includes("fixed");
-                    });
-                    if (fixedIndex !== -1) {
-                      const fixedCol = allCols[fixedIndex];
-                      // If it's not already displayed, replace the last shown column with it
-                      if (!tileCols.includes(fixedCol)) {
-                        tileCols = [...tileCols.slice(0, Math.max(0, tileCols.length - 1)), fixedCol];
-                      }
-                    }
-                  }
-                  return (
-                    <div key={startIdx + rowIdx} className="tile-card" style={{
-                      padding: responsive.isMobile ? '8px' : responsive.isTablet ? tileConfig.cardPadding : '12px',
-                      minHeight: responsive.isMobile ? '120px' : responsive.isTablet ? tileConfig.cardHeight : '280px',
-                      backgroundColor: tileBackground,
-                      border: tileBorder,
-                      color: tileText,
-                      boxShadow: isDark ? '0 8px 20px rgba(0,0,0,0.35)' : '0 8px 20px rgba(0,0,0,0.07)',
-                      transition: 'border 0.2s ease, box-shadow 0.2s ease, color 0.2s ease',
-                    }}>
-                      {/* Top colored strip */}
-                      <div className="tile-card-header" />
-                      
-                      {/* Status dot + card content */}
-                      <div style={{ 
-                        display: 'flex', 
-                        gap: responsive.isMobile ? '4px' : '16px', 
-                        padding: responsive.isMobile ? '4px' : tileConfig.cardPadding,
-                        flexDirection: responsive.isMobile ? 'row' : 'row',
-                      }}>
-                        {/* Status Dot */}
-                        <div
-                          className="tile-status-dot"
-                          style={{
-                            width: '12px',
-                            height: '12px',
-                            borderRadius: '50%',
-                            backgroundColor: statusColor,
-                            flexShrink: 0,
-                            marginTop: responsive.isMobile ? '0px' : '4px',
-                            boxShadow: `0 0 12px ${statusColor}99`
-                          }}
-                          title={isActive ? 'Active' : 'Inactive'}
-                        />
-
-                        {/* Card Content - Grid Layout */}
-                        <div style={{ 
-                          flex: 1, 
-                          display: 'grid', 
-                          gridTemplateColumns: responsive.isMobile 
-                            ? '1fr' 
-                            : responsive.isTablet
-                            ? 'repeat(2, 1fr)'
-                            : 'repeat(3, 1fr)',
-                          gap: responsive.isMobile ? '2px' : responsive.isTablet ? '16px' : '12px'
-                        }}>
-                          {(responsive.isDesktop ? detectedColumns : detectedColumns.slice(0, tileConfig.fieldsPerTile)).map((col) => (
-                            <div 
-                              key={`${startIdx + rowIdx}-${col}`} 
-                              className="tile-field"
-                              title={row[col]}
-                              style={{
-                                display: 'flex',
-                                flexDirection: 'column',
-                                gap: responsive.isMobile ? '4px' : '6px',
-                                backgroundColor: tileFieldBackground,
-                                border: tileFieldBorder,
-                              }}
-                            >
-                              <div className="tile-field-label" style={{
-                                fontSize: responsive.isMobile ? '11px' : responsive.isTablet ? '12px' : '11px',
-                                fontWeight: 700,
-                                textTransform: 'uppercase',
-                                letterSpacing: '0.5px',
-                                wordBreak: 'break-word',
-                              }}>{col}</div>
-                              <div className="tile-field-value" style={{
-                                fontSize: responsive.isMobile ? '13px' : responsive.isTablet ? '14px' : '12px',
-                                fontWeight: 400,
-                                wordBreak: 'break-word',
-                                lineHeight: 1.4,
-                              }}>{formatCellValue(row[col])}</div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
+                      </thead>
+                      <tbody>
+                        {pagedRows.map((row, rowIdx) => (
+                          <tr key={startIdx + rowIdx} style={{
+                            height: tableConfig.compactMode ? 'auto' : 'auto',
+                          }}>
+                            {detectedColumns.slice(0, tableConfig.columnsVisible).map((col) => (
+                              <td key={`${startIdx + rowIdx}-${col}`} style={{
+                                padding: tableConfig.padding,
+                                fontSize: tableConfig.fontSize,
+                              }}>{formatCellValue(row[col])}</td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
+            )}
+
+            {/* Tile View */}
+            {viewMode === "tile" && (
+              <div className="data-view-panel is-active" style={{
+                animation: 'fadeIn 0.2s ease-in-out'
+              }}>
+                {/* Summary / Context for Tile View */}
+                {summaryContent && (
+                  <div 
+                    className="large-dataset-context" 
+                    dangerouslySetInnerHTML={{ __html: summaryContent }} 
+                    style={{ marginBottom: '12px' }}
+                  />
+                )}
+                
+                <div className="tile-scroll" style={{ overflow: 'auto', maxHeight: '60vh' }}>
+                  <div className="tile-cards-grid" style={{
+                    gridTemplateColumns: responsive.isMobile
+                      ? '1fr'
+                      : responsive.isTablet
+                        ? 'repeat(2, 1fr)'
+                        : 'repeat(3, 1fr)',
+                    gap: responsive.isMobile ? '12px' : responsive.isTablet ? '20px' : '24px',
+                    padding: responsive.isMobile ? '8px' : responsive.isTablet ? '20px' : '24px',
+                  }}>
+                    {pagedRows.map((row, rowIdx) => {
+                      // Detect status from row data for status dot color
+                      const statusValue = row.status || row.STATUS || row.condition || row.CONDITION || "neutral";
+                      const isActive = ["active", "online", "good", "operational"].some(s => statusValue.toLowerCase().includes(s));
+                      const statusColor = isActive ? "#10b981" : "#6b7280";
+                      // Prepare columns to show for this tile. On non-desktop show up to tileConfig.fieldsPerTile
+                      // but prioritize any column whose value contains the word 'fixed' (case-insensitive)
+                      const allCols = detectedColumns;
+                      let tileCols: string[];
+                      if (responsive.isDesktop) {
+                        tileCols = allCols;
+                      } else {
+                        const maxFields = tileConfig.fieldsPerTile ?? Math.max(3, allCols.length);
+                        tileCols = allCols.slice(0, maxFields);
+                        // Find any column whose value contains 'fixed'
+                        const fixedIndex = allCols.findIndex(c => {
+                          const v = (row[c] ?? "").toString().toLowerCase();
+                          return v.includes("fixed");
+                        });
+                        if (fixedIndex !== -1) {
+                          const fixedCol = allCols[fixedIndex];
+                          // If it's not already displayed, replace the last shown column with it
+                          if (!tileCols.includes(fixedCol)) {
+                            tileCols = [...tileCols.slice(0, Math.max(0, tileCols.length - 1)), fixedCol];
+                          }
+                        }
+                      }
+                      return (
+                        <div key={startIdx + rowIdx} className="tile-card" style={{
+                          padding: responsive.isMobile ? '8px' : responsive.isTablet ? tileConfig.cardPadding : '12px',
+                          minHeight: responsive.isMobile ? '120px' : responsive.isTablet ? tileConfig.cardHeight : '280px',
+                          backgroundColor: tileBackground,
+                          border: tileBorder,
+                          color: tileText,
+                          boxShadow: isDark ? '0 8px 20px rgba(0,0,0,0.35)' : '0 8px 20px rgba(0,0,0,0.07)',
+                          transition: 'border 0.2s ease, box-shadow 0.2s ease, color 0.2s ease',
+                        }}>
+                          {/* Top colored strip */}
+                          <div className="tile-card-header" />
+
+                          {/* Status dot + card content */}
+                          <div style={{
+                            display: 'flex',
+                            gap: responsive.isMobile ? '4px' : '16px',
+                            padding: responsive.isMobile ? '4px' : tileConfig.cardPadding,
+                            flexDirection: responsive.isMobile ? 'row' : 'row',
+                          }}>
+                            {/* Status Dot */}
+                            <div
+                              className="tile-status-dot"
+                              style={{
+                                width: '12px',
+                                height: '12px',
+                                borderRadius: '50%',
+                                backgroundColor: statusColor,
+                                flexShrink: 0,
+                                marginTop: responsive.isMobile ? '0px' : '4px',
+                                boxShadow: `0 0 12px ${statusColor}99`
+                              }}
+                              title={isActive ? 'Active' : 'Inactive'}
+                            />
+
+                            {/* Card Content - Grid Layout */}
+                            <div style={{
+                              flex: 1,
+                              display: 'grid',
+                              gridTemplateColumns: responsive.isMobile
+                                ? '1fr'
+                                : responsive.isTablet
+                                  ? 'repeat(2, 1fr)'
+                                  : 'repeat(3, 1fr)',
+                              gap: responsive.isMobile ? '2px' : responsive.isTablet ? '16px' : '12px'
+                            }}>
+                              {(responsive.isDesktop ? detectedColumns : detectedColumns.slice(0, tileConfig.fieldsPerTile)).map((col) => (
+                                <div
+                                  key={`${startIdx + rowIdx}-${col}`}
+                                  className="tile-field"
+                                  title={row[col]}
+                                  style={{
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    gap: responsive.isMobile ? '4px' : '6px',
+                                    backgroundColor: tileFieldBackground,
+                                    border: tileFieldBorder,
+                                  }}
+                                >
+                                  <div className="tile-field-label" style={{
+                                    fontSize: responsive.isMobile ? '11px' : responsive.isTablet ? '12px' : '11px',
+                                    fontWeight: 700,
+                                    textTransform: 'uppercase',
+                                    letterSpacing: '0.5px',
+                                    wordBreak: 'break-word',
+                                  }}>{col}</div>
+                                  <div className="tile-field-value" style={{
+                                    fontSize: responsive.isMobile ? '13px' : responsive.isTablet ? '14px' : '12px',
+                                    fontWeight: 400,
+                                    wordBreak: 'break-word',
+                                    lineHeight: 1.4,
+                                  }}>{formatCellValue(row[col])}</div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-            </div>
-          )}
-        </div>
+              </div>
+            )}
+          </div>
           {/* Pagination Controls (table view only) */}
           {viewMode === "table" && (
             <div style={{ display: 'flex', gap: responsive.isMobile ? 6 : 8, justifyContent: 'center', alignItems: 'center', marginTop: responsive.isMobile ? 6 : 8 }}>
@@ -412,8 +442,10 @@ export default function TableWithTile({
               })()}
             </div>
           )}
-      </div>
+        </div>
       </div>
     </div>
   );
-}
+});
+
+export default TableWithTile;

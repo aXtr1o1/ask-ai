@@ -130,7 +130,8 @@ def _has_date_keyword(text: str) -> bool:
 
 
 def _build_table_context(context_summary: str, user_query: str) -> str:
-    """Keep the table context short, and default to last 7 days when no date is mentioned."""
+    # """Keep the table context short, and default to last 7 days when no date is mentioned."""
+    """Keep the table context short."""
     summary = (context_summary or "").strip()
 
     # Remove the follow-up question if it was included in the summary.
@@ -139,7 +140,8 @@ def _build_table_context(context_summary: str, user_query: str) -> str:
     summary = " ".join(lines).strip()
 
     if not _has_date_keyword(user_query):
-        summary = "Here is the last 7 days data you requested."
+        # summary = "Here is the last 7 days data you requested."
+        summary = "Here is the data you requested."
         return summary
 
     if not summary:
