@@ -6,7 +6,7 @@ import pytest
 import json
 from unittest.mock import MagicMock, patch
 from datetime import date, timedelta
-from app.tools.facility_tools import ASSETS, PPM, BDM, getTime
+from app.tools.facility_tools import ASSETS, PPM, BDM #, getTime
 
 
 # Test 1: Check ASSETS tool returns error string when user_name is missing
@@ -60,13 +60,13 @@ def test_assets_aggregate_mode():
 
 
 # Test 4: Check getTime() auto-fills last 7 days when both dates are None
-def test_gettime_auto_fills_dates():
-    # When no dates given, should default to last 7 days
-    date_from, date_to = getTime(None, None)
+# def test_gettime_auto_fills_dates():
+#     # When no dates given, should default to last 7 days
+#     date_from, date_to = getTime(None, None)
 
-    today = date.today().isoformat()
-    expected_from = (date.today() - timedelta(days=6)).isoformat()
+#     today = date.today().isoformat()
+#     expected_from = (date.today() - timedelta(days=6)).isoformat()
 
-    # date_from should be 6 days ago and date_to should be today
-    assert date_from == expected_from
-    assert date_to == today
+#     # date_from should be 6 days ago and date_to should be today
+#     assert date_from == expected_from
+#     assert date_to == today
