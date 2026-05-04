@@ -451,7 +451,7 @@ class LangChainService:
                         
                         # 3. Extra detail from user query (e.g. specific IDs mentioned)
                         # We check for common prefixes OR any word that looks like a complex ID (has numbers and hyphens/underscores)
-                        complaint_match = _re.search(r"(?:complaint|work order|wo|asset|tag|unit|id|equipment|ref|no)\s*(?:no|#)?\s*([a-zA-Z0-9_-]+)", user_query, _re.IGNORECASE)
+                        complaint_match = _re.search(r"\b(?:complaint|work order|wo|asset|tag|unit|id|equipment|ref|no)s?\b\s*(?:no|#)?\s*([a-zA-Z0-9_-]+)", user_query, _re.IGNORECASE)
                         if not complaint_match:
                             # Fallback: catch anything that looks like an ID (e.g. JJ-HVAC...) anywhere in the query
                             fallback_match = _re.search(r"\b[a-zA-Z0-9]+[_-][a-zA-Z0-9_-]+\b", user_query)
