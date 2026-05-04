@@ -2800,7 +2800,7 @@ export default function Home() {
                           style={{
                             position: 'fixed',
                             top: `${sessionMenuPos.top}px`,
-                            transform: sessionMenuPos.placement === 'above' ? 'translateY(-100%)' : 'none',
+                            transform: sessionMenuPos.placement === 'above' ? 'translate(calc(-100% + 24px), -100%)' : 'translateX(calc(-100% + 24px))',
                             left: `${sessionMenuPos.left}px`,
                             background: 'var(--color-bg-alt)',
                             border: '1px solid var(--color-border)',

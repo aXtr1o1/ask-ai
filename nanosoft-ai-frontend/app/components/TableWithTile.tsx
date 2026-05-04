@@ -35,7 +35,7 @@ const TableWithTile = React.memo(function TableWithTile({
   const tileFieldLabelColor = "var(--tile-field-label, #0f172a)";
   const tileFieldValueColor = "var(--tile-field-value, #1f2937)";
   const [viewMode, setViewMode] = useState<"table" | "tile">("table");
-  
+
   // Set default view mode based on device on initial load
   useEffect(() => {
     if (responsive.isMobile) {
@@ -56,17 +56,17 @@ const TableWithTile = React.memo(function TableWithTile({
   const [page, setPage] = useState(0);
   const LIMIT = 100;
 
-    // Automatically detect columns from rows (scan first 100 for performance)
-    const detectedColumns = useMemo(() => {
-        if (columns) return columns;
-        if (rows.length === 0) return [];
-        const cols = new Set<string>();
-        const sampleRows = rows.slice(0, 100);
-        sampleRows.forEach((row) => {
-            Object.keys(row).forEach((key) => cols.add(key));
-        });
-        return Array.from(cols);
-    }, [columns, rows]);
+  // Automatically detect columns from rows (scan first 100 for performance)
+  const detectedColumns = useMemo(() => {
+    if (columns) return columns;
+    if (rows.length === 0) return [];
+    const cols = new Set<string>();
+    const sampleRows = rows.slice(0, 100);
+    sampleRows.forEach((row) => {
+      Object.keys(row).forEach((key) => cols.add(key));
+    });
+    return Array.from(cols);
+  }, [columns, rows]);
 
   // Pagination: compute the slice of rows to display
   const totalPages = Math.max(1, Math.ceil(rows.length / LIMIT));
@@ -262,30 +262,25 @@ const TableWithTile = React.memo(function TableWithTile({
               }}>
                 {/* Summary / Context for Tile View */}
                 {summaryContent && (
-                  <div 
-                    className="large-dataset-context" 
-                    dangerouslySetInnerHTML={{ __html: summaryContent }} 
-                    style={{ marginBottom: '12px' }}
+                  <div
+                    className="large-dataset-context"
+                    dangerouslySetInnerHTML={{ __html: summaryContent }}
+                    style={{ marginBottom: '8px' }}
                   />
                 )}
-                
+
                 <div className="tile-scroll" style={{ overflow: 'auto', maxHeight: '60vh' }}>
                   <div className="tile-cards-grid" style={{
-                    gridTemplateColumns: responsive.isMobile
-                      ? '1fr'
-                      : responsive.isTablet
-                        ? 'repeat(2, 1fr)'
-                        : 'repeat(3, 1fr)',
-                    gap: responsive.isMobile ? '12px' : responsive.isTablet ? '20px' : '24px',
-                    padding: responsive.isMobile ? '8px' : responsive.isTablet ? '20px' : '24px',
+                    display: 'grid',
+                    gridTemplateColumns: '1fr',
+                    gap: responsive.isMobile ? '12px' : '24px',
+                    padding: responsive.isMobile ? '8px' : '20px 24px',
                   }}>
                     {pagedRows.map((row, rowIdx) => {
                       // Detect status from row data for status dot color
                       const statusValue = row.status || row.STATUS || row.condition || row.CONDITION || "neutral";
                       const isActive = ["active", "online", "good", "operational"].some(s => statusValue.toLowerCase().includes(s));
                       const statusColor = isActive ? "#10b981" : "#6b7280";
-                      // Prepare columns to show for this tile. On non-desktop show up to tileConfig.fieldsPerTile
-                      // but prioritize any column whose value contains the word 'fixed' (case-insensitive)
                       const allCols = detectedColumns;
                       let tileCols: string[];
                       if (responsive.isDesktop) {
@@ -293,14 +288,12 @@ const TableWithTile = React.memo(function TableWithTile({
                       } else {
                         const maxFields = tileConfig.fieldsPerTile ?? Math.max(3, allCols.length);
                         tileCols = allCols.slice(0, maxFields);
-                        // Find any column whose value contains 'fixed'
                         const fixedIndex = allCols.findIndex(c => {
                           const v = (row[c] ?? "").toString().toLowerCase();
                           return v.includes("fixed");
                         });
                         if (fixedIndex !== -1) {
                           const fixedCol = allCols[fixedIndex];
-                          // If it's not already displayed, replace the last shown column with it
                           if (!tileCols.includes(fixedCol)) {
                             tileCols = [...tileCols.slice(0, Math.max(0, tileCols.length - 1)), fixedCol];
                           }
@@ -308,23 +301,29 @@ const TableWithTile = React.memo(function TableWithTile({
                       }
                       return (
                         <div key={startIdx + rowIdx} className="tile-card" style={{
-                          padding: responsive.isMobile ? '8px' : responsive.isTablet ? tileConfig.cardPadding : '12px',
-                          minHeight: responsive.isMobile ? '120px' : responsive.isTablet ? tileConfig.cardHeight : '280px',
+                          padding: responsive.isMobile ? '8px' : '16px',
+                          minHeight: 'auto',
+                          display: 'flex',
+                          flexDirection: 'column',
                           backgroundColor: tileBackground,
                           border: tileBorder,
                           color: tileText,
-                          boxShadow: isDark ? '0 8px 20px rgba(0,0,0,0.35)' : '0 8px 20px rgba(0,0,0,0.07)',
-                          transition: 'border 0.2s ease, box-shadow 0.2s ease, color 0.2s ease',
+                          boxShadow: isDark ? '0 8px 24px rgba(0,0,0,0.4)' : '0 8px 24px rgba(0,0,0,0.08)',
+                          borderRadius: '12px',
+                          transition: 'all 0.3s ease',
+                          minWidth: 0,
+                          overflow: 'hidden'
                         }}>
                           {/* Top colored strip */}
-                          <div className="tile-card-header" />
+                          <div className="tile-card-header" style={{ height: '4px', width: '100%', background: 'linear-gradient(90deg, #d4af37 0%, #ffd700 100%)', borderRadius: '12px 12px 0 0', opacity: 0.8 }} />
 
                           {/* Status dot + card content */}
                           <div style={{
                             display: 'flex',
-                            gap: responsive.isMobile ? '4px' : '16px',
-                            padding: responsive.isMobile ? '4px' : tileConfig.cardPadding,
-                            flexDirection: responsive.isMobile ? 'row' : 'row',
+                            gap: '16px',
+                            padding: '12px',
+                            flexDirection: 'row',
+                            minWidth: 0,
                           }}>
                             {/* Status Dot */}
                             <div
@@ -335,24 +334,23 @@ const TableWithTile = React.memo(function TableWithTile({
                                 borderRadius: '50%',
                                 backgroundColor: statusColor,
                                 flexShrink: 0,
-                                marginTop: responsive.isMobile ? '0px' : '4px',
+                                marginTop: '4px',
                                 boxShadow: `0 0 12px ${statusColor}99`
                               }}
                               title={isActive ? 'Active' : 'Inactive'}
                             />
 
-                            {/* Card Content - Grid Layout */}
+                            {/* Card Content - Horizontal Spread Layout */}
                             <div style={{
                               flex: 1,
                               display: 'grid',
                               gridTemplateColumns: responsive.isMobile
-                                ? '1fr'
-                                : responsive.isTablet
-                                  ? 'repeat(2, 1fr)'
-                                  : 'repeat(3, 1fr)',
-                              gap: responsive.isMobile ? '2px' : responsive.isTablet ? '16px' : '12px'
+                                ? 'repeat(2, 1fr)'
+                                : 'repeat(5, 1fr)',
+                              gap: '16px 12px',
+                              minWidth: 0,
                             }}>
-                              {(responsive.isDesktop ? detectedColumns : detectedColumns.slice(0, tileConfig.fieldsPerTile)).map((col) => (
+                              {(responsive.isDesktop ? detectedColumns : tileCols).map((col) => (
                                 <div
                                   key={`${startIdx + rowIdx}-${col}`}
                                   className="tile-field"
@@ -360,23 +358,33 @@ const TableWithTile = React.memo(function TableWithTile({
                                   style={{
                                     display: 'flex',
                                     flexDirection: 'column',
-                                    gap: responsive.isMobile ? '4px' : '6px',
+                                    gap: '4px',
                                     backgroundColor: tileFieldBackground,
                                     border: tileFieldBorder,
+                                    padding: '8px 10px',
+                                    borderRadius: '8px',
+                                    minWidth: 0,
+                                    overflow: 'hidden',
                                   }}
                                 >
                                   <div className="tile-field-label" style={{
-                                    fontSize: responsive.isMobile ? '11px' : responsive.isTablet ? '12px' : '11px',
+                                    fontSize: '11px',
                                     fontWeight: 700,
                                     textTransform: 'uppercase',
                                     letterSpacing: '0.5px',
-                                    wordBreak: 'break-word',
+                                    whiteSpace: 'nowrap',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    color: tileTextMuted,
+                                    opacity: 0.8
                                   }}>{col}</div>
                                   <div className="tile-field-value" style={{
-                                    fontSize: responsive.isMobile ? '13px' : responsive.isTablet ? '14px' : '12px',
-                                    fontWeight: 400,
-                                    wordBreak: 'break-word',
-                                    lineHeight: 1.4,
+                                    fontSize: '13px',
+                                    fontWeight: 500,
+                                    color: tileFieldValueColor,
+                                    whiteSpace: 'nowrap',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
                                   }}>{formatCellValue(row[col])}</div>
                                 </div>
                               ))}
