@@ -20,6 +20,8 @@ ch.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(me
 if not logger.handlers:
     logger.addHandler(ch)
 
+
+
 def extract_date_from_query(query: str):
     """Extract date keyword from user query for forced tool calls."""
     q = query.lower()
@@ -43,8 +45,21 @@ def extract_date_from_query(query: str):
     elif "present" in q or "current" in q or "now" in q:
         # Treat present/current wording as today's data
         return "today", "today"
-    else:
-        return None, None
+    
+    # ── Dynamic pattern: X days/weeks/months/years ago/before ──
+    import re
+    match = re.search(r"(\d+)\s*(day|week|month|year)s?\s*(ago|before)", q)
+    if match:
+        found_phrase = match.group(0)
+        return found_phrase, found_phrase
+
+    # ── Match explicit month names (e.g. "March", "April 2026") ──
+    month_match = re.search(r"\b(january|february|march|april|may|june|july|august|september|october|november|december)(?:\s+\d{4})?\b", q)
+    if month_match:
+        found_month = month_match.group(0).title()
+        return found_month, found_month
+
+    return None, None
 
 
 # def _needs_default_last_7_days(query: str) -> bool:
@@ -443,29 +458,22 @@ class LangChainService:
                         if not entity or len(entity) > 30: # Safety fallback
                              entity = tool_name.lower()
                         
-                        # 2. Try to make it more dynamic from tool arguments (keyword)
-                        if args and args.get("keyword"):
-                            entity = args.get("keyword")
-                        elif args and args.get("asset_type"):
-                            entity = args.get("asset_type")
-                        
-                        # 3. Extra detail from user query (e.g. specific IDs mentioned)
-                        # We check for common prefixes OR any word that looks like a complex ID (has numbers and hyphens/underscores)
-                        complaint_match = _re.search(r"\b(?:complaint|work order|wo|asset|tag|unit|id|equipment|ref|no)s?\b\s*(?:no|#)?\s*([a-zA-Z0-9_-]+)", user_query, _re.IGNORECASE)
-                        if not complaint_match:
-                            # Fallback: catch anything that looks like an ID (e.g. JJ-HVAC...) anywhere in the query
-                            fallback_match = _re.search(r"\b[a-zA-Z0-9]+[_-][a-zA-Z0-9_-]+\b", user_query)
-                            if fallback_match:
-                                entity = f"{entity} matching '{fallback_match.group(0)}'"
-                        else:
-                            entity = f"{entity} matching '{complaint_match.group(1)}'"
+                        # 2. Add extra detail from the actual tool arguments used
+                        if args:
+                            if args.get("keyword"):
+                                entity = f"{entity} matching '{args.get('keyword')}'"
+                            elif args.get("complaint_no"):
+                                entity = f"{entity} '{args.get('complaint_no')}'"
+                            elif args.get("asset_tag_no"):
+                                entity = f"{entity} '{args.get('asset_tag_no')}'"
+                            elif args.get("work_order"):
+                                entity = f"{entity} '{args.get('work_order')}'"
+                            elif args.get("asset_type"):
+                                entity = f"{entity} of type '{args.get('asset_type')}'"
                         
                         # 4. Extract time context
-                        time_context = ""
-                        for kw in ["today", "yesterday", "this week", "last week", "this month", "last month", "this year", "last year"]:
-                            if kw in user_query.lower():
-                                time_context = f" for {kw}"
-                                break
+                        time_kw, _ = extract_date_from_query(user_query)
+                        time_context = f" for {time_kw}" if time_kw else ""
                                 
                         msg = f"No {entity} found for your request{time_context}."
                         return msg, msg, messages
