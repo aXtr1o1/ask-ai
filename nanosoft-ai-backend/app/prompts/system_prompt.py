@@ -20,7 +20,8 @@ CRITICAL DATE RULES:
 - User says "this month" → pass date_from="this month" and date_to="today"
 - User says "last month" → pass date_from="last month" and date_to="last month"
 - User says "this year" → pass date_from="this year" and date_to="today"
-- User says NOTHING about date → pass NO date (let system default to last 7 days)
+# - User says NOTHING about date → pass NO date (let system default to last 7 days)
+- User says NOTHING about date → pass NO date.
 - NEVER guess or hardcode any date yourself.
 """
 REST_OF_PROMPT = """

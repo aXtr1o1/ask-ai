@@ -44,31 +44,32 @@ def extract_date_from_query(query: str):
         # Treat present/current wording as today's data
         return "today", "today"
     else:
-        return None, None  # Let getTime default to last 7 days
+        return None, None
 
 
-def _needs_default_last_7_days(query: str) -> bool:
-    q = (query or "").lower()
-    time_keywords = (
-        "today", "yesterday", "last week", "this week", "week",
-        "last month", "this month", "month",
-        "last year", "this year", "year",
-        "day", "days", "date", "present", "current"
-    )
-    if any(k in q for k in time_keywords):
-        return False
-    if _re.search(r"\b\d{4}-\d{2}-\d{2}\b", q):
-        return False
-    return True
+# def _needs_default_last_7_days(query: str) -> bool:
+#     q = (query or "").lower()
+#     time_keywords = (
+#         "today", "yesterday", "last week", "this week", "week",
+#         "last month", "this month", "month",
+#         "last year", "this year", "year",
+#         "day", "days", "date", "present", "current"
+#     )
+#     if any(k in q for k in time_keywords):
+#         return False
+#     if _re.search(r"\b\d{4}-\d{2}-\d{2}\b", q):
+#         return False
+#     return True
 
 
-def _append_default_7days(text: str, query: str) -> str:
-    base = (text or "").strip()
-    if _needs_default_last_7_days(query):
-        if "last 7 days" not in base.lower():
-            suffix = "This is for the last 7 days."
-            return f"{base} {suffix}".strip()
-    return base
+# def _append_default_7days(text: str, query: str) -> str:
+#     # Logic disabled as per user request
+#     return text
+    # if _needs_default_last_7_days(query):
+    #     suffix = " (This is for the last 7 days)"
+    #     if suffix not in text:
+    #         return text + suffix
+    # return text
 
 
 def _append_explicit_today(text: str, query: str) -> str:
@@ -97,6 +98,19 @@ def _append_explicit_today(text: str, query: str) -> str:
     if "today" not in base.lower():
         return f"{base} This is for today.".strip()
     return base
+def _clean_query_for_fallback(query: str) -> str:
+    """Strip command prefixes and common suffixes to isolate the user's core request context."""
+    q = (query or "").lower()
+    # Remove common prefixes
+    q = _re.sub(r"^(?:show me all|list all|find all|get all|search for|show me|list|find|get|give me|tell me about|how many|when was|is there any|do you have|where is|what is)\s+", "", q)
+    # Remove trailing question marks and common suffixes
+    q = _re.sub(r"\s+(?:located|completed|done|finished|available|status|count|total)\??$", "", q)
+    q = _re.sub(r"\?$", "", q)
+    # Remove leading filler words
+    q = _re.sub(r"^(?:all|any|every|the|a|an)\s+", "", q).strip()
+    return q
+
+
 class LangChainService:
     def __init__(self):
         try:
@@ -208,9 +222,11 @@ class LangChainService:
                         "Summarize the overall distribution. "
                         "Highlight the highest/most significant values and any notable trends. "
                         "Do NOT mention internal database IDs or technical tool names. "
-                        "Do NOT render any table. Do NOT include any markdown table. "
-                        "End your response with exactly this line:\n"
-                        "**Would you like to see the detailed breakdown table for a better understanding?**"
+                        "Do NOT render any table. Do NOT include any markdown table. " + (
+                            "\nEnd your response with exactly this line:\n"
+                            "**Would you like to see the detailed breakdown table for a better understanding?**"
+                            if display_count > 0 else ""
+                        )
                     )
 
                 else:
@@ -229,10 +245,12 @@ class LangChainService:
                         "2. Start with 'I found...', 'I've retrieved...', or 'Your search returned...'.\n"
                         "3. Use NO markdown (no bold, no italics) in the summary text.\n"
                         "4. Do NOT include a table.\n"
-                        "5. Use clear, active-voice grammar.\n\n"
-                        "FINAL LINE (MUST BE EXACT):\n"
-                        "**Would you like to see the full table for a better understanding?**"
-                                        )
+                        "5. Use clear, active-voice grammar.\n\n" + (
+                            "FINAL LINE (MUST BE EXACT):\n"
+                            "**Would you like to see the full table for a better understanding?**"
+                            if display_count > 0 else ""
+                        )
+                    )
 
 
     # ──  return type is now tuple[str, str, list] used for the chat memory and the db memory .
@@ -417,7 +435,40 @@ class LangChainService:
                     if p_count == 0 and total_for_count == 0:
                         logger.info("📊 No records found for tool %s", tool_name)
                         self._log_query_summary(current_user_query)
-                        return "No results found for the given query.", "No results found for the given query.", messages
+                        
+                        # 1. Dynamically identify the subject using the LLM (no hardcoding)
+                        subject_prompt = f"Identify the main subject of this query in 1-2 words (e.g., 'assets', 'complaints', 'work orders'): '{user_query}'"
+                        subject_res = self.model.invoke([HumanMessage(content=subject_prompt)])
+                        entity = subject_res.content.strip().lower()
+                        if not entity or len(entity) > 30: # Safety fallback
+                             entity = tool_name.lower()
+                        
+                        # 2. Try to make it more dynamic from tool arguments (keyword)
+                        if args and args.get("keyword"):
+                            entity = args.get("keyword")
+                        elif args and args.get("asset_type"):
+                            entity = args.get("asset_type")
+                        
+                        # 3. Extra detail from user query (e.g. specific IDs mentioned)
+                        # We check for common prefixes OR any word that looks like a complex ID (has numbers and hyphens/underscores)
+                        complaint_match = _re.search(r"(?:complaint|work order|wo|asset|tag|unit|id|equipment|ref|no)\s*(?:no|#)?\s*([a-zA-Z0-9_-]+)", user_query, _re.IGNORECASE)
+                        if not complaint_match:
+                            # Fallback: catch anything that looks like an ID (e.g. JJ-HVAC...) anywhere in the query
+                            fallback_match = _re.search(r"\b[a-zA-Z0-9]+[_-][a-zA-Z0-9_-]+\b", user_query)
+                            if fallback_match:
+                                entity = f"{entity} matching '{fallback_match.group(0)}'"
+                        else:
+                            entity = f"{entity} matching '{complaint_match.group(1)}'"
+                        
+                        # 4. Extract time context
+                        time_context = ""
+                        for kw in ["today", "yesterday", "this week", "last week", "this month", "last month", "this year", "last year"]:
+                            if kw in user_query.lower():
+                                time_context = f" for {kw}"
+                                break
+                                
+                        msg = f"No {entity} found for your request{time_context}."
+                        return msg, msg, messages
 
                     
                     display_count = total_for_count if total_for_count > len(p_list) else p_count
@@ -527,7 +578,8 @@ class LangChainService:
                         context_ai_msg = self.model.invoke(messages)
                         self._accumulate_tokens(context_ai_msg)
                         context_summary = context_ai_msg.content or f"Found {display_count} records for your request."
-                        context_summary = _append_default_7days(context_summary, user_query)
+                        # context_summary = _append_default_7days(context_summary, user_query)
+
                         context_summary = _append_explicit_today(context_summary, user_query)
                         logger.info("✅ Context summary generated for large dataset | context='%s'", context_summary[:80])
 
@@ -593,7 +645,7 @@ class LangChainService:
                 # FINAL SAFETY NET (NO EMPTY STRING EVER)
 
                 if not final_content or str(final_content).strip() == "":
-                    final_content = "No results found for the given query."
+                    final_content = "No data records were found matching your request."
                     logger.info("final_ai_content is empty")
 
                 # aggregate context summary same as count (one sentence)
@@ -676,8 +728,8 @@ class LangChainService:
                         f"**Tip:** Try modifying your question by adding a category (for example: by type, date, or status) so that I can generate a meaningful chart"
 
                     )
-                final_content = _append_default_7days(final_content, user_query)
-                context_summary = _append_default_7days(context_summary, user_query)
+                # final_content = _append_default_7days(final_content, user_query)
+                # context_summary = _append_default_7days(context_summary, user_query)
                 final_content = _append_explicit_today(final_content, user_query)
                 context_summary = _append_explicit_today(context_summary, user_query)
                 return final_content, context_summary, messages
@@ -771,8 +823,34 @@ class LangChainService:
                     display_count = total_for_count if total_for_count > len(p_list) else p_count
 
                     if p_count == 0 and total_for_count == 0:
+                        logger.info("📊 [FORCED] No records found for tool %s", tool_name)
                         self._log_query_summary(current_user_query)
-                        return "No results found for the given query.", "No results found for the given query.", messages
+
+                        # 1. Start with generic map
+                        entity_map = {
+                            "ASSETS": "assets",
+                            "PPM": "PPM tasks",
+                            "BDM": "breakdown records",
+                            "FA": "complaints",
+                            "SB": "service boards"
+                        }
+                        entity = entity_map.get(tool_name, "results")
+
+                        # 2. Try to make it more dynamic from tool arguments
+                        if args and args.get("keyword"):
+                            entity = args.get("keyword")
+                        elif args and args.get("asset_type"):
+                            entity = args.get("asset_type")
+
+                        # 3. Extract time context
+                        time_context = ""
+                        for kw in ["today", "yesterday", "this week", "last week", "this month", "last month", "this year", "last year"]:
+                            if kw in user_query.lower():
+                                time_context = f" for {kw}"
+                                break
+
+                        msg = f"No {entity} found{time_context} for the given query."
+                        return msg, msg, messages
                     # Inject synthetic tool call + result so model formats from live data
 
                     fake_tool_id = "forced-" + tool_name.lower() + "-1"
@@ -889,7 +967,7 @@ class LangChainService:
                         context_ai_msg = self.model.invoke(messages)
                         self._accumulate_tokens(context_ai_msg)
                         context_summary = context_ai_msg.content or f"Found {display_count} records for your request."
-                        context_summary = _append_default_7days(context_summary, user_query)
+                        # context_summary = _append_default_7days(context_summary, user_query)
                         context_summary = _append_explicit_today(context_summary, user_query)
 
                         large_dataset_response = json.dumps({
@@ -946,7 +1024,7 @@ class LangChainService:
 
                     final_ai_msg = self.model.invoke(messages)
                     self._accumulate_tokens(final_ai_msg)
-                    content = final_ai_msg.content or "No results found for the given query."
+                    content = final_ai_msg.content or "No specific data could be retrieved for this query."
                     logger.info("✅ Response after forced tool call")                  
                     if is_count_query:
                         context_summary = content   
@@ -995,15 +1073,15 @@ class LangChainService:
                         f"**Tip:** Try modifying your question by adding a category (for example: by type, date, or status) so that I can generate a meaningful chart"
 
                         )
-                    content = _append_default_7days(content, user_query)
-                    context_summary = _append_default_7days(context_summary, user_query)
+                    # content = _append_default_7days(content, user_query)
+                    # context_summary = _append_default_7days(context_summary, user_query)
                     content = _append_explicit_today(content, user_query)
                     context_summary = _append_explicit_today(context_summary, user_query)
                     return content, context_summary, messages
                     
                 content = ai_msg.content
                 if not content or str(content).strip() == "":
-                    content = "No results found for the given query."
+                    content = "No matching records were found for the requested data."
                 logger.info("✅ No tool call — direct response")
                 self._log_query_summary(current_user_query)
                 return content, content, messages

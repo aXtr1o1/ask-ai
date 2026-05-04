@@ -14,7 +14,7 @@ from app.api.routes.bdm import get_bdm
 from app.api.routes.fa import get_fa
 from app.api.routes.sb import get_sb
 from fastapi import HTTPException
-from app.tools.facility_tools import getTime
+# from app.tools.facility_tools import getTime
 
 logger = logging.getLogger("quota_fallback_service")
 logger.setLevel(logging.INFO)
@@ -166,8 +166,10 @@ class QuotaFallbackService:
         Returns:
             dict: Minimal payload
         """
-        # Use existing getTime function to get default dates (last 7 days)
-        date_from, date_to = getTime(None, None)
+        # Get default dates
+        # date_from, date_to = getTime(None, None)
+        date_from, date_to = None, None
+        
         
         payload = {
             "user_name": user_name,

@@ -1936,56 +1936,74 @@ export default function Home() {
   const processLoadedMessages = (msgs: Message[]): Message[] => {
     return msgs.map(m => {
       if (m.role !== "ai") return m;
-      
+
       const text = m.text || "";
-     
+
       // 🔑 FIRST: Check if this is a GRAPH response
       const graphData = parseGraphData(text);
       if (graphData) {
         console.log("📊 [HISTORY] Graph response detected — keeping as raw JSON for chart");
-        return { ...m, text, isGraphResponse: true };  // ← Mark as graph
+        return { ...m, text, isGraphResponse: true };
       }
-     
-      // Check if already formatted (contains HTML tags)
-        if (
-      text.includes('<table') || 
-      text.includes('<div class=') || 
-      text.includes('<div style=') ||
-      text.includes('large-dataset-wrapper')
-    ) {
-      console.log("✅ [HISTORY] Message already HTML formatted (from cache) - skipping");
-      // Try to extract table data from HTML
-      const rows = extractTableRows(text);
-      if (rows.length > 0) {
-        return { ...m, text, tableData: rows, tableTitle: "Data Results" };
-      }
-      return m;
-    }
-          
-      // Extract response content (removes session_id wrapper)
-      const cleanedText = decodeEntities(extractResponseContent(text));
-     
-      // ALWAYS TRY RENDERING AS UNIFIED TABLE STRUCTURE FIRST (ALL SIZES)
-      const largeDatasetHTML = renderLargeDataset(cleanedText);
-      if (largeDatasetHTML) {
-        console.log("✅ [HISTORY] Rendered as unified table structure");
-        // Always extract table rows for TableWithTile
-        const rows = extractTableRows(largeDatasetHTML);
-        if (rows.length > 0) {
-          return { ...m, text: largeDatasetHTML, tableData: rows, tableTitle: "Data" };
+
+      // 🔑 THE FIX: Detect if the history text is a Table JSON
+      try {
+        if (text.trim().startsWith('{') || text.trim().startsWith('[')) {
+          const parsed = JSON.parse(text);
+          if (parsed && (parsed.columns || parsed.data)) {
+            // It's a table! Use the existing render function
+            const tableHTML = renderLargeDataset(text);
+            if (tableHTML) {
+              const rows = extractTableRows(tableHTML);
+              return { ...m, text: tableHTML, tableData: rows, tableTitle: "Results" };
+            }
+          }
         }
-        return { ...m, text: largeDatasetHTML };
+      } catch (e) {
+        /* Not JSON, ignore */
       }
-      
+
+      // Check if already formatted (contains HTML tags or wrapper class)
+      if (
+        text.includes('<table') ||
+        text.includes('large-dataset-wrapper') ||
+        text.includes('ai-table')
+      ) {
+        console.log("✅ [HISTORY] Message already HTML formatted - extracting table data");
+        // Try to extract table data from HTML
+        const rows = extractTableRows(text);
+        if (rows.length > 0) {
+          return { ...m, text, tableData: rows, tableTitle: "Results" };
+        }
+        return m;
+      }
+
+      // Extract response content (removes session_id wrapper)
+      const rawJson = extractResponseContent(text);
+      const cleanedText = decodeEntities(rawJson);
+
+      // ALWAYS TRY RENDERING AS UNIFIED TABLE STRUCTURE FIRST (ALL SIZES)
+      const tableHTML = renderLargeDataset(cleanedText);
+      if (tableHTML) {
+        console.log("✅ [HISTORY] Successfully rendered as table structure");
+        const rows = extractTableRows(tableHTML);
+        if (rows.length > 0) {
+          return { ...m, text: tableHTML, tableData: rows, tableTitle: "Results" };
+        }
+        return { ...m, text: tableHTML };
+      }
+
       // Not tabular data → try to format as text
       try {
         const formattedText = formatOutput(cleanedText);
-        console.log("✅ [HISTORY] Formatted as text output");
+        // 🔑 EXTRA FIX: If the formatted text still has raw HTML tags, decode them
+        if (formattedText.includes('<div') || formattedText.includes('&lt;')) {
+          return { ...m, text: decodeEntities(formattedText) };
+        }
         return { ...m, text: formattedText };
       } catch (err) {
-        // Not JSON → treat as already formatted or plain text
-        console.log("📝 [HISTORY] Not JSON - keeping as is");
-        return m;
+        console.log("📝 [HISTORY] Fallback to raw text");
+        return { ...m, text: decodeEntities(text) };
       }
     });
   };
@@ -3028,7 +3046,7 @@ export default function Home() {
                       <div className="avatar-box"><IconAI/></div>
                     )}
 
-                    <div className={`message-bubble ${msg.role}${isGraphMsg ? ' graph-message' : ''}`}>
+                    <div className={`message-bubble ${msg.role}${isGraphMsg ? ' graph-message' : ''}${msg.tableData && msg.tableData.length > 0 ? ' table-message' : ''}`}>
 
                       {isAudio ? (
                     /* ── Audio Message: Show player UI ── */
