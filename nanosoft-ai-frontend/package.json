@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
+    "dev": "cross-env NODE_OPTIONS=\"--max-old-space-size=4096\" next dev --webpack",
+    "build": "cross-env NODE_OPTIONS=\"--max-old-space-size=4096\" next build",
     "start": "next start",
     "test": "jest",
     "lint": "eslint"
@@ -14,11 +14,13 @@
     "@tabler/icons-react": "^3.41.1",
     "@tanstack/react-virtual": "^3.13.23",
     "next": "^16.2.2",
-    "node": "^25.9.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-window": "^2.2.7",
     "recharts": "^3.8.1"
+  },
+  "engines": {
+    "node": "^24.0.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -28,6 +30,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "autoprefixer": "^10.4.24",
+    "cross-env": "^7.0.3",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "jest": "^30.2.0",
