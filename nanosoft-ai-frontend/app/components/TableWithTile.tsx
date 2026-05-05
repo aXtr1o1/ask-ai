@@ -55,8 +55,7 @@ const TableWithTile = React.memo(function TableWithTile({
     return summary || null;
   }, [htmlTableContent]);
 
-  const [page, setPage] = useState(0);
-  const LIMIT = 100;
+
 
   // Automatically detect columns from rows (scan first 100 for performance)
   const detectedColumns = useMemo(() => {
@@ -100,35 +99,6 @@ const TableWithTile = React.memo(function TableWithTile({
     return String(val);
   };
 
-  // Pagination: compute the slice of rows to display
-  const totalPages = Math.max(1, Math.ceil(rows.length / LIMIT));
-  // Reset to first page when data set changes
-  useEffect(() => {
-    setPage(0);
-  }, [rows.length]);
-  // Clamp page if totalPages shrinks
-  useEffect(() => {
-    if (page > totalPages - 1) setPage(Math.max(0, totalPages - 1));
-  }, [totalPages, page]);
-  const startIdx = page * LIMIT;
-  const pagedRows = rows.slice(startIdx, startIdx + LIMIT);
-
-  // Format cell values safely for JSONB / object values
-  const formatCellValue = (val: any) => {
-    if (val === null || val === undefined) return "—";
-    if (typeof val === 'boolean') return val ? '✓' : '✗';
-    if (typeof val === 'number') return String(val);
-    if (Array.isArray(val)) return val.length === 0 ? '—' : val.map(v => typeof v === 'object' ? JSON.stringify(v) : String(v)).join(', ');
-    if (typeof val === 'object') {
-      try {
-        const s = JSON.stringify(val);
-        return s.length > 120 ? s.slice(0, 120) + '…' : s;
-      } catch {
-        return String(val);
-      }
-    }
-    return String(val);
-  };
 
   // Toggle container style: absolute on larger screens, inline/static on mobile
   const toggleContainerStyle = {
@@ -483,58 +453,6 @@ const TableWithTile = React.memo(function TableWithTile({
             </div>
           )}
         </div>
-          {/* Pagination Controls (table view only) */}
-          {viewMode === "table" && (
-            <div style={{ display: 'flex', gap: responsive.isMobile ? 6 : 8, justifyContent: 'center', alignItems: 'center', marginTop: responsive.isMobile ? 6 : 8 }}>
-              {(() => {
-                const disabledPrev = page <= 0;
-                const disabledNext = page >= totalPages - 1;
-                const navButtonStyle = (disabled: boolean) => ({
-                  padding: responsive.isMobile ? '4px 8px' : responsive.isTablet ? '5px 10px' : '6px 12px',
-                  borderRadius: responsive.isMobile ? 6 : 8,
-                  border: disabled ? '1px solid rgba(212,175,55,0.28)' : '1px solid rgba(212,175,55,0.9)',
-                  cursor: disabled ? 'not-allowed' : 'pointer',
-                  background: disabled
-                    ? 'linear-gradient(180deg, rgba(212,175,55,0.14) 0%, rgba(212,175,55,0.08) 100%)'
-                    : 'linear-gradient(180deg, #ae8625 0%, #f7ef8a 35%, #d2ac47 65%, #edc967 100%)',
-                  color: '#ffffff',
-                  fontWeight: 700,
-                  fontSize: responsive.isMobile ? 12 : 13,
-                  boxShadow: disabled ? 'none' : (isDark ? '0 6px 20px rgba(212,175,55,0.22)' : '0 6px 14px rgba(212,175,55,0.12)'),
-                  transition: 'transform 0.08s ease, box-shadow 0.12s ease, opacity 0.12s ease',
-                  minWidth: responsive.isMobile ? 56 : undefined,
-                } as React.CSSProperties);
-
-                return (
-                  <>
-                    <button
-                      onClick={() => setPage(Math.max(0, page - 1))}
-                      disabled={disabledPrev}
-                      style={navButtonStyle(disabledPrev)}
-                      onMouseDown={e => (e.currentTarget.style.transform = 'scale(0.98)')}
-                      onMouseUp={e => (e.currentTarget.style.transform = 'scale(1)')}
-                    >
-                      Prev
-                    </button>
-
-                    <div style={{ fontSize: responsive.isMobile ? 11 : 12, color: tileTextMuted, padding: responsive.isMobile ? '0 6px' : undefined }}>
-                      Page {page + 1} / {totalPages} — Showing {Math.min((page + 1) * LIMIT, rows.length)} of {rows.length}
-                    </div>
-
-                    <button
-                      onClick={() => setPage(Math.min(totalPages - 1, page + 1))}
-                      disabled={disabledNext}
-                      style={navButtonStyle(disabledNext)}
-                      onMouseDown={e => (e.currentTarget.style.transform = 'scale(0.98)')}
-                      onMouseUp={e => (e.currentTarget.style.transform = 'scale(1)')}
-                    >
-                      Next
-                    </button>
-                  </>
-                );
-              })()}
-            </div>
-          )}
       </div>
     </div>
   );
