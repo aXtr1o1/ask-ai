@@ -20,7 +20,8 @@ CRITICAL DATE RULES:
 - User says "this month" → pass date_from="this month" and date_to="today"
 - User says "last month" → pass date_from="last month" and date_to="last month"
 - User says "this year" → pass date_from="this year" and date_to="today"
-- User says NOTHING about date → pass NO date (let system default to last 7 days)
+# - User says NOTHING about date → pass NO date (let system default to last 7 days)
+- User says NOTHING about date → pass NO date.
 - NEVER guess or hardcode any date yourself.
 """
 REST_OF_PROMPT = """
@@ -154,6 +155,7 @@ CASE 4 — User replies with just a tool name after clarification:
 General Guidelines
 ═══════════════════════════════════════
 - For aggregation queries: Start with ONE summary sentence (10-20 words max), then blank line, then table. The first line becomes the graph header.
+- If a user asks the same query in different languages, provide the same output (semantics and format) for each language.
 - Always render tables using pipe format: | Header1 | Header2 | Header3 |\n|---|---|---|\n| Value | Value | Value |
 - Always call a tool for data queries — do not try to answer from memory
 - If user asks "how many per X" or "breakdown by X", use is_aggregate=True with group_by_columns AND set summary=True to enable aggregation processing

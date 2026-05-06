@@ -89,6 +89,28 @@ def resolveDate(date_value, fallback, is_end_date=False):
         logger.info("📅 Relative keyword '%s' → resolved to %s", date_value, resolved)
         return resolved
 
+    # ── Dynamic pattern: X days/weeks/months/years ago/before ──
+    import re
+    match = re.search(r"(\d+)\s*(day|week|month|year)s?\s*(ago|before)", val)
+    if match:
+        num = int(match.group(1))
+        unit = match.group(2)
+        
+        if unit == "day":
+            delta = timedelta(days=num)
+        elif unit == "week":
+            delta = timedelta(weeks=num)
+        elif unit == "month":
+            delta = timedelta(days=num * 30)
+        elif unit == "year":
+            delta = timedelta(days=num * 365)
+        else:
+            delta = timedelta(days=num)
+            
+        resolved = (today - delta).isoformat()
+        logger.info("📅 Relative pattern '%s' → resolved to %s", date_value, resolved)
+        return resolved
+
     # ── Validate actual date string ──
     try:
         from datetime import datetime
@@ -101,34 +123,33 @@ def resolveDate(date_value, fallback, is_end_date=False):
 
 
 def getTime(date_from, date_to):
-    today = date.today()
-    today_str = today.isoformat()
-    default_from = (today - timedelta(days=6)).isoformat()
+    # today = date.today()
+    # today_str = today.isoformat()
+    # default_from = (today - timedelta(days=6)).isoformat()
 
     # ── Resolve relative keywords first ──
-    # ✅ is_end_date=False for date_from, is_end_date=True for date_to
-    date_from = resolveDate(date_from, fallback=default_from, is_end_date=False)
-    date_to   = resolveDate(date_to,   fallback=today_str,    is_end_date=True)
+    # ✅ fallback=None means no default 7-day filter is applied
+    date_from = resolveDate(date_from, fallback=None, is_end_date=False)
+    date_to   = resolveDate(date_to,   fallback=None, is_end_date=True)
 
-    # Case 1: both dates missing → last 7 days
-    if date_from is None and date_to is None:
-        logger.info("📅 No dates provided → defaulting to last 7 days: %s to %s", default_from, today_str)
-        return default_from, today_str
+    # # Case 1: both dates missing → last 7 days (HASHED BY USER REQUEST)
+    # if date_from is None and date_to is None:
+    #     logger.info("📅 No dates provided → defaulting to last 7 days: %s to %s", default_from, today_str)
+    #     return default_from, today_str
 
-    # Case 2: only from date missing
-    elif date_from is None:
-        logger.info("📅 date_from missing → defaulting to 7 days before date_to: %s to %s", default_from, date_to)
-        return default_from, date_to
+    # # Case 2: only from date missing
+    # elif date_from is None:
+    #     logger.info("📅 date_from missing → defaulting to 7 days before date_to: %s to %s", default_from, date_to)
+    #     return default_from, date_to
 
-    # Case 3: only to date missing
-    elif date_to is None:
-        logger.info("📅 date_to missing → defaulting to today: %s to %s", date_from, today_str)
-        return date_from, today_str
+    # # Case 3: only to date missing
+    # elif date_to is None:
+    #     logger.info("📅 date_to missing → defaulting to today: %s to %s", date_from, today_str)
+    #     return date_from, today_str
 
-    # Case 4: both dates provided
-    else:
-        logger.info("📅 Both dates provided → using as-is: %s to %s", date_from, date_to)
-        return date_from, date_to
+    # Case 4: Return resolved values
+    logger.info("📅 Date Resolution (No Default) | from: %s -> %s | to: %s -> %s", date_from, date_from, date_to, date_to)
+    return date_from, date_to
 
 
 # =====================================================
@@ -158,8 +179,8 @@ FULL PARAMETER CAPABILITIES:
 - spot_name, serial_no: Filter by spot or serial number.
 - on_hold, is_snagged, is_scraped: Filter by asset lifecycle flags.
 - enable_ppm, enable_bdm: Filter by maintenance eligibility configuration.
-- asset_tag_no, keyword: Filter by specific identification or search terms.
-- date_from, date_to: Filter by asset creation or update timestamps.
+- asset_tag_no, keyword: Filter by specific identification or search terms. DO NOT include conversational stop-words, prepositions, articles, or time/date references as keywords.
+- date_from, date_to: Filter by timestamps. Supports relative keywords: 'today', 'yesterday', 'this week', 'last week', 'this month', 'last month', 'this year', 'last year', or 'X days ago' (e.g., '3 days ago').
 - limit, offset: Control data pagination.
 
 AGGREGATE / GROUP BY GUIDANCE:
@@ -240,7 +261,7 @@ def ASSETS(
 
     logger.info(f"📦 ASSETS TOOL TRIGGERED for user_name: {user_name}")
     
-    resolved_date_from,resolved_date_to = getTime(date_from,date_to)
+    resolved_date_from, resolved_date_to = getTime(date_from, date_to)
     
     payload = {
         "user_name":    user_name,
@@ -328,8 +349,8 @@ FULL PARAMETER CAPABILITIES:
 - division, discipline: Filter by organizational structure.
 - locality, building, floor, spot_name: Filter by location hierarchy.
 - contract, tech, equipment: Filter by service provider, technician, or equipment.
-- keyword: General search for maintenance tasks or asset types.
-- date_from, date_to: Filter by planned or actual maintenance start dates.
+- keyword: General search for maintenance tasks or asset types. DO NOT include conversational stop-words, prepositions, articles, or time/date references as keywords.
+- date_from, date_to: Filter by timestamps. Supports relative keywords: 'today', 'yesterday', 'this week', 'last week', 'this month', 'last month', 'this year', 'last year', or 'X days ago' (e.g., '3 days ago').
 - comp_from, comp_to: Filter by maintenance completion date ranges.
 - sla_min, sla_max: Filter by SLA duration (in minutes).
 - limit, offset: Control data pagination.
@@ -402,7 +423,7 @@ def PPM(
         return "Error: user_name is required. It is set from the authenticated request."
 
     logger.info(f"🛠️ PPM TOOL TRIGGERED for user_name: {user_name}")
-    resolved_date_from,resolved_date_to = getTime(date_from=date_from,date_to=date_to)
+    resolved_date_from, resolved_date_to = getTime(date_from, date_to)
 
     payload = {
         "user_name":    user_name,
@@ -486,8 +507,8 @@ FULL PARAMETER CAPABILITIES:
 - locality, building, floor, spot_name: Filter by location hierarchy.
 - contract, analysis_tech, execution_tech: Filter by service provider or assigned staff.
 - complainer: Filter by the individual who raised the complaint.
-- keyword: General search for complaints or equipment issues.
-- date_from, date_to: Filter by complaint registration date range.
+- keyword: General search. DO NOT include conversational stop-words, prepositions, articles, or time/date references as keywords.
+- date_from, date_to: Filter by timestamps. Supports relative keywords: 'today', 'yesterday', 'this week', 'last week', 'this month', 'last month', 'this year', 'last year', or 'X days ago' (e.g., '3 days ago').
 - completed_from, completed_to: Filter by complaint resolution date range.
 - limit, offset: Control data pagination.
 
@@ -560,7 +581,7 @@ def BDM(
         return "Error: user_name is required. It is set from the authenticated request."
 
     logger.info(f"🔧 BDM TOOL TRIGGERED for user_name: {user_name}")
-    resolved_date_from,resolved_date_to = getTime(date_from,date_to)
+    resolved_date_from, resolved_date_to = getTime(date_from, date_to)
 
     payload = {
         "user_name":        user_name,
@@ -678,7 +699,8 @@ PARAMETERS:
 - frequency: e.g. "MONTHLY", "WEEKLY"
 - request_desc: e.g. "Pest Control"
 - is_withdraw, is_rework, is_active: Boolean flags
-- date_from, date_to: Date range (YYYY-MM-DD)
+- keyword: General search. DO NOT include conversational stop-words, prepositions, articles, or time/date references as keywords.
+- date_from, date_to: Filter by timestamps. Supports relative keywords: 'today', 'yesterday', 'this week', 'last week', 'this month', 'last month', 'this year', 'last year', or 'X days ago' (e.g., '3 days ago').
 - comp_from, comp_to: Completion date range
 - limit, offset: Pagination
  
@@ -841,7 +863,8 @@ PARAMETERS:
 - service_type: e.g. "Environmental Services"
 - tech: Technician name
 - is_withdraw, is_reschedule, is_rework, is_active: Boolean flags
-- date_from, date_to: Date range (YYYY-MM-DD)
+- keyword: General search. DO NOT include conversational stop-words, prepositions, articles, or time/date references as keywords.
+- date_from, date_to: Filter by timestamps. Supports relative keywords: 'today', 'yesterday', 'this week', 'last week', 'this month', 'last month', 'this year', 'last year', or 'X days ago' (e.g., '3 days ago').
 - comp_from, comp_to: Completion date range
 - limit, offset: Pagination
  

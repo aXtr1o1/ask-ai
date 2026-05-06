@@ -31,7 +31,8 @@ from app.services.session_service import get_sessions_for_user, get_chat_history
 from app.models.schemas import SessionRequest, ClientInsertionRequest
 from app.services.audio_service import convert_audio_to_text, get_audio_duration_seconds
 from app.services.quota_service import quota_fallback_service
-
+from app.voiceAgent_endpoint import voice_agent_router
+from app.state import memory_store, MAX_HISTORY, frontend_saved_sessions
 
 logger = logging.getLogger("chatbot_app")
 logger.setLevel(logging.INFO)
@@ -72,8 +73,7 @@ api_router = APIRouter(prefix="/api", tags=["api"])
 #   }
 # }
 # =====================================================
-MAX_HISTORY =  settings.MAX_HISTORY
-memory_store = {}
+
 MAX_AUDIO_BYTES = 500 * 1024  # 500 KB
 
 YES_WORDS = {
@@ -115,9 +115,43 @@ NO_WORDS = {
     "i disagree", "disagree", "not agreed"
 }
 
+
+def _has_date_keyword(text: str) -> bool:
+    if not text:
+        return False
+    q = text.lower()
+    keywords = (
+        "today", "yesterday", "last week", "this week", "last month", "this month",
+        "last year", "this year", "week", "month", "year", "day", "days", "date"
+    )
+    if any(keyword in q for keyword in keywords):
+        return True
+    return bool(re.search(r"\b\d{4}-\d{2}-\d{2}\b", q))
+
+
+def _build_table_context(context_summary: str, user_query: str) -> str:
+    # """Keep the table context short, and default to last 7 days when no date is mentioned."""
+    """Keep the table context short."""
+    summary = (context_summary or "").strip()
+
+    # Remove the follow-up question if it was included in the summary.
+    lines = [line.strip() for line in summary.splitlines() if line.strip()]
+    lines = [line for line in lines if "would you like to see" not in line.lower()]
+    summary = " ".join(lines).strip()
+
+    if not _has_date_keyword(user_query):
+        # summary = "Here is the last 7 days data you requested."
+        summary = "Here is the data you requested."
+        return summary
+
+    if not summary:
+        summary = "Here is the detailed table you requested."
+
+    return summary
+
 #Track sessions already saved by frontend HTTP POST
 # So WebSocketDisconnect does NOT save again (prevents double save)
-frontend_saved_sessions: set = set()
+# frontend_saved_sessions now imported from app.state
 
 
 #chat memory for debugging purpose. 
@@ -362,11 +396,13 @@ async def ws_chat_endpoint(websocket: WebSocket):
                         logger.info(f"🎙️ Audio table reply: '{reply_table}' (raw='{raw_reply_table}')")
 
                         if reply_table in YES_WORDS:
+                            pending_ctx = session_data_audio.get("pending_table_context") or _build_table_context("", pending_transcription)
                             table_response = json.dumps({
-                                "context_summary": "Here is the detailed table you requested.",
+                                "context_summary": pending_ctx,
                                 "records": pending_table_audio
                             })
                             memory_store[session_id]["pending_table"] = None
+                            memory_store[session_id]["pending_table_context"] = None
 
                             await websocket.send_text(json.dumps({
                                 "session_id": session_id,
@@ -388,6 +424,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
 
                         elif reply_table in NO_WORDS:
                             memory_store[session_id]["pending_table"] = None
+                            memory_store[session_id]["pending_table_context"] = None
                             no_msg = "No problem! Let me know if you have any other questions."
 
                             await websocket.send_text(json.dumps({
@@ -411,6 +448,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
                         else:
                             # Not yes/no — clear pending table and treat as new audio query
                             memory_store[session_id]["pending_table"] = None
+                            memory_store[session_id]["pending_table_context"] = None
                             logger.info("⚠️ Audio reply not yes/no — clearing pending_table, processing as new query")
 
                     
@@ -645,11 +683,13 @@ async def ws_chat_endpoint(websocket: WebSocket):
                     logger.info(f"🔍 pending_table check | reply='{reply}' | in_YES_WORDS={reply in YES_WORDS} | in_NO_WORDS={reply in NO_WORDS}")
 
                     if reply in YES_WORDS:
+                        pending_ctx = session_data.get("pending_table_context") or _build_table_context("", user_query)
                         table_response = json.dumps({
-                            "context_summary": "Here is the detailed table you requested.",
+                            "context_summary": pending_ctx,
                             "records": pending_table
                         })
                         memory_store[session_id]["pending_table"] = None
+                        memory_store[session_id]["pending_table_context"] = None
 
                         await websocket.send_text(json.dumps({
                             "session_id": session_id,
@@ -671,6 +711,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
 
                     elif reply in NO_WORDS:
                         memory_store[session_id]["pending_table"] = None
+                        memory_store[session_id]["pending_table_context"] = None
                         no_msg = "No problem! Let me know if you have any other questions."
 
                         await websocket.send_text(json.dumps({
@@ -694,6 +735,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
                     else:
                         # User sent a new query — clear pending and fall through
                         memory_store[session_id]["pending_table"] = None
+                        memory_store[session_id]["pending_table_context"] = None
                         logger.info("⚠️ Non-yes/no after table question — clearing pending_table, processing as new query")
             
             # ── Continue to normal query processing ──
@@ -881,8 +923,9 @@ async def ws_chat_endpoint(websocket: WebSocket):
             pending_table = getattr(langchain_service, "_last_pending_table", None)
             if pending_table:
                 memory_store[session_id]["pending_table"] = pending_table
+                memory_store[session_id]["pending_table_context"] = _build_table_context(context_summary, query_to_store)
                 langchain_service._last_pending_table = None  # clear after stashing
-                logger.info(f"📋 Stashed pending_table | records={len(pending_table)}")
+                logger.info(f"📋 Stashed pending_table | records={len(pending_table)} | context_saved=True")
 
             memory_store[session_id]["history"].append({
                 "query":     query_to_store,
@@ -1150,8 +1193,9 @@ async def get_usage_stats(external_user_id: str, user_name: str):
 @api_router.get("/health", tags=["Health"])
 def api_health():
     return {"status": "ok", "service": "Facility Management AI Assistant"}
-
+#voice agent endpoint added by sudharshan
 chatbot_app.include_router(api_router)
+chatbot_app.include_router(voice_agent_router)
 
 @chatbot_app.on_event("startup")
 async def startup_event():

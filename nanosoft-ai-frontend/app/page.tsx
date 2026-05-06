@@ -43,9 +43,20 @@ function extractText(raw: any, depth = 0): string {
   if (depth > 10 || raw == null) return "";
   if (typeof raw === "string") {
     const trimmed = raw.trim();
-    // Only try JSON parse if it looks like JSON AND has no spaces (avoids parsing prose)
-    if ((trimmed.startsWith("{") || trimmed.startsWith("[")) && !trimmed.includes(" ")) {
-      try { return extractText(JSON.parse(trimmed), depth + 1); } catch { return raw; }
+    // If it looks like JSON (starts with { or [), attempt to parse it.
+    // Relaxed rule: JSONB or stringified JSON from backend often contains spaces
+    // so try parsing whenever it appears JSON-like. Fall back to the raw string on error.
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      try {
+        const parsedOnce = JSON.parse(trimmed);
+        // If parsing returns a string containing JSON (double-encoded), try again
+        if (typeof parsedOnce === 'string') {
+          try { return extractText(JSON.parse(parsedOnce), depth + 1); } catch { /* ignore */ }
+        }
+        return extractText(parsedOnce, depth + 1);
+      } catch {
+        // not valid JSON — continue and return raw below
+      }
     }
     return raw;
   }
@@ -998,7 +1009,12 @@ export default function Home() {
   const [userIdFromUrl, setUserIdFromUrl] = useState<string | null>(null); // display name
   const [userIdInt, setUserIdInt] = useState<number | null>(null); // integer user_id for filtering
   const [clientNameFromUrl, setClientNameFromUrl] = useState<string | null>(null); // backend username
+  // `input` is the debounced value (used for heavier work).
   const [input,        setInput]        = useState<string>("");
+  // Use a ref for immediate typing to avoid re-renders on each keystroke
+  const rawInputRef = useRef<string>("");
+  const inputDebounceRef = useRef<number | null>(null);
+  const DEBOUNCE_MS = 400; // 300-500ms recommended
   const [messages,     setMessages]     = useState<Message[]>([]);
   const [isLoading,    setIsLoading]    = useState<boolean>(false);
   const [sessionId,    setSessionId]    = useState<string>(() => generateSessionId());
@@ -1137,30 +1153,47 @@ export default function Home() {
 
   // Read userName and branding logos from URL (e.g. from autologin redirect); persist logos to localStorage
   useEffect(() => {
-    
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
-      const userName = params.get("userName") ?? params.get("userId"); // display only
-        const clientName = params.get("clientName"); // backend username
-        const userIdParam = params.get("userId");
-        if (userIdParam) {
-          setUserIdInt(parseInt(userIdParam, 10));
-        }
-      const clientLogo = params.get("loginPageClientLogoPath");
-      const footerLogo = params.get("loginFooterLogoPath");
-      setUserIdFromUrl(userName);
-      if (clientName) {
-        setClientNameFromUrl(clientName);
+      
+      // 1. Get values from URL
+      const userNameFromUrlValue = params.get("userName") ?? params.get("userId"); 
+      const clientNameFromUrlValue = params.get("clientName"); 
+      const userIdParam = params.get("userId");
+      const clientLogoFromUrl = params.get("loginPageClientLogoPath");
+      const footerLogoFromUrl = params.get("loginFooterLogoPath");
+
+      // 2. Resolve final values (URL takes priority over localStorage)
+      const finalUserName = userNameFromUrlValue || localStorage.getItem("userName");
+      const finalClientName = clientNameFromUrlValue || localStorage.getItem("clientName") || localStorage.getItem("loggedInUser");
+      const finalUserId = userIdParam || localStorage.getItem("userId");
+
+      // 3. Update state and persist
+      if (finalUserName) {
+        setUserIdFromUrl(finalUserName);
+        localStorage.setItem("userName", finalUserName);
       }
-      if (clientLogo) {
-        setLoginPageClientLogoPath(clientLogo);
-        localStorage.setItem("loginPageClientLogoPath", clientLogo);
+      if (finalClientName) {
+        setClientNameFromUrl(finalClientName);
+        localStorage.setItem("clientName", finalClientName);
+        localStorage.setItem("loggedInUser", finalClientName);
+      }
+      if (finalUserId) {
+        setUserIdInt(parseInt(finalUserId, 10));
+        localStorage.setItem("userId", finalUserId);
+      }
+
+      // Branding logos
+      if (clientLogoFromUrl) {
+        setLoginPageClientLogoPath(clientLogoFromUrl);
+        localStorage.setItem("loginPageClientLogoPath", clientLogoFromUrl);
       } else {
         setLoginPageClientLogoPath(localStorage.getItem("loginPageClientLogoPath"));
       }
-      if (footerLogo) {
-        setLoginFooterLogoPath(footerLogo);
-        localStorage.setItem("loginFooterLogoPath", footerLogo);
+
+      if (footerLogoFromUrl) {
+        setLoginFooterLogoPath(footerLogoFromUrl);
+        localStorage.setItem("loginFooterLogoPath", footerLogoFromUrl);
       } else {
         setLoginFooterLogoPath(localStorage.getItem("loginFooterLogoPath"));
       }
@@ -1206,21 +1239,31 @@ export default function Home() {
   // Auth guard
   useEffect(() => {
     if (typeof window === "undefined") return;
-    // Prefer clientNameFromUrl as backend username; fall back to userIdFromUrl
-    const backendUserName = clientNameFromUrl;
+    
+    // Prefer clientNameFromUrl as backend username; fall back to localStorage
+    const backendUserName = clientNameFromUrl || localStorage.getItem("clientName") || localStorage.getItem("loggedInUser");
+    
     if (backendUserName) {
       localStorage.setItem("loggedInUser", backendUserName);
       setLoggedInUser(backendUserName);
       setAuthChecked(true);
-      router.replace("/");
+      
+      // If there are query parameters in the URL, hide them after processing
+      if (window.location.search) {
+        router.replace("/");
+      }
       return;
     }
+    
     const stored = localStorage.getItem("loggedInUser");
-    if (!stored) { router.replace("/login"); return; }
-    // stored value is backend username (client_name)
+    if (!stored) { 
+      router.replace("/login"); 
+      return; 
+    }
+    
     setLoggedInUser(stored);
     setAuthChecked(true);
-  }, [router, userIdFromUrl]);
+  }, [router, clientNameFromUrl]);
 
   // Keep sessionIdRef in sync with state
   useEffect(() => {
@@ -1277,7 +1320,7 @@ export default function Home() {
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
     el.style.overflowY = el.scrollHeight > 160 ? "auto" : "hidden";
   };
-  useEffect(() => { resizeTA(); }, [input]);
+  // Auto-resize is called from the onChange handler (direct DOM measurement)
 
   // ── Persistent WebSocket: connect once on mount, stay open all session ───────
   const IDLE_TIMEOUT = 2 * 60 * 1000;  // 2 minutes
@@ -1740,8 +1783,8 @@ export default function Home() {
         wsConnectTimeoutRef.current = null;
       }
       setWsConnectionState('failed');
-      console.error("❌ WebSocket error");
-      setMessages(prev => [...prev, { role: "error", text: "❌ Connection failed. Retrying…" }]);
+      // Log connection error to console only — do not surface as chat bubble
+      console.error("❌ WebSocket error — connection failed, will retry");
       setIsLoading(false);
     };
   };
@@ -1893,56 +1936,74 @@ export default function Home() {
   const processLoadedMessages = (msgs: Message[]): Message[] => {
     return msgs.map(m => {
       if (m.role !== "ai") return m;
-      
+
       const text = m.text || "";
-     
+
       // 🔑 FIRST: Check if this is a GRAPH response
       const graphData = parseGraphData(text);
       if (graphData) {
         console.log("📊 [HISTORY] Graph response detected — keeping as raw JSON for chart");
-        return { ...m, text, isGraphResponse: true };  // ← Mark as graph
+        return { ...m, text, isGraphResponse: true };
       }
-     
-      // Check if already formatted (contains HTML tags)
-        if (
-      text.includes('<table') || 
-      text.includes('<div class=') || 
-      text.includes('<div style=') ||
-      text.includes('large-dataset-wrapper')
-    ) {
-      console.log("✅ [HISTORY] Message already HTML formatted (from cache) - skipping");
-      // Try to extract table data from HTML
-      const rows = extractTableRows(text);
-      if (rows.length > 0) {
-        return { ...m, text, tableData: rows, tableTitle: "Data Results" };
-      }
-      return m;
-    }
-          
-      // Extract response content (removes session_id wrapper)
-      const cleanedText = decodeEntities(extractResponseContent(text));
-     
-      // ALWAYS TRY RENDERING AS UNIFIED TABLE STRUCTURE FIRST (ALL SIZES)
-      const largeDatasetHTML = renderLargeDataset(cleanedText);
-      if (largeDatasetHTML) {
-        console.log("✅ [HISTORY] Rendered as unified table structure");
-        // Always extract table rows for TableWithTile
-        const rows = extractTableRows(largeDatasetHTML);
-        if (rows.length > 0) {
-          return { ...m, text: largeDatasetHTML, tableData: rows, tableTitle: "Data" };
+
+      // 🔑 THE FIX: Detect if the history text is a Table JSON
+      try {
+        if (text.trim().startsWith('{') || text.trim().startsWith('[')) {
+          const parsed = JSON.parse(text);
+          if (parsed && (parsed.columns || parsed.data)) {
+            // It's a table! Use the existing render function
+            const tableHTML = renderLargeDataset(text);
+            if (tableHTML) {
+              const rows = extractTableRows(tableHTML);
+              return { ...m, text: tableHTML, tableData: rows, tableTitle: "Results" };
+            }
+          }
         }
-        return { ...m, text: largeDatasetHTML };
+      } catch (e) {
+        /* Not JSON, ignore */
       }
-      
+
+      // Check if already formatted (contains HTML tags or wrapper class)
+      if (
+        text.includes('<table') ||
+        text.includes('large-dataset-wrapper') ||
+        text.includes('ai-table')
+      ) {
+        console.log("✅ [HISTORY] Message already HTML formatted - extracting table data");
+        // Try to extract table data from HTML
+        const rows = extractTableRows(text);
+        if (rows.length > 0) {
+          return { ...m, text, tableData: rows, tableTitle: "Results" };
+        }
+        return m;
+      }
+
+      // Extract response content (removes session_id wrapper)
+      const rawJson = extractResponseContent(text);
+      const cleanedText = decodeEntities(rawJson);
+
+      // ALWAYS TRY RENDERING AS UNIFIED TABLE STRUCTURE FIRST (ALL SIZES)
+      const tableHTML = renderLargeDataset(cleanedText);
+      if (tableHTML) {
+        console.log("✅ [HISTORY] Successfully rendered as table structure");
+        const rows = extractTableRows(tableHTML);
+        if (rows.length > 0) {
+          return { ...m, text: tableHTML, tableData: rows, tableTitle: "Results" };
+        }
+        return { ...m, text: tableHTML };
+      }
+
       // Not tabular data → try to format as text
       try {
         const formattedText = formatOutput(cleanedText);
-        console.log("✅ [HISTORY] Formatted as text output");
+        // 🔑 EXTRA FIX: If the formatted text still has raw HTML tags, decode them
+        if (formattedText.includes('<div') || formattedText.includes('&lt;')) {
+          return { ...m, text: decodeEntities(formattedText) };
+        }
         return { ...m, text: formattedText };
       } catch (err) {
-        // Not JSON → treat as already formatted or plain text
-        console.log("📝 [HISTORY] Not JSON - keeping as is");
-        return m;
+        console.log("📝 [HISTORY] Fallback to raw text");
+        return { ...m, text: decodeEntities(text) };
       }
     });
   };
@@ -2194,8 +2255,9 @@ export default function Home() {
 
   // ── Send message over the persistent WebSocket ────────────────────────────
   const sendMessage = () => {
-  if (!input.trim() || isLoading) return;
-  const userText = input.trim();
+  const domVal = inputRef.current?.value ?? "";
+  if (!domVal.trim() || isLoading) return;
+  const userText = domVal.trim();
 
   const ws = wsRef.current;
 
@@ -2232,6 +2294,9 @@ export default function Home() {
     sessionMessagesRef.current.set(sessionId, updated);
     return updated;
   });
+  // Clear textarea DOM value and debounced state
+  if (inputRef.current) inputRef.current.value = "";
+  rawInputRef.current = "";
   setInput("");
   setIsLoading(true);
   accRef.current = "";
@@ -2295,8 +2360,23 @@ export default function Home() {
           <textarea
             ref={inputRef}
             className="main-input"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
+            defaultValue={input}
+            onChange={(e) => {
+              // Update ref immediately (no re-render)
+              rawInputRef.current = e.target.value;
+              // Resize based on DOM measurements
+              resizeTA();
+
+              // Debounce updating the heavier `input` state
+              if (inputDebounceRef.current) {
+                clearTimeout(inputDebounceRef.current);
+                inputDebounceRef.current = null;
+              }
+              inputDebounceRef.current = window.setTimeout(() => {
+                setInput(rawInputRef.current);
+                inputDebounceRef.current = null;
+              }, DEBOUNCE_MS);
+            }}
             onKeyDown={handleKeyDown}
             disabled={isLoading || wsConnectionState !== "connected"}
             placeholder={
@@ -2338,7 +2418,7 @@ export default function Home() {
           <button
             className="send-btn"
             onClick={sendMessage}
-            disabled={isLoading || wsConnectionState !== "connected" || !input.trim()}
+            disabled={isLoading || wsConnectionState !== "connected" || !(inputRef.current?.value ?? "").trim()}
           >
             <IconArrowUp size={16} color="white" stroke={2} />
           </button>
@@ -2347,6 +2427,11 @@ export default function Home() {
       {variant === "landing" && (
         <LandingSuggestedQueries
           onSelect={(q) => {
+            if (inputDebounceRef.current) { clearTimeout(inputDebounceRef.current); inputDebounceRef.current = null; }
+            if (inputRef.current) {
+              inputRef.current.value = q;
+            }
+            rawInputRef.current = q;
             setInput(q);
             requestAnimationFrame(() => inputRef.current?.focus());
           }}
@@ -2715,7 +2800,7 @@ export default function Home() {
                           style={{
                             position: 'fixed',
                             top: `${sessionMenuPos.top}px`,
-                            transform: sessionMenuPos.placement === 'above' ? 'translateY(-100%)' : 'none',
+                            transform: sessionMenuPos.placement === 'above' ? 'translate(calc(-100% + 24px), -100%)' : 'translateX(calc(-100% + 24px))',
                             left: `${sessionMenuPos.left}px`,
                             background: 'var(--color-bg-alt)',
                             border: '1px solid var(--color-border)',
@@ -2961,7 +3046,7 @@ export default function Home() {
                       <div className="avatar-box"><IconAI/></div>
                     )}
 
-                    <div className={`message-bubble ${msg.role}${isGraphMsg ? ' graph-message' : ''}`}>
+                    <div className={`message-bubble ${msg.role}${isGraphMsg ? ' graph-message' : ''}${msg.tableData && msg.tableData.length > 0 ? ' table-message' : ''}`}>
 
                       {isAudio ? (
                     /* ── Audio Message: Show player UI ── */
