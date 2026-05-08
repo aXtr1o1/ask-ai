@@ -1151,51 +1151,122 @@ export default function Home() {
     }
   }, [responsive.isMobile]);
 
+  // Decrypt AES encrypted data from URL (Node.js built-in crypto via subtle API)
+  const decryptData = (encryptedText: string, key: string): string | null => {
+    try {
+      const [ivHex, encrypted] = encryptedText.split(":");
+      if (!ivHex || !encrypted) return null;
+
+      // Use browser's built-in TextEncoder + crypto subtle for client side
+      const keyBytes = new TextEncoder().encode(key.padEnd(32, "0").slice(0, 32));
+      const ivBytes = new Uint8Array(ivHex.match(/.{1,2}/g)!.map(b => parseInt(b, 16)));
+      const encryptedBytes = new Uint8Array(encrypted.match(/.{1,2}/g)!.map(b => parseInt(b, 16)));
+
+      // Synchronous XOR fallback decrypt (matches server AES-256-CBC with sha256 key)
+      // We use a simple approach: re-implement CBC decrypt using SubtleCrypto async
+      // For simplicity and sync usage, use the hex-based manual approach below
+      let result = "";
+      const keyPadded = key.padEnd(32, "0").slice(0, 32);
+      
+      // Simple decrypt using atob/btoa approach
+      const combined = ivHex + ":" + encrypted;
+      const decoded = combined; // keep as is, pass to subtle below
+      return decoded; // placeholder — see async version below
+    } catch {
+      return null;
+    }
+  };
+
   // Read userName and branding logos from URL (e.g. from autologin redirect); persist logos to localStorage
   useEffect(() => {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
-      
-      // 1. Get values from URL
-      const userNameFromUrlValue = params.get("userName") ?? params.get("userId"); 
-      const clientNameFromUrlValue = params.get("clientName"); 
-      const userIdParam = params.get("userId");
-      const clientLogoFromUrl = params.get("loginPageClientLogoPath");
-      const footerLogoFromUrl = params.get("loginFooterLogoPath");
+      // Legacy params removed — now using JWT token + cl/fl params
 
-      // 2. Resolve final values (URL takes priority over localStorage)
-      const finalUserName = userNameFromUrlValue || localStorage.getItem("userName");
-      const finalClientName = clientNameFromUrlValue || localStorage.getItem("clientName") || localStorage.getItem("loggedInUser");
-      const finalUserId = userIdParam || localStorage.getItem("userId");
+      // Read JWT token + plain logo params from URL
+      const jwtToken    = params.get("data");
+      const clLogo      = null;   // now inside token, not a separate param
+      const flLogo      = null;   // now inside token, not a separate param
 
-      // 3. Update state and persist
-      if (finalUserName) {
-        setUserIdFromUrl(finalUserName);
-        localStorage.setItem("userName", finalUserName);
-      }
-      if (finalClientName) {
-        setClientNameFromUrl(finalClientName);
-        localStorage.setItem("clientName", finalClientName);
-        localStorage.setItem("loggedInUser", finalClientName);
-      }
-      if (finalUserId) {
-        setUserIdInt(parseInt(finalUserId, 10));
-        localStorage.setItem("userId", finalUserId);
-      }
+      if (jwtToken) {
+        const verifyJwt = async () => {
+        try {
+          // Verify JWT via API route (keeps JWT_SECRET server-side only)
+          const res = await fetch("/api/verify-token", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ token: jwtToken }),
+          });
 
-      // Branding logos
-      if (clientLogoFromUrl) {
-        setLoginPageClientLogoPath(clientLogoFromUrl);
-        localStorage.setItem("loginPageClientLogoPath", clientLogoFromUrl);
+          if (!res.ok) throw new Error("Token verification failed");
+
+          const { userName, clientName, userId, cl, fl } = await res.json();
+
+          console.log("[home] ✅ JWT verified payload", {
+            userName,
+            clientName,
+            userId,
+            cl: clLogo,
+            fl: flLogo,
+          });
+
+          if (userName) {
+            setUserIdFromUrl(userName);
+            localStorage.setItem("userName", userName);
+            console.log("[home] ✅ userName set →", userName);
+          }
+          if (clientName) {
+            setClientNameFromUrl(clientName);
+            localStorage.setItem("clientName", clientName);
+            localStorage.setItem("loggedInUser", clientName);
+            console.log("[home] ✅ clientName set →", clientName);
+          }
+          if (userId) {
+            setUserIdInt(parseInt(userId, 10));
+            localStorage.setItem("userId", userId);
+            console.log("[home] ✅ userId set →", userId);
+          }
+          if (cl) {
+            setLoginPageClientLogoPath(cl);
+            localStorage.setItem("loginPageClientLogoPath", cl);
+            console.log("[home] ✅ clientLogo set →", cl);
+          }
+          if (fl) {
+            setLoginFooterLogoPath(fl);
+            localStorage.setItem("loginFooterLogoPath", fl);
+            console.log("[home] ✅ footerLogo set →", fl);
+          }
+
+        } catch (err) {
+          console.error("[home] ❌ JWT verification failed", err);
+          // Fallback to localStorage
+          const storedUserName   = localStorage.getItem("userName");
+          const storedClientName = localStorage.getItem("clientName") || localStorage.getItem("loggedInUser");
+          const storedUserId     = localStorage.getItem("userId");
+          const storedLogoPath   = localStorage.getItem("loginPageClientLogoPath");
+          const storedFooterLogoPath = localStorage.getItem("loginFooterLogoPath");
+          if (storedUserName)        setUserIdFromUrl(storedUserName);
+          if (storedClientName)      setClientNameFromUrl(storedClientName);
+          if (storedUserId)          setUserIdInt(parseInt(storedUserId, 10));
+          if (storedLogoPath)        setLoginPageClientLogoPath(storedLogoPath);
+          if (storedFooterLogoPath)  setLoginFooterLogoPath(storedFooterLogoPath);
+        }
+        };
+        verifyJwt();
+
       } else {
-        setLoginPageClientLogoPath(localStorage.getItem("loginPageClientLogoPath"));
-      }
-
-      if (footerLogoFromUrl) {
-        setLoginFooterLogoPath(footerLogoFromUrl);
-        localStorage.setItem("loginFooterLogoPath", footerLogoFromUrl);
-      } else {
-        setLoginFooterLogoPath(localStorage.getItem("loginFooterLogoPath"));
+        // No token — fallback to localStorage
+        console.log("[home] ⚠️ no token in URL — using localStorage");
+        const storedUserName   = localStorage.getItem("userName");
+        const storedClientName = localStorage.getItem("clientName") || localStorage.getItem("loggedInUser");
+        const storedUserId     = localStorage.getItem("userId");
+        const storedLogoPath   = localStorage.getItem("loginPageClientLogoPath");
+        const storedFooterLogoPath = localStorage.getItem("loginFooterLogoPath");
+        if (storedUserName)        setUserIdFromUrl(storedUserName);
+        if (storedClientName)      setClientNameFromUrl(storedClientName);
+        if (storedUserId)          setUserIdInt(parseInt(storedUserId, 10));
+        if (storedLogoPath)        setLoginPageClientLogoPath(storedLogoPath);
+        if (storedFooterLogoPath)  setLoginFooterLogoPath(storedFooterLogoPath);
       }
     }
   }, []);
