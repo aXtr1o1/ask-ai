@@ -1237,6 +1237,8 @@ export default function Home() {
             console.log("[home] ✅ footerLogo set →", fl);
           }
 
+          setTokenVerified(true); // ← ADD THIS LINE
+
         } catch (err) {
           console.error("[home] ❌ JWT verification failed", err);
           // Fallback to localStorage
@@ -1250,6 +1252,8 @@ export default function Home() {
           if (storedUserId)          setUserIdInt(parseInt(storedUserId, 10));
           if (storedLogoPath)        setLoginPageClientLogoPath(storedLogoPath);
           if (storedFooterLogoPath)  setLoginFooterLogoPath(storedFooterLogoPath);
+
+          setTokenVerified(true); // ← ADD THIS LINE TOO
         }
         };
         verifyJwt();
@@ -1307,34 +1311,41 @@ export default function Home() {
     }
   }, [responsive.isDesktop, responsive.isMobile, showManageAccount, showUpgradePlan]);
 
-  // Auth guard
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    
-    // Prefer clientNameFromUrl as backend username; fall back to localStorage
-    const backendUserName = clientNameFromUrl || localStorage.getItem("clientName") || localStorage.getItem("loggedInUser");
-    
-    if (backendUserName) {
-      localStorage.setItem("loggedInUser", backendUserName);
-      setLoggedInUser(backendUserName);
-      setAuthChecked(true);
-      
-      // If there are query parameters in the URL, hide them after processing
-      if (window.location.search) {
-        router.replace("/");
-      }
-      return;
-    }
-    
-    const stored = localStorage.getItem("loggedInUser");
-    if (!stored) { 
-      router.replace("/login"); 
-      return; 
-    }
-    
-    setLoggedInUser(stored);
+  // Add this state at top of component with other states:
+const [tokenVerified, setTokenVerified] = useState(false);
+
+// Auth guard
+useEffect(() => {
+  if (typeof window === "undefined") return;
+
+  const params = new URLSearchParams(window.location.search);
+  const hasToken = !!params.get("data");
+
+  // Wait for JWT verification to finish before checking auth
+  if (hasToken && !tokenVerified) return;
+
+  const backendUserName = clientNameFromUrl || localStorage.getItem("clientName") || localStorage.getItem("loggedInUser");
+
+  if (backendUserName) {
+    localStorage.setItem("loggedInUser", backendUserName);
+    setLoggedInUser(backendUserName);
     setAuthChecked(true);
-  }, [router, clientNameFromUrl]);
+
+    if (window.location.search) {
+      router.replace("/");
+    }
+    return;
+  }
+
+  const stored = localStorage.getItem("loggedInUser");
+  if (!stored) {
+    router.replace("/login");
+    return;
+  }
+
+  setLoggedInUser(stored);
+  setAuthChecked(true);
+}, [router, clientNameFromUrl, tokenVerified]);
 
   // Keep sessionIdRef in sync with state
   useEffect(() => {
