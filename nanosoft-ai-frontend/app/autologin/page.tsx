@@ -112,7 +112,7 @@ export default async function AutoLoginPage({ searchParams }: AutoLoginPageProps
   if (autoLoginOutput?.userID != null && autoLoginOutput?.userName && autoLoginOutput?.service) {
     const backendBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
     const clientInsertionUrl = `${backendBaseUrl}/api/client_insertion`;
-    const token = xAuth?.startsWith("Bearer ") ? xAuth : xAuth ? `Bearer ${xAuth}` : "";
+    const authToken = xAuth?.startsWith("Bearer ") ? xAuth : xAuth ? `Bearer ${xAuth}` : "";
     const clientName =
       (() => {
         try {
@@ -127,7 +127,7 @@ export default async function AutoLoginPage({ searchParams }: AutoLoginPageProps
       userName: autoLoginOutput.userName,
       service: autoLoginOutput.service,
       clientName,
-      hasToken: !!token,
+      hasToken:  !!authToken,
     });
 
 
@@ -144,7 +144,7 @@ export default async function AutoLoginPage({ searchParams }: AutoLoginPageProps
           userName: autoLoginOutput.userName,
           service: autoLoginOutput.service,
           clientName,
-          token,
+          token: authToken,
         }),
         cache: "no-store",
       });
@@ -161,8 +161,8 @@ export default async function AutoLoginPage({ searchParams }: AutoLoginPageProps
     
     // getBranding: POST with x-auth, userid, body { data: { service } }
     const getBrandingUrl = `${autoLoginOutput.service}/getBranding`;
-    //const serviceName = new URL(autoLoginOutput.service).hostname.split(".")[0] ?? "";
-    const serviceName = "v4demo";
+    const serviceName = new URL(autoLoginOutput.service).hostname.split(".")[0] ?? "";
+    //const serviceName = "v4demo";
     const authHeader = xAuth?.startsWith("Bearer ") ? xAuth : xAuth ? `Bearer ${xAuth}` : "";
 
     let LoginPageClientLogoPath: string | undefined;
@@ -202,15 +202,34 @@ export default async function AutoLoginPage({ searchParams }: AutoLoginPageProps
       }
     }
 
-    // Pass username, clientName and logo paths to main chat page via query params
-    const search = new URLSearchParams();
-    search.set("userName", autoLoginOutput.userName);
-    search.set("clientName", clientName);
-    if (LoginPageClientLogoPath) search.set("loginPageClientLogoPath", LoginPageClientLogoPath);
-    if (LoginFooterLogoPath) search.set("loginFooterLogoPath", LoginFooterLogoPath);
-    const target = `/?${search.toString()}`;
-    console.log("[autologin] redirecting to main chat", { target });
-    redirect(target);
+  const jwt = require("jsonwebtoken");
+  const jwtSecret = process.env.JWT_SECRET;
+
+  // Bundle everything into one single token (userName, clientName, userId + logos)
+  const token = jwt.sign(
+    {
+      userName: autoLoginOutput.userName,
+      clientName: clientName,
+      userId: "1",
+      cl: LoginPageClientLogoPath ?? "",
+      fl: LoginFooterLogoPath ?? "",
+    },
+    jwtSecret,
+    { expiresIn: "5m" }
+  );
+
+  console.log("[autologin] signing JWT payload", {
+    userName: autoLoginOutput.userName,
+    clientName: clientName,
+    userId: "1",
+    cl: LoginPageClientLogoPath ?? "",
+    fl: LoginFooterLogoPath ?? "",
+  });
+
+  // Single encoded param — no plain logo URLs in the address bar
+  const target = `/?data=${encodeURIComponent(token)}`;
+  console.log("[autologin] redirecting to main chat (single encoded token)", { target });
+  redirect(target);
   }
 
 
