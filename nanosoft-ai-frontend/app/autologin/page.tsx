@@ -214,8 +214,7 @@ export default async function AutoLoginPage({ searchParams }: AutoLoginPageProps
       cl: LoginPageClientLogoPath ?? "",
       fl: LoginFooterLogoPath ?? "",
     },
-    jwtSecret,
-    { expiresIn: "5m" }
+    jwtSecret
   );
 
   console.log("[autologin] signing JWT payload", {
