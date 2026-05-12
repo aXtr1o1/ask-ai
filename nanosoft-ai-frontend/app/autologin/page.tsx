@@ -35,8 +35,8 @@ export default async function AutoLoginPage({ searchParams }: AutoLoginPageProps
   });
 
   if (!p1) {
-    console.log("[autologin] missing p1, redirecting to /login");
-    redirect("/login");
+    console.log("[autologin] missing p1, redirecting to /?autologin_error=missing_p1");
+    redirect("/?autologin_error=missing_p1");
   }
 
   let email: string;
@@ -56,19 +56,19 @@ export default async function AutoLoginPage({ searchParams }: AutoLoginPageProps
 
     if (!payload.email) {
       console.log("[autologin] missing email in payload");
-      redirect("/login");
+      redirect("/?autologin_error=missing_email");
     }
     email = payload.email;
 
     if (payload.service) {service = payload.service.replace(/\/$/, "");}
     else if (payload.domain) {service = `https://${payload.domain}.smartfm.cloud`;}
     else {console.log("[autologin] missing service or domain in payload");
-      redirect("/login");
+      redirect("/?autologin_error=missing_service");
     }
     console.log("[autologin] using", { email, service });
   } catch (err) {
     console.error("[autologin] decode/parse error", err);
-    redirect("/login");
+    redirect("/?autologin_error=decode_error");
   }
 // encoding :
   const encodedEmail = Buffer.from(email, "utf-8").toString("base64");   ////////////////////////////////
@@ -203,7 +203,12 @@ export default async function AutoLoginPage({ searchParams }: AutoLoginPageProps
     }
 
   const jwt = require("jsonwebtoken");
-  const jwtSecret = process.env.JWT_SECRET;
+  // Must match app/verify-token/route.ts so ?data= tokens verify after redirect
+  const jwtSecret = process.env.JWT_SECRET ?? "nano_encryption_key";
+  console.log("[autologin] signing session JWT", {
+    hasJwtSecretFromEnv: Boolean(process.env.JWT_SECRET),
+    usingFallbackSecret: !process.env.JWT_SECRET,
+  });
 
   // Bundle everything into one single token (userName, clientName, userId + logos)
   const token = jwt.sign(
@@ -232,5 +237,8 @@ export default async function AutoLoginPage({ searchParams }: AutoLoginPageProps
   }
 
 
-  redirect("/login");
+  console.log("[autologin] autoLogin output incomplete, redirecting to /?autologin_error=auto_login_failed", {
+    autoLoginOutput,
+  });
+  redirect("/?autologin_error=auto_login_failed");
 }

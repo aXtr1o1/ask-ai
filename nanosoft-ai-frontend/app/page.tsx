@@ -1151,32 +1151,6 @@ export default function Home() {
     }
   }, [responsive.isMobile]);
 
-  // Decrypt AES encrypted data from URL (Node.js built-in crypto via subtle API)
-  const decryptData = (encryptedText: string, key: string): string | null => {
-    try {
-      const [ivHex, encrypted] = encryptedText.split(":");
-      if (!ivHex || !encrypted) return null;
-
-      // Use browser's built-in TextEncoder + crypto subtle for client side
-      const keyBytes = new TextEncoder().encode(key.padEnd(32, "0").slice(0, 32));
-      const ivBytes = new Uint8Array(ivHex.match(/.{1,2}/g)!.map(b => parseInt(b, 16)));
-      const encryptedBytes = new Uint8Array(encrypted.match(/.{1,2}/g)!.map(b => parseInt(b, 16)));
-
-      // Synchronous XOR fallback decrypt (matches server AES-256-CBC with sha256 key)
-      // We use a simple approach: re-implement CBC decrypt using SubtleCrypto async
-      // For simplicity and sync usage, use the hex-based manual approach below
-      let result = "";
-      const keyPadded = key.padEnd(32, "0").slice(0, 32);
-      
-      // Simple decrypt using atob/btoa approach
-      const combined = ivHex + ":" + encrypted;
-      const decoded = combined; // keep as is, pass to subtle below
-      return decoded; // placeholder — see async version below
-    } catch {
-      return null;
-    }
-  };
-
   // Read userName and branding logos from URL (e.g. from autologin redirect); persist logos to localStorage
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -1184,63 +1158,76 @@ export default function Home() {
       // Legacy params removed — now using JWT token + cl/fl params
 
       // Read JWT token + plain logo params from URL
-      const jwtToken    = params.get("data");
-      const clLogo      = null;   // now inside token, not a separate param
-      const flLogo      = null;   // now inside token, not a separate param
+      const jwtToken = params.get("data");
 
       if (jwtToken) {
         const verifyJwt = async () => {
         try {
-          // Verify JWT via API route (keeps JWT_SECRET server-side only)
-          const res = await fetch("/api/verify-token", {
+          console.log("[auth] verifying token");
+          // Verify JWT via API route (keeps JWT_SECRET server-side only; not under /api/ so nginx can proxy /api to Python)
+          const res = await fetch("/verify-token", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ token: jwtToken }),
           });
 
-          if (!res.ok) throw new Error("Token verification failed");
+          const rawBody = await res.text();
+          let parsed: Record<string, unknown> = {};
+          try {
+            parsed = JSON.parse(rawBody) as Record<string, unknown>;
+          } catch {
+            parsed = {};
+          }
+          if (!res.ok) {
+            console.error("[home] JWT verify HTTP error", {
+              status: res.status,
+              statusText: res.statusText,
+              body: rawBody.slice(0, 500),
+            });
+            throw new Error("Token verification failed");
+          }
 
-          const { userName, clientName, userId, cl, fl } = await res.json();
+          const { userName, clientName, userId, cl, fl } = parsed as {
+            userName?: string;
+            clientName?: string;
+            userId?: string;
+            cl?: string;
+            fl?: string;
+          };
 
-          console.log("[home] ✅ JWT verified payload", {
-            userName,
-            clientName,
-            userId,
-            cl: clLogo,
-            fl: flLogo,
-          });
+          console.log("[auth] token verified");
 
           if (userName) {
             setUserIdFromUrl(userName);
             localStorage.setItem("userName", userName);
-            console.log("[home] ✅ userName set →", userName);
+            
           }
           if (clientName) {
             setClientNameFromUrl(clientName);
             localStorage.setItem("clientName", clientName);
             localStorage.setItem("loggedInUser", clientName);
-            console.log("[home] ✅ clientName set →", clientName);
+            
           }
           if (userId) {
             setUserIdInt(parseInt(userId, 10));
             localStorage.setItem("userId", userId);
-            console.log("[home] ✅ userId set →", userId);
+            
           }
           if (cl) {
             setLoginPageClientLogoPath(cl);
             localStorage.setItem("loginPageClientLogoPath", cl);
-            console.log("[home] ✅ clientLogo set →", cl);
+            
           }
           if (fl) {
             setLoginFooterLogoPath(fl);
             localStorage.setItem("loginFooterLogoPath", fl);
-            console.log("[home] ✅ footerLogo set →", fl);
+            
           }
 
           setTokenVerified(true); // ← ADD THIS LINE
 
         } catch (err) {
-          console.error("[home] ❌ JWT verification failed", err);
+          console.error("[auth] verification failed — using stored session");
           // Fallback to localStorage
           const storedUserName   = localStorage.getItem("userName");
           const storedClientName = localStorage.getItem("clientName") || localStorage.getItem("loggedInUser");
@@ -1260,7 +1247,7 @@ export default function Home() {
 
       } else {
         // No token — fallback to localStorage
-        console.log("[home] ⚠️ no token in URL — using localStorage");
+        console.log("[auth] using stored session");
         const storedUserName   = localStorage.getItem("userName");
         const storedClientName = localStorage.getItem("clientName") || localStorage.getItem("loggedInUser");
         const storedUserId     = localStorage.getItem("userId");
@@ -1339,7 +1326,9 @@ useEffect(() => {
 
   const stored = localStorage.getItem("loggedInUser");
   if (!stored) {
-    router.replace("/login");
+    console.warn("[auth] no session found");
+    setLoggedInUser(null);
+    setAuthChecked(true);
     return;
   }
 
@@ -2227,7 +2216,7 @@ useEffect(() => {
   }
 
   localStorage.removeItem("loggedInUser");
-  router.replace("/login");
+  router.replace("/");
 };
   const toggleRecording = async () => {
     if (isRecording) {
