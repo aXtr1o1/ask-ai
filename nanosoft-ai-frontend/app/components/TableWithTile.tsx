@@ -329,7 +329,7 @@ const TableWithTile = React.memo(function TableWithTile({
           {/* Download Button */}
           <button
             onClick={handleDownload}
-            title="Download CSV"
+            title="Download data"
             style={{
               display: 'flex',
               alignItems: 'center',
