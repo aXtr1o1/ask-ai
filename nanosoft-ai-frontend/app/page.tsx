@@ -2014,19 +2014,19 @@ export default function Home() {
       const graphData = parseGraphData(text);
       if (graphData) {
         console.log("📊 [HISTORY] Graph response detected — keeping as raw JSON for chart");
-        return { ...m, text, isGraphResponse: true };
+        return { ...m, text, originalText: text, isGraphResponse: true };
       }
 
-      // 🔑 THE FIX: Detect if the history text is a Table JSON
+      // 🔑 Detect if the history text is a Table JSON (records/data/columns key)
       try {
         if (text.trim().startsWith('{') || text.trim().startsWith('[')) {
           const parsed = JSON.parse(text);
-          if (parsed && (parsed.columns || parsed.data)) {
-            // It's a table! Use the existing render function
+          if (parsed && (parsed.columns || parsed.data || parsed.records || parsed.p_list)) {
             const tableHTML = renderLargeDataset(text);
             if (tableHTML) {
               const rows = extractTableRows(tableHTML);
-              return { ...m, text: tableHTML, tableData: rows, tableTitle: "Results" };
+              // ✅ Set originalText = raw JSON so future saves preserve it
+              return { ...m, text: tableHTML, originalText: text, tableData: rows, tableTitle: "Results" };
             }
           }
         }
@@ -2034,19 +2034,19 @@ export default function Home() {
         /* Not JSON, ignore */
       }
 
-      // Check if already formatted (contains HTML tags or wrapper class)
+      // Check if already formatted HTML (contains table tags)
       if (
         text.includes('<table') ||
         text.includes('large-dataset-wrapper') ||
         text.includes('ai-table')
       ) {
         console.log("✅ [HISTORY] Message already HTML formatted - extracting table data");
-        // Try to extract table data from HTML
         const rows = extractTableRows(text);
         if (rows.length > 0) {
-          return { ...m, text, tableData: rows, tableTitle: "Results" };
+          // ✅ originalText stays as the HTML — no raw JSON available here
+          return { ...m, text, originalText: text, tableData: rows, tableTitle: "Results" };
         }
-        return m;
+        return { ...m, originalText: text };
       }
 
       // Extract response content (removes session_id wrapper)
@@ -2059,22 +2059,28 @@ export default function Home() {
         console.log("✅ [HISTORY] Successfully rendered as table structure");
         const rows = extractTableRows(tableHTML);
         if (rows.length > 0) {
-          return { ...m, text: tableHTML, tableData: rows, tableTitle: "Results" };
+          // ✅ originalText = raw text from DB so future saves re-parse correctly
+          return { ...m, text: tableHTML, originalText: text, tableData: rows, tableTitle: "Results" };
         }
-        return { ...m, text: tableHTML };
+        return { ...m, text: tableHTML, originalText: text };
       }
 
       // Not tabular data → try to format as text
       try {
         const formattedText = formatOutput(cleanedText);
-        // 🔑 EXTRA FIX: If the formatted text still has raw HTML tags, decode them
-        if (formattedText.includes('<div') || formattedText.includes('&lt;')) {
-          return { ...m, text: decodeEntities(formattedText) };
+        // Check if formatOutput produced an HTML table
+        const rows = extractTableRows(formattedText);
+        if (rows.length > 0) {
+          return { ...m, text: formattedText, originalText: text, tableData: rows, tableTitle: "Results" };
         }
-        return { ...m, text: formattedText };
+        // If the formatted text has raw HTML tags, decode them
+        if (formattedText.includes('<div') || formattedText.includes('&lt;')) {
+          return { ...m, text: decodeEntities(formattedText), originalText: text };
+        }
+        return { ...m, text: formattedText, originalText: text };
       } catch (err) {
         console.log("📝 [HISTORY] Fallback to raw text");
-        return { ...m, text: decodeEntities(text) };
+        return { ...m, text: decodeEntities(text), originalText: text };
       }
     });
   };

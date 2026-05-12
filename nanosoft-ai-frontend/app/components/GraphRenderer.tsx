@@ -1,21 +1,21 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { 
-  BarChart, 
-  Bar, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  ResponsiveContainer, 
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
   Cell,
   LineChart,
   Line,
   PieChart,
   Pie
 } from "recharts";
-import { IconChartBar, IconChartArea, IconChartPie, IconChartLine, IconChevronDown } from "@tabler/icons-react";
+import { IconChartBar, IconChartArea, IconChartPie, IconChartLine, IconChevronDown, IconDownload } from "@tabler/icons-react";
 import { useTheme } from "./useTheme";
 import { useResponsive, getResponsivePieChartSize } from "@/app/hooks/useResponsive";
 
@@ -66,6 +66,146 @@ export function parseGraphData(text: string): GraphData | null {
     console.warn("⚠️ parseGraphData parse error:", error instanceof Error ? error.message : error);
     return null;
   }
+}
+
+// ─── Download Graph Data as Excel ───────────────────────────────────────────
+export async function downloadGraphData(graphData: GraphData) {
+  if (!graphData.records || graphData.records.length === 0) return;
+  const headers = Object.keys(graphData.records[0]);
+  const htmlRows = graphData.records.map(row =>
+    `<tr>${headers.map(col => {
+      const val = row[col];
+      const formatted = String(val);
+      const escaped = ('' + formatted)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+      return `<td>${escaped}</td>`;
+    }).join('')}</tr>`
+  ).join('');
+
+  const htmlContent = `
+    <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+    <head>
+      <meta charset="utf-8">
+      <!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Sheet1</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->
+      <style>
+        th { font-weight: bold; background-color: #f3f4f6; text-align: left; padding: 8px; }
+        td { padding: 4px; }
+      </style>
+    </head>
+    <body>
+      <table>
+        <thead>
+          <tr>
+            ${headers.map(col => `<th>${col}</th>`).join('')}
+          </tr>
+        </thead>
+        <tbody>
+          ${htmlRows}
+        </tbody>
+      </table>
+    </body>
+    </html>
+  `;
+  const blob = new Blob([htmlContent], { type: 'application/vnd.ms-excel' });
+
+  let savedName = "Nano data.xls";
+
+  // Try to use File System Access API (Save As dialog)
+  if (typeof window !== "undefined" && "showSaveFilePicker" in window) {
+    try {
+      const handle = await (window as any).showSaveFilePicker({
+        suggestedName: "Nano data.xls",
+        types: [{
+          description: 'Excel File',
+          accept: { 'application/vnd.ms-excel': ['.xls'] },
+        }],
+      });
+      const writable = await handle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      savedName = handle.name;
+    } catch (err) {
+      // If user cancelled, just return
+      if ((err as Error).name === 'AbortError') return;
+      console.warn("File picker failed, falling back to default download.", err);
+      // Fallback
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.setAttribute("href", url);
+      link.setAttribute("download", "Nano data.xls");
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+  } else {
+    // Fallback for browsers without File System Access API
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", "Nano data.xls");
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+
+  // Show toast notification
+  showFileSavedToast(savedName);
+}
+
+function showFileSavedToast(filename: string) {
+  const isDark = document.documentElement.getAttribute("data-theme") !== "light";
+
+  // Theme-aware colours
+  const bg = isDark ? "rgba(28, 28, 30, 0.97)" : "rgba(255, 255, 255, 0.97)";
+  const border = isDark ? "rgba(212, 175, 55, 0.5)" : "rgba(180, 140, 30, 0.4)";
+  const textColor = isDark ? "#ffffff" : "#1a1a1a";
+  const accent = isDark ? "#D4AF37" : "#9A7B20";
+  const shadow = isDark ? "0 8px 32px rgba(0,0,0,0.5)" : "0 8px 32px rgba(0,0,0,0.15)";
+
+  const toast = document.createElement("div");
+  toast.style.cssText = `
+    position: fixed;
+    bottom: 32px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: ${bg};
+    border: 1px solid ${border};
+    border-radius: 12px;
+    padding: 14px 24px;
+    color: ${textColor};
+    font-size: 14px;
+    font-weight: 500;
+    box-shadow: ${shadow};
+    z-index: 99999;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    opacity: 0;
+    transition: opacity 0.3s ease, transform 0.3s ease;
+    pointer-events: none;
+    white-space: nowrap;
+    backdrop-filter: blur(8px);
+  `;
+  toast.innerHTML = `<span style="color:${accent};font-size:18px;">✓</span> <span>Saved as <strong style="color:${accent};">"${filename}"</strong></span>`;
+  document.body.appendChild(toast);
+
+  // Animate in
+  requestAnimationFrame(() => {
+    toast.style.opacity = "1";
+    toast.style.transform = "translateX(-50%) translateY(0)";
+  });
+
+  // Auto remove after 3s
+  setTimeout(() => {
+    toast.style.opacity = "0";
+    toast.style.transform = "translateX(-50%) translateY(20px)";
+    setTimeout(() => document.body.removeChild(toast), 350);
+  }, 3000);
 }
 
 // ─── Chart Type Dropdown Component ──────────────────────────────────────────
@@ -149,8 +289,8 @@ function ChartTypeDropdown({ currentType, onTypeChange }: ChartTypeDropdownProps
             marginBottom: '6px',
             ...dropdownMenuStyle,
             borderRadius: '6px',
-            boxShadow: theme === "light" 
-              ? '0 4px 12px rgba(0,0,0,0.1)' 
+            boxShadow: theme === "light"
+              ? '0 4px 12px rgba(0,0,0,0.1)'
               : '0 4px 12px rgba(0,0,0,0.6)',
             zIndex: 9999,
             minWidth: '160px',
@@ -167,11 +307,11 @@ function ChartTypeDropdown({ currentType, onTypeChange }: ChartTypeDropdownProps
                 gap: '8px',
                 width: '100%',
                 padding: '10px 12px',
-                background: 
-                  hoveredChartType === chart.type 
+                background:
+                  hoveredChartType === chart.type
                     ? menuItemHoverBackground
-                    : currentType === chart.type 
-                      ? menuItemActiveBackground 
+                    : currentType === chart.type
+                      ? menuItemActiveBackground
                       : 'transparent',
                 border: 'none',
                 color: currentType === chart.type ? menuItemActiveText : menuItemTextColor,
@@ -231,10 +371,10 @@ function usePreventChartFocus() {
 // ─── Vertical Bar Chart Component ────────────────────────────────────────────
 export function BarChartRenderer({ graphData, currentChartType, onChartTypeChange }: { graphData: GraphData; currentChartType?: ChartType; onChartTypeChange?: (type: ChartType) => void }) {
   const chartRef = usePreventChartFocus();
-  const tooltipStyle = { 
-    background: 'var(--color-bg-alt)', 
-    border: '1px solid var(--color-border)', 
-    color: 'var(--color-text)' 
+  const tooltipStyle = {
+    background: 'var(--color-bg-alt)',
+    border: '1px solid var(--color-border)',
+    color: 'var(--color-text)'
   };
   const barCount = Math.min(50, graphData.records.length);
   /** Tighter gaps when many categories so chart fits width without horizontal scroll */
@@ -242,9 +382,46 @@ export function BarChartRenderer({ graphData, currentChartType, onChartTypeChang
   const maxBarSize = barCount > 30 ? 24 : barCount > 15 ? 32 : 40;
 
   return (
-    <div className="ai-bubble" style={{ overflow: 'visible' }}>
+    <div className="ai-bubble" style={{ overflow: 'visible', position: 'relative' }}>
+      {/* Download Button — Top Right */}
+      <div style={{ position: 'absolute', top: 12, right: 12, zIndex: 10 }}>
+        <button
+          onClick={() => downloadGraphData(graphData)}
+          title="Download Data"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '4px 8px',
+            borderRadius: '6px',
+            background: 'rgba(174, 134, 37, 0.3)',
+            color: '#1f2937',
+            border: '1px solid #d4af37',
+            cursor: 'pointer',
+            fontSize: '11px',
+            fontWeight: 600,
+            transition: 'all 0.2s ease-in-out',
+            backdropFilter: 'blur(8px)',
+            transform: 'scale(1)',
+            opacity: 0.8,
+          }}
+          onMouseEnter={e => {
+            (e.currentTarget as HTMLElement).style.opacity = '1';
+            (e.currentTarget as HTMLElement).style.boxShadow = '0 0 12px rgba(212, 175, 55, 0.6)';
+          }}
+          onMouseLeave={e => {
+            (e.currentTarget as HTMLElement).style.opacity = '0.8';
+            (e.currentTarget as HTMLElement).style.boxShadow = 'none';
+          }}
+        >
+          <span style={{ display: 'flex', alignItems: 'center' }}>
+            <IconDownload size={14} />
+          </span>
+        </button>
+      </div>
+
       {/* Context summary shown above chart — from backend */}
-      <div className="graph-context-summary">
+      <div className="graph-context-summary" style={{ paddingRight: '40px', marginBottom: '32px' }}>
         {graphData.context_summary}
       </div>
 
@@ -268,8 +445,8 @@ export function BarChartRenderer({ graphData, currentChartType, onChartTypeChang
               />
 
               {/* Y Axis — value_key column e.g. result / count */}
-              <YAxis 
-                tick={{ fill: "#9CA3AF", fontSize: 10 }} 
+              <YAxis
+                tick={{ fill: "#9CA3AF", fontSize: 10 }}
                 width={44}
                 domain={[0, "dataMax + 100"]}
                 label={{ value: graphData.value_key, angle: -90, position: "insideLeft", offset: -6, style: { fill: "#9CA3AF", fontSize: 10 } }}
@@ -325,19 +502,56 @@ export function BarChartRenderer({ graphData, currentChartType, onChartTypeChang
 // ─── Horizontal Bar Chart Component ──────────────────────────────────────────
 export function HorizontalBarChartRenderer({ graphData, currentChartType, onChartTypeChange }: { graphData: GraphData; currentChartType?: ChartType; onChartTypeChange?: (type: ChartType) => void }) {
   const chartRef = usePreventChartFocus();
-  const tooltipStyle = { 
-    background: 'var(--color-bg-alt)', 
-    border: '1px solid var(--color-border)', 
-    color: 'var(--color-text)' 
+  const tooltipStyle = {
+    background: 'var(--color-bg-alt)',
+    border: '1px solid var(--color-border)',
+    color: 'var(--color-text)'
   };
   const rowCount = Math.min(50, graphData.records.length);
   /** Enough vertical space for each row without inner scroll */
   const chartHeight = Math.min(720, Math.max(280, rowCount * 17 + 96));
 
   return (
-    <div className="ai-bubble" style={{ overflow: 'visible' }}>
+    <div className="ai-bubble" style={{ overflow: 'visible', position: 'relative' }}>
+      {/* Download Button — Top Right */}
+      <div style={{ position: 'absolute', top: 12, right: 12, zIndex: 10 }}>
+        <button
+          onClick={() => downloadGraphData(graphData)}
+          title="Download Data"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '4px 8px',
+            borderRadius: '6px',
+            background: 'rgba(174, 134, 37, 0.3)',
+            color: '#1f2937',
+            border: '1px solid #d4af37',
+            cursor: 'pointer',
+            fontSize: '11px',
+            fontWeight: 600,
+            transition: 'all 0.2s ease-in-out',
+            backdropFilter: 'blur(8px)',
+            transform: 'scale(1)',
+            opacity: 0.8,
+          }}
+          onMouseEnter={e => {
+            (e.currentTarget as HTMLElement).style.opacity = '1';
+            (e.currentTarget as HTMLElement).style.boxShadow = '0 0 12px rgba(212, 175, 55, 0.6)';
+          }}
+          onMouseLeave={e => {
+            (e.currentTarget as HTMLElement).style.opacity = '0.8';
+            (e.currentTarget as HTMLElement).style.boxShadow = 'none';
+          }}
+        >
+          <span style={{ display: 'flex', alignItems: 'center' }}>
+            <IconDownload size={14} />
+          </span>
+        </button>
+      </div>
+
       {/* Context summary shown above chart — from backend */}
-      <div className="graph-context-summary">
+      <div className="graph-context-summary" style={{ paddingRight: '40px', marginBottom: '32px' }}>
         {graphData.context_summary}
       </div>
 
@@ -368,7 +582,7 @@ export function HorizontalBarChartRenderer({ graphData, currentChartType, onChar
               />
 
               {/* X Axis — value_key column */}
-              <XAxis 
+              <XAxis
                 type="number"
                 tick={{ fill: "#9CA3AF", fontSize: 9 }}
                 domain={[0, "dataMax + 100"]}
@@ -423,15 +637,52 @@ export function HorizontalBarChartRenderer({ graphData, currentChartType, onChar
 // ─── Line Chart Component ───────────────────────────────────────────────────
 export function LineChartRenderer({ graphData, currentChartType, onChartTypeChange }: { graphData: GraphData; currentChartType?: ChartType; onChartTypeChange?: (type: ChartType) => void }) {
   const chartRef = usePreventChartFocus();
-  const tooltipStyle = { 
-    background: 'var(--color-bg-alt)', 
-    border: '1px solid var(--color-border)', 
-    color: 'var(--color-text)' 
+  const tooltipStyle = {
+    background: 'var(--color-bg-alt)',
+    border: '1px solid var(--color-border)',
+    color: 'var(--color-text)'
   };
-    return (
-    <div className="ai-bubble" style={{ overflow: 'visible' }}>
+  return (
+    <div className="ai-bubble" style={{ overflow: 'visible', position: 'relative' }}>
+      {/* Download Button — Top Right */}
+      <div style={{ position: 'absolute', top: 12, right: 12, zIndex: 10 }}>
+        <button
+          onClick={() => downloadGraphData(graphData)}
+          title="Download Data"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '4px 8px',
+            borderRadius: '6px',
+            background: 'rgba(174, 134, 37, 0.3)',
+            color: '#1f2937',
+            border: '1px solid #d4af37',
+            cursor: 'pointer',
+            fontSize: '11px',
+            fontWeight: 600,
+            transition: 'all 0.2s ease-in-out',
+            backdropFilter: 'blur(8px)',
+            transform: 'scale(1)',
+            opacity: 0.8,
+          }}
+          onMouseEnter={e => {
+            (e.currentTarget as HTMLElement).style.opacity = '1';
+            (e.currentTarget as HTMLElement).style.boxShadow = '0 0 12px rgba(212, 175, 55, 0.6)';
+          }}
+          onMouseLeave={e => {
+            (e.currentTarget as HTMLElement).style.opacity = '0.8';
+            (e.currentTarget as HTMLElement).style.boxShadow = 'none';
+          }}
+        >
+          <span style={{ display: 'flex', alignItems: 'center' }}>
+            <IconDownload size={14} />
+          </span>
+        </button>
+      </div>
+
       {/* Context summary shown above chart — from backend */}
-      <div className="graph-context-summary">
+      <div className="graph-context-summary" style={{ paddingRight: '40px', marginBottom: '32px' }}>
         {graphData.context_summary}
       </div>
 
@@ -454,8 +705,8 @@ export function LineChartRenderer({ graphData, currentChartType, onChartTypeChan
               />
 
               {/* Y Axis — value_key column */}
-              <YAxis 
-                tick={{ fill: "#9CA3AF", fontSize: 10 }} 
+              <YAxis
+                tick={{ fill: "#9CA3AF", fontSize: 10 }}
                 width={44}
                 domain={[0, "dataMax + 100"]}
                 label={{ value: graphData.value_key, angle: -90, position: "insideLeft", offset: -6, style: { fill: "#9CA3AF", fontSize: 10 } }}
@@ -479,10 +730,10 @@ export function LineChartRenderer({ graphData, currentChartType, onChartTypeChan
               />
 
               {/* Line — gold stroke */}
-              <Line 
-                type="monotone" 
-                dataKey={graphData.value_key} 
-                stroke="#d4af37" 
+              <Line
+                type="monotone"
+                dataKey={graphData.value_key}
+                stroke="#d4af37"
                 dot={{ fill: "#f5c249", r: 4, strokeWidth: 2, stroke: "#8b6914" }}
                 activeDot={{ r: 6 }}
                 strokeWidth={3}
@@ -508,22 +759,22 @@ export function LineChartRenderer({ graphData, currentChartType, onChartTypeChan
 }
 
 // ─── Pie Chart Component ────────────────────────────────────────────────────
-export function PieChartRenderer({ graphData, currentChartType, onChartTypeChange }: { graphData: GraphData; currentChartType?: ChartType; onChartTypeChange?: (type: ChartType) => void }) { 
-    const [activeIndex, setActiveIndex] = useState<number | null>(null);
-    const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
-    const responsive = useResponsive();
-    const chartSize = getResponsivePieChartSize(responsive.screen);
-    const tooltipStyle = { 
-      background: 'var(--color-bg-alt)', 
-      border: '1px solid var(--color-border)', 
-      color: 'var(--color-text)' 
-    };
-    const minSliceAngle = responsive.isMobile ? 8 : responsive.isTablet ? 5 : 3;
-    const outerRadius = responsive.isMobile ? 98 : responsive.isTablet ? 110 : 120;
-    const innerRadius = responsive.isMobile ? 45 : responsive.isTablet ? 48 : 50;
-    const highlightedIndex = activeIndex !== null ? activeIndex : selectedIndex;
+export function PieChartRenderer({ graphData, currentChartType, onChartTypeChange }: { graphData: GraphData; currentChartType?: ChartType; onChartTypeChange?: (type: ChartType) => void }) {
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const responsive = useResponsive();
+  const chartSize = getResponsivePieChartSize(responsive.screen);
+  const tooltipStyle = {
+    background: 'var(--color-bg-alt)',
+    border: '1px solid var(--color-border)',
+    color: 'var(--color-text)'
+  };
+  const minSliceAngle = responsive.isMobile ? 8 : responsive.isTablet ? 5 : 3;
+  const outerRadius = responsive.isMobile ? 98 : responsive.isTablet ? 110 : 120;
+  const innerRadius = responsive.isMobile ? 45 : responsive.isTablet ? 48 : 50;
+  const highlightedIndex = activeIndex !== null ? activeIndex : selectedIndex;
 
-    // Prepare pie chart data — limit to top 8 slices for readability
+  // Prepare pie chart data — limit to top 8 slices for readability
   const pieData = graphData.records.slice(0, 8).map((record) => ({
     name: record[graphData.label_key],
     value: record[graphData.value_key] || 0,
@@ -535,9 +786,46 @@ export function PieChartRenderer({ graphData, currentChartType, onChartTypeChang
   ];
 
   return (
-    <div className="ai-bubble" style={{ overflow: 'visible' }}>
+    <div className="ai-bubble" style={{ overflow: 'visible', position: 'relative' }}>
+      {/* Download Button — Top Right */}
+      <div style={{ position: 'absolute', top: 12, right: 12, zIndex: 10 }}>
+        <button
+          onClick={() => downloadGraphData(graphData)}
+          title="Download Data"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '4px 8px',
+            borderRadius: '6px',
+            background: 'rgba(174, 134, 37, 0.3)',
+            color: '#1f2937',
+            border: '1px solid #d4af37',
+            cursor: 'pointer',
+            fontSize: '11px',
+            fontWeight: 600,
+            transition: 'all 0.2s ease-in-out',
+            backdropFilter: 'blur(8px)',
+            transform: 'scale(1)',
+            opacity: 0.8,
+          }}
+          onMouseEnter={e => {
+            (e.currentTarget as HTMLElement).style.opacity = '1';
+            (e.currentTarget as HTMLElement).style.boxShadow = '0 0 12px rgba(212, 175, 55, 0.6)';
+          }}
+          onMouseLeave={e => {
+            (e.currentTarget as HTMLElement).style.opacity = '0.8';
+            (e.currentTarget as HTMLElement).style.boxShadow = 'none';
+          }}
+        >
+          <span style={{ display: 'flex', alignItems: 'center' }}>
+            <IconDownload size={14} />
+          </span>
+        </button>
+      </div>
+
       {/* Context summary shown above chart — from backend */}
-      <div className="graph-context-summary">
+      <div className="graph-context-summary" style={{ paddingRight: '40px', marginBottom: '32px' }}>
         {graphData.context_summary}
       </div>
 
@@ -563,8 +851,8 @@ export function PieChartRenderer({ graphData, currentChartType, onChartTypeChang
                 onMouseLeave={() => setActiveIndex(null)}
               >
                 {pieData.map((entry, index) => (
-                  <Cell 
-                    key={`cell-${index}`} 
+                  <Cell
+                    key={`cell-${index}`}
                     fill={COLORS[index % COLORS.length]}
                     opacity={activeIndex === null || activeIndex === index ? 1 : 0.5}
                   />

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
-import { IconList, IconLayoutGrid } from "@tabler/icons-react";
+import { IconList, IconLayoutGrid, IconDownload } from "@tabler/icons-react";
 import { useTheme } from "@/app/components/useTheme";
 import { useResponsive, getResponsiveTable, getResponsiveTileDisplay, getSmartVisibleColumns } from "@/app/hooks/useResponsive";
 
@@ -38,12 +38,6 @@ const TableWithTile = React.memo(function TableWithTile({
   const [page, setPage] = useState(0);
   const LIMIT = 100;
 
-  // Set default view mode based on device on initial load
-  useEffect(() => {
-    if (responsive.isMobile) {
-      setViewMode("tile");
-    }
-  }, [responsive.isMobile]);
 
   // Extract non-table content from htmlTableContent to show as a header/summary
   const summaryContent = useMemo(() => {
@@ -99,6 +93,135 @@ const TableWithTile = React.memo(function TableWithTile({
     return String(val);
   };
 
+  // Download handler to export data as Excel with bold headers
+  const handleDownload = async () => {
+    const headers = detectedColumns;
+    const htmlRows = rows.map(row =>
+      `<tr>${headers.map(col => {
+        const val = row[col];
+        const formatted = formatCellValue(val);
+        // Escape special HTML characters
+        const escaped = ('' + formatted)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;');
+        return `<td>${escaped}</td>`;
+      }).join('')}</tr>`
+    ).join('');
+
+    const htmlContent = `
+      <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+      <head>
+        <meta charset="utf-8">
+        <!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Sheet1</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->
+        <style>
+          th { font-weight: bold; background-color: #f3f4f6; text-align: left; padding: 8px; }
+          td { padding: 4px; }
+        </style>
+      </head>
+      <body>
+        <table>
+          <thead>
+            <tr>
+              ${headers.map(col => `<th>${col}</th>`).join('')}
+            </tr>
+          </thead>
+          <tbody>
+            ${htmlRows}
+          </tbody>
+        </table>
+      </body>
+      </html>
+    `;
+    const blob = new Blob([htmlContent], { type: 'application/vnd.ms-excel' });
+
+    let savedName = "Nano data.xls";
+
+    // Try to use File System Access API (Save As dialog)
+    if (typeof window !== "undefined" && "showSaveFilePicker" in window) {
+      try {
+        const handle = await (window as any).showSaveFilePicker({
+          suggestedName: "Nano data.xls",
+          types: [{
+            description: 'Excel File',
+            accept: { 'application/vnd.ms-excel': ['.xls'] },
+          }],
+        });
+        const writable = await handle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        savedName = handle.name;
+      } catch (err) {
+        // If user cancelled, just return
+        if ((err as Error).name === 'AbortError') return;
+        console.warn("File picker failed, falling back to default download.", err);
+        // Fallback
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.setAttribute("href", url);
+        link.setAttribute("download", "Nano data.xls");
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+    } else {
+      // Fallback for browsers without File System Access API
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.setAttribute("href", url);
+      link.setAttribute("download", "Nano data.xls");
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+
+    // Show toast notification
+    const isDark = document.documentElement.getAttribute("data-theme") !== "light";
+    const bg       = isDark ? "rgba(28, 28, 30, 0.97)"  : "rgba(255, 255, 255, 0.97)";
+    const border    = isDark ? "rgba(212, 175, 55, 0.5)" : "rgba(180, 140, 30, 0.4)";
+    const textColor = isDark ? "#ffffff"                  : "#1a1a1a";
+    const accent    = isDark ? "#D4AF37"                  : "#9A7B20";
+    const shadow    = isDark ? "0 8px 32px rgba(0,0,0,0.5)" : "0 8px 32px rgba(0,0,0,0.15)";
+
+    const toast = document.createElement("div");
+    toast.style.cssText = `
+      position: fixed;
+      bottom: 32px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: ${bg};
+      border: 1px solid ${border};
+      border-radius: 12px;
+      padding: 14px 24px;
+      color: ${textColor};
+      font-size: 14px;
+      font-weight: 500;
+      box-shadow: ${shadow};
+      z-index: 99999;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      opacity: 0;
+      transition: opacity 0.3s ease, transform 0.3s ease;
+      pointer-events: none;
+      white-space: nowrap;
+      backdrop-filter: blur(8px);
+    `;
+    toast.innerHTML = `<span style="color:${accent};font-size:18px;">✓</span> <span>Saved as <strong style="color:${accent};">"${savedName}"</strong></span>`;
+    document.body.appendChild(toast);
+    requestAnimationFrame(() => {
+      toast.style.opacity = "1";
+      toast.style.transform = "translateX(-50%) translateY(0)";
+    });
+    setTimeout(() => {
+      toast.style.opacity = "0";
+      toast.style.transform = "translateX(-50%) translateY(20px)";
+      setTimeout(() => document.body.removeChild(toast), 350);
+    }, 3000);
+  };
 
   // Toggle container style: absolute on larger screens, inline/static on mobile
   const toggleContainerStyle = {
@@ -202,6 +325,50 @@ const TableWithTile = React.memo(function TableWithTile({
               <IconLayoutGrid size={14} />
             </span>
           </button>
+
+          {/* Download Button */}
+          <button
+            onClick={handleDownload}
+            title="Download CSV"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '4px 8px',
+              borderRadius: '6px',
+              background: 'rgba(174, 134, 37, 0.3)',
+              color: '#1f2937',
+              border: '1px solid #d4af37',
+              cursor: 'pointer',
+              fontSize: '11px',
+              fontWeight: 600,
+              transition: 'all 0.2s ease-in-out',
+              backdropFilter: 'blur(8px)',
+              transform: 'scale(1)',
+              opacity: 0.8,
+            }}
+            onMouseDown={e => {
+              (e.target as HTMLElement).style.transform = 'scale(0.95)';
+            }}
+            onMouseUp={e => {
+              (e.target as HTMLElement).style.transform = 'scale(1)';
+            }}
+            onMouseEnter={e => {
+              (e.currentTarget as HTMLElement).style.opacity = '1';
+              (e.currentTarget as HTMLElement).style.boxShadow = '0 0 12px rgba(212, 175, 55, 0.6)';
+            }}
+            onMouseLeave={e => {
+              (e.currentTarget as HTMLElement).style.opacity = '0.8';
+              (e.currentTarget as HTMLElement).style.boxShadow = 'none';
+            }}
+          >
+            <span style={{
+              display: 'flex',
+              alignItems: 'center',
+            }}>
+              <IconDownload size={14} />
+            </span>
+          </button>
         </div>
 
         <div className="content-shell" style={{ paddingTop: 0 }}>
@@ -233,6 +400,7 @@ const TableWithTile = React.memo(function TableWithTile({
                             <th key={col} style={{
                               padding: tableConfig.padding,
                               fontSize: tableConfig.fontSize,
+                              fontWeight: 600,
                             }}>{col}</th>
                           ))}
                         </tr>
