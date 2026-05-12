@@ -1163,10 +1163,7 @@ export default function Home() {
       if (jwtToken) {
         const verifyJwt = async () => {
         try {
-          console.log("[home] JWT path: calling /verify-token", {
-            tokenLength: jwtToken.length,
-            tokenPreview: `${jwtToken.slice(0, 24)}…${jwtToken.slice(-12)}`,
-          });
+          console.log("[auth] verifying token");
           // Verify JWT via API route (keeps JWT_SECRET server-side only; not under /api/ so nginx can proxy /api to Python)
           const res = await fetch("/verify-token", {
             method: "POST",
@@ -1198,45 +1195,39 @@ export default function Home() {
             fl?: string;
           };
 
-          console.log("[home] ✅ JWT verified payload (from /verify-token)", {
-            userName,
-            clientName,
-            userId,
-            cl,
-            fl,
-          });
+          console.log("[auth] token verified");
 
           if (userName) {
             setUserIdFromUrl(userName);
             localStorage.setItem("userName", userName);
-            console.log("[home] ✅ userName set →", userName);
+            
           }
           if (clientName) {
             setClientNameFromUrl(clientName);
             localStorage.setItem("clientName", clientName);
             localStorage.setItem("loggedInUser", clientName);
-            console.log("[home] ✅ clientName set →", clientName);
+            
           }
           if (userId) {
             setUserIdInt(parseInt(userId, 10));
             localStorage.setItem("userId", userId);
-            console.log("[home] ✅ userId set →", userId);
+            
           }
           if (cl) {
             setLoginPageClientLogoPath(cl);
             localStorage.setItem("loginPageClientLogoPath", cl);
-            console.log("[home] ✅ clientLogo set →", cl);
+            
           }
           if (fl) {
             setLoginFooterLogoPath(fl);
             localStorage.setItem("loginFooterLogoPath", fl);
-            console.log("[home] ✅ footerLogo set →", fl);
+            
           }
 
           setTokenVerified(true); // ← ADD THIS LINE
 
         } catch (err) {
-          console.error("[home] ❌ JWT verification failed (client)", err);
+          console.error("[auth] verification failed — using stored session");
           // Fallback to localStorage
           const storedUserName   = localStorage.getItem("userName");
           const storedClientName = localStorage.getItem("clientName") || localStorage.getItem("loggedInUser");
@@ -1256,7 +1247,7 @@ export default function Home() {
 
       } else {
         // No token — fallback to localStorage
-        console.log("[home] ⚠️ no token in URL — using localStorage");
+        console.log("[auth] using stored session");
         const storedUserName   = localStorage.getItem("userName");
         const storedClientName = localStorage.getItem("clientName") || localStorage.getItem("loggedInUser");
         const storedUserId     = localStorage.getItem("userId");
@@ -1335,11 +1326,7 @@ useEffect(() => {
 
   const stored = localStorage.getItem("loggedInUser");
   if (!stored) {
-    console.warn("[home] auth: no client session after URL token handling — staying on app (login page removed)", {
-      hadDataParam: hasToken,
-      tokenVerified,
-      clientNameFromUrl: clientNameFromUrl ?? null,
-    });
+    console.warn("[auth] no session found");
     setLoggedInUser(null);
     setAuthChecked(true);
     return;
