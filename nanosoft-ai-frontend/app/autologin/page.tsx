@@ -203,7 +203,7 @@ export default async function AutoLoginPage({ searchParams }: AutoLoginPageProps
     }
 
   const jwt = require("jsonwebtoken");
-  // Must match app/api/verify-token/route.ts so ?data= tokens verify after redirect
+  // Must match app/verify-token/route.ts so ?data= tokens verify after redirect
   const jwtSecret = process.env.JWT_SECRET ?? "nano_encryption_key";
   console.log("[autologin] signing session JWT", {
     hasJwtSecretFromEnv: Boolean(process.env.JWT_SECRET),

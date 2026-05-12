@@ -1163,12 +1163,12 @@ export default function Home() {
       if (jwtToken) {
         const verifyJwt = async () => {
         try {
-          console.log("[home] JWT path: calling /api/verify-token", {
+          console.log("[home] JWT path: calling /verify-token", {
             tokenLength: jwtToken.length,
             tokenPreview: `${jwtToken.slice(0, 24)}…${jwtToken.slice(-12)}`,
           });
-          // Verify JWT via API route (keeps JWT_SECRET server-side only)
-          const res = await fetch("/api/verify-token", {
+          // Verify JWT via API route (keeps JWT_SECRET server-side only; not under /api/ so nginx can proxy /api to Python)
+          const res = await fetch("/verify-token", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ token: jwtToken }),
@@ -1198,7 +1198,7 @@ export default function Home() {
             fl?: string;
           };
 
-          console.log("[home] ✅ JWT verified payload (from /api/verify-token)", {
+          console.log("[home] ✅ JWT verified payload (from /verify-token)", {
             userName,
             clientName,
             userId,
