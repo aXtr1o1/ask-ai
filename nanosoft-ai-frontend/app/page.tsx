@@ -27,7 +27,7 @@ interface Message {
   audioDuration?: number;
   audioUrl?: string;
   sendStatus?: "sent" | "failed" | "sending";
-   isGraphResponse?: boolean;  // ← Set to true if response is type="graph"
+  isGraphResponse?: boolean;  // ← Set to true if response is type="graph"
   chartType?: ChartType;      // ← chart type per message
   originalText?: string;      // ← Store original raw response before HTML processing
   tableData?: TableWithTileRow[];  // ← Store table rows for TableWithTile component
@@ -65,9 +65,9 @@ function extractText(raw: any, depth = 0): string {
   if (typeof raw === "object") {
     // Priority order: response → content → text → reply
     if (raw.response) return extractText(raw.response, depth + 1);
-    if (raw.content)  return extractText(raw.content,  depth + 1);
-    if (raw.text)     return extractText(raw.text,     depth + 1);
-    if (raw.reply)    return extractText(raw.reply,    depth + 1);
+    if (raw.content) return extractText(raw.content, depth + 1);
+    if (raw.text) return extractText(raw.text, depth + 1);
+    if (raw.reply) return extractText(raw.reply, depth + 1);
     return "";
   }
   return String(raw);
@@ -106,7 +106,7 @@ function md(text: string): string {
   text = text.replace(/`([^`]+)`/g,
     '<code style="background:rgba(0,0,0,0.07);padding:1px 5px;border-radius:3px;font-family:monospace;font-size:12px">$1</code>');
   text = text.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-  text = text.replace(/\*(.+?)\*/g,     "<em>$1</em>");
+  text = text.replace(/\*(.+?)\*/g, "<em>$1</em>");
   return text;
 }
 
@@ -161,7 +161,7 @@ function extractTableRows(html: string): TableWithTileRow[] {
 }
 
 // ── Regex: matches "Key: value" or "**Key**: value" (key 2–30 alpha chars) ────
-const KV_LINE_RE   = /^\*{0,2}([A-Za-z][A-Za-z ]{1,28})\*{0,2}:[ \t]+(.+)$/;
+const KV_LINE_RE = /^\*{0,2}([A-Za-z][A-Za-z ]{1,28})\*{0,2}:[ \t]+(.+)$/;
 // Multi-KV on one line: "Key: Val, Key: Val"
 const KV_BOUND_SRC = String.raw`(?:^|(?:,\s+))([A-Za-z][A-Za-z ]{0,25}?):\s*`;
 
@@ -184,16 +184,16 @@ function isHiddenColumn(col: string): boolean {
 
 // ── Status badge renderer ─────────────────────────────────────────────────────
 function badge(val: string): string {
-  const v   = val.toLowerCase();
-  const cls = ["online","open","good","active","operational","serviceable","completed"].includes(v)
-            ? "status-online"
-            : ["offline","closed","inactive","fault","immobilized","cancelled"].includes(v)
-            ? "status-offline"
-            : "status-neutral";
+  const v = val.toLowerCase();
+  const cls = ["online", "open", "good", "active", "operational", "serviceable", "completed"].includes(v)
+    ? "status-online"
+    : ["offline", "closed", "inactive", "fault", "immobilized", "cancelled"].includes(v)
+      ? "status-offline"
+      : "status-neutral";
   return `<span class="status-badge ${cls}">${esc(val)}</span>`;
 }
 
-const BADGE_COLS = new Set(["status","condition","state","wostatus","ppstatus","ppmstatus"]);
+const BADGE_COLS = new Set(["status", "condition", "state", "wostatus", "ppstatus", "ppmstatus"]);
 function isBadgeCol(col: string): boolean {
   return BADGE_COLS.has(col.toLowerCase().replace(/[\s_]/g, ""));
 }
@@ -221,7 +221,7 @@ function buildTable(rows: Record<string, string>[], cols?: string[]): string {
 
   const tbody = `<tbody>${rows.map(row =>
     `<tr>${allCols.map(col => {
-      const val  = row[col] ?? "—";
+      const val = row[col] ?? "—";
       const cell = isBadgeCol(col) ? badge(val) : esc(val);
       return `<td>${cell}</td>`;
     }).join("")}</tr>`
@@ -239,17 +239,17 @@ function buildTable(rows: Record<string, string>[], cols?: string[]): string {
 function extractResponseContent(text: string): string {
   try {
     const parsed = JSON.parse(text);
-   
+
     // If wrapper has session_id + response, extract just the response
     if (parsed.session_id && parsed.response) {
       return String(parsed.response);
     }
-   
+
     // If it has a response field, use it
     if (parsed.response) {
       return String(parsed.response);
     }
-   
+
     // Otherwise return original text
     return text;
   } catch {
@@ -305,8 +305,8 @@ function renderLargeDataset(text: string): string | null {
       ["online", "open", "good", "active", "operational", "serviceable", "completed"].includes(v)
         ? "status-online"
         : ["offline", "closed", "inactive", "fault", "immobilized", "cancelled"].includes(v)
-        ? "status-offline"
-        : "status-neutral";
+          ? "status-offline"
+          : "status-neutral";
     return `<span class="status-badge ${cls}">${escapeHTML(val)}</span>`;
   }
 
@@ -460,27 +460,27 @@ function renderLargeDataset(text: string): string | null {
 function formatLargeDatasetTable(largeDataData: any): string {
   let records = largeDataData.records || [];
   const context = largeDataData.context_summary || "";
- 
+
   // Handle case where records might not be an array
   if (!Array.isArray(records)) {
     console.warn("⚠️ Large dataset records is not an array:", typeof records);
     records = [];
   }
-  
-  
+
+
   if (records.length === 0) {
     return `<div class="large-dataset-context"><strong>Summary:</strong> ${esc(context)}</div>`;
   }
-  
-  
+
+
   console.log(`✅ Formatting large dataset: ${records.length} records, context length: ${context.length}`);
-  
-  
+
+
   // ═══════════════════════════════════════════════════════════════════
   // DYNAMICALLY COLLECT ALL COLUMNS FROM RECORDS (EXCLUDING HIDDEN)
   // ═══════════════════════════════════════════════════════════════════
-  
-  
+
+
   const allKeys = new Set<string>();
   records.forEach((r: any) => {
     if (r && typeof r === 'object') {
@@ -492,43 +492,43 @@ function formatLargeDatasetTable(largeDataData: any): string {
       });
     }
   });
-  
-  
+
+
   // Convert Set to array while preserving order
   const colsToShow: string[] = Array.from(allKeys);
-  
-  
+
+
   console.log(`📊 Dynamic columns detected: ${colsToShow.length} columns (hidden: ${records[0] ? Object.keys(records[0]).filter(k => isHiddenColumn(k)).length : 0}):`, colsToShow.slice(0, 10));
-  
-  
+
+
   // ═══════════════════════════════════════════════════════════════════
   // BUILD HTML TABLE STRUCTURE DYNAMICALLY - USING CSS CLASSES
   // ═══════════════════════════════════════════════════════════════════
-  
-  
+
+
   // 1. Create table header with ALL columns (excluding hidden)
   let tableHeadHTML = "<thead><tr>";
   colsToShow.forEach(col => {
     tableHeadHTML += `<th>${esc(col)}</th>`;
   });
   tableHeadHTML += "</tr></thead>";
-  
-  
+
+
   // 2. Create table body rows dynamically
   let tableBodyHTML = "<tbody>";
   records.forEach((record: any, rowIndex: number) => {
     if (!record || typeof record !== 'object') return;
-    
-    
+
+
     tableBodyHTML += `<tr>`;
-    
-    
+
+
     // Populate visible columns for each row (skip hidden columns)
     colsToShow.forEach(col => {
       const val = record[col];
       let cellContent = "—";
-      
-      
+
+
       if (val === null || val === undefined) {
         cellContent = "—";
       } else if (typeof val === "boolean") {
@@ -539,8 +539,8 @@ function formatLargeDatasetTable(largeDataData: any): string {
       } else {
         const strVal = String(val);
         const displayVal = strVal.length > 100 ? strVal.substring(0, 100) + "…" : strVal;
-        
-        
+
+
         // Apply status badge styling for status-like columns
         if (isBadgeCol(col) && val) {
           cellContent = badge(strVal);
@@ -548,21 +548,21 @@ function formatLargeDatasetTable(largeDataData: any): string {
           cellContent = esc(displayVal);
         }
       }
-      
-      
+
+
       tableBodyHTML += `<td>${cellContent}</td>`;
     });
-    
-    
+
+
     tableBodyHTML += "</tr>";
   });
   tableBodyHTML += "</tbody>";
-  
-  
+
+
   // 3. Create table footer with summary - ALIGN RIGHT
   const tfoot = `<tfoot><tr><td colspan="${colsToShow.length}" style="text-align: right; padding-right: 14px;">Total: ${records.length} record${records.length !== 1 ? "s" : ""} | ${colsToShow.length} column${colsToShow.length !== 1 ? "s" : ""}</td></tr></tfoot>`;
-  
-  
+
+
   // 4. Complete table HTML with CSS classes for styling
   const tableHTML = `<div class="large-dataset-wrapper">
     <table class="large-dataset-table">
@@ -571,16 +571,16 @@ function formatLargeDatasetTable(largeDataData: any): string {
       ${tfoot}
     </table>
   </div>`;
-  
-  
+
+
   // 5. Add context summary above table - JUST THE CONTEXT ONLY
   // const contextHTML = context 
   //   ? `<div class="large-dataset-context">${esc(context)}</div>` 
-  const contextHTML = context 
-    ? `<div class="large-dataset-context">${esc(context)}</div>` 
+  const contextHTML = context
+    ? `<div class="large-dataset-context">${esc(context)}</div>`
     : "";
-  
-  
+
+
   const fullHTML = contextHTML + tableHTML;
   console.log(` HTML generated - length: ${fullHTML.length}, has table-wrapper: ${fullHTML.includes('large-dataset-wrapper')}`);
   return fullHTML;
@@ -608,7 +608,7 @@ function renderKVVertical(pairs: { key: string; val: string }[]): string {
 function parseHorizKV(raw: string): Record<string, string> | null {
   const line = cleanLine(raw);
   if (!line) return null;
-  const re   = new RegExp(KV_BOUND_SRC, "g");
+  const re = new RegExp(KV_BOUND_SRC, "g");
   const hits: { key: string; vs: number; rs: number }[] = [];
   let m: RegExpExecArray | null;
   while ((m = re.exec(line)) !== null) {
@@ -628,7 +628,7 @@ function parseHorizKV(raw: string): Record<string, string> | null {
 // ── Parse one line as single KV: "Key: value" → {key, val} ───────────────────
 function parseSingleKV(raw: string): { key: string; val: string } | null {
   const line = cleanLine(raw);
-  const m    = KV_LINE_RE.exec(line);
+  const m = KV_LINE_RE.exec(line);
   if (!m) return null;
   return { key: m[1].trim(), val: m[2].trim() };
 }
@@ -664,13 +664,13 @@ function parsePipeTable(lines: string[]): { cols: string[]; rows: Record<string,
   const tl = lines.filter(l => /^\|.+\|$/.test(l.trim()));
   if (tl.length < 2) return null;
 
-  const split  = (l: string) =>
+  const split = (l: string) =>
     l.split("|").map(c => c.trim()).filter((_, i, a) => i > 0 && i < a.length - 1);
-  const isSep  = (l: string) =>
+  const isSep = (l: string) =>
     /^\|[\s\-:|]+\|$/.test(l.trim()) && split(l).every(c => /^[\-:\s]+$/.test(c));
 
-  const hasSep   = tl.length > 1 && isSep(tl[1]);
-  const cols     = split(tl[0]);
+  const hasSep = tl.length > 1 && isSep(tl[1]);
+  const cols = split(tl[0]);
   const dataRows = (hasSep ? tl.slice(2) : tl.slice(1)).filter(l => !isSep(l));
   if (!dataRows.length) return null;
 
@@ -713,15 +713,15 @@ function formatOutput(text: string): string {
 
   // Remove emojis from the first line only (Found X records message)
   text = removeEmoji(text);
-  
-  
-  const allLines = text.split("\n");
-  let   html     = "";
 
-  let   i        = 0;
+
+  const allLines = text.split("\n");
+  let html = "";
+
+  let i = 0;
 
   while (i < allLines.length) {
-    const line    = allLines[i];
+    const line = allLines[i];
     const trimmed = line.trim();
 
     // ── Blank line ─────────────────────────────────────────────────────────
@@ -855,7 +855,7 @@ function formatOutput(text: string): string {
     // ── Heading # ## ### ───────────────────────────────────────────────────
     const headM = trimmed.match(/^(#{1,3})\s+(.*)/);
     if (headM) {
-      const sz = ["20px","17px","15px"][headM[1].length - 1];
+      const sz = ["20px", "17px", "15px"][headM[1].length - 1];
       const fw = headM[1].length === 1 ? "700" : "600";
       html += `<div style="font-size:${sz};font-weight:${fw};margin:12px 0 5px;background:linear-gradient(180deg, #AE8625 0%, #F7EF8A 35%, #D2AC47 65%, #EDC967 100%);background-size:200% 200%;-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent">${md(headM[2])}</div>`;
       i++; continue;
@@ -889,7 +889,7 @@ function generateSessionId(): string {
   b[6] = (b[6]! & 0x0f) | 0x40;
   b[8] = (b[8]! & 0x3f) | 0x80;
   const h = [...b].map(x => x.toString(16).padStart(2, "0")).join("");
-  return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
 
 // ─── Static Data ─────────────────────────────────────────────────────────────
@@ -898,12 +898,12 @@ function generateSessionId(): string {
 // ─── Icons ────────────────────────────────────────────────────────────────────
 const IconFolder = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/>
+    <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
   </svg>
 );
 const IconPlus = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-    <path d="M12 5v14M5 12h14"/>
+    <path d="M12 5v14M5 12h14" />
   </svg>
 );
 const IconSearch = () => (
@@ -923,79 +923,89 @@ const IconSearch = () => (
 );
 const IconHamburger = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-    <line x1="3" y1="6"  x2="21" y2="6"/>
-    <line x1="3" y1="12" x2="21" y2="12"/>
-    <line x1="3" y1="18" x2="21" y2="18"/>
+    <line x1="3" y1="6" x2="21" y2="6" />
+    <line x1="3" y1="12" x2="21" y2="12" />
+    <line x1="3" y1="18" x2="21" y2="18" />
   </svg>
 );
 const IconLogout = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-    <polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+    <polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" />
   </svg>
 );
 const IconUser1 = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" />
   </svg>
 );
 const IconChat = ({ width = 16, height = 16, style }: { width?: number; height?: number; style?: React.CSSProperties }) => (
   <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
-    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
   </svg>
 );
 const IconArchive = ({ width = 16, height = 16, style }: { width?: number; height?: number; style?: React.CSSProperties }) => (
   <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
-    <rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><line x1="10" y1="12" x2="14" y2="12"/>
+    <rect x="3" y="4" width="18" height="4" rx="1" /><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8" /><line x1="10" y1="12" x2="14" y2="12" />
   </svg>
 );
-const IconLibrary = ({ width = 16, height = 16, style }: { width?: number; height?: number; style?: React.CSSProperties }) => (
+const IconGroupChat = ({ width = 16, height = 16, style }: { width?: number; height?: number; style?: React.CSSProperties }) => (
   <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
-    <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+    <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
+  </svg>
+);
+const IconShare = ({ width = 16, height = 16, style }: { width?: number; height?: number; style?: React.CSSProperties }) => (
+  <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+    <circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" /><line x1="8.59" y1="13.51" x2="15.41" y2="17.49" /><line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+  </svg>
+);
+const IconPin = ({ width = 16, height = 16, style }: { width?: number; height?: number; style?: React.CSSProperties }) => (
+  <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+    <path d="M21 10h-2l-3-3V3a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v4l-3 3h-2v2h8v10l2 2 2-2V12h8v-2z" />
   </svg>
 );
 const IconCheckbox = ({ width = 16, height = 16, style }: { width?: number; height?: number; style?: React.CSSProperties }) => (
   <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
-    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
   </svg>
 );
 const IconWarning = ({ width = 14, height = 14, style }: { width?: number; height?: number; style?: React.CSSProperties }) => (
   <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
-    <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+    <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
   </svg>
 );
 const IconTheme = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M12 3v2M12 19v2M5.64 5.64l1.41 1.41M16.95 16.95l1.41 1.41M3 12h2M19 12h2M5.64 18.36l1.41-1.41M16.95 7.05l1.41-1.41"/>
-    <circle cx="12" cy="12" r="4"/>
+    <path d="M12 3v2M12 19v2M5.64 5.64l1.41 1.41M16.95 16.95l1.41 1.41M3 12h2M19 12h2M5.64 18.36l1.41-1.41M16.95 7.05l1.41-1.41" />
+    <circle cx="12" cy="12" r="4" />
   </svg>
 );
 const IconAI = () => (
   <svg width="22" height="22" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
     <defs>
       <linearGradient id="aiGrad" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
-        <stop offset="0%" stopColor="#f5c249"/>
-        <stop offset="50%" stopColor="#d4af37"/>
-        <stop offset="100%" stopColor="#b8941f"/>
+        <stop offset="0%" stopColor="#f5c249" />
+        <stop offset="50%" stopColor="#d4af37" />
+        <stop offset="100%" stopColor="#b8941f" />
       </linearGradient>
       <radialGradient id="goldGlow" cx="50%" cy="50%">
-        <stop offset="0%" stopColor="#f5c249" stopOpacity="0.8"/>
-        <stop offset="100%" stopColor="#d4af37" stopOpacity="0.3"/>
+        <stop offset="0%" stopColor="#f5c249" stopOpacity="0.8" />
+        <stop offset="100%" stopColor="#d4af37" stopOpacity="0.3" />
       </radialGradient>
       <filter id="glow">
-        <feGaussianBlur stdDeviation="2.5" result="coloredBlur"/>
+        <feGaussianBlur stdDeviation="2.5" result="coloredBlur" />
         <feMerge>
-          <feMergeNode in="coloredBlur"/>
-          <feMergeNode in="SourceGraphic"/>
+          <feMergeNode in="coloredBlur" />
+          <feMergeNode in="SourceGraphic" />
         </feMerge>
       </filter>
     </defs>
     {/* Premium golden circle with glow */}
-    <circle cx="16" cy="16" r="15" fill="url(#goldGlow)" opacity="0.4"/>
-    <circle cx="16" cy="16" r="14" fill="url(#aiGrad)" filter="url(#glow)"/>
+    <circle cx="16" cy="16" r="15" fill="url(#goldGlow)" opacity="0.4" />
+    <circle cx="16" cy="16" r="14" fill="url(#aiGrad)" filter="url(#glow)" />
     {/* Plus icon filling the circle */}
-    <line x1="16" y1="6" x2="16" y2="26" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round"/>
-    <line x1="6" y1="16" x2="26" y2="16" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round"/>
+    <line x1="16" y1="6" x2="16" y2="26" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" />
+    <line x1="6" y1="16" x2="26" y2="16" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" />
   </svg>
 );
 
@@ -1003,23 +1013,24 @@ const IconAI = () => (
 export const dynamic = "force-dynamic";
 
 export default function Home() {
-  const router        = useRouter();
+  const router = useRouter();
   // const searchParams  = useSearchParams();
-  const responsive    = useResponsive();  // Auto-detect screen size
+  const responsive = useResponsive();  // Auto-detect screen size
   const [userIdFromUrl, setUserIdFromUrl] = useState<string | null>(null); // display name
   const [userIdInt, setUserIdInt] = useState<number | null>(null); // integer user_id for filtering
   const [clientNameFromUrl, setClientNameFromUrl] = useState<string | null>(null); // backend username
   // `input` is the debounced value (used for heavier work).
-  const [input,        setInput]        = useState<string>("");
+  const [input, setInput] = useState<string>("");
   // Use a ref for immediate typing to avoid re-renders on each keystroke
   const rawInputRef = useRef<string>("");
   const inputDebounceRef = useRef<number | null>(null);
   const DEBOUNCE_MS = 400; // 300-500ms recommended
-  const [messages,     setMessages]     = useState<Message[]>([]);
-  const [isLoading,    setIsLoading]    = useState<boolean>(false);
-  const [sessionId,    setSessionId]    = useState<string>(() => generateSessionId());
-  const [searchVal,    setSearchVal]    = useState("");
-  const [isRecording,  setIsRecording]  = useState<boolean>(false);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [activeMessageIdx, setActiveMessageIdx] = useState<number | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [sessionId, setSessionId] = useState<string>(() => generateSessionId());
+  const [searchVal, setSearchVal] = useState("");
+  const [isRecording, setIsRecording] = useState<boolean>(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [isLocked, setIsLocked] = useState(false);
   const [recordedAudioBlob, setRecordedAudioBlob] = useState<Blob | null>(null);
@@ -1027,14 +1038,14 @@ export default function Home() {
   const [playbackTime, setPlaybackTime] = useState(0);
   const [slideGestureActive, setSlideGestureActive] = useState(false);
   const [loggedInUser, setLoggedInUser] = useState<string | null>(null); // backend username (client_name)
-  const [authChecked,  setAuthChecked]  = useState<boolean>(false);
-  const [menuOpen,     setMenuOpen]     = useState(false);
+  const [authChecked, setAuthChecked] = useState<boolean>(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [showUpgradePlan, setShowUpgradePlan] = useState(false);
   const [showManageAccount, setShowManageAccount] = useState(false);
   const [isManageAccountMenuOpen, setIsManageAccountMenuOpen] = useState(false);
   const [currentPlan, setCurrentPlan] = useState<string>("Free"); // Track active plan
-  const [sidebarOpen,  setSidebarOpen]  = useState(true);  // Will be auto-closed by useEffect if mobile is detected
-  const [wsConnectionState, setWsConnectionState] = useState<'connecting'|'connected'|'failed'>('connecting');
+  const [sidebarOpen, setSidebarOpen] = useState(true);  // Will be auto-closed by useEffect if mobile is detected
+  const [wsConnectionState, setWsConnectionState] = useState<'connecting' | 'connected' | 'failed'>('connecting');
   const [isGraphMode, setIsGraphMode] = useState<boolean>(false);
   const [chartType, setChartType] = useState<ChartType>('vertical-bar');
   const [activeFeature, setActiveFeature] = useState<'chat' | 'archived' | 'library'>('chat');
@@ -1089,18 +1100,18 @@ export default function Home() {
   //     }
   //   } catch (e) { /* ignore */ }
   // }, []);
-  const [audioProgressMap,  setAudioProgressMap]  = useState<Record<number, number>>({});
-  const [audioDurationMap,  setAudioDurationMap]  = useState<Record<number, number>>({});
+  const [audioProgressMap, setAudioProgressMap] = useState<Record<number, number>>({});
+  const [audioDurationMap, setAudioDurationMap] = useState<Record<number, number>>({});
   const audioDurationMapRef = useRef<Record<number, number>>({});
   const [loginPageClientLogoPath, setLoginPageClientLogoPath] = useState<string | null>(null);
   const [loginFooterLogoPath, setLoginFooterLogoPath] = useState<string | null>(null);
 
   // ─── Refs (declare early for use in hooks) ────────────────────────────────
-  const messagesEndRef   = useRef<HTMLDivElement | null>(null);
-  const inputRef         = useRef<HTMLTextAreaElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const menuRef          = useRef<HTMLDivElement>(null);
-  const wsRef            = useRef<WebSocket | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const wsRef = useRef<WebSocket | null>(null);
   const sessionIdRef = useRef<string>(sessionId);
   const wsConnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectDelayRef = useRef(2000);
@@ -1126,22 +1137,22 @@ export default function Home() {
     sessionId,
     wsRef,
     (duration: number, audioUrl: string) => {
-  setIsGraphMode(false);
-  setMessages(prev => {
-    const updated = [...prev, {
-      role: "user" as const,
-      text: "Voice message",
-      isAudio: true,
-      audioDuration: duration,
-      audioUrl: audioUrl
-    }];
-    sessionMessagesRef.current.set(sessionId, updated);
-    return updated;
-  });
-  setIsLoading(true);
-  accRef.current = "";
-  setTimeout(() => inputRef.current?.focus(), 100);
-}
+      setIsGraphMode(false);
+      setMessages(prev => {
+        const updated = [...prev, {
+          role: "user" as const,
+          text: "Voice message",
+          isAudio: true,
+          audioDuration: duration,
+          audioUrl: audioUrl
+        }];
+        sessionMessagesRef.current.set(sessionId, updated);
+        return updated;
+      });
+      setIsLoading(true);
+      accRef.current = "";
+      setTimeout(() => inputRef.current?.focus(), 100);
+    }
   );
 
   // Sync sidebarOpen with responsive.isMobile - ensures sidebar closes on mobile detection
@@ -1162,102 +1173,102 @@ export default function Home() {
 
       if (jwtToken) {
         const verifyJwt = async () => {
-        try {
-          console.log("[auth] verifying token");
-          // Verify JWT via API route (keeps JWT_SECRET server-side only; not under /api/ so nginx can proxy /api to Python)
-          const res = await fetch("/verify-token", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ token: jwtToken }),
-          });
-
-          const rawBody = await res.text();
-          let parsed: Record<string, unknown> = {};
           try {
-            parsed = JSON.parse(rawBody) as Record<string, unknown>;
-          } catch {
-            parsed = {};
-          }
-          if (!res.ok) {
-            console.error("[home] JWT verify HTTP error", {
-              status: res.status,
-              statusText: res.statusText,
-              body: rawBody.slice(0, 500),
+            console.log("[auth] verifying token");
+            // Verify JWT via API route (keeps JWT_SECRET server-side only; not under /api/ so nginx can proxy /api to Python)
+            const res = await fetch("/verify-token", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ token: jwtToken }),
             });
-            throw new Error("Token verification failed");
-          }
 
-          const { userName, clientName, userId, cl, fl } = parsed as {
-            userName?: string;
-            clientName?: string;
-            userId?: string;
-            cl?: string;
-            fl?: string;
-          };
+            const rawBody = await res.text();
+            let parsed: Record<string, unknown> = {};
+            try {
+              parsed = JSON.parse(rawBody) as Record<string, unknown>;
+            } catch {
+              parsed = {};
+            }
+            if (!res.ok) {
+              console.error("[home] JWT verify HTTP error", {
+                status: res.status,
+                statusText: res.statusText,
+                body: rawBody.slice(0, 500),
+              });
+              throw new Error("Token verification failed");
+            }
 
-          console.log("[auth] token verified");
+            const { userName, clientName, userId, cl, fl } = parsed as {
+              userName?: string;
+              clientName?: string;
+              userId?: string;
+              cl?: string;
+              fl?: string;
+            };
 
-          if (userName) {
-            setUserIdFromUrl(userName);
-            localStorage.setItem("userName", userName);
-            
-          }
-          if (clientName) {
-            setClientNameFromUrl(clientName);
-            localStorage.setItem("clientName", clientName);
-            localStorage.setItem("loggedInUser", clientName);
-            
-          }
-          if (userId) {
-            setUserIdInt(parseInt(userId, 10));
-            localStorage.setItem("userId", userId);
-            
-          }
-          if (cl) {
-            setLoginPageClientLogoPath(cl);
-            localStorage.setItem("loginPageClientLogoPath", cl);
-            
-          }
-          if (fl) {
-            setLoginFooterLogoPath(fl);
-            localStorage.setItem("loginFooterLogoPath", fl);
-            
-          }
+            console.log("[auth] token verified");
 
-          setTokenVerified(true); // ← ADD THIS LINE
+            if (userName) {
+              setUserIdFromUrl(userName);
+              localStorage.setItem("userName", userName);
 
-        } catch (err) {
-          console.error("[auth] verification failed — using stored session");
-          // Fallback to localStorage
-          const storedUserName   = localStorage.getItem("userName");
-          const storedClientName = localStorage.getItem("clientName") || localStorage.getItem("loggedInUser");
-          const storedUserId     = localStorage.getItem("userId");
-          const storedLogoPath   = localStorage.getItem("loginPageClientLogoPath");
-          const storedFooterLogoPath = localStorage.getItem("loginFooterLogoPath");
-          if (storedUserName)        setUserIdFromUrl(storedUserName);
-          if (storedClientName)      setClientNameFromUrl(storedClientName);
-          if (storedUserId)          setUserIdInt(parseInt(storedUserId, 10));
-          if (storedLogoPath)        setLoginPageClientLogoPath(storedLogoPath);
-          if (storedFooterLogoPath)  setLoginFooterLogoPath(storedFooterLogoPath);
+            }
+            if (clientName) {
+              setClientNameFromUrl(clientName);
+              localStorage.setItem("clientName", clientName);
+              localStorage.setItem("loggedInUser", clientName);
 
-          setTokenVerified(true); // ← ADD THIS LINE TOO
-        }
+            }
+            if (userId) {
+              setUserIdInt(parseInt(userId, 10));
+              localStorage.setItem("userId", userId);
+
+            }
+            if (cl) {
+              setLoginPageClientLogoPath(cl);
+              localStorage.setItem("loginPageClientLogoPath", cl);
+
+            }
+            if (fl) {
+              setLoginFooterLogoPath(fl);
+              localStorage.setItem("loginFooterLogoPath", fl);
+
+            }
+
+            setTokenVerified(true); // ← ADD THIS LINE
+
+          } catch (err) {
+            console.error("[auth] verification failed — using stored session");
+            // Fallback to localStorage
+            const storedUserName = localStorage.getItem("userName");
+            const storedClientName = localStorage.getItem("clientName") || localStorage.getItem("loggedInUser");
+            const storedUserId = localStorage.getItem("userId");
+            const storedLogoPath = localStorage.getItem("loginPageClientLogoPath");
+            const storedFooterLogoPath = localStorage.getItem("loginFooterLogoPath");
+            if (storedUserName) setUserIdFromUrl(storedUserName);
+            if (storedClientName) setClientNameFromUrl(storedClientName);
+            if (storedUserId) setUserIdInt(parseInt(storedUserId, 10));
+            if (storedLogoPath) setLoginPageClientLogoPath(storedLogoPath);
+            if (storedFooterLogoPath) setLoginFooterLogoPath(storedFooterLogoPath);
+
+            setTokenVerified(true); // ← ADD THIS LINE TOO
+          }
         };
         verifyJwt();
 
       } else {
         // No token — fallback to localStorage
         console.log("[auth] using stored session");
-        const storedUserName   = localStorage.getItem("userName");
+        const storedUserName = localStorage.getItem("userName");
         const storedClientName = localStorage.getItem("clientName") || localStorage.getItem("loggedInUser");
-        const storedUserId     = localStorage.getItem("userId");
-        const storedLogoPath   = localStorage.getItem("loginPageClientLogoPath");
+        const storedUserId = localStorage.getItem("userId");
+        const storedLogoPath = localStorage.getItem("loginPageClientLogoPath");
         const storedFooterLogoPath = localStorage.getItem("loginFooterLogoPath");
-        if (storedUserName)        setUserIdFromUrl(storedUserName);
-        if (storedClientName)      setClientNameFromUrl(storedClientName);
-        if (storedUserId)          setUserIdInt(parseInt(storedUserId, 10));
-        if (storedLogoPath)        setLoginPageClientLogoPath(storedLogoPath);
-        if (storedFooterLogoPath)  setLoginFooterLogoPath(storedFooterLogoPath);
+        if (storedUserName) setUserIdFromUrl(storedUserName);
+        if (storedClientName) setClientNameFromUrl(storedClientName);
+        if (storedUserId) setUserIdInt(parseInt(storedUserId, 10));
+        if (storedLogoPath) setLoginPageClientLogoPath(storedLogoPath);
+        if (storedFooterLogoPath) setLoginFooterLogoPath(storedFooterLogoPath);
       }
     }
   }, []);
@@ -1288,7 +1299,7 @@ export default function Home() {
     if (showManageAccount || showUpgradePlan) {
       return;
     }
-    
+
     if (responsive.isDesktop) {
       // Always show sidebar on desktop
       setSidebarOpen(true);
@@ -1299,42 +1310,42 @@ export default function Home() {
   }, [responsive.isDesktop, responsive.isMobile, showManageAccount, showUpgradePlan]);
 
   // Add this state at top of component with other states:
-const [tokenVerified, setTokenVerified] = useState(false);
+  const [tokenVerified, setTokenVerified] = useState(false);
 
-// Auth guard
-useEffect(() => {
-  if (typeof window === "undefined") return;
+  // Auth guard
+  useEffect(() => {
+    if (typeof window === "undefined") return;
 
-  const params = new URLSearchParams(window.location.search);
-  const hasToken = !!params.get("data");
+    const params = new URLSearchParams(window.location.search);
+    const hasToken = !!params.get("data");
 
-  // Wait for JWT verification to finish before checking auth
-  if (hasToken && !tokenVerified) return;
+    // Wait for JWT verification to finish before checking auth
+    if (hasToken && !tokenVerified) return;
 
-  const backendUserName = clientNameFromUrl || localStorage.getItem("clientName") || localStorage.getItem("loggedInUser");
+    const backendUserName = clientNameFromUrl || localStorage.getItem("clientName") || localStorage.getItem("loggedInUser");
 
-  if (backendUserName) {
-    localStorage.setItem("loggedInUser", backendUserName);
-    setLoggedInUser(backendUserName);
-    setAuthChecked(true);
+    if (backendUserName) {
+      localStorage.setItem("loggedInUser", backendUserName);
+      setLoggedInUser(backendUserName);
+      setAuthChecked(true);
 
-    if (window.location.search) {
-      router.replace("/");
+      if (window.location.search) {
+        router.replace("/");
+      }
+      return;
     }
-    return;
-  }
 
-  const stored = localStorage.getItem("loggedInUser");
-  if (!stored) {
-    console.warn("[auth] no session found");
-    setLoggedInUser(null);
+    const stored = localStorage.getItem("loggedInUser");
+    if (!stored) {
+      console.warn("[auth] no session found");
+      setLoggedInUser(null);
+      setAuthChecked(true);
+      return;
+    }
+
+    setLoggedInUser(stored);
     setAuthChecked(true);
-    return;
-  }
-
-  setLoggedInUser(stored);
-  setAuthChecked(true);
-}, [router, clientNameFromUrl, tokenVerified]);
+  }, [router, clientNameFromUrl, tokenVerified]);
 
   // Keep sessionIdRef in sync with state
   useEffect(() => {
@@ -1411,7 +1422,7 @@ useEffect(() => {
   //     .replace(/^https:/, "wss:") + "/api/chat";
 
   // ── Start pinging only the ACTIVE session socket ──────────────────────────
-  const connectWSRef = useRef<() => void>(() => {});  // forward ref for connectWS
+  const connectWSRef = useRef<() => void>(() => { });  // forward ref for connectWS
 
   const startPing = () => {
     // Clear any previous ping interval
@@ -1424,7 +1435,7 @@ useEffect(() => {
       }
     }, 30_000);
   };
-    const stripHtml = (html: string) => {
+  const stripHtml = (html: string) => {
     const temp = document.createElement("div");
     temp.innerHTML = html;
     return temp.textContent || "";
@@ -1456,29 +1467,29 @@ useEffect(() => {
 
   // ── Save chat history to backend (PostgreSQL) ───────────────────────────────
   const saveChatHistory = async (sid: string, msgs: Message[]) => {
-  const valid = msgs.filter(m => m.role !== "error");
-  if (valid.length === 0) return;
-  try {
-    await fetch(`${baseUrl}/api/session`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        userName: userIdFromUrl ?? loggedInUser,
-        sessionId: sid,
-        chatHistory: valid.map(m => ({
-          role: m.role,
-          text: m.isAudio
-            ? (m.audioUrl || m.text)
-            : m.role === "ai"
-              ? (m.originalText || stripHtml(m.text))  // ← Use original raw response if available, fallback to stripHtml
-              : m.text,
-          isAudio: m.isAudio ?? false,
-        })),
-      }),
-    });
-  } catch (err) {
-    console.warn("Failed to save chat history:", err);
-  }
+    const valid = msgs.filter(m => m.role !== "error");
+    if (valid.length === 0) return;
+    try {
+      await fetch(`${baseUrl}/api/session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userName: userIdFromUrl ?? loggedInUser,
+          sessionId: sid,
+          chatHistory: valid.map(m => ({
+            role: m.role,
+            text: m.isAudio
+              ? (m.audioUrl || m.text)
+              : m.role === "ai"
+                ? (m.originalText || stripHtml(m.text))  // ← Use original raw response if available, fallback to stripHtml
+                : m.text,
+            isAudio: m.isAudio ?? false,
+          })),
+        }),
+      });
+    } catch (err) {
+      console.warn("Failed to save chat history:", err);
+    }
   };
 
   const saveChatHistoryRef = useRef(saveChatHistory);
@@ -1718,7 +1729,7 @@ useEffect(() => {
     // ── Every message from backend ────────────────────────────────────────
     ws.onmessage = (event: MessageEvent) => {
       try {
-        const raw     = typeof event.data === "string" ? event.data : "";
+        const raw = typeof event.data === "string" ? event.data : "";
 
         // Ignore pong heartbeat responses
         if (raw.trim() === "pong") return;
@@ -1732,7 +1743,7 @@ useEffect(() => {
           let isGraphResponse = false;
           let tableData: TableWithTileRow[] | undefined = undefined;
           let tableTitle: string | undefined = undefined;
-         
+
           // 🔑 FIRST: Check if this is a GRAPH response (type="graph")
           const cleanedForGraph = extractResponseContent(finalText);
           const graphData = parseGraphData(cleanedForGraph);
@@ -1744,10 +1755,10 @@ useEffect(() => {
             // Not a graph → continue with normal processing
             // 🔑 SECOND: Extract response content (removes session_id wrapper)
             const cleanedText = extractResponseContent(finalText);
-           
+
             // 🔑 THIRD: ALWAYS TRY RENDERING AS TABLE STRUCTURE FIRST (ALL SIZES, NO LIMITS)
             const largeDatasetHTML = renderLargeDataset(cleanedText);
-           
+
             if (largeDatasetHTML) {
               // Successfully rendered as unified table structure (any size)
               processedText = largeDatasetHTML;
@@ -1769,7 +1780,7 @@ useEffect(() => {
               }
             }
           }
-          
+
           setMessages(prev => {
             const u = [...prev];
             const l = u.length - 1;
@@ -1800,8 +1811,8 @@ useEffect(() => {
         if (part) {
           accRef.current += part;
           const snap = accRef.current;
-          
-          
+
+
           // Extract text for display during streaming
           let displayText = snap;
           try {
@@ -1810,8 +1821,8 @@ useEffect(() => {
             // If can't parse yet (incomplete JSON), show what we have
             displayText = snap;
           }
-          
-          
+
+
           setMessages(prev => {
             const u = [...prev];
             const l = u.length - 1;
@@ -2199,31 +2210,31 @@ useEffect(() => {
   };
 
   const handleLogout = async () => {
-  const savePromises: Promise<void>[] = [];
-  sessionMessagesRef.current.forEach((msgs, sid) => {
-    const valid = msgs.filter(m => m.role !== "error");
-    if (valid.length > 0) {
-      savePromises.push(saveChatHistoryRef.current(sid, msgs));
+    const savePromises: Promise<void>[] = [];
+    sessionMessagesRef.current.forEach((msgs, sid) => {
+      const valid = msgs.filter(m => m.role !== "error");
+      if (valid.length > 0) {
+        savePromises.push(saveChatHistoryRef.current(sid, msgs));
+      }
+    });
+
+    try {
+      await Promise.all(savePromises);
+      console.log("✅ All sessions saved before logout");
+    } catch {
+      console.warn("⚠️ Some sessions failed to save on logout");
     }
-  });
 
-  try {
-    await Promise.all(savePromises);
-    console.log("✅ All sessions saved before logout");
-  } catch {
-    console.warn("⚠️ Some sessions failed to save on logout");
-  }
+    if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
+    if (idleTimerRef.current) { clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
 
-  if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
-  if (idleTimerRef.current) { clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
-  if (wsRef.current) {
-    wsRef.current.close();
-    wsRef.current = null;
-  }
-
-  localStorage.removeItem("loggedInUser");
-  router.replace("/");
-};
+    localStorage.removeItem("loggedInUser");
+    router.replace("/");
+  };
   const toggleRecording = async () => {
     if (isRecording) {
       mediaRecorderRef.current?.stop();
@@ -2231,167 +2242,167 @@ useEffect(() => {
     } else {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const rec    = new MediaRecorder(stream);
+        const rec = new MediaRecorder(stream);
         rec.start();
         mediaRecorderRef.current = rec;
         setIsRecording(true);
       } catch { alert("Please allow microphone access."); }
     }
-   };
+  };
 
   // ── Handle Audio Playback ─────────────────────────────────────────────────
   const handleAudioPlayback = async (idx: number, audioUrl?: string, passedDuration: number = 0) => {
-  if (!audioUrl) return;
+    if (!audioUrl) return;
 
-  const isCurrentlyPlaying = audioPlayingIndex === idx;
+    const isCurrentlyPlaying = audioPlayingIndex === idx;
 
-  if (isCurrentlyPlaying) {
-    const audio = audioPlayersRef.current[idx];
-    if (audio) {
-      audio.pause();
+    if (isCurrentlyPlaying) {
+      const audio = audioPlayersRef.current[idx];
+      if (audio) {
+        audio.pause();
+        setAudioPlayingIndex(null);
+      }
+      return;
+    }
+
+    // Pause any other playing audio
+    if (audioPlayingIndex !== null) {
+      const otherAudio = audioPlayersRef.current[audioPlayingIndex];
+      if (otherAudio) otherAudio.pause();
       setAudioPlayingIndex(null);
     }
-    return;
-  }
 
-  // Pause any other playing audio
-  if (audioPlayingIndex !== null) {
-    const otherAudio = audioPlayersRef.current[audioPlayingIndex];
-    if (otherAudio) otherAudio.pause();
-    setAudioPlayingIndex(null);
-  }
+    // Create audio element if not yet created for this index
+    if (!audioPlayersRef.current[idx]) {
+      let playUrl = audioUrl;
+      if (audioUrl.startsWith("data:")) {
+        const res = await fetch(audioUrl);
+        const blob = await res.blob();
+        playUrl = URL.createObjectURL(blob);
+      }
+      const audio = new Audio(playUrl);
+      let animationFrameId: number | null = null;
 
-  // Create audio element if not yet created for this index
-  if (!audioPlayersRef.current[idx]) {
-    let playUrl = audioUrl;
-    if (audioUrl.startsWith("data:")) {
-      const res = await fetch(audioUrl);
-      const blob = await res.blob();
-      playUrl = URL.createObjectURL(blob);
+      // ── FIX BUG 1: load real duration from the audio element itself ──────
+      audio.addEventListener("loadedmetadata", () => {
+        if (isFinite(audio.duration) && audio.duration > 0) {
+          audioDurationMapRef.current[idx] = audio.duration;
+          setAudioDurationMap(prev => ({ ...prev, [idx]: audio.duration }));
+        } else if (passedDuration > 0) {
+          setAudioDurationMap(prev => ({ ...prev, [idx]: passedDuration }));
+        }
+      });
+
+      // ── FIX BUG 3: rAF loop for smooth progress ──────────────────────────
+      const progressLoop = () => {
+        const a = audioPlayersRef.current[idx];
+        if (!a || a.paused) return;
+        const dur = audioDurationMapRef.current[idx] ?? passedDuration;
+        if (dur > 0) {
+          const pct = (a.currentTime / dur) * 100;
+          setAudioProgressMap(prev => ({ ...prev, [idx]: pct }));
+        }
+        animationFrameId = requestAnimationFrame(progressLoop);
+      };
+
+      audio.onplay = () => {
+        setAudioPlayingIndex(idx);
+        if (animationFrameId !== null) cancelAnimationFrame(animationFrameId);
+        animationFrameId = requestAnimationFrame(progressLoop);
+      };
+
+      audio.onpause = () => {
+        if (animationFrameId !== null) {
+          cancelAnimationFrame(animationFrameId);
+          animationFrameId = null;
+        }
+        setAudioPlayingIndex(null);
+      };
+
+      audio.onended = () => {
+        if (animationFrameId !== null) {
+          cancelAnimationFrame(animationFrameId);
+          animationFrameId = null;
+        }
+        setAudioPlayingIndex(null);
+        setAudioProgressMap(prev => ({ ...prev, [idx]: 0 }));
+      };
+
+      audioPlayersRef.current[idx] = audio;
     }
-    const audio = new Audio(playUrl);
-    let animationFrameId: number | null = null;
 
-    // ── FIX BUG 1: load real duration from the audio element itself ──────
-    audio.addEventListener("loadedmetadata", () => {
-      if (isFinite(audio.duration) && audio.duration > 0) {
-        audioDurationMapRef.current[idx] = audio.duration;
-        setAudioDurationMap(prev => ({ ...prev, [idx]: audio.duration }));
-      } else if (passedDuration > 0) {
-        setAudioDurationMap(prev => ({ ...prev, [idx]: passedDuration }));
-      }
-    });
-
-    // ── FIX BUG 3: rAF loop for smooth progress ──────────────────────────
-    const progressLoop = () => {
-      const a = audioPlayersRef.current[idx];
-      if (!a || a.paused) return;
-      const dur = audioDurationMapRef.current[idx] ?? passedDuration;
-      if (dur > 0) {
-        const pct = (a.currentTime / dur) * 100;
-        setAudioProgressMap(prev => ({ ...prev, [idx]: pct }));
-      }
-      animationFrameId = requestAnimationFrame(progressLoop);
-    };
-
-    audio.onplay = () => {
-      setAudioPlayingIndex(idx);
-      if (animationFrameId !== null) cancelAnimationFrame(animationFrameId);
-      animationFrameId = requestAnimationFrame(progressLoop);
-    };
-
-    audio.onpause = () => {
-      if (animationFrameId !== null) {
-        cancelAnimationFrame(animationFrameId);
-        animationFrameId = null;
-      }
-      setAudioPlayingIndex(null);
-    };
-
-    audio.onended = () => {
-      if (animationFrameId !== null) {
-        cancelAnimationFrame(animationFrameId);
-        animationFrameId = null;
-      }
-      setAudioPlayingIndex(null);
-      setAudioProgressMap(prev => ({ ...prev, [idx]: 0 }));
-    };
-
-    audioPlayersRef.current[idx] = audio;
-  }
-
-  // Trigger load so loadedmetadata fires (needed for old-session base64 URLs)
-  const audioElement = audioPlayersRef.current[idx];
-  if (audioElement) {
-    audioElement.play().catch(err => {
-      console.error("❌ Audio play failed:", err.message);
-      setAudioPlayingIndex(null);
-    });
-  }
-};
+    // Trigger load so loadedmetadata fires (needed for old-session base64 URLs)
+    const audioElement = audioPlayersRef.current[idx];
+    if (audioElement) {
+      audioElement.play().catch(err => {
+        console.error("❌ Audio play failed:", err.message);
+        setAudioPlayingIndex(null);
+      });
+    }
+  };
 
   // ── Send message over the persistent WebSocket ────────────────────────────
   const sendMessage = () => {
-  const domVal = inputRef.current?.value ?? "";
-  if (!domVal.trim() || isLoading) return;
-  const userText = domVal.trim();
+    const domVal = inputRef.current?.value ?? "";
+    if (!domVal.trim() || isLoading) return;
+    const userText = domVal.trim();
 
-  const ws = wsRef.current;
+    const ws = wsRef.current;
 
-  if (!ws || ws.readyState !== WebSocket.OPEN) {
-    console.warn("Socket not ready for session:", sessionId);
-    setMessages(prev => [...prev, { role: "error", text: "Still connecting. Please wait." }]);
-    return;
-  }
-
-  // Ensure capsule exists and move this session to top when user types (content changed)
-  const now = Date.now();
-  setChatSessions(prev => {
-    const existing = prev.find(s => s.id === sessionId);
-    const rest = prev.filter(s => s.id !== sessionId);
-    if (existing) {
-      return [{ ...existing, updatedAt: now }, ...rest];
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      console.warn("Socket not ready for session:", sessionId);
+      setMessages(prev => [...prev, { role: "error", text: "Still connecting. Please wait." }]);
+      return;
     }
-    const newCapsule: ChatSession = {
-      id: sessionId,
-      title: "New Chat",
-      createdAt: now,
-      updatedAt: now,
-    };
-    return [newCapsule, ...rest];
-  });
 
-  setShowFeaturePlaceholder(false);
-  setMessages(prev => {
-    const updated = [...prev, {
-      role: "user" as const,
-      text: userText
-    }];
-    // Save to per-session store
-    sessionMessagesRef.current.set(sessionId, updated);
-    return updated;
-  });
-  // Clear textarea DOM value and debounced state
-  if (inputRef.current) inputRef.current.value = "";
-  rawInputRef.current = "";
-  setInput("");
-  setIsLoading(true);
-  accRef.current = "";
+    // Ensure capsule exists and move this session to top when user types (content changed)
+    const now = Date.now();
+    setChatSessions(prev => {
+      const existing = prev.find(s => s.id === sessionId);
+      const rest = prev.filter(s => s.id !== sessionId);
+      if (existing) {
+        return [{ ...existing, updatedAt: now }, ...rest];
+      }
+      const newCapsule: ChatSession = {
+        id: sessionId,
+        title: "New Chat",
+        createdAt: now,
+        updatedAt: now,
+      };
+      return [newCapsule, ...rest];
+    });
 
-  ws.send(JSON.stringify({
-    type: "message",
-    messageType: "text",
-    isAudio: false,
-    isText: true,
-    isGraph: isGraphMode,
-    query: userText,
-    userName: loggedInUser,
-    subUserName: userIdFromUrl ?? loggedInUser,
-    userId: userIdInt !== null ? String(userIdInt) : undefined,
-    sessionId,
-    timestamp: Date.now()
-  }));
-};  // ← THIS CLOSING BRACE WAS MISSING
+    setShowFeaturePlaceholder(false);
+    setMessages(prev => {
+      const updated = [...prev, {
+        role: "user" as const,
+        text: userText
+      }];
+      // Save to per-session store
+      sessionMessagesRef.current.set(sessionId, updated);
+      return updated;
+    });
+    // Clear textarea DOM value and debounced state
+    if (inputRef.current) inputRef.current.value = "";
+    rawInputRef.current = "";
+    setInput("");
+    setIsLoading(true);
+    accRef.current = "";
+
+    ws.send(JSON.stringify({
+      type: "message",
+      messageType: "text",
+      isAudio: false,
+      isText: true,
+      isGraph: isGraphMode,
+      query: userText,
+      userName: loggedInUser,
+      subUserName: userIdFromUrl ?? loggedInUser,
+      userId: userIdInt !== null ? String(userIdInt) : undefined,
+      sessionId,
+      timestamp: Date.now()
+    }));
+  };  // ← THIS CLOSING BRACE WAS MISSING
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
@@ -2536,7 +2547,48 @@ useEffect(() => {
           background: "linear-gradient(135deg, #0A0A0A 0%, #111111 50%, #0A0A0A 100%)",
         }}
       >
-        <span style={{ fontSize: 14, color: "#A0AEC0" }}>Checking authentication…</span>
+        <div style={{ textAlign: "center" }}>
+          <svg width="120" height="60" viewBox="0 0 100 50">
+            <path
+              d="M 50 25 C 30 5 10 5 10 25 C 10 45 30 45 50 25 C 70 5 90 5 90 25 C 90 45 70 45 50 25 Z"
+              fill="none"
+              stroke="#2A2A2A"
+              strokeWidth="6"
+              strokeLinecap="round"
+            />
+            <path
+              d="M 50 25 C 30 5 10 5 10 25 C 10 45 30 45 50 25 C 70 5 90 5 90 25 C 90 45 70 45 50 25 Z"
+              fill="none"
+              stroke="url(#infinity-gradient)"
+              strokeWidth="6"
+              strokeLinecap="round"
+              pathLength="100"
+              strokeDasharray="30 70"
+              strokeDashoffset="100"
+              style={{
+                animation: "infinity-dash 1.5s linear infinite",
+                willChange: "stroke-dashoffset",
+                transform: "translateZ(0)"
+              }}
+            />
+            <defs>
+              <linearGradient id="infinity-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stopColor="#D4AF37" />
+                <stop offset="100%" stopColor="#FFFF00" />
+              </linearGradient>
+            </defs>
+          </svg>
+          <style>{`
+            @keyframes infinity-dash {
+              from {
+                stroke-dashoffset: 100;
+              }
+              to {
+                stroke-dashoffset: 0;
+              }
+            }
+          `}</style>
+        </div>
       </div>
     );
   }
@@ -2552,423 +2604,451 @@ useEffect(() => {
             : "app-content-wrapper"
         }
       >
-      {/* ── Sidebar ─────────────────────────────────────────────────────── */}
-      <div 
-        className="sidebar-shell" 
-        style={{ 
-          display: sidebarOpen ? 'flex' : 'none',
-          position: responsive.isMobile && sidebarOpen ? 'fixed' : 'relative',
-          top: 0,
-          left: 0,
-          zIndex: responsive.isMobile && sidebarOpen ? 9999 : 2,
-        }}
-      >
-      <aside className="sidebar">
-        {/* Sidebar Header with Logo */}
-        <div className="sidebar-header">
-          
-          <div style={{ display: "flex", alignItems: "center", flex: 1 }}>
-            <div
-              className="brand-box"
-              style={loginPageClientLogoPath ? { width: "100%", maxWidth: 220, height: "auto", minHeight: 56, maxHeight: 72, padding: 0, border: "none", borderRadius: 0 } : undefined}
-            >
-              {loginPageClientLogoPath ? (
-                <img
-                  src={loginPageClientLogoPath}
-                  alt="Client logo"
-                  style={{ width: "100%", maxWidth: 220, height: "auto", maxHeight: 72, objectFit: "contain", display: "block" }}
-                />
-              ) : (
-                <Image src="/icon.png" alt="Nanosoft Ask AI" width={20} height={20} style={{ borderRadius: 0 }} />
-              )}
-            </div>
-          </div>
-          {/* Close button on mobile */}
-          {responsive.isMobile && !showManageAccount && !showUpgradePlan && (
-            <button
-              className="sidebar-close-btn"
-              onClick={() => setSidebarOpen(false)}
-              title="Close sidebar"
-              aria-label="Close sidebar"
-              style={{
-                background: 'transparent',
-                border: 'none',
-                color: 'var(--color-text)',
-                cursor: 'pointer',
-                padding: '8px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                transition: 'all 0.2s ease',
-              }}
-            >
-              <IconX size={24} />
-            </button>
-          )}
-          <div className="hamburger-wrapper" ref={menuRef}>
-            <button
-              className="hamburger-btn"
-              onClick={() => setMenuOpen((p) => !p)}
-              title="Profile menu"
-              aria-label="Open profile menu"
-            >
-              <IconHamburger />
-            </button>
-            <div className={`profile-dropdown ${menuOpen ? "open" : ""}`}>
-              <div className="profile-dropdown-inner">
-                <div className="profile-dropdown-item profile-user-row">
-                  <div className="profile-avatar">
-                  <IconUser  />
-                  </div>
-                  <div className="profile-user-info">
-                    {/* Display original userName (if available) while backend uses client_name */}
-                    <span className="profile-userid">{userIdFromUrl ?? loggedInUser}</span>
-                  </div>
-                </div>
-                <div className="profile-divider" />
-                <div className="profile-dropdown-item profile-action-btn">
-                  <ThemeToggle />
-                </div>
-                <div className="profile-divider" />
-                <button
-                  className="profile-dropdown-item profile-action-btn"
-                  onClick={() => {
-                    setShowUpgradePlan(true);
-                    setMenuOpen(false);
-                    setSidebarOpen(false);
-                  }}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '10px',
-                    color: '#d4af37',
-                    fontWeight: 600,
-                  }}
-                >
-                  <IconCrown size={18} />
-                  <span>Upgrade Plan</span>
-                </button>
-                <div className="profile-divider" />
-                <button
-                  className="profile-dropdown-item profile-action-btn"
-                  onClick={() => {
-                    setShowManageAccount(true);
-                    setMenuOpen(false);
-                    setSidebarOpen(false);
-                  }}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '10px',
-                    color: 'var(--color-primary)',
-                    fontWeight: 600,
-                  }}
-                >
-                  <IconUser size={18} />
-                  <span>Manage Account</span>
-                </button>
-                <div className="profile-divider" />
-                <button
-                  className="profile-dropdown-item profile-action-btn profile-logout"
-                  onClick={handleLogout}
-                >
-                  <IconLogout />
-                  <span>Logout</span>
-                </button>
-              </div>
-            </div>
-          </div>
+        {/* ── Sidebar ─────────────────────────────────────────────────────── */}
+        <div
+          className="sidebar-shell"
+          style={{
+            display: sidebarOpen ? 'flex' : 'none',
+            position: responsive.isMobile && sidebarOpen ? 'fixed' : 'relative',
+            top: 0,
+            left: 0,
+            zIndex: responsive.isMobile && sidebarOpen ? 9999 : 2,
+          }}
+        >
+          <aside className="sidebar">
+            {/* Sidebar Header with Logo */}
+            <div className="sidebar-header">
 
-          {/* <button className="sidebar-hamburger-btn" onClick={() => setMenuOpen(p => !p)} title="Menu" aria-label="Open menu">
+              <div style={{ display: "flex", alignItems: "center", flex: 1 }}>
+                <div
+                  className="brand-box"
+                  style={loginPageClientLogoPath ? { width: "100%", maxWidth: 220, height: "auto", minHeight: 56, maxHeight: 72, padding: 0, border: "none", borderRadius: 0 } : undefined}
+                >
+                  {loginPageClientLogoPath ? (
+                    <img
+                      src={loginPageClientLogoPath}
+                      alt="Client logo"
+                      style={{ width: "100%", maxWidth: 220, height: "auto", maxHeight: 72, objectFit: "contain", display: "block" }}
+                    />
+                  ) : (
+                    <Image src="/icon.png" alt="Nanosoft Ask AI" width={20} height={20} style={{ borderRadius: 0 }} />
+                  )}
+                </div>
+              </div>
+              {/* Close button on mobile */}
+              {responsive.isMobile && !showManageAccount && !showUpgradePlan && (
+                <button
+                  className="sidebar-close-btn"
+                  onClick={() => setSidebarOpen(false)}
+                  title="Close sidebar"
+                  aria-label="Close sidebar"
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: 'var(--color-text)',
+                    cursor: 'pointer',
+                    padding: '8px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    transition: 'all 0.2s ease',
+                  }}
+                >
+                  <IconX size={24} />
+                </button>
+              )}
+              <div className="hamburger-wrapper" ref={menuRef}>
+                <button
+                  className="hamburger-btn"
+                  onClick={() => setMenuOpen((p) => !p)}
+                  title="Profile menu"
+                  aria-label="Open profile menu"
+                >
+                  <IconHamburger />
+                </button>
+                <div className={`profile-dropdown ${menuOpen ? "open" : ""}`}>
+                  <div className="profile-dropdown-inner">
+                    <div className="profile-dropdown-item profile-user-row">
+                      <div className="profile-avatar">
+                        <IconUser />
+                      </div>
+                      <div className="profile-user-info">
+                        {/* Display original userName (if available) while backend uses client_name */}
+                        <span className="profile-userid">{userIdFromUrl ?? loggedInUser}</span>
+                      </div>
+                    </div>
+                    <div className="profile-divider" />
+                    <div className="profile-dropdown-item profile-action-btn">
+                      <ThemeToggle />
+                    </div>
+                    <div className="profile-divider" />
+                    <button
+                      className="profile-dropdown-item profile-action-btn"
+                      onClick={() => {
+                        setShowUpgradePlan(true);
+                        setMenuOpen(false);
+                        setSidebarOpen(false);
+                      }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '10px',
+                        color: '#d4af37',
+                        fontWeight: 600,
+                      }}
+                    >
+                      <IconCrown size={18} />
+                      <span>Upgrade Plan</span>
+                    </button>
+                    <div className="profile-divider" />
+                    <button
+                      className="profile-dropdown-item profile-action-btn"
+                      onClick={() => {
+                        setShowManageAccount(true);
+                        setMenuOpen(false);
+                        setSidebarOpen(false);
+                      }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '10px',
+                        color: 'var(--color-primary)',
+                        fontWeight: 600,
+                      }}
+                    >
+                      <IconUser size={18} />
+                      <span>Manage Account</span>
+                    </button>
+                    <div className="profile-divider" />
+                    <button
+                      className="profile-dropdown-item profile-action-btn profile-logout"
+                      onClick={handleLogout}
+                    >
+                      <IconLogout />
+                      <span>Logout</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* <button className="sidebar-hamburger-btn" onClick={() => setMenuOpen(p => !p)} title="Menu" aria-label="Open menu">
             <IconHamburger/>
           </button> */}
 
-        </div>
-        {/* <div className={`sidebar-profile-card ${menuOpen ? "open" : ""}`} ref={menuRef}> */}
-         
-         
-           
-        {/* </div> */}
-
-        {/* + New Chat Button */}
-        <div className="new-chat-container-top">
-          <button className="new-chat-btn" onClick={handleNewChat}>
-            <IconChat width={16} height={16}/>
-            <span>+ New Chat</span>
-          </button>
-        </div>
-
-        {/* FEATURES + Chat History Section */}
-        <div className="sidebar-scroll">
-          {/* FEATURES */}
-          <div className="section-title">FEATURES</div>
-          <div
-            className={`feature-item ${activeFeature === 'chat' ? 'active' : ''}`}
-            onClick={() => {
-              setActiveFeature('chat');
-              handleFeatureClick('chat');
-            }}
-          >
-            <IconChat/>
-            <span>Chat</span>
-          </div>
-          <div
-            className={`feature-item ${activeFeature === 'archived' ? 'active' : ''}`}
-            onClick={() => {
-              setActiveFeature('archived');
-              handleFeatureClick('archived');
-            }}
-          >
-            <IconArchive/>
-            <span>Archived</span>
-          </div>
-          <div
-            className={`feature-item ${activeFeature === 'library' ? 'active' : ''}`}
-            onClick={() => {
-              setActiveFeature('library');
-              handleFeatureClick('library');
-            }}
-          >
-            <IconLibrary/>
-            <span>Library</span>
-          </div>
-
-          {showFeaturePlaceholder && (
-            <div className="feature-placeholder-sidebar">
-              <div className="feature-placeholder-box">
-                <div className="feature-placeholder-title">
-                  {activeFeature === 'archived' ? 'Archived' : 'Library'}
-                </div>
-                <div className="feature-placeholder-subtitle">
-                  Yet to be implemented
-                </div>
-              </div>
             </div>
-          )}
+            {/* <div className={`sidebar-profile-card ${menuOpen ? "open" : ""}`} ref={menuRef}> */}
 
-          {/* Archived view */}
-          {activeFeature === 'archived' && (
-            <div className="chat-history-box" style={{ marginTop: 24, display: "flex", flexDirection: "column", minHeight: 0 }}>
-              <div className="chat-history-scroll">
-                {archivedSessions.map(a => (
-                  <div
-                    key={a.id}
-                    className="sidebar-item"
-                    onClick={() => {
-                      // Open archived session history while staying in Archived view
-                      // Do NOT switch the sidebar to Chat or add title back to chatSessions
-                      void switchSession(a.id);
-                    }}
-                    style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
-                  >
-                    <div className="content" style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <IconArchive width={16} height={16}/>
-                      <span title={a.title} style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{a.title}</span>
+
+
+            {/* </div> */}
+
+            {/* + New Chat Button */}
+            <div className="new-chat-container-top">
+              <button className="new-chat-btn" onClick={handleNewChat}>
+                <IconChat width={16} height={16} />
+                <span>+ New Chat</span>
+              </button>
+            </div>
+
+            {/* FEATURES + Chat History Section */}
+            <div className="sidebar-scroll">
+              {/* FEATURES */}
+              <div className="section-title">FEATURES</div>
+              <div
+                className={`feature-item ${activeFeature === 'chat' ? 'active' : ''}`}
+                onClick={() => {
+                  setActiveFeature('chat');
+                  handleFeatureClick('chat');
+                }}
+              >
+                <IconChat />
+                <span>Chat</span>
+              </div>
+              <div
+                className={`feature-item ${activeFeature === 'archived' ? 'active' : ''}`}
+                onClick={() => {
+                  setActiveFeature('archived');
+                  handleFeatureClick('archived');
+                }}
+              >
+                <IconArchive />
+                <span>Archived</span>
+              </div>
+              <div
+                className={`feature-item ${activeFeature === 'library' ? 'active' : ''}`}
+                onClick={() => {
+                  setActiveFeature('library');
+                  handleFeatureClick('library');
+                }}
+              >
+                <IconGroupChat />
+                <span>Group Chat</span>
+              </div>
+
+              {showFeaturePlaceholder && (
+                <div className="feature-placeholder-sidebar">
+                  <div className="feature-placeholder-box">
+                    <div className="feature-placeholder-title">
+                      {activeFeature === 'archived' ? 'Archived' : 'Library'}
                     </div>
-                    <div>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          // Unarchive: remove from archived list
-                          setArchivedSessions(prev => {
-                            const next = prev.filter(x => x.id !== a.id);
-                            try { localStorage.setItem('archivedSessions', JSON.stringify(next)); } catch {};
-                            return next;
-                          });
-                          // Restore to chatSessions list with same title; avoid duplicates by filtering existing id
-                          setChatSessions(prev => {
-                            const without = prev.filter(s => s.id !== a.id);
-                            return [{ id: a.id, title: a.title, createdAt: a.createdAt }, ...without];
-                          });
-                        }}
-                        title="Unarchive"
-                        style={{ background: 'transparent', border: 'none', color: 'var(--color-text)', cursor: 'pointer', padding: 6, borderRadius: 6 }}
-                      >Unarchive</button>
+                    <div className="feature-placeholder-subtitle">
+                      Yet to be implemented
                     </div>
                   </div>
-                ))}
-                {archivedSessions.length === 0 && (
-                  <div style={{ padding: "12px 16px", fontSize: 12, color: "#7a8f75", fontStyle: "italic" }}>
-                    No archived chats
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
+                </div>
+              )}
 
-          {/* Chat History – only visible when Chat feature is active */}
-          {activeFeature === 'chat' && (
-            
-            <div className="chat-history-box" style={{ marginTop: 24, display: "flex", flexDirection: "column", minHeight: 0 }}>
-              <div className="chat-history-scroll">
-                {chatSessions.map(s => (
-                  <div
-                    key={s.id}
-                    className={`sidebar-item${s.id === sessionId ? " active" : ""}`}
-                    onClick={() => switchSession(s.id)}
-                    style={{ cursor: "pointer", display: 'flex', alignItems: 'center', gap: 8 }}
-                  >
-                    <div className="content" style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <IconChat width={16} height={16}/>
-                      {editingSessionId === s.id ? (
-                        <input
-                          ref={(el) => { editingInputRef.current = el; if (el) el.focus(); }}
-                          value={editingTitle}
-                          onChange={(e) => setEditingTitle(e.target.value)}
-                          onBlur={() => commitRename(s.id)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") { e.preventDefault(); commitRename(s.id); }
-                            if (e.key === "Escape") { setEditingSessionId(null); setEditingTitle(""); }
-                          }}
-                          onClick={(e) => e.stopPropagation()}
-                          title={s.title}
-                          style={{
-                            whiteSpace: "nowrap",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            borderRadius: 6,
-                            padding: "6px 8px",
-                            border: "1px solid var(--color-border)",
-                            background: "var(--color-bg-alt)",
-                            color: "var(--color-text)",
-                            width: '100%'
-                          }}
-                        />
-                      ) : (
-                        <span
-                          title={s.title}
-                          style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
-                        >
-                          {previewTitle(s.title, 2)}
-                        </span>
-                      )}
-                    </div>
-
-                    <div style={{ display: 'flex', alignItems: 'center' }}>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const btn = e.currentTarget as HTMLElement;
-                          const pos = computeSessionMenuPos(btn, 140);
-                          const willOpen = sessionMenuOpen !== s.id;
-                          setSessionMenuOpen(willOpen ? s.id : null);
-                          setSessionMenuPos(willOpen ? pos : null);
-                          setSessionMenuVisible(false);
+              {/* Archived view */}
+              {activeFeature === 'archived' && (
+                <div className="chat-history-box" style={{ marginTop: 24, display: "flex", flexDirection: "column", minHeight: 0 }}>
+                  <div className="chat-history-scroll">
+                    {archivedSessions.map(a => (
+                      <div
+                        key={a.id}
+                        className="sidebar-item"
+                        onClick={() => {
+                          // Open archived session history while staying in Archived view
+                          // Do NOT switch the sidebar to Chat or add title back to chatSessions
+                          void switchSession(a.id);
                         }}
-                        aria-label="Session options"
-                        title="Options"
-                        style={{
-                          background: 'transparent',
-                          border: 'none',
-                          color: 'var(--color-text)',
-                          cursor: 'pointer',
-                          padding: '6px',
-                          borderRadius: 6,
-                        }}
+                        style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
                       >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
-                      </button>
-
-                      {sessionMenuOpen === s.id && sessionMenuPos && (
-                        <div
-                          ref={(el) => { sessionMenuRef.current = el; }}
-                          onClick={(e) => e.stopPropagation()}
-                          className="session-menu"
-                          style={{
-                            position: 'fixed',
-                            top: `${sessionMenuPos.top}px`,
-                            transform: sessionMenuPos.placement === 'above' ? 'translate(calc(-100% + 24px), -100%)' : 'translateX(calc(-100% + 24px))',
-                            left: `${sessionMenuPos.left}px`,
-                            background: 'var(--color-bg-alt)',
-                            border: '1px solid var(--color-border)',
-                            borderRadius: 8,
-                            padding: '6px 8px',
-                            boxShadow: '0 6px 18px rgba(0,0,0,0.4)',
-                            zIndex: 20000,
-                            minWidth: 140,
-                            whiteSpace: 'nowrap',
-                            visibility: sessionMenuVisible ? 'visible' : 'hidden',
-                            pointerEvents: sessionMenuVisible ? 'auto' : 'none',
-                          }}>
-                          <button
-                            onClick={() => { setSessionMenuOpen(null); setSessionMenuPos(null); handleRenameSession(s.id); }}
-                            style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 8px', background: 'transparent', border: 'none', color: 'var(--color-text)', cursor: 'pointer' }}
-                          >Rename</button>
-                          {/* <button
-                            onClick={() => { handleArchiveSession(s.id); }}
-                            style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 8px', background: 'transparent', border: 'none', color: 'var(--color-text)', cursor: 'pointer' }}
-                          >Archive</button> */}
-                          <button
-                            onClick={() => { setSessionMenuOpen(null); setSessionMenuPos(null); handleDeleteSession(s.id); }}
-                            style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 8px', background: 'transparent', border: 'none', color: 'var(--color-text)', cursor: 'pointer' }}
-                          >Delete</button>
+                        <div className="content" style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <IconArchive width={16} height={16} />
+                          <span title={a.title} style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{a.title}</span>
                         </div>
-                      )}
-                    </div>
+                        <div>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              // Unarchive: remove from archived list
+                              setArchivedSessions(prev => {
+                                const next = prev.filter(x => x.id !== a.id);
+                                try { localStorage.setItem('archivedSessions', JSON.stringify(next)); } catch { };
+                                return next;
+                              });
+                              // Restore to chatSessions list with same title; avoid duplicates by filtering existing id
+                              setChatSessions(prev => {
+                                const without = prev.filter(s => s.id !== a.id);
+                                return [{ id: a.id, title: a.title, createdAt: a.createdAt }, ...without];
+                              });
+                            }}
+                            title="Unarchive"
+                            style={{ background: 'transparent', border: 'none', color: 'var(--color-text)', cursor: 'pointer', padding: 6, borderRadius: 6 }}
+                          >Unarchive</button>
+                        </div>
+                      </div>
+                    ))}
+                    {archivedSessions.length === 0 && (
+                      <div style={{ padding: "12px 16px", fontSize: 12, color: "#7a8f75", fontStyle: "italic" }}>
+                        No archived chats
+                      </div>
+                    )}
                   </div>
-                ))}
+                </div>
+              )}
 
-                {chatSessions.length === 0 && (
-                  <div style={{ padding: "12px 16px", fontSize: 12, color: "#7a8f75", fontStyle: "italic" }}>
-                    No chats yet — click New Chat to start
+              {/* Chat History – only visible when Chat feature is active */}
+              {activeFeature === 'chat' && (
+
+                <div className="chat-history-box" style={{ marginTop: 24, display: "flex", flexDirection: "column", minHeight: 0 }}>
+                  <div className="chat-history-scroll">
+                    {chatSessions.map(s => (
+                      <div
+                        key={s.id}
+                        className={`sidebar-item${s.id === sessionId ? " active" : ""}`}
+                        onClick={() => switchSession(s.id)}
+                        style={{ cursor: "pointer", display: 'flex', alignItems: 'center', gap: 8 }}
+                      >
+                        <div className="content" style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <IconChat width={16} height={16} />
+                          {editingSessionId === s.id ? (
+                            <input
+                              ref={(el) => { editingInputRef.current = el; if (el) el.focus(); }}
+                              value={editingTitle}
+                              onChange={(e) => setEditingTitle(e.target.value)}
+                              onBlur={() => commitRename(s.id)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") { e.preventDefault(); commitRename(s.id); }
+                                if (e.key === "Escape") { setEditingSessionId(null); setEditingTitle(""); }
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                              title={s.title}
+                              style={{
+                                whiteSpace: "nowrap",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                borderRadius: 6,
+                                padding: "6px 8px",
+                                border: "1px solid var(--color-border)",
+                                background: "var(--color-bg-alt)",
+                                color: "var(--color-text)",
+                                width: '100%'
+                              }}
+                            />
+                          ) : (
+                            <span
+                              title={s.title}
+                              style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                            >
+                              {previewTitle(s.title, 2)}
+                            </span>
+                          )}
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center' }}>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const btn = e.currentTarget as HTMLElement;
+                              const pos = computeSessionMenuPos(btn, 140);
+                              const willOpen = sessionMenuOpen !== s.id;
+                              setSessionMenuOpen(willOpen ? s.id : null);
+                              setSessionMenuPos(willOpen ? pos : null);
+                              setSessionMenuVisible(false);
+                            }}
+                            aria-label="Session options"
+                            title="Options"
+                            style={{
+                              background: 'transparent',
+                              border: 'none',
+                              color: 'var(--color-text)',
+                              cursor: 'pointer',
+                              padding: '6px',
+                              borderRadius: 6,
+                            }}
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="5" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="12" cy="19" r="1" /></svg>
+                          </button>
+
+                          {sessionMenuOpen === s.id && sessionMenuPos && (
+                            <div
+                              ref={(el) => { sessionMenuRef.current = el; }}
+                              onClick={(e) => e.stopPropagation()}
+                              className="session-menu"
+                              style={{
+                                position: 'fixed',
+                                top: `${sessionMenuPos.top}px`,
+                                transform: sessionMenuPos.placement === 'above' ? 'translate(calc(-100% + 24px), -100%)' : 'translateX(calc(-100% + 24px))',
+                                left: `${sessionMenuPos.left}px`,
+                                background: 'var(--color-bg-alt)',
+                                border: '1px solid var(--color-border)',
+                                borderRadius: 8,
+                                padding: '6px 8px',
+                                boxShadow: '0 6px 18px rgba(0,0,0,0.4)',
+                                zIndex: 20000,
+                                minWidth: 140,
+                                whiteSpace: 'nowrap',
+                                visibility: sessionMenuVisible ? 'visible' : 'hidden',
+                                pointerEvents: sessionMenuVisible ? 'auto' : 'none',
+                              }}>
+                              <button
+                                onClick={() => { setSessionMenuOpen(null); setSessionMenuPos(null); handleRenameSession(s.id); }}
+                                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 8px', background: 'transparent', border: 'none', color: 'var(--color-text)', cursor: 'pointer' }}
+                              >Rename</button>
+                              <button
+                                onClick={() => { setSessionMenuOpen(null); setSessionMenuPos(null); handleDeleteSession(s.id); }}
+                                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 8px', background: 'transparent', border: 'none', color: 'var(--color-text)', cursor: 'pointer' }}
+                              >Delete</button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+
+                    {chatSessions.length === 0 && (
+                      <div style={{ padding: "12px 16px", fontSize: 12, color: "#7a8f75", fontStyle: "italic" }}>
+                        No chats yet — click New Chat to start
+                      </div>
+                    )}
                   </div>
-                )}
+                </div>
+              )}
+            </div>
+
+            {/* Profile Card - Toggle on Hamburger Click */}
+
+
+
+            {/* Beta Version Disclaimer */}
+            <div className="sidebar-disclaimer">
+              <IconWarning width={14} height={14} />
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 2 }}>BETA VERSION</div>
+                <div style={{ fontSize: 10, lineHeight: 1.4 }}>
+                  NanoSoft Ask AI is currently in beta. Responses may be incomplete or inaccurate and should not be treated as formal legal advice.
+                </div>
               </div>
             </div>
-          )}
+          </aside>
         </div>
 
-        {/* Profile Card - Toggle on Hamburger Click */}
-       
-       
+        {/* ── Main Content ─────────────────────────────────────────────────── */}
+        <div
+          className={
+            !historyLoading && isLanding
+              ? "main-content main-content--landing-start"
+              : "main-content"
+          }
+        >
 
-        {/* Beta Version Disclaimer */}
-        <div className="sidebar-disclaimer">
-          <IconWarning width={14} height={14}/>
-          <div>
-            <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 2 }}>BETA VERSION</div>
-            <div style={{ fontSize: 10, lineHeight: 1.4 }}>
-              NanoSoft Ask AI is currently in beta. Responses may be incomplete or inaccurate and should not be treated as formal legal advice.
+          {/* Mobile Header with Menu Button - sticky at top (hidden while sidebar is open) */}
+          {isMobileHeaderVisible && (
+            <div
+              style={{
+                position: 'fixed',
+                top: 0,
+                left: 0,
+                right: 0,
+                height: '36px',
+                background: 'var(--color-bg-alt)',
+                borderBottom: '1px solid var(--color-border)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                paddingLeft: '12px',
+                paddingRight: '12px',
+                zIndex: 10000,
+                backdropFilter: 'blur(10px)',
+              }}
+            >
+              <button
+                onClick={() => setSidebarOpen(true)}
+                title="Open sidebar"
+                aria-label="Open sidebar"
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--color-text)',
+                  cursor: 'pointer',
+                  padding: '8px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'all 0.2s ease',
+                }}
+              >
+                <IconMenu2 size={24} />
+              </button>
+              <div style={{ fontSize: '14px', fontWeight: '500', flex: 1, textAlign: 'center' }}>
+                Ask AI
+              </div>
+              <div style={{ width: '40px' }} />
             </div>
-          </div>
-        </div>
-      </aside>
-      </div>
+          )}
 
-      {/* ── Main Content ─────────────────────────────────────────────────── */}
-      <div
-        className={
-          !historyLoading && isLanding
-            ? "main-content main-content--landing-start"
-            : "main-content"
-        }
-      >
-
-        {/* Mobile Header with Menu Button - sticky at top (hidden while sidebar is open) */}
-        {isMobileHeaderVisible && (
-          <div
-            style={{
-              position: 'fixed',
-              top: 0,
-              left: 0,
-              right: 0,
-              height: '36px',
-              background: 'var(--color-bg-alt)',
-              borderBottom: '1px solid var(--color-border)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              paddingLeft: '12px',
-              paddingRight: '12px',
-              zIndex: 10000,
-              backdropFilter: 'blur(10px)',
-            }}
-          >
+          {/* Mobile Menu Button - legacy, disabled when header is shown */}
+          {false && responsive.isMobile && (
             <button
+              className="mobile-menu-btn"
               onClick={() => setSidebarOpen(true)}
               title="Open sidebar"
               aria-label="Open sidebar"
               style={{
+                position: 'fixed',
+                top: 16,
+                left: 16,
+                zIndex: 1000,
                 background: 'transparent',
                 border: 'none',
                 color: 'var(--color-text)',
@@ -2978,452 +3058,536 @@ useEffect(() => {
                 alignItems: 'center',
                 justifyContent: 'center',
                 transition: 'all 0.2s ease',
+                opacity: sidebarOpen ? 0 : 1,
+                pointerEvents: sidebarOpen ? 'none' : 'auto',
               }}
             >
               <IconMenu2 size={24} />
             </button>
-            <div style={{ fontSize: '14px', fontWeight: '500', flex: 1, textAlign: 'center' }}>
-              Ask AI
-            </div>
-            <div style={{ width: '40px' }} />
-          </div>
-        )}
+          )}
 
-        {/* Mobile Menu Button - legacy, disabled when header is shown */}
-        {false && responsive.isMobile && (
-          <button
-            className="mobile-menu-btn"
-            onClick={() => setSidebarOpen(true)}
-            title="Open sidebar"
-            aria-label="Open sidebar"
-            style={{
-              position: 'fixed',
-              top: 16,
-              left: 16,
-              zIndex: 1000,
-              background: 'transparent',
-              border: 'none',
-              color: 'var(--color-text)',
-              cursor: 'pointer',
-              padding: '8px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              transition: 'all 0.2s ease',
-              opacity: sidebarOpen ? 0 : 1,
-              pointerEvents: sidebarOpen ? 'none' : 'auto',
-            }}
-          >
-            <IconMenu2 size={24} />
-          </button>
-        )}
+          {/* Overlay when sidebar is open on mobile */}
+          {(responsive.isMobile || responsive.isTablet) && sidebarOpen && (
+            <div
+              style={{
+                position: 'fixed',
+                inset: 0,
+                zIndex: 9997,
+                // Blur the background behind the sidebar (mobile/tablet "max blur")
+                backgroundColor: 'rgba(0, 0, 0, 0.35)',
+                backdropFilter: 'blur(30px) saturate(130%)',
+                WebkitBackdropFilter: 'blur(30px) saturate(130%)',
+              }}
+              onClick={() => setSidebarOpen(false)}
+            />
+          )}
 
-        {/* Overlay when sidebar is open on mobile */}
-        {(responsive.isMobile || responsive.isTablet) && sidebarOpen && (
-          <div
-            style={{
-              position: 'fixed',
-              inset: 0,
-              zIndex: 9997,
-              // Blur the background behind the sidebar (mobile/tablet "max blur")
-              backgroundColor: 'rgba(0, 0, 0, 0.35)',
-              backdropFilter: 'blur(30px) saturate(130%)',
-              WebkitBackdropFilter: 'blur(30px) saturate(130%)',
-            }}
-            onClick={() => setSidebarOpen(false)}
-          />
-        )}
-
-        {/* History loading spinner */}
-        {historyLoading && (
-          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <div style={{ textAlign: "center" }}>
-              <div style={{ display: "flex", gap: 6, justifyContent: "center", marginBottom: 8 }}>
-                {[0, 1, 2].map(i => (
-                  <span key={i} style={{
-                    display: "inline-block", width: 8, height: 8,
-                    borderRadius: "50%", background: "#d4af37",
-                    animation: `bounce 1.2s ease-in-out ${i * 0.2}s infinite`,
-                  }}/>
-                ))}
-              </div>
-              <span style={{ fontSize: 13, color: "#A0AEC0" }}>Loading chat history…</span>
-            </div>
-          </div>
-        )}
-
-        {/* Landing — welcome shifted up; input vertically centered (only before first message) */}
-        {!historyLoading && isLanding && (
-          <div className="landing-start-column">
-            <div className="landing-start-spacer-top" aria-hidden />
-            <div className="landing-container landing-container--start">
-              <div className="landing-card">
-                <h1
-                  style={{
-                    fontSize: 32,
-                    fontWeight: 700,
-                    marginBottom: 16,
-                    background:
-                      "linear-gradient(180deg, #AE8625 0%, #F7EF8A 35%, #D2AC47 65%, #EDC967 100%)",
-                    backgroundSize: "200% 200%",
-                    WebkitBackgroundClip: "text",
-                    backgroundClip: "text",
-                    WebkitTextFillColor: "transparent",
-                    animation: "goldShine 3s ease-in-out infinite",
-                  }}
-                >
-                  Welcome to Ask AI
-                </h1>
-                <p className="landing-subtitle">{"Let's work together buddy"}</p>
-              </div>
-            </div>
-            {renderChatInputFooter("landing")}
-            <div className="landing-start-spacer-bottom" aria-hidden />
-          </div>
-        )}
-
-        {/* Chat area */}
-        {!historyLoading && !isLanding && (
-          <div className="chat-scroll-area">
-            <div className="messages-container">
-              {messages.map((msg, idx) => {
-                const isUser      = msg.role === "user";
-                const isError     = msg.role === "error";
-                const isStreaming = msg.streaming === true;
-                const isAudio     = msg.isAudio === true;
-                const isGraphMsg  = msg.isGraphResponse === true;  // ← Use explicit flag
-               
-                // ✅ Parse graph data ONLY if message is marked as graph response
-                const graphData = isGraphMsg
-                  ? parseGraphData(msg.text)
-                  : null;
-
-                // DEBUG: Log rendering decision
-                if (isGraphMsg) {
-                  console.log("✅ [RENDER] Marked as graph message → will render BarChartRenderer", {
-                    parsed: graphData !== null,
-                    type: graphData?.type,
-                  });
-                } else if (!isUser && !isError && !isStreaming) {
-                  console.log("📨 [RENDER] Regular message → will render as HTML", {
-                    textLength: msg.text?.length || 0,
-                  });
-                }
-
-                // Format duration as MM:SS
-                const formatDuration = (seconds: number): string => {
-                  const mins = Math.floor(seconds / 60);
-                  const secs = seconds % 60;
-                  return `${mins}:${secs.toString().padStart(2, "0")}`;
-                };
-
-                return (
-                  <div key={idx} className={`message-row ${msg.role}`}>
-                    {!isUser && !isError && (
-                      <div className="avatar-box"><IconAI/></div>
-                    )}
-
-                    <div className={`message-bubble ${msg.role}${isGraphMsg ? ' graph-message' : ''}${msg.tableData && msg.tableData.length > 0 ? ' table-message' : ''}`}>
-
-                      {isAudio ? (
-                    /* ── Audio Message: Show player UI ── */
-                    (() => {
-                      // BUG 1 FIX: prefer real loaded duration, fall back to stored, then 0
-                      const realDur = audioDurationMap[idx] ?? msg.audioDuration ?? 0;
-                      const progress = audioProgressMap[idx] ?? 0;
-                      // currentTime = progress% of realDur
-                      const currentSec = realDur > 0 ? (progress / 100) * realDur : 0;
-
-                      const fmtSec = (s: number) => {
-                        const m = Math.floor(s / 60);
-                        const sec = Math.floor(s % 60);
-                        return `${m}:${sec.toString().padStart(2, "0")}`;
-                      };
-
-                      return (
-                        <div className="voice-message-container" style={{
-                          fontSize: responsive.isMobile ? '12px' : responsive.isTablet ? '13px' : '14px',
-                          display: 'flex',
-                          gap: responsive.isMobile ? '8px' : '12px',
-                          alignItems: 'center',
-                          width: '100%',
-                        }}>
-                          <button
-                            className="voice-message-play-btn"
-                            onClick={() => handleAudioPlayback(idx, msg.audioUrl, msg.audioDuration || 0)}
-                            disabled={!isUser}
-                          >
-                            {audioPlayingIndex === idx ? <IconPlayerPause size={20} /> : <IconPlayerPlay size={20} />}
-                          </button>
-                          <div style={{ display: "flex", flexDirection: "column", flex: 1, gap: "6px" }}>
-                            <div className="voice-message-progress-wrapper">
-                              <div
-                                className="voice-message-progress-bar"
-                                style={{
-                                  width: `${progress}%`,
-                                  transition: "width 0.1s linear",   // smooth CSS transition
-                                }}
-                              />
-                            </div>
-                            {/* BUG 1 FIX: show real duration; if playing show currentTime / total */}
-                            <div className="voice-message-duration" style={{
-                              fontSize: responsive.isMobile ? '11px' : responsive.isTablet ? '12px' : '13px',
-                            }}>
-                              {audioPlayingIndex === idx
-                                ? `${fmtSec(currentSec)} / ${fmtSec(realDur)}`
-                                : fmtSec(realDur)
-                              }
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })()
-                      ) : isUser || isError ? (
-                        /* ── User / Error: plain text ── */
-                        <>{msg.text}</>
-
-                      ) : isStreaming ? (
-                        /* ── Streaming: pre-wrap plain text + blinking cursor ── */
-                        <div className="ai-bubble streaming-text">
-                          {msg.text}
-                          <span className="stream-cursor"/>
-                        </div>
-
-                      ) : isGraphMsg && graphData ? (
-                        /* ── Graph: Render chart with per-message type switcher ── */
-                        (() => {
-                          const chartSize = getResponsivePieChartSize(responsive.screen);
-                          return (
-                        <div style={{
-                          display: 'flex',
-                          justifyContent: 'center',
-                          alignItems: 'center',
-                          width: '100%',
-                          maxWidth: chartSize.containerMaxWidth,
-                          marginTop: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
-                          marginBottom: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
-                          marginLeft: 'auto',
-                          marginRight: 'auto',
-                          overflow: responsive.isMobile ? 'visible' : 'visible',
-                          paddingLeft: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
-                          paddingRight: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
-                          paddingTop: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
-                          paddingBottom: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
-                        }}>
-                          {(() => {
-                            const msgChartType = msg.chartType || 'vertical-bar';
-
-                            const handleChartTypeChange = (newType: ChartType) => {
-                              setChartType(newType);
-                              setMessages(prev => {
-                                const updated = [...prev];
-                                updated[idx] = { ...updated[idx], chartType: newType };
-                                return updated;
-                              });
-                            };
-
-                            if (msgChartType === 'horizontal-bar') {
-                              return <HorizontalBarChartRenderer key={`hbar-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
-                            } else if (msgChartType === 'pie') {
-                              return <PieChartRenderer key={`pie-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
-                            } else if (msgChartType === 'line') {
-                              return <LineChartRenderer key={`line-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
-                            } else {
-                              return <BarChartRenderer key={`bar-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
-                            }
-                          })()}
-                        </div>
-                          );
-                        })()  
-
-                      ) : msg.tableData && msg.tableData.length > 0 ? (
-                        /* ── Table: Render with TableWithTile component with toggle buttons for table/tile views ── */
-                        <TableWithTile 
-                          rows={msg.tableData}
-                          title={msg.tableTitle || "Data"}
-                          htmlTableContent={msg.text}
-                        />
-
-                      ) : (
-                        /* ── Complete: already formatted at [DONE] time ── */
-                        <div className="ai-bubble" style={{
-                          fontSize: responsive.isMobile ? '13px' : responsive.isTablet ? '14px' : '15px',
-                          lineHeight: 1.5,
-                          maxWidth: responsive.isMobile ? '90%' : responsive.isTablet ? '85%' : '75%',
-                          display: 'flex',
-                          justifyContent: 'center',
-                          alignItems: 'flex-start',
-                        }}>
-                          <div dangerouslySetInnerHTML={{ __html: msg.text }} style={{
-                            width: '100%',
-                            textAlign: 'left',
-                          }} />
-                        </div>
-                      )}
-
-                    </div>
-                  </div>
-                );
-              })}
-
-              {isLoading && (
-                <div className="loading-indicator">
-                  <div className="avatar-box"><IconAI/></div>
-                  <div className="loading-dots-box">
-                    {[0, 1, 2].map(i => (
-                      <span key={i} style={{
-                        display: "inline-block", width: 7, height: 7,
-                        borderRadius: "50%", background: "#d4af37",
-                        animation: `bounce 1.2s ease-in-out ${i * 0.2}s infinite`,
-                      }}/>
-                    ))}
-                  </div>
+          {/* History loading spinner */}
+          {historyLoading && (
+            <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <div style={{ textAlign: "center" }}>
+                <div style={{ display: "flex", gap: 6, justifyContent: "center", marginBottom: 8 }}>
+                  {[0, 1, 2].map(i => (
+                    <span key={i} style={{
+                      display: "inline-block", width: 8, height: 8,
+                      borderRadius: "50%", background: "#d4af37",
+                      animation: `bounce 1.2s ease-in-out ${i * 0.2}s infinite`,
+                    }} />
+                  ))}
                 </div>
-              )}
-              <div ref={messagesEndRef}/>
-            </div>
-          </div>
-        )}
-
-        {/* Input footer — bottom bar after chat starts or while history loads (not duplicated on landing) */}
-        {(historyLoading || !isLanding) && renderChatInputFooter("default")}
-
-        {/* Upgrade Plan Modal */}
-        {showUpgradePlan && (
-          <div 
-            className="upgrade-plan-backdrop"
-            style={{
-              position: 'fixed',
-              inset: 0,
-              background: 'rgba(0, 0, 0, 0.60)',
-              backdropFilter: 'blur(12px) saturate(120%)',
-              WebkitBackdropFilter: 'blur(12px) saturate(120%)',
-              zIndex: 10010,
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'center',
-            }}
-            onClick={() => setShowUpgradePlan(false)}
-          >
-            <div 
-              className="upgrade-plan-modal"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <button
-                onClick={() => setShowUpgradePlan(false)}
-                className="upgrade-plan-close-btn"
-              >
-                ×
-              </button>
-              <UpgradePlan 
-                onManageAccountClick={() => {
-                  setShowUpgradePlan(false);
-                  setShowManageAccount(true);
-                }}
-                onPlanChange={(planName) => {
-                  setCurrentPlan(planName);
-                }}
-              />
-            </div>
-          </div>
-        )}
-
-        {/* Delete Confirmation Modal (rendered via portal to avoid being blurred) */}
-        {typeof document !== 'undefined' && showDeleteModal && createPortal(
-          <div
-            className="modal-backdrop"
-            onClick={() => { setShowDeleteModal(false); setDeleteSessionId(null); setDeleteSessionTitle(""); }}
-          >
-            <div className="confirm-delete-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
-              <h3>Delete chat?</h3>
-              <p>This will delete <strong>{deleteSessionTitle}</strong>.</p>
-              <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 12 }}>
-                <button className="btn btn-secondary" onClick={() => { setShowDeleteModal(false); setDeleteSessionId(null); setDeleteSessionTitle(""); }}>Cancel</button>
-                <button className="btn btn-danger" onClick={() => performDeleteSession()}>Delete</button>
+                <span style={{ fontSize: 13, color: "#A0AEC0" }}>Loading chat history…</span>
               </div>
-            </div>
-          </div>,
-          document.body
-        )}
-
-        {/* Manage Account Full-Screen Page */}
-        {showManageAccount && (
-          <div 
-            style={{
-              position: "fixed",
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              width: "100vw",
-              height: "100vh",
-              background: "var(--color-bg)",
-              zIndex: 10000,
-              display: "flex",
-              flexDirection: "column",
-            }}
-          >
-            {!isManageAccountMenuOpen && (
-              <div style={{
-                position: "absolute",
-                top: "20px",
-                right: "20px",
-                zIndex: 10001,
-              }}>
-                <button
-                  onClick={() => {
-                    setShowManageAccount(false);
-                    setIsManageAccountMenuOpen(false);
-                  }}
-                  style={{
-                  width: "40px",
-                  height: "40px",
-                  borderRadius: "6px",
-                  border: "1.5px solid var(--color-primary)",
-                  background: "transparent",
-                  color: "var(--color-primary)",
-                  cursor: "pointer",
-                  fontSize: "24px",
-                  fontWeight: 600,
-                  transition: "all 0.3s ease",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-                onMouseEnter={(e) => {
-                  const btn = e.currentTarget as HTMLElement;
-                  btn.style.background = "var(--color-primary)";
-                  btn.style.color = "var(--color-text)";
-                }}
-                onMouseLeave={(e) => {
-                  const btn = e.currentTarget as HTMLElement;
-                  btn.style.background = "transparent";
-                  btn.style.color = "var(--color-primary)";
-                }}
-              >
-                ×
-              </button>
             </div>
           )}
-            <div style={{
-              flex: 1,
-              width: "100%",
-              height: "100%",
-            }}>
-               <ManageAccount
-              currentPlan={currentPlan}
-              profileName={loggedInUser || "My Account"}
-              subUserName={userIdFromUrl ?? loggedInUser ?? ""}
-              externalUserId={loggedInUser ?? ""}
-              onMobileSidebarOpenChange={(open) => setIsManageAccountMenuOpen(open)}
-            />
+
+          {/* Landing — welcome shifted up; input vertically centered (only before first message) */}
+          {!historyLoading && isLanding && (
+            <div className="landing-start-column">
+              <div className="landing-start-spacer-top" aria-hidden />
+              <div className="landing-container landing-container--start">
+                <div className="landing-card">
+                  <h1
+                    style={{
+                      fontSize: 32,
+                      fontWeight: 700,
+                      marginBottom: 16,
+                      background:
+                        "linear-gradient(180deg, #AE8625 0%, #F7EF8A 35%, #D2AC47 65%, #EDC967 100%)",
+                      backgroundSize: "200% 200%",
+                      WebkitBackgroundClip: "text",
+                      backgroundClip: "text",
+                      WebkitTextFillColor: "transparent",
+                      animation: "goldShine 3s ease-in-out infinite",
+                    }}
+                  >
+                    Welcome to Ask AI
+                  </h1>
+                  <p className="landing-subtitle">{"Let's work together buddy"}</p>
+                </div>
+              </div>
+              {renderChatInputFooter("landing")}
+              <div className="landing-start-spacer-bottom" aria-hidden />
             </div>
-          </div>
-        )}
-        
-        {/* Walkthrough Popup */}
-        <WalkthroughPopup />
-      </div>
+          )}
+
+          {/* Chat area */}
+          {!historyLoading && !isLanding && (
+            <div className="chat-scroll-area">
+              <div className="messages-container">
+                {messages.map((msg, idx) => {
+                  const isUser = msg.role === "user";
+                  const isError = msg.role === "error";
+                  const isStreaming = msg.streaming === true;
+                  const isAudio = msg.isAudio === true;
+                  const isGraphMsg = msg.isGraphResponse === true;  // ← Use explicit flag
+
+                  // ✅ Parse graph data ONLY if message is marked as graph response
+                  const graphData = isGraphMsg
+                    ? parseGraphData(msg.text)
+                    : null;
+
+                  // DEBUG: Log rendering decision
+                  if (isGraphMsg) {
+                    console.log("✅ [RENDER] Marked as graph message → will render BarChartRenderer", {
+                      parsed: graphData !== null,
+                      type: graphData?.type,
+                    });
+                  } else if (!isUser && !isError && !isStreaming) {
+                    console.log("📨 [RENDER] Regular message → will render as HTML", {
+                      textLength: msg.text?.length || 0,
+                    });
+                  }
+
+                  // Format duration as MM:SS
+                  const formatDuration = (seconds: number): string => {
+                    const mins = Math.floor(seconds / 60);
+                    const secs = seconds % 60;
+                    return `${mins}:${secs.toString().padStart(2, "0")}`;
+                  };
+
+                  return (
+                    <div key={idx} className={`message-row ${msg.role}`}>
+                      {!isUser && !isError && (
+                        <div className="avatar-box"><IconAI /></div>
+                      )}
+
+                      <div
+                        className={`message-bubble ${msg.role}${isGraphMsg ? ' graph-message' : ''}${msg.tableData && msg.tableData.length > 0 ? ' table-message' : ''}`}
+                        style={{ position: 'relative' }}
+                      >
+
+                        {isAudio ? (
+                          /* ── Audio Message: Show player UI ── */
+                          (() => {
+                            // BUG 1 FIX: prefer real loaded duration, fall back to stored, then 0
+                            const realDur = audioDurationMap[idx] ?? msg.audioDuration ?? 0;
+                            const progress = audioProgressMap[idx] ?? 0;
+                            // currentTime = progress% of realDur
+                            const currentSec = realDur > 0 ? (progress / 100) * realDur : 0;
+
+                            const fmtSec = (s: number) => {
+                              const m = Math.floor(s / 60);
+                              const sec = Math.floor(s % 60);
+                              return `${m}:${sec.toString().padStart(2, "0")}`;
+                            };
+
+                            return (
+                              <div className="voice-message-container" style={{
+                                fontSize: responsive.isMobile ? '12px' : responsive.isTablet ? '13px' : '14px',
+                                display: 'flex',
+                                gap: responsive.isMobile ? '8px' : '12px',
+                                alignItems: 'center',
+                                width: '100%',
+                              }}>
+                                <button
+                                  className="voice-message-play-btn"
+                                  onClick={() => handleAudioPlayback(idx, msg.audioUrl, msg.audioDuration || 0)}
+                                  disabled={!isUser}
+                                >
+                                  {audioPlayingIndex === idx ? <IconPlayerPause size={20} /> : <IconPlayerPlay size={20} />}
+                                </button>
+                                <div style={{ display: "flex", flexDirection: "column", flex: 1, gap: "6px" }}>
+                                  <div className="voice-message-progress-wrapper">
+                                    <div
+                                      className="voice-message-progress-bar"
+                                      style={{
+                                        width: `${progress}%`,
+                                        transition: "width 0.1s linear",   // smooth CSS transition
+                                      }}
+                                    />
+                                  </div>
+                                  {/* BUG 1 FIX: show real duration; if playing show currentTime / total */}
+                                  <div className="voice-message-duration" style={{
+                                    fontSize: responsive.isMobile ? '11px' : responsive.isTablet ? '12px' : '13px',
+                                  }}>
+                                    {audioPlayingIndex === idx
+                                      ? `${fmtSec(currentSec)} / ${fmtSec(realDur)}`
+                                      : fmtSec(realDur)
+                                    }
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })()
+                        ) : isUser || isError ? (
+                          /* ── User / Error: plain text ── */
+                          <>{msg.text}</>
+
+                        ) : isStreaming ? (
+                          /* ── Streaming: pre-wrap plain text + blinking cursor ── */
+                          <div className="ai-bubble streaming-text">
+                            {msg.text}
+                            <span className="stream-cursor" />
+                          </div>
+
+                        ) : isGraphMsg && graphData ? (
+                          /* ── Graph: Render chart with per-message type switcher ── */
+                          (() => {
+                            const chartSize = getResponsivePieChartSize(responsive.screen);
+                            return (
+                              <div style={{
+                                display: 'flex',
+                                justifyContent: 'center',
+                                alignItems: 'center',
+                                width: '100%',
+                                maxWidth: chartSize.containerMaxWidth,
+                                marginTop: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
+                                marginBottom: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
+                                marginLeft: 'auto',
+                                marginRight: 'auto',
+                                overflow: responsive.isMobile ? 'visible' : 'visible',
+                                paddingLeft: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
+                                paddingRight: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
+                                paddingTop: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
+                                paddingBottom: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
+                              }}>
+                                {(() => {
+                                  const msgChartType = msg.chartType || 'vertical-bar';
+
+                                  const handleChartTypeChange = (newType: ChartType) => {
+                                    setChartType(newType);
+                                    setMessages(prev => {
+                                      const updated = [...prev];
+                                      updated[idx] = { ...updated[idx], chartType: newType };
+                                      return updated;
+                                    });
+                                  };
+
+                                  if (msgChartType === 'horizontal-bar') {
+                                    return <HorizontalBarChartRenderer key={`hbar-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
+                                  } else if (msgChartType === 'pie') {
+                                    return <PieChartRenderer key={`pie-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
+                                  } else if (msgChartType === 'line') {
+                                    return <LineChartRenderer key={`line-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
+                                  } else {
+                                    return <BarChartRenderer key={`bar-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
+                                  }
+                                })()}
+                              </div>
+                            );
+                          })()
+
+                        ) : msg.tableData && msg.tableData.length > 0 ? (
+                          /* ── Table: Render with TableWithTile component with toggle buttons for table/tile views ── */
+                          <TableWithTile
+                            rows={msg.tableData}
+                            title={msg.tableTitle || "Data"}
+                            htmlTableContent={msg.text}
+                          />
+
+                        ) : (
+                          /* ── Complete: already formatted at [DONE] time ── */
+                          <div className="ai-bubble" style={{
+                            fontSize: responsive.isMobile ? '13px' : responsive.isTablet ? '14px' : '15px',
+                            lineHeight: 1.5,
+                            maxWidth: responsive.isMobile ? '90%' : responsive.isTablet ? '85%' : '75%',
+                            display: 'flex',
+                            justifyContent: 'center',
+                            alignItems: 'flex-start',
+                          }}>
+                            <div dangerouslySetInnerHTML={{ __html: msg.text }} style={{
+                              width: '100%',
+                              textAlign: 'left',
+                            }} />
+                          </div>
+                        )}
+
+                        {/* Copy button for text bubbles only */}
+                        {!isAudio && !isGraphMsg && !(msg.tableData && msg.tableData.length > 0) && (
+                          <>
+                            <button
+                              className="copy-bubble-btn"
+                              onClick={(e) => {
+                                // Extract plain text if it's HTML
+                                const textToCopy = msg.text.replace(/<[^>]*>?/gm, '');
+                                navigator.clipboard.writeText(textToCopy);
+
+                                // Change icon to tick
+                                const btn = e.currentTarget;
+                                const originalHTML = btn.innerHTML;
+                                btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
+
+                                setTimeout(() => {
+                                  btn.innerHTML = originalHTML;
+                                }, 2000);
+                              }}
+                              style={{
+                                position: 'absolute',
+                                bottom: '4px',
+                                right: '4px',
+                                opacity: 0, // hidden by default on desktop
+                                transition: 'opacity 0.2s',
+                                background: (typeof window !== 'undefined' ? document.documentElement.getAttribute('data-theme') === 'dark' : (theme === 'dark')) ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.05)',
+                                border: 'none',
+                                borderRadius: '4px',
+                                color: (typeof window !== 'undefined' ? document.documentElement.getAttribute('data-theme') === 'dark' : (theme === 'dark')) ? '#d4af37' : '#5c4033',
+                                padding: '4px',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                zIndex: 10
+                              }}
+                              title="Copy text"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                              </svg>
+                            </button>
+                            <style>{`
+                              @media (hover: hover) {
+                                .message-bubble:hover .copy-bubble-btn {
+                                  opacity: 1 !important;
+                                }
+                              }
+                              @media (max-width: 1024px) {
+                                .copy-bubble-btn {
+                                  opacity: 1 !important;
+                                  padding: 2px !important;
+                                }
+                                .copy-bubble-btn svg {
+                                  width: 12px !important;
+                                  height: 12px !important;
+                                }
+                              }
+                            `}</style>
+                          </>
+                        )}
+
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {isLoading && (() => {
+                  const isDarkTheme = typeof window !== 'undefined' ? document.documentElement.getAttribute('data-theme') === 'dark' : (theme === 'dark');
+                  return (
+                    <div className="loading-indicator" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                      <div className="avatar-box"><IconAI /></div>
+                      {/* Bubble with cycling sliding workflow text */}
+                      <div className="ai-bubble" style={{
+                        background: isDarkTheme ? '#111111' : '#ffffff',
+                        color: isDarkTheme ? '#d4af37' : '#5c4033',
+                        border: '1px solid #d4af37',
+                        borderRadius: '16px 16px 16px 4px',
+                        padding: '10px 16px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        fontSize: '13px',
+                        position: 'relative',
+                        overflow: 'hidden',
+                        width: 'max-content'
+                      }}>
+                        {/* Invisible element to size the container to the longest text naturally */}
+                        <span style={{ opacity: 0, visibility: 'hidden', whiteSpace: 'nowrap' }}>Rendering Output...</span>
+
+                        {/* Absolute container for the centered animated text */}
+                        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', paddingLeft: '16px' }}>
+                          {["AI Recognized", "Passed Payload", "Fetching DB", "Returning Data", "Rendering Output"].map((text, textIdx) => (
+                            <div key={textIdx} style={{
+                              position: 'absolute',
+                              opacity: 0,
+                              animation: 'cycle-text-5 10s infinite',
+                              animationDelay: `${textIdx * 2}s`,
+                              whiteSpace: 'nowrap',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '2px'
+                            }}>
+                              <span>{text}</span>
+                              {/* Animated dots attached to the text */}
+                              <div style={{ display: 'flex', gap: '2px', alignItems: 'flex-end', height: '10px', paddingBottom: '2px' }}>
+                                {[0, 1, 2].map(i => (
+                                  <span key={i} style={{
+                                    display: "inline-block", width: 3, height: 3,
+                                    borderRadius: "50%", background: "currentColor",
+                                    animation: `bounce 1.2s ease-in-out ${i * 0.2}s infinite`,
+                                  }} />
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <style>{`
+                        @keyframes cycle-text-5 {
+                          0% { opacity: 0; transform: translateY(10px); }
+                          5%, 15% { opacity: 1; transform: translateY(0); }
+                          20%, 100% { opacity: 0; transform: translateY(-10px); }
+                        }
+                        @keyframes bounce {
+                          0%, 100% { transform: translateY(0); }
+                          50% { transform: translateY(-3px); }
+                        }
+                      `}</style>
+                    </div>
+                  );
+                })()}
+                <div ref={messagesEndRef} />
+              </div>
+            </div>
+          )}
+
+          {/* Input footer — bottom bar after chat starts or while history loads (not duplicated on landing) */}
+          {(historyLoading || !isLanding) && renderChatInputFooter("default")}
+
+          {/* Upgrade Plan Modal */}
+          {showUpgradePlan && (
+            <div
+              className="upgrade-plan-backdrop"
+              style={{
+                position: 'fixed',
+                inset: 0,
+                background: 'rgba(0, 0, 0, 0.60)',
+                backdropFilter: 'blur(12px) saturate(120%)',
+                WebkitBackdropFilter: 'blur(12px) saturate(120%)',
+                zIndex: 10010,
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+              }}
+              onClick={() => setShowUpgradePlan(false)}
+            >
+              <div
+                className="upgrade-plan-modal"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <button
+                  onClick={() => setShowUpgradePlan(false)}
+                  className="upgrade-plan-close-btn"
+                >
+                  ×
+                </button>
+                <UpgradePlan
+                  onManageAccountClick={() => {
+                    setShowUpgradePlan(false);
+                    setShowManageAccount(true);
+                  }}
+                  onPlanChange={(planName) => {
+                    setCurrentPlan(planName);
+                  }}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Delete Confirmation Modal (rendered via portal to avoid being blurred) */}
+          {typeof document !== 'undefined' && showDeleteModal && createPortal(
+            <div
+              className="modal-backdrop"
+              onClick={() => { setShowDeleteModal(false); setDeleteSessionId(null); setDeleteSessionTitle(""); }}
+            >
+              <div className="confirm-delete-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+                <h3>Delete chat?</h3>
+                <p>This will delete <strong>{deleteSessionTitle}</strong>.</p>
+                <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 12 }}>
+                  <button className="btn btn-secondary" onClick={() => { setShowDeleteModal(false); setDeleteSessionId(null); setDeleteSessionTitle(""); }}>Cancel</button>
+                  <button className="btn btn-danger" onClick={() => performDeleteSession()}>Delete</button>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
+
+          {/* Manage Account Full-Screen Page */}
+          {showManageAccount && (
+            <div
+              style={{
+                position: "fixed",
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                width: "100vw",
+                height: "100vh",
+                background: "var(--color-bg)",
+                zIndex: 10000,
+                display: "flex",
+                flexDirection: "column",
+              }}
+            >
+              {!isManageAccountMenuOpen && (
+                <div style={{
+                  position: "absolute",
+                  top: "20px",
+                  right: "20px",
+                  zIndex: 10001,
+                }}>
+                  <button
+                    onClick={() => {
+                      setShowManageAccount(false);
+                      setIsManageAccountMenuOpen(false);
+                    }}
+                    style={{
+                      width: "40px",
+                      height: "40px",
+                      borderRadius: "6px",
+                      border: "1.5px solid var(--color-primary)",
+                      background: "transparent",
+                      color: "var(--color-primary)",
+                      cursor: "pointer",
+                      fontSize: "24px",
+                      fontWeight: 600,
+                      transition: "all 0.3s ease",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                    onMouseEnter={(e) => {
+                      const btn = e.currentTarget as HTMLElement;
+                      btn.style.background = "var(--color-primary)";
+                      btn.style.color = "var(--color-text)";
+                    }}
+                    onMouseLeave={(e) => {
+                      const btn = e.currentTarget as HTMLElement;
+                      btn.style.background = "transparent";
+                      btn.style.color = "var(--color-primary)";
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
+              <div style={{
+                flex: 1,
+                width: "100%",
+                height: "100%",
+              }}>
+                <ManageAccount
+                  currentPlan={currentPlan}
+                  profileName={loggedInUser || "My Account"}
+                  subUserName={userIdFromUrl ?? loggedInUser ?? ""}
+                  externalUserId={userIdInt !== null ? String(userIdInt) : (typeof window !== "undefined" ? localStorage.getItem("userId") || "" : "")}
+                  onMobileSidebarOpenChange={(open) => setIsManageAccountMenuOpen(open)}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Walkthrough Popup */}
+          <WalkthroughPopup />
+        </div>
       </div>
     </div>
   );
