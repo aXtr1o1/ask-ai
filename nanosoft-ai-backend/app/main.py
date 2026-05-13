@@ -1072,6 +1072,59 @@ async def delete_session_endpoint(payload: dict):
         raise HTTPException(status_code=500, detail="Failed to delete session")
     return {"status": "ok", "sessionId": session_id}
     
+@api_router.post("/sessions/pin")
+async def pin_session_endpoint(payload: dict):
+    user_name = str(payload.get("userName", "")).strip()
+    session_id = str(payload.get("sessionId", "")).strip()
+    is_pinned = bool(payload.get("isPinned", False))
+
+    if not user_name or not session_id:
+        raise HTTPException(status_code=400, detail="userName and sessionId are required")
+
+    from app.services.postgres_service import toggle_pin_session
+    ok = await toggle_pin_session(session_id, user_name, is_pinned)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Chat session not found for this user")
+    return {"status": "ok", "sessionId": session_id, "isPinned": is_pinned}
+
+@api_router.post("/sessions/archive")
+async def archive_session_endpoint(payload: dict):
+    user_name = str(payload.get("userName", "")).strip()
+    session_id = str(payload.get("sessionId", "")).strip()
+    is_archived = bool(payload.get("isArchived", False))
+
+    if not user_name or not session_id:
+        raise HTTPException(status_code=400, detail="userName and sessionId are required")
+
+    from app.services.postgres_service import toggle_archive_session
+    ok = await toggle_archive_session(session_id, user_name, is_archived)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Chat session not found for this user")
+    return {"status": "ok", "sessionId": session_id, "isArchived": is_archived}
+
+@api_router.post("/sessions/share")
+async def share_session_endpoint(payload: dict):
+    user_name = str(payload.get("userName", "")).strip()
+    session_id = str(payload.get("sessionId", "")).strip()
+    is_public = bool(payload.get("isPublic", False))
+
+    if not user_name or not session_id:
+        raise HTTPException(status_code=400, detail="userName and sessionId are required")
+
+    from app.services.postgres_service import toggle_session_public
+    ok = await toggle_session_public(session_id, user_name, is_public)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Chat session not found for this user")
+    return {"status": "ok", "sessionId": session_id, "isPublic": is_public}
+
+@chatbot_app.get("/api/share/history")
+async def get_shared_history(sessionId: str, owner: str = None):
+    from app.services.postgres_service import get_public_chat_history
+    history = await get_public_chat_history(sessionId, owner)
+    if not history:
+        raise HTTPException(status_code=404, detail="Shared session not found or private")
+    return {"status": "ok", "history": history}
+    
 @api_router.post("/client_insertion")
 async def client_insertion(request: ClientInsertionRequest):
     userId     = request.userId.strip()
