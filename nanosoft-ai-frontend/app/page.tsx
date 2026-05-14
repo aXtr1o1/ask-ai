@@ -1130,6 +1130,22 @@ export default function Home() {
   // ─── Refs (declare early for use in hooks) ────────────────────────────────
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const {
+    ghostUserSpanRef,
+    ghostSuffixSpanRef,
+    ghostSuffixStrRef,
+    isComposingRef,
+    clearGhostCompletion,
+    syncGhostUserMirror,
+    applyGhostSuffixFromInput,
+  } = useGhostInputCompletion(
+    messages,
+    loggedInUser,
+    rawInputRef,
+    inputRef,
+    isLoading,
+    wsConnectionState,
+  );
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -2598,6 +2614,7 @@ export default function Home() {
   const sendMessage = () => {
     const domVal = inputRef.current?.value ?? "";
     if (!domVal.trim() || isLoading) return;
+    clearGhostCompletion();
     const userText = domVal.trim();
 
     const ws = wsRef.current;
@@ -2607,6 +2624,8 @@ export default function Home() {
       setMessages(prev => [...prev, { role: "error", text: "Still connecting. Please wait." }]);
       return;
     }
+
+    recordPromptForGhostHistory(ghostPromptHistoryStorageKey(loggedInUser), userText);
 
     // Ensure capsule exists and move this session to top when user types (content changed)
     const now = Date.now();
@@ -2639,6 +2658,7 @@ export default function Home() {
     if (inputRef.current) inputRef.current.value = "";
     rawInputRef.current = "";
     setInput("");
+    syncGhostUserMirror();
     setIsLoading(true);
     accRef.current = "";
 
@@ -2658,6 +2678,24 @@ export default function Home() {
   };  // ← THIS CLOSING BRACE WAS MISSING
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Tab" && ghostSuffixStrRef.current) {
+      e.preventDefault();
+      const ta = e.currentTarget;
+      const ghost = ghostSuffixStrRef.current;
+      ta.value = ta.value + ghost;
+      rawInputRef.current = ta.value;
+      ghostSuffixStrRef.current = "";
+      if (ghostSuffixSpanRef.current) ghostSuffixSpanRef.current.textContent = "";
+      resizeTA();
+      syncGhostUserMirror();
+      if (inputDebounceRef.current) {
+        window.clearTimeout(inputDebounceRef.current);
+        inputDebounceRef.current = null;
+      }
+      setInput(ta.value);
+      applyGhostSuffixFromInput();
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   };
 
