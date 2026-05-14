@@ -676,6 +676,7 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-height: 0;
   /* only inner chat list scrolls */
 }
 
@@ -686,20 +687,10 @@ body {
   background: rgba(0, 0, 0, 0.2);
   padding: 8px;
   min-height: 80px;
-}
-
-:root[data-theme='light'] .chat-history-box {
-  border-color: rgba(212, 175, 55, 0.5);
-  background: rgba(250, 250, 250, 0.6);
-}
-
-/* Box around chat history / "No chats yet" area */
-.chat-history-box {
-  border: 1px solid rgba(212, 175, 55, 0.35);
-  border-radius: 10px;
-  background: rgba(0, 0, 0, 0.2);
-  padding: 8px;
-  min-height: 80px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 :root[data-theme='light'] .chat-history-box {
@@ -712,6 +703,7 @@ body {
   flex: 1;
   overflow-y: auto;
   padding-right: 2px;
+  max-height: calc(100vh - 320px);
   /* small breathing room on the right */
 }
 
@@ -3713,6 +3705,16 @@ textarea:focus-visible {
   .sidebar-scroll {
     max-height: calc(100vh - 88px);
   }
+
+  /* iPad: sidebar is a fixed overlay, give history scroll all remaining space */
+  .chat-history-box {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .chat-history-scroll {
+    max-height: calc(100vh - 260px);
+  }
 }
 
 @media (max-width: 640px) {
@@ -3749,6 +3751,16 @@ textarea:focus-visible {
     /* Stack header above chat area */
     padding-top: var(--header-height);
     /* ensure fixed mobile header does not overlap chat */
+  }
+
+  /* Mobile: sidebar is a fixed overlay, give history scroll all remaining space */
+  .chat-history-box {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .chat-history-scroll {
+    max-height: calc(var(--vh, 1vh) * 100 - 260px);
   }
 
   .chat-scroll-area {
