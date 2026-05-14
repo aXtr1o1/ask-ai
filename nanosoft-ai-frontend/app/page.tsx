@@ -906,7 +906,7 @@ const IconPlus = () => (
     <path d="M12 5v14M5 12h14" />
   </svg>
 );
-const IconSearch = () => (
+const IconSearch = ({ style }: { style?: React.CSSProperties }) => (
   <svg
     width="14"
     height="14"
@@ -916,6 +916,7 @@ const IconSearch = () => (
     strokeWidth="1.7"
     strokeLinecap="round"
     strokeLinejoin="round"
+    style={style}
   >
     <circle cx="11" cy="11" r="5.5" />
     <line x1="15" y1="15" x2="20" y2="20" />
@@ -954,11 +955,18 @@ const IconLibrary = ({ width = 16, height = 16, style }: { width?: number; heigh
     <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
   </svg>
 );
+const IconShare = ({ width = 16, height = 16, style }: { width?: number; height?: number; style?: React.CSSProperties }) => (
+  <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+    <circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" /><line x1="8.59" y1="13.51" x2="15.41" y2="17.49" /><line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+  </svg>
+);
+
 const IconPin = ({ size = 16, style }: { size?: number; style?: React.CSSProperties }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
     <path d="M12 17v5M9 17h6M15 13V4H9v9l-2 4h10l-2-4z" />
   </svg>
 );
+
 const IconCheckbox = ({ width = 16, height = 16, style }: { width?: number; height?: number; style?: React.CSSProperties }) => (
   <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
     <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
@@ -1021,6 +1029,7 @@ export default function Home() {
   const inputDebounceRef = useRef<number | null>(null);
   const DEBOUNCE_MS = 400; // 300-500ms recommended
   const [messages, setMessages] = useState<Message[]>([]);
+  const [activeMessageIdx, setActiveMessageIdx] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [sessionId, setSessionId] = useState<string>(() => generateSessionId());
   const [searchVal, setSearchVal] = useState("");
@@ -1594,14 +1603,14 @@ export default function Home() {
     const btnTop = sessionMenuPos.buttonRectTop ?? (sessionMenuPos.top || 0);
 
     // If not enough space below and more space above, flip
-    if ((btnBottom + menuH) > viewportH && btnTop > (viewportH - btnBottom)) {
+    if (sessionMenuPos.placement !== 'above' && (btnBottom + menuH) > viewportH && btnTop > (viewportH - btnBottom)) {
       // place above
       setSessionMenuPos(pos => pos ? { ...pos, placement: 'above', top: (pos.buttonRectTop ?? btnTop) - 6 } : pos);
       return;
     }
 
     // If placement was above but now not enough space above, ensure below
-    if ((sessionMenuPos.placement === 'above') && ((btnTop - menuH) < 0)) {
+    if (sessionMenuPos.placement === 'above' && ((btnTop - menuH) < 0)) {
       setSessionMenuPos(pos => pos ? { ...pos, placement: 'below', top: (pos.buttonRectBottom ?? btnBottom) + 6 } : pos);
       return;
     }
@@ -2157,8 +2166,10 @@ export default function Home() {
     setTimeout(() => refetchSessions(), 400);
   };
 
+
+
   // ── Process loaded messages: convert raw JSON to formatted tables ─────────
-  const processLoadedMessages = (msgs: Message[]): Message[] => {
+  function processLoadedMessages(msgs: Message[]): Message[] {
     return msgs.map(m => {
       if (m.role !== "ai") return m;
 
@@ -2168,19 +2179,19 @@ export default function Home() {
       const graphData = parseGraphData(text);
       if (graphData) {
         console.log("📊 [HISTORY] Graph response detected — keeping as raw JSON for chart");
-        return { ...m, text, isGraphResponse: true };
+        return { ...m, text, originalText: text, isGraphResponse: true };
       }
 
-      // 🔑 THE FIX: Detect if the history text is a Table JSON
+      // 🔑 Detect if the history text is a Table JSON (records/data/columns key)
       try {
         if (text.trim().startsWith('{') || text.trim().startsWith('[')) {
           const parsed = JSON.parse(text);
-          if (parsed && (parsed.columns || parsed.data)) {
-            // It's a table! Use the existing render function
+          if (parsed && (parsed.columns || parsed.data || parsed.records || parsed.p_list)) {
             const tableHTML = renderLargeDataset(text);
             if (tableHTML) {
               const rows = extractTableRows(tableHTML);
-              return { ...m, text: tableHTML, tableData: rows, tableTitle: "Results" };
+              // ✅ Set originalText = raw JSON so future saves preserve it
+              return { ...m, text: tableHTML, originalText: text, tableData: rows, tableTitle: "Results" };
             }
           }
         }
@@ -2188,19 +2199,19 @@ export default function Home() {
         /* Not JSON, ignore */
       }
 
-      // Check if already formatted (contains HTML tags or wrapper class)
+      // Check if already formatted HTML (contains table tags)
       if (
         text.includes('<table') ||
         text.includes('large-dataset-wrapper') ||
         text.includes('ai-table')
       ) {
         console.log("✅ [HISTORY] Message already HTML formatted - extracting table data");
-        // Try to extract table data from HTML
         const rows = extractTableRows(text);
         if (rows.length > 0) {
-          return { ...m, text, tableData: rows, tableTitle: "Results" };
+          // ✅ originalText stays as the HTML — no raw JSON available here
+          return { ...m, text, originalText: text, tableData: rows, tableTitle: "Results" };
         }
-        return m;
+        return { ...m, originalText: text };
       }
 
       // Extract response content (removes session_id wrapper)
@@ -2213,22 +2224,28 @@ export default function Home() {
         console.log("✅ [HISTORY] Successfully rendered as table structure");
         const rows = extractTableRows(tableHTML);
         if (rows.length > 0) {
-          return { ...m, text: tableHTML, tableData: rows, tableTitle: "Results" };
+          // ✅ originalText = raw text from DB so future saves re-parse correctly
+          return { ...m, text: tableHTML, originalText: text, tableData: rows, tableTitle: "Results" };
         }
-        return { ...m, text: tableHTML };
+        return { ...m, text: tableHTML, originalText: text };
       }
 
       // Not tabular data → try to format as text
       try {
         const formattedText = formatOutput(cleanedText);
-        // 🔑 EXTRA FIX: If the formatted text still has raw HTML tags, decode them
-        if (formattedText.includes('<div') || formattedText.includes('&lt;')) {
-          return { ...m, text: decodeEntities(formattedText) };
+        // Check if formatOutput produced an HTML table
+        const rows = extractTableRows(formattedText);
+        if (rows.length > 0) {
+          return { ...m, text: formattedText, originalText: text, tableData: rows, tableTitle: "Results" };
         }
-        return { ...m, text: formattedText };
+        // If the formatted text has raw HTML tags, decode them
+        if (formattedText.includes('<div') || formattedText.includes('&lt;')) {
+          return { ...m, text: decodeEntities(formattedText), originalText: text };
+        }
+        return { ...m, text: formattedText, originalText: text };
       } catch (err) {
         console.log("📝 [HISTORY] Fallback to raw text");
-        return { ...m, text: decodeEntities(text) };
+        return { ...m, text: decodeEntities(text), originalText: text };
       }
     });
   };
@@ -2717,7 +2734,48 @@ export default function Home() {
           background: "linear-gradient(135deg, #0A0A0A 0%, #111111 50%, #0A0A0A 100%)",
         }}
       >
-        <span style={{ fontSize: 14, color: "#A0AEC0" }}>Checking authentication…</span>
+        <div style={{ textAlign: "center" }}>
+          <svg width="120" height="60" viewBox="0 0 100 50">
+            <path
+              d="M 50 25 C 30 5 10 5 10 25 C 10 45 30 45 50 25 C 70 5 90 5 90 25 C 90 45 70 45 50 25 Z"
+              fill="none"
+              stroke="#2A2A2A"
+              strokeWidth="6"
+              strokeLinecap="round"
+            />
+            <path
+              d="M 50 25 C 30 5 10 5 10 25 C 10 45 30 45 50 25 C 70 5 90 5 90 25 C 90 45 70 45 50 25 Z"
+              fill="none"
+              stroke="url(#infinity-gradient)"
+              strokeWidth="6"
+              strokeLinecap="round"
+              pathLength="100"
+              strokeDasharray="30 70"
+              strokeDashoffset="100"
+              style={{
+                animation: "infinity-dash 1.5s linear infinite",
+                willChange: "stroke-dashoffset",
+                transform: "translateZ(0)"
+              }}
+            />
+            <defs>
+              <linearGradient id="infinity-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stopColor="#D4AF37" />
+                <stop offset="100%" stopColor="#FFFF00" />
+              </linearGradient>
+            </defs>
+          </svg>
+          <style>{`
+            @keyframes infinity-dash {
+              from {
+                stroke-dashoffset: 100;
+              }
+              to {
+                stroke-dashoffset: 0;
+              }
+            }
+          `}</style>
+        </div>
       </div>
     );
   }
@@ -2911,12 +2969,12 @@ export default function Home() {
                 }}
               >
                 <IconLibrary />
-                <span>Library</span>
+                <span>Groups</span>
               </div>
 
               <div className="search-section-sidebar" style={{ padding: '8px 12px', marginTop: 16 }}>
                 <div className="search-input-wrapper" style={{ position: 'relative' }}>
-                  <IconChartBar size={16} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }} />
+                  <IconSearch style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }} />
                   <input
                     type="text"
                     placeholder="Search chats..."
@@ -2981,7 +3039,7 @@ export default function Home() {
                 <div className="feature-placeholder-sidebar">
                   <div className="feature-placeholder-box">
                     <div className="feature-placeholder-title">
-                      Library
+                      Groups
                     </div>
                     <div className="feature-placeholder-subtitle">
                       Yet to be implemented
@@ -2999,8 +3057,6 @@ export default function Home() {
                         key={a.id}
                         className="sidebar-item"
                         onClick={() => {
-                          // Open archived session history while staying in Archived view
-                          // Do NOT switch the sidebar to Chat or add title back to chatSessions
                           void switchSession(a.id);
                         }}
                         style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
@@ -3030,8 +3086,8 @@ export default function Home() {
                 </div>
               )}
 
-              {/* Chat History – only visible when Chat feature is active */}
-              {activeFeature === 'chat' && (
+              {/* Chat History – only visible when Chat feature is active and not searching */}
+              {activeFeature === 'chat' && !searchTerm && (
 
                 <div className="chat-history-box" style={{ marginTop: 24, display: "flex", flexDirection: "column", minHeight: 0 }}>
                   <div className="chat-history-scroll">
@@ -3159,11 +3215,6 @@ export default function Home() {
                 </div>
               )}
             </div>
-
-            {/* Profile Card - Toggle on Hamburger Click */}
-
-
-            {/* changes done by megnathan: Removed Beta Version disclaimer and legal notice */}
 
           </aside>
         </div>
@@ -3356,7 +3407,10 @@ export default function Home() {
                         <div className="avatar-box"><IconAI /></div>
                       )}
 
-                      <div className={`message-bubble ${msg.role}${isGraphMsg ? ' graph-message' : ''}${msg.tableData && msg.tableData.length > 0 ? ' table-message' : ''}`}>
+                      <div
+                        className={`message-bubble ${msg.role}${isGraphMsg ? ' graph-message' : ''}${msg.tableData && msg.tableData.length > 0 ? ' table-message' : ''}`}
+                        style={{ position: 'relative' }}
+                      >
 
                         {isAudio ? (
                           /* ── Audio Message: Show player UI ── */
@@ -3494,25 +3548,138 @@ export default function Home() {
                           </div>
                         )}
 
+                        {/* Copy button for text bubbles only */}
+                        {!isAudio && !isGraphMsg && !(msg.tableData && msg.tableData.length > 0) && (
+                          <>
+                            <button
+                              className="copy-bubble-btn"
+                              onClick={(e) => {
+                                // Extract plain text if it's HTML
+                                const textToCopy = msg.text.replace(/<[^>]*>?/gm, '');
+                                navigator.clipboard.writeText(textToCopy);
+
+                                // Change icon to tick
+                                const btn = e.currentTarget;
+                                const originalHTML = btn.innerHTML;
+                                btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
+
+                                setTimeout(() => {
+                                  btn.innerHTML = originalHTML;
+                                }, 2000);
+                              }}
+                              style={{
+                                position: 'absolute',
+                                bottom: '4px',
+                                right: '4px',
+                                opacity: 0, // hidden by default on desktop
+                                transition: 'opacity 0.2s',
+                                background: (typeof window !== 'undefined' ? document.documentElement.getAttribute('data-theme') === 'dark' : (theme === 'dark')) ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.05)',
+                                border: 'none',
+                                borderRadius: '4px',
+                                color: (typeof window !== 'undefined' ? document.documentElement.getAttribute('data-theme') === 'dark' : (theme === 'dark')) ? '#d4af37' : '#5c4033',
+                                padding: '4px',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                zIndex: 10
+                              }}
+                              title="Copy text"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                              </svg>
+                            </button>
+                            <style>{`
+                              @media (hover: hover) {
+                                .message-bubble:hover .copy-bubble-btn {
+                                  opacity: 1 !important;
+                                }
+                              }
+                              @media (max-width: 1024px) {
+                                .copy-bubble-btn {
+                                  opacity: 1 !important;
+                                  padding: 2px !important;
+                                }
+                                .copy-bubble-btn svg {
+                                  width: 12px !important;
+                                  height: 12px !important;
+                                }
+                              }
+                            `}</style>
+                          </>
+                        )}
+
                       </div>
                     </div>
                   );
                 })}
 
-                {isLoading && (
-                  <div className="loading-indicator">
-                    <div className="avatar-box"><IconAI /></div>
-                    <div className="loading-dots-box">
-                      {[0, 1, 2].map(i => (
-                        <span key={i} style={{
-                          display: "inline-block", width: 7, height: 7,
-                          borderRadius: "50%", background: "#d4af37",
-                          animation: `bounce 1.2s ease-in-out ${i * 0.2}s infinite`,
-                        }} />
-                      ))}
+                {isLoading && (() => {
+                  const isDarkTheme = typeof window !== 'undefined' ? document.documentElement.getAttribute('data-theme') === 'dark' : (theme === 'dark');
+                  return (
+                    <div className="loading-indicator" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                      <div className="avatar-box"><IconAI /></div>
+                      {/* Bubble with cycling sliding workflow text */}
+                      <div className="ai-bubble" style={{
+                        background: isDarkTheme ? '#111111' : '#ffffff',
+                        color: isDarkTheme ? '#d4af37' : '#5c4033',
+                        border: '1px solid #d4af37',
+                        borderRadius: '16px 16px 16px 4px',
+                        padding: '10px 16px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        fontSize: '13px',
+                        position: 'relative',
+                        overflow: 'hidden',
+                        width: 'max-content'
+                      }}>
+                        {/* Invisible element to size the container to the longest text naturally */}
+                        <span style={{ opacity: 0, visibility: 'hidden', whiteSpace: 'nowrap' }}>Rendering Output...</span>
+
+                        {/* Absolute container for the centered animated text */}
+                        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', paddingLeft: '16px' }}>
+                          {["AI Recognized", "Passed Payload", "Fetching DB", "Returning Data", "Rendering Output"].map((text, textIdx) => (
+                            <div key={textIdx} style={{
+                              position: 'absolute',
+                              opacity: 0,
+                              animation: 'cycle-text-5 10s infinite',
+                              animationDelay: `${textIdx * 2}s`,
+                              whiteSpace: 'nowrap',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '2px'
+                            }}>
+                              <span>{text}</span>
+                              {/* Animated dots attached to the text */}
+                              <div style={{ display: 'flex', gap: '2px', alignItems: 'flex-end', height: '10px', paddingBottom: '2px' }}>
+                                {[0, 1, 2].map(i => (
+                                  <span key={i} style={{
+                                    display: "inline-block", width: 3, height: 3,
+                                    borderRadius: "50%", background: "currentColor",
+                                    animation: `bounce 1.2s ease-in-out ${i * 0.2}s infinite`,
+                                  }} />
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <style>{`
+                        @keyframes cycle-text-5 {
+                          0% { opacity: 0; transform: translateY(10px); }
+                          5%, 15% { opacity: 1; transform: translateY(0); }
+                          20%, 100% { opacity: 0; transform: translateY(-10px); }
+                        }
+                        @keyframes bounce {
+                          0%, 100% { transform: translateY(0); }
+                          50% { transform: translateY(-3px); }
+                        }
+                      `}</style>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
                 <div ref={messagesEndRef} />
               </div>
             </div>
@@ -3733,6 +3900,5 @@ function previewTitle(title: string | undefined | null, n = 2): string {
     return first + " " + second + (words.length > 2 ? "…" : "");
   }
 
-  // Otherwise show only the first word with an ellipsis if there's more
   return first + (words.length > 1 ? "…" : "");
 }

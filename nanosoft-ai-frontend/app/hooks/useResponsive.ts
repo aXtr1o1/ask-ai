@@ -97,36 +97,38 @@ export function useResponsive(): ResponsiveInfo {
   useEffect(() => {
     let debounceTimer: NodeJS.Timeout;
 
-    const handleResize = () => {
-      // Debounce: wait 150ms after resize stops before updating
-      clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        const width = window.innerWidth;
-        const height = window.innerHeight;
-        const hybrid = getHybridResponsiveState(width);
+    const updateResponsive = () => {
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      const hybrid = getHybridResponsiveState(width);
 
-        setResponsive({
-          isMobile: hybrid.screen === 'mobile' && !hybrid.isDesktopLayout,
-          isTablet: hybrid.screen === 'tablet',
-          isDesktop: hybrid.screen === 'desktop',
-          isTouch: detectTouchDevice(),
-          isDesktopLayout: hybrid.isDesktopLayout,
-          screen: hybrid.screen,
-          sizingScreen: hybrid.sizingScreen,
-          width,
-          height,
-        });
-      }, 150);
+      setResponsive({
+        isMobile: hybrid.screen === 'mobile' && !hybrid.isDesktopLayout,
+        isTablet: hybrid.screen === 'tablet',
+        isDesktop: hybrid.screen === 'desktop',
+        isTouch: detectTouchDevice(),
+        isDesktopLayout: hybrid.isDesktopLayout,
+        screen: hybrid.screen,
+        sizingScreen: hybrid.sizingScreen,
+        width,
+        height,
+      });
+    };
+
+    const handleResize = () => {
+      // Debounce: wait 50ms after resize stops before updating
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(updateResponsive, 20);
     };
 
     // Set initial size immediately
-    handleResize();
+    updateResponsive();
 
     // Add resize listener
     window.addEventListener('resize', handleResize);
     
-    // Add orientationchange listener for mobile devices (crucial for rotation detection!)
-    window.addEventListener('orientationchange', handleResize);
+    // Add orientationchange listener for mobile devices (Instant response)
+    window.addEventListener('orientationchange', updateResponsive);
 
     // Cleanup
     return () => {
