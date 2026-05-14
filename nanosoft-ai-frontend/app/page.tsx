@@ -1367,14 +1367,16 @@ export default function Home() {
             // Map DB fields (query/assistant) to UI fields (role/text)
             const mappedHistory = (data.history || []).flatMap((m: any) => [
               { role: "user", text: m.query || "" },
-              { role: "ai", text: typeof m.assistant === "string" && m.assistant.startsWith("{") 
-                  ? JSON.parse(m.assistant).response || m.assistant 
-                  : m.assistant || "" }
+              {
+                role: "ai", text: typeof m.assistant === "string" && m.assistant.startsWith("{")
+                  ? JSON.parse(m.assistant).response || m.assistant
+                  : m.assistant || ""
+              }
             ]);
             setSessionId(sharedSid);
             setMessages(mappedHistory);
             console.log("[share] shared chat loaded and mapped");
-            setAuthChecked(true); 
+            setAuthChecked(true);
           }
         } catch (e) {
           console.error("Failed to load shared session:", e);
@@ -1769,975 +1771,1436 @@ export default function Home() {
     }
   };
 
-const handleShareSession = async (sid: string) => {
-  try {
-    // 1. Force save the current history to DB first
-    const currentMsgs = sessionMessagesRef.current.get(sid) || messages;
-    if (currentMsgs.length > 0) {
-      await saveChatHistory(sid, currentMsgs);
-    }
-
-    // 2. Now mark it as public
-    const res = await fetch(`${baseUrl}/api/sessions/share`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sessionId: sid,
-        userName: userIdFromUrl ?? loggedInUser,
-        isPublic: true
-      }),
-    });
-    if (res.ok) {
-      const link = `${window.location.origin}${window.location.pathname}?sharedSessionId=${sid}&owner=${userIdFromUrl ?? loggedInUser}`;
-      setShareLink(link);
-      setShareModalOpen(true);
-    }
-  } catch (e) {
-    console.error("Failed to share session:", e);
-  }
-};
-
-// ── User activity detection ───────────────────────────────────────────────
-const markUserActive = () => {
-  userActiveRef.current = true;
-
-  // Reset idle timer
-  if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
-  idleTimerRef.current = setTimeout(() => {
-    userActiveRef.current = false;
-    // Save current session to backend before going idle (keep WebSocket alive)
-    const idleSid = sessionIdRef.current;
-    const idleMsgs = sessionMessagesRef.current.get(idleSid);
-    if (idleMsgs && idleMsgs.filter(m => m.role !== "error").length > 0) {
-      saveChatHistoryRef.current(idleSid, idleMsgs);
-    }
-    console.log("💤 User idle — saved session, keeping WebSocket connection open");
-  }, IDLE_TIMEOUT);
-};
-
-useEffect(() => {
-  const events = ["mousemove", "mousedown", "keydown", "scroll", "touchstart"] as const;
-  events.forEach(e => window.addEventListener(e, markUserActive));
-  // Start initial idle timer
-  markUserActive();
-  return () => {
-    events.forEach(e => window.removeEventListener(e, markUserActive));
-    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
-  };
-}, []);
-
-const WS_CONNECT_TIMEOUT_MS = 15000; // 15s: fail fast in production if proxy/backend is slow
-
-const connectWS = () => {
-  // If there's already an open or connecting socket, reuse it
-  if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
-    return;
-  }
-
-  setWsConnectionState('connecting');
-  const ws = new WebSocket(getWsUrl());
-  wsRef.current = ws;
-
-  wsConnectTimeoutRef.current = setTimeout(() => {
-    if (ws.readyState === WebSocket.CONNECTING) {
-      ws.close();
-      setWsConnectionState('failed');
-      console.warn("⚠️ WebSocket connection timeout");
-    }
-    wsConnectTimeoutRef.current = null;
-  }, WS_CONNECT_TIMEOUT_MS);
-
-  ws.onopen = () => {
-    if (wsConnectTimeoutRef.current) {
-      clearTimeout(wsConnectTimeoutRef.current);
-      wsConnectTimeoutRef.current = null;
-    }
-    reconnectDelayRef.current = 2000;
-    setWsConnectionState('connected');
-    console.log("✅ WebSocket connected");
-    startPing();
-  };
-
-  // ── Every message from backend ────────────────────────────────────────
-  ws.onmessage = (event: MessageEvent) => {
+  const handleShareSession = async (sid: string) => {
     try {
-      const raw = typeof event.data === "string" ? event.data : "";
+      // 1. Force save the current history to DB first
+      const currentMsgs = sessionMessagesRef.current.get(sid) || messages;
+      if (currentMsgs.length > 0) {
+        await saveChatHistory(sid, currentMsgs);
+      }
 
-      // Ignore pong heartbeat responses
-      if (raw.trim() === "pong") return;
+      // 2. Now mark it as public
+      const res = await fetch(`${baseUrl}/api/sessions/share`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: sid,
+          userName: userIdFromUrl ?? loggedInUser,
+          isPublic: true
+        }),
+      });
+      if (res.ok) {
+        const link = `${window.location.origin}${window.location.pathname}?sharedSessionId=${sid}&owner=${userIdFromUrl ?? loggedInUser}`;
+        setShareLink(link);
+        setShareModalOpen(true);
+      }
+    } catch (e) {
+      console.error("Failed to share session:", e);
+    }
+  };
 
-      const jsonStr = raw.startsWith("data: ") ? raw.slice(6) : raw;
+  // ── User activity detection ───────────────────────────────────────────────
+  const markUserActive = () => {
+    userActiveRef.current = true;
 
-      // "[DONE]" = end of this response → finalize bubble, stay connected
-      if (jsonStr.trim() === "[DONE]" || jsonStr.trim() === "__END__") {
-        const finalText = accRef.current;
-        let processedText = finalText;
-        let isGraphResponse = false;
-        let tableData: TableWithTileRow[] | undefined = undefined;
-        let tableTitle: string | undefined = undefined;
+    // Reset idle timer
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    idleTimerRef.current = setTimeout(() => {
+      userActiveRef.current = false;
+      // Save current session to backend before going idle (keep WebSocket alive)
+      const idleSid = sessionIdRef.current;
+      const idleMsgs = sessionMessagesRef.current.get(idleSid);
+      if (idleMsgs && idleMsgs.filter(m => m.role !== "error").length > 0) {
+        saveChatHistoryRef.current(idleSid, idleMsgs);
+      }
+      console.log("💤 User idle — saved session, keeping WebSocket connection open");
+    }, IDLE_TIMEOUT);
+  };
 
-        // 🔑 FIRST: Check if this is a GRAPH response (type="graph")
-        const cleanedForGraph = extractResponseContent(finalText);
-        const graphData = parseGraphData(cleanedForGraph);
-        if (graphData) {
-          console.log("📊 [DONE] Graph response detected — will render as bar chart");
-          processedText = cleanedForGraph // ← Keep raw JSON for parseGraphData() in render
-          isGraphResponse = true;
-        } else {
-          // Not a graph → continue with normal processing
-          // 🔑 SECOND: Extract response content (removes session_id wrapper)
-          const cleanedText = extractResponseContent(finalText);
+  useEffect(() => {
+    const events = ["mousemove", "mousedown", "keydown", "scroll", "touchstart"] as const;
+    events.forEach(e => window.addEventListener(e, markUserActive));
+    // Start initial idle timer
+    markUserActive();
+    return () => {
+      events.forEach(e => window.removeEventListener(e, markUserActive));
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    };
+  }, []);
 
-          // 🔑 THIRD: ALWAYS TRY RENDERING AS TABLE STRUCTURE FIRST (ALL SIZES, NO LIMITS)
-          const largeDatasetHTML = renderLargeDataset(cleanedText);
+  const WS_CONNECT_TIMEOUT_MS = 15000; // 15s: fail fast in production if proxy/backend is slow
 
-          if (largeDatasetHTML) {
-            // Successfully rendered as unified table structure (any size)
-            processedText = largeDatasetHTML;
-            // Always extract table rows for TableWithTile component
-            const rows = extractTableRows(largeDatasetHTML);
-            if (rows.length > 0) {
-              tableData = rows;
-              tableTitle = "Data";
-              console.log("✅ [DONE] Rendered as unified table structure (" + rows.length + " rows)");
-            }
+  const connectWS = () => {
+    // If there's already an open or connecting socket, reuse it
+    if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
+
+    setWsConnectionState('connecting');
+    const ws = new WebSocket(getWsUrl());
+    wsRef.current = ws;
+
+    wsConnectTimeoutRef.current = setTimeout(() => {
+      if (ws.readyState === WebSocket.CONNECTING) {
+        ws.close();
+        setWsConnectionState('failed');
+        console.warn("⚠️ WebSocket connection timeout");
+      }
+      wsConnectTimeoutRef.current = null;
+    }, WS_CONNECT_TIMEOUT_MS);
+
+    ws.onopen = () => {
+      if (wsConnectTimeoutRef.current) {
+        clearTimeout(wsConnectTimeoutRef.current);
+        wsConnectTimeoutRef.current = null;
+      }
+      reconnectDelayRef.current = 2000;
+      setWsConnectionState('connected');
+      console.log("✅ WebSocket connected");
+      startPing();
+    };
+
+    // ── Every message from backend ────────────────────────────────────────
+    ws.onmessage = (event: MessageEvent) => {
+      try {
+        const raw = typeof event.data === "string" ? event.data : "";
+
+        // Ignore pong heartbeat responses
+        if (raw.trim() === "pong") return;
+
+        const jsonStr = raw.startsWith("data: ") ? raw.slice(6) : raw;
+
+        // "[DONE]" = end of this response → finalize bubble, stay connected
+        if (jsonStr.trim() === "[DONE]" || jsonStr.trim() === "__END__") {
+          const finalText = accRef.current;
+          let processedText = finalText;
+          let isGraphResponse = false;
+          let tableData: TableWithTileRow[] | undefined = undefined;
+          let tableTitle: string | undefined = undefined;
+
+          // 🔑 FIRST: Check if this is a GRAPH response (type="graph")
+          const cleanedForGraph = extractResponseContent(finalText);
+          const graphData = parseGraphData(cleanedForGraph);
+          if (graphData) {
+            console.log("📊 [DONE] Graph response detected — will render as bar chart");
+            processedText = cleanedForGraph // ← Keep raw JSON for parseGraphData() in render
+            isGraphResponse = true;
           } else {
-            // Not tabular data → format as text output only
-            try {
-              processedText = formatOutput(cleanedText);
-              console.log("📝 [DONE] Formatted as text");
-            } catch (err) {
-              console.log("📝 [DONE] Using raw text", err);
-              processedText = finalText;
+            // Not a graph → continue with normal processing
+            // 🔑 SECOND: Extract response content (removes session_id wrapper)
+            const cleanedText = extractResponseContent(finalText);
+
+            // 🔑 THIRD: ALWAYS TRY RENDERING AS TABLE STRUCTURE FIRST (ALL SIZES, NO LIMITS)
+            const largeDatasetHTML = renderLargeDataset(cleanedText);
+
+            if (largeDatasetHTML) {
+              // Successfully rendered as unified table structure (any size)
+              processedText = largeDatasetHTML;
+              // Always extract table rows for TableWithTile component
+              const rows = extractTableRows(largeDatasetHTML);
+              if (rows.length > 0) {
+                tableData = rows;
+                tableTitle = "Data";
+                console.log("✅ [DONE] Rendered as unified table structure (" + rows.length + " rows)");
+              }
+            } else {
+              // Not tabular data → format as text output only
+              try {
+                processedText = formatOutput(cleanedText);
+                console.log("📝 [DONE] Formatted as text");
+              } catch (err) {
+                console.log("📝 [DONE] Using raw text", err);
+                processedText = finalText;
+              }
             }
           }
+
+          setMessages(prev => {
+            const u = [...prev];
+            const l = u.length - 1;
+            if (u[l]?.role === "ai") {
+              u[l] = {
+                role: "ai",
+                text: processedText,
+                streaming: false,
+                isGraphResponse: isGraphResponse,  // ← Set graph flag
+                chartType: chartType,              // ← Store chart type
+                originalText: finalText,           // ← Store original raw response before HTML processing
+                tableData: tableData,              // ← Store table rows
+                tableTitle: tableTitle              // ← Store table title
+              };
+            }
+            // Persist to per-session store so switching sessions keeps history
+            const activeSid = sessionIdRef.current;
+            sessionMessagesRef.current.set(activeSid, u);
+            return u;
+          });
+          accRef.current = "";          // reset for next message
+          setIsLoading(false);
+          setTimeout(() => inputRef.current?.focus(), 50);
+          return;
         }
 
-        setMessages(prev => {
-          const u = [...prev];
-          const l = u.length - 1;
-          if (u[l]?.role === "ai") {
-            u[l] = {
-              role: "ai",
-              text: processedText,
-              streaming: false,
-              isGraphResponse: isGraphResponse,  // ← Set graph flag
-              chartType: chartType,              // ← Store chart type
-              originalText: finalText,           // ← Store original raw response before HTML processing
-              tableData: tableData,              // ← Store table rows
-              tableTitle: tableTitle              // ← Store table title
-            };
+        const part = jsonStr;
+        if (part) {
+          accRef.current += part;
+          const snap = accRef.current;
+
+
+          // Extract text for display during streaming
+          let displayText = snap;
+          try {
+            displayText = extractText(JSON.parse(snap));
+          } catch {
+            // If can't parse yet (incomplete JSON), show what we have
+            displayText = snap;
           }
-          // Persist to per-session store so switching sessions keeps history
-          const activeSid = sessionIdRef.current;
-          sessionMessagesRef.current.set(activeSid, u);
-          return u;
-        });
-        accRef.current = "";          // reset for next message
+
+
+          setMessages(prev => {
+            const u = [...prev];
+            const l = u.length - 1;
+            // If last message is already our streaming AI bubble → update it
+            if (u[l]?.role === "ai" && u[l]?.streaming === true) {
+              u[l] = { ...u[l], text: displayText, streaming: true };  // ← Preserve chartType
+            } else {
+              // First chunk → create the AI bubble now (only once) with current chartType
+              u.push({ role: "ai", text: displayText, streaming: true, chartType: chartType });
+            }
+            return u;
+          });
+        }
+      } catch { /* non-JSON frame — ignore */ }
+    };
+
+    ws.onclose = (event) => {
+      if (wsConnectTimeoutRef.current) {
+        clearTimeout(wsConnectTimeoutRef.current);
+        wsConnectTimeoutRef.current = null;
+      }
+      // Only react if this is the active socket
+      if (wsRef.current === ws) {
+        wsRef.current = null;
+        setWsConnectionState('failed');
+        console.warn("⚠️ WebSocket closed");
+        if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
         setIsLoading(false);
-        setTimeout(() => inputRef.current?.focus(), 50);
-        return;
-      }
-
-      const part = jsonStr;
-      if (part) {
-        accRef.current += part;
-        const snap = accRef.current;
-
-
-        // Extract text for display during streaming
-        let displayText = snap;
-        try {
-          displayText = extractText(JSON.parse(snap));
-        } catch {
-          // If can't parse yet (incomplete JSON), show what we have
-          displayText = snap;
+        if (!event.wasClean && userActiveRef.current) {
+          const delay = reconnectDelayRef.current;
+          reconnectDelayRef.current = Math.min(15000, delay * 2);
+          setTimeout(() => connectWS(), delay);
         }
-
-
-        setMessages(prev => {
-          const u = [...prev];
-          const l = u.length - 1;
-          // If last message is already our streaming AI bubble → update it
-          if (u[l]?.role === "ai" && u[l]?.streaming === true) {
-            u[l] = { ...u[l], text: displayText, streaming: true };  // ← Preserve chartType
-          } else {
-            // First chunk → create the AI bubble now (only once) with current chartType
-            u.push({ role: "ai", text: displayText, streaming: true, chartType: chartType });
-          }
-          return u;
-        });
       }
-    } catch { /* non-JSON frame — ignore */ }
-  };
+    };
 
-  ws.onclose = (event) => {
-    if (wsConnectTimeoutRef.current) {
-      clearTimeout(wsConnectTimeoutRef.current);
-      wsConnectTimeoutRef.current = null;
-    }
-    // Only react if this is the active socket
-    if (wsRef.current === ws) {
-      wsRef.current = null;
+    ws.onerror = () => {
+      if (wsConnectTimeoutRef.current) {
+        clearTimeout(wsConnectTimeoutRef.current);
+        wsConnectTimeoutRef.current = null;
+      }
       setWsConnectionState('failed');
-      console.warn("⚠️ WebSocket closed");
-      if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
+      // Log connection error to console only — do not surface as chat bubble
+      console.error("❌ WebSocket error — connection failed, will retry");
       setIsLoading(false);
-      if (!event.wasClean && userActiveRef.current) {
-        const delay = reconnectDelayRef.current;
-        reconnectDelayRef.current = Math.min(15000, delay * 2);
-        setTimeout(() => connectWS(), delay);
+    };
+  };
+
+  // Keep ref in sync so markUserActive can call connectWS
+  useEffect(() => { connectWSRef.current = connectWS; });
+
+  // Connect when component mounts (after auth is confirmed)
+  useEffect(() => {
+    const sharedSid = new URLSearchParams(window.location.search).get("sharedSessionId");
+    if (!authChecked || (!loggedInUser && !sharedSid)) return;
+
+    connectWS();
+
+    return () => {
+      if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
+      if (idleTimerRef.current) { clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
+      if (wsConnectTimeoutRef.current) { clearTimeout(wsConnectTimeoutRef.current); wsConnectTimeoutRef.current = null; }
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+    };
+  }, [authChecked, loggedInUser]);
+
+  // Helper: sort sessions newest-first (by updatedAt or createdAt)
+  const sortSessionsNewestFirst = (list: ChatSession[]): ChatSession[] =>
+    [...list].sort((a, b) => {
+      if (a.isPinned && !b.isPinned) return -1;
+      if (!a.isPinned && b.isPinned) return 1;
+      return (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt);
+    });
+
+  // Fetch chat sessions list for sidebar (new at top, old at bottom)
+  useEffect(() => {
+    if (!authChecked || !loggedInUser) return;
+
+    const fetchSessions = async () => {
+      try {
+        const res = await fetch(`${baseUrl}/api/session`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userName: userIdFromUrl ?? loggedInUser, historyOnClick: false }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const fetched: ChatSession[] = (data?.sessions ?? []).map(
+          (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; is_pinned?: boolean; is_archived?: boolean }) => ({
+            id: s.session_id,
+            title: s.title || "Chat",
+            createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
+            updatedAt: s.updated_at ? new Date(s.updated_at).getTime() : undefined,
+            isPinned: s.is_pinned || false,
+            isArchived: s.is_archived || false,
+          })
+        );
+        setChatSessions(sortSessionsNewestFirst(fetched));
+      } catch (err) {
+        console.warn("Failed to fetch chat sessions:", err);
+        setChatSessions([]);
+      }
+    };
+
+    fetchSessions();
+  }, [authChecked, loggedInUser]);
+
+  const handleFeatureClick = (featureName: 'chat' | 'archived' | 'library') => {
+    // Chat and Archived have real views implemented; only Library shows placeholder
+    if (featureName === 'chat') {
+      setShowFeaturePlaceholder(false);
+      return;
+    }
+    setShowFeaturePlaceholder(true);
+  };
+
+  const handleNewChat = async () => {
+    if (isLoading) {
+      setMessages(prev => [...prev, { role: "error", text: "Please wait for the current response to finish before starting a new chat." }]);
+      return;
+    }
+    // Persist current session messages to ref before leaving
+    const previousSid = sessionId; // chat we're leaving (may have been typed in, so keep it near top after refetch)
+    sessionMessagesRef.current.set(previousSid, messages);
+
+    setShowFeaturePlaceholder(false);
+    setMessages([]);
+    accRef.current = "";
+    setIsLoading(false);
+
+    const newSessionId = generateSessionId();
+    setSessionId(newSessionId);
+    sessionIdRef.current = newSessionId;
+
+    // Auto-close sidebar on mobile
+    if (responsive.isMobile) {
+      setSidebarOpen(false);
+    }
+
+    // Immediately show this new chat at the top of the history list
+    setChatSessions(prev => {
+      const existing = prev.filter(s => s.id !== newSessionId);
+      const newCapsule: ChatSession = {
+        id: newSessionId,
+        title: "New Chat",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      return [newCapsule, ...existing];
+    });
+
+    // Refetch session list; new chat at top, previous chat (just left) second, rest by updated_at
+    const refetchSessions = async () => {
+      try {
+        const res = await fetch(`${baseUrl}/api/session`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userName: userIdFromUrl ?? loggedInUser, historyOnClick: false }),
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        const fetched: ChatSession[] = (data?.sessions ?? []).map(
+          (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; is_pinned?: boolean; is_archived?: boolean }) => ({
+            id: s.session_id,
+            title: s.title || "Chat",
+            createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
+            updatedAt: s.updated_at ? new Date(s.updated_at).getTime() : undefined,
+            isPinned: s.is_pinned || false,
+            isArchived: s.is_archived || false,
+          })
+        );
+        setChatSessions(prev => {
+          const newCapsule: ChatSession = {
+            id: newSessionId,
+            title: "New Chat",
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          };
+          // Previous chat stays second (just left, not yet saved so backend may have old order)
+          const previousSession = prev.find(s => s.id === previousSid) ?? fetched.find(s => s.id === previousSid);
+          const rest = sortSessionsNewestFirst(
+            fetched.filter(s => s.id !== newSessionId && s.id !== previousSid)
+          );
+          if (previousSession) {
+            const fromApi = fetched.find(s => s.id === previousSid);
+            const title = fromApi?.title ?? previousSession.title;
+            return [newCapsule, { ...previousSession, title }, ...rest];
+          }
+          return [newCapsule, ...rest];
+        });
+      } catch (err) {
+        console.warn("Failed to refetch sessions:", err);
+      }
+    };
+    setTimeout(() => refetchSessions(), 400);
+  };
+
+  // ── Process loaded messages: convert raw JSON to formatted tables ─────────
+  const processLoadedMessages = (msgs: Message[]): Message[] => {
+    return msgs.map(m => {
+      if (m.role !== "ai") return m;
+
+      const text = m.text || "";
+
+      // 🔑 FIRST: Check if this is a GRAPH response
+      const graphData = parseGraphData(text);
+      if (graphData) {
+        console.log("📊 [HISTORY] Graph response detected — keeping as raw JSON for chart");
+        return { ...m, text, isGraphResponse: true };
+      }
+
+      // 🔑 THE FIX: Detect if the history text is a Table JSON
+      try {
+        if (text.trim().startsWith('{') || text.trim().startsWith('[')) {
+          const parsed = JSON.parse(text);
+          if (parsed && (parsed.columns || parsed.data)) {
+            // It's a table! Use the existing render function
+            const tableHTML = renderLargeDataset(text);
+            if (tableHTML) {
+              const rows = extractTableRows(tableHTML);
+              return { ...m, text: tableHTML, tableData: rows, tableTitle: "Results" };
+            }
+          }
+        }
+      } catch (e) {
+        /* Not JSON, ignore */
+      }
+
+      // Check if already formatted (contains HTML tags or wrapper class)
+      if (
+        text.includes('<table') ||
+        text.includes('large-dataset-wrapper') ||
+        text.includes('ai-table')
+      ) {
+        console.log("✅ [HISTORY] Message already HTML formatted - extracting table data");
+        // Try to extract table data from HTML
+        const rows = extractTableRows(text);
+        if (rows.length > 0) {
+          return { ...m, text, tableData: rows, tableTitle: "Results" };
+        }
+        return m;
+      }
+
+      // Extract response content (removes session_id wrapper)
+      const rawJson = extractResponseContent(text);
+      const cleanedText = decodeEntities(rawJson);
+
+      // ALWAYS TRY RENDERING AS UNIFIED TABLE STRUCTURE FIRST (ALL SIZES)
+      const tableHTML = renderLargeDataset(cleanedText);
+      if (tableHTML) {
+        console.log("✅ [HISTORY] Successfully rendered as table structure");
+        const rows = extractTableRows(tableHTML);
+        if (rows.length > 0) {
+          return { ...m, text: tableHTML, tableData: rows, tableTitle: "Results" };
+        }
+        return { ...m, text: tableHTML };
+      }
+
+      // Not tabular data → try to format as text
+      try {
+        const formattedText = formatOutput(cleanedText);
+        // 🔑 EXTRA FIX: If the formatted text still has raw HTML tags, decode them
+        if (formattedText.includes('<div') || formattedText.includes('&lt;')) {
+          return { ...m, text: decodeEntities(formattedText) };
+        }
+        return { ...m, text: formattedText };
+      } catch (err) {
+        console.log("📝 [HISTORY] Fallback to raw text");
+        return { ...m, text: decodeEntities(text) };
+      }
+    });
+  };
+
+  // ── Switch to an existing session ─────────────────────────────────────────
+  const switchSession = async (targetSid: string) => {
+    if (targetSid === sessionId) return; // already active
+    if (isLoading) {
+      setMessages(prev => [...prev, { role: "error", text: "Please wait for the current response to finish before switching chats." }]);
+      return;
+    }
+
+    // Auto-close sidebar on mobile
+    if (responsive.isMobile) {
+      setSidebarOpen(false);
+    }
+
+    // Capture the currently active session ID
+    const currentSid = sessionIdRef.current;
+
+    // Save current messages
+    sessionMessagesRef.current.set(currentSid, messages);
+
+    // Refresh from backend to get latest titles; do not move clicked chat to top (just highlight)
+    const refreshSessions = async () => {
+      if (!loggedInUser) return;
+      try {
+        const res = await fetch(`${baseUrl}/api/session`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userName: userIdFromUrl ?? loggedInUser, historyOnClick: false }),
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        const fetched: ChatSession[] = (data?.sessions ?? []).map(
+          (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; is_pinned?: boolean; is_archived?: boolean }) => ({
+            id: s.session_id,
+            title: s.title || "Chat",
+            createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
+            updatedAt: s.updated_at ? new Date(s.updated_at).getTime() : undefined,
+            isPinned: s.is_pinned || false,
+            isArchived: s.is_archived || false,
+          })
+        );
+        setChatSessions(prev => {
+          const merged = sortSessionsNewestFirst(fetched);
+          // If current list has a session not in fetched (e.g. new unsaved), prepend it
+          const onlyInPrev = prev.filter(s => !fetched.some(f => f.id === s.id));
+          return sortSessionsNewestFirst([...onlyInPrev, ...merged]);
+        });
+      } catch (err) {
+        console.warn("Failed to refresh sessions:", err);
+      }
+    };
+    refreshSessions();
+
+    // Switch session ID immediately
+    setSessionId(targetSid);
+    sessionIdRef.current = targetSid;
+    accRef.current = "";
+    setIsLoading(false);
+
+    // Check local cache first
+    const cached = sessionMessagesRef.current.get(targetSid);
+    if (cached && cached.length > 0) {
+      const processed = processLoadedMessages(cached);
+      setMessages(processed);
+    } else {
+      // Fetch from backend
+      setHistoryLoading(true);
+      setMessages([]);
+      try {
+        const res = await fetch(`${baseUrl}/api/session`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userName: userIdFromUrl ?? loggedInUser, sessionId: targetSid, historyOnClick: true }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const history: Message[] = [];
+        //handles is_audio from backend
+        for (const entry of (data?.chat_history ?? [])) {
+          if (entry.query) {
+            if (entry.is_audio) {
+              // query is base64 audio string from DB
+              history.push({
+                role: "user",
+                text: "Voice message",
+                isAudio: true,
+                audioUrl: entry.query,   // base64 → audio player
+                audioDuration: 0         // duration not stored in DB
+              });
+            } else {
+              history.push({ role: "user", text: entry.query });
+            }
+          }
+          if (entry.assistant) {
+            history.push({ role: "ai", text: entry.assistant });
+          }
+        }
+        const processed = processLoadedMessages(history);
+        sessionMessagesRef.current.set(targetSid, processed);
+        setMessages(processed);
+      } catch (err) {
+        console.warn("Failed to fetch session history:", err);
+        setMessages([]);
+      } finally {
+        setHistoryLoading(false);
       }
     }
-  };
 
-  ws.onerror = () => {
-    if (wsConnectTimeoutRef.current) {
-      clearTimeout(wsConnectTimeoutRef.current);
-      wsConnectTimeoutRef.current = null;
+    // Ensure WebSocket connection is available for the target session
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      connectWS();
+    } else {
+      startPing();
     }
-    setWsConnectionState('failed');
-    // Log connection error to console only — do not surface as chat bubble
-    console.error("❌ WebSocket error — connection failed, will retry");
-    setIsLoading(false);
   };
-};
 
-// Keep ref in sync so markUserActive can call connectWS
-useEffect(() => { connectWSRef.current = connectWS; });
+  const handleLogout = async () => {
+    const savePromises: Promise<void>[] = [];
+    sessionMessagesRef.current.forEach((msgs, sid) => {
+      const valid = msgs.filter(m => m.role !== "error");
+      if (valid.length > 0) {
+        savePromises.push(saveChatHistoryRef.current(sid, msgs));
+      }
+    });
 
-// Connect when component mounts (after auth is confirmed)
-useEffect(() => {
-  const sharedSid = new URLSearchParams(window.location.search).get("sharedSessionId");
-  if (!authChecked || (!loggedInUser && !sharedSid)) return;
+    try {
+      await Promise.all(savePromises);
+      console.log("✅ All sessions saved before logout");
+    } catch {
+      console.warn("⚠️ Some sessions failed to save on logout");
+    }
 
-  connectWS();
-
-  return () => {
     if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
     if (idleTimerRef.current) { clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
-    if (wsConnectTimeoutRef.current) { clearTimeout(wsConnectTimeoutRef.current); wsConnectTimeoutRef.current = null; }
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
     }
+
+    localStorage.removeItem("loggedInUser");
+    router.replace("/");
   };
-}, [authChecked, loggedInUser]);
-
-// Helper: sort sessions newest-first (by updatedAt or createdAt)
-const sortSessionsNewestFirst = (list: ChatSession[]): ChatSession[] =>
-  [...list].sort((a, b) => {
-    if (a.isPinned && !b.isPinned) return -1;
-    if (!a.isPinned && b.isPinned) return 1;
-    return (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt);
-  });
-
-// Fetch chat sessions list for sidebar (new at top, old at bottom)
-useEffect(() => {
-  if (!authChecked || !loggedInUser) return;
-
-  const fetchSessions = async () => {
-    try {
-      const res = await fetch(`${baseUrl}/api/session`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userName: userIdFromUrl ?? loggedInUser, historyOnClick: false }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      const fetched: ChatSession[] = (data?.sessions ?? []).map(
-        (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; is_pinned?: boolean; is_archived?: boolean }) => ({
-          id: s.session_id,
-          title: s.title || "Chat",
-          createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
-          updatedAt: s.updated_at ? new Date(s.updated_at).getTime() : undefined,
-          isPinned: s.is_pinned || false,
-          isArchived: s.is_archived || false,
-        })
-      );
-      setChatSessions(sortSessionsNewestFirst(fetched));
-    } catch (err) {
-      console.warn("Failed to fetch chat sessions:", err);
-      setChatSessions([]);
+  const toggleRecording = async () => {
+    if (isRecording) {
+      mediaRecorderRef.current?.stop();
+      setIsRecording(false);
+    } else {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const rec = new MediaRecorder(stream);
+        rec.start();
+        mediaRecorderRef.current = rec;
+        setIsRecording(true);
+      } catch { alert("Please allow microphone access."); }
     }
   };
 
-  fetchSessions();
-}, [authChecked, loggedInUser]);
+  // ── Handle Audio Playback ─────────────────────────────────────────────────
+  const handleAudioPlayback = async (idx: number, audioUrl?: string, passedDuration: number = 0) => {
+    if (!audioUrl) return;
 
-const handleFeatureClick = (featureName: 'chat' | 'archived' | 'library') => {
-  // Chat and Archived have real views implemented; only Library shows placeholder
-  if (featureName === 'chat') {
+    const isCurrentlyPlaying = audioPlayingIndex === idx;
+
+    if (isCurrentlyPlaying) {
+      const audio = audioPlayersRef.current[idx];
+      if (audio) {
+        audio.pause();
+        setAudioPlayingIndex(null);
+      }
+      return;
+    }
+
+    // Pause any other playing audio
+    if (audioPlayingIndex !== null) {
+      const otherAudio = audioPlayersRef.current[audioPlayingIndex];
+      if (otherAudio) otherAudio.pause();
+      setAudioPlayingIndex(null);
+    }
+
+    // Create audio element if not yet created for this index
+    if (!audioPlayersRef.current[idx]) {
+      let playUrl = audioUrl;
+      if (audioUrl.startsWith("data:")) {
+        const res = await fetch(audioUrl);
+        const blob = await res.blob();
+        playUrl = URL.createObjectURL(blob);
+      }
+      const audio = new Audio(playUrl);
+      let animationFrameId: number | null = null;
+
+      // ── FIX BUG 1: load real duration from the audio element itself ──────
+      audio.addEventListener("loadedmetadata", () => {
+        if (isFinite(audio.duration) && audio.duration > 0) {
+          audioDurationMapRef.current[idx] = audio.duration;
+          setAudioDurationMap(prev => ({ ...prev, [idx]: audio.duration }));
+        } else if (passedDuration > 0) {
+          setAudioDurationMap(prev => ({ ...prev, [idx]: passedDuration }));
+        }
+      });
+
+      // ── FIX BUG 3: rAF loop for smooth progress ──────────────────────────
+      const progressLoop = () => {
+        const a = audioPlayersRef.current[idx];
+        if (!a || a.paused) return;
+        const dur = audioDurationMapRef.current[idx] ?? passedDuration;
+        if (dur > 0) {
+          const pct = (a.currentTime / dur) * 100;
+          setAudioProgressMap(prev => ({ ...prev, [idx]: pct }));
+        }
+        animationFrameId = requestAnimationFrame(progressLoop);
+      };
+
+      audio.onplay = () => {
+        setAudioPlayingIndex(idx);
+        if (animationFrameId !== null) cancelAnimationFrame(animationFrameId);
+        animationFrameId = requestAnimationFrame(progressLoop);
+      };
+
+      audio.onpause = () => {
+        if (animationFrameId !== null) {
+          cancelAnimationFrame(animationFrameId);
+          animationFrameId = null;
+        }
+        setAudioPlayingIndex(null);
+      };
+
+      audio.onended = () => {
+        if (animationFrameId !== null) {
+          cancelAnimationFrame(animationFrameId);
+          animationFrameId = null;
+        }
+        setAudioPlayingIndex(null);
+        setAudioProgressMap(prev => ({ ...prev, [idx]: 0 }));
+      };
+
+      audioPlayersRef.current[idx] = audio;
+    }
+
+    // Trigger load so loadedmetadata fires (needed for old-session base64 URLs)
+    const audioElement = audioPlayersRef.current[idx];
+    if (audioElement) {
+      audioElement.play().catch(err => {
+        console.error("❌ Audio play failed:", err.message);
+        setAudioPlayingIndex(null);
+      });
+    }
+  };
+
+  // ── Send message over the persistent WebSocket ────────────────────────────
+  const sendMessage = () => {
+    const domVal = inputRef.current?.value ?? "";
+    if (!domVal.trim() || isLoading) return;
+    const userText = domVal.trim();
+
+    const ws = wsRef.current;
+
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      console.warn("Socket not ready for session:", sessionId);
+      setMessages(prev => [...prev, { role: "error", text: "Still connecting. Please wait." }]);
+      return;
+    }
+
+    // Ensure capsule exists and move this session to top when user types (content changed)
+    const now = Date.now();
+    setChatSessions(prev => {
+      const existing = prev.find(s => s.id === sessionId);
+      const rest = prev.filter(s => s.id !== sessionId);
+      if (existing) {
+        return [{ ...existing, updatedAt: now }, ...rest];
+      }
+      const newCapsule: ChatSession = {
+        id: sessionId,
+        title: "New Chat",
+        createdAt: now,
+        updatedAt: now,
+      };
+      return [newCapsule, ...rest];
+    });
+
     setShowFeaturePlaceholder(false);
-    return;
-  }
-  setShowFeaturePlaceholder(true);
-};
-
-const handleNewChat = async () => {
-  if (isLoading) {
-    setMessages(prev => [...prev, { role: "error", text: "Please wait for the current response to finish before starting a new chat." }]);
-    return;
-  }
-  // Persist current session messages to ref before leaving
-  const previousSid = sessionId; // chat we're leaving (may have been typed in, so keep it near top after refetch)
-  sessionMessagesRef.current.set(previousSid, messages);
-
-  setShowFeaturePlaceholder(false);
-  setMessages([]);
-  accRef.current = "";
-  setIsLoading(false);
-
-  const newSessionId = generateSessionId();
-  setSessionId(newSessionId);
-  sessionIdRef.current = newSessionId;
-
-  // Auto-close sidebar on mobile
-  if (responsive.isMobile) {
-    setSidebarOpen(false);
-  }
-
-  // Immediately show this new chat at the top of the history list
-  setChatSessions(prev => {
-    const existing = prev.filter(s => s.id !== newSessionId);
-    const newCapsule: ChatSession = {
-      id: newSessionId,
-      title: "New Chat",
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-    return [newCapsule, ...existing];
-  });
-
-  // Refetch session list; new chat at top, previous chat (just left) second, rest by updated_at
-  const refetchSessions = async () => {
-    try {
-      const res = await fetch(`${baseUrl}/api/session`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userName: userIdFromUrl ?? loggedInUser, historyOnClick: false }),
-      });
-      if (!res.ok) return;
-      const data = await res.json();
-      const fetched: ChatSession[] = (data?.sessions ?? []).map(
-        (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; is_pinned?: boolean; is_archived?: boolean }) => ({
-          id: s.session_id,
-          title: s.title || "Chat",
-          createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
-          updatedAt: s.updated_at ? new Date(s.updated_at).getTime() : undefined,
-          isPinned: s.is_pinned || false,
-          isArchived: s.is_archived || false,
-        })
-      );
-      setChatSessions(prev => {
-        const newCapsule: ChatSession = {
-          id: newSessionId,
-          title: "New Chat",
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        };
-        // Previous chat stays second (just left, not yet saved so backend may have old order)
-        const previousSession = prev.find(s => s.id === previousSid) ?? fetched.find(s => s.id === previousSid);
-        const rest = sortSessionsNewestFirst(
-          fetched.filter(s => s.id !== newSessionId && s.id !== previousSid)
-        );
-        if (previousSession) {
-          const fromApi = fetched.find(s => s.id === previousSid);
-          const title = fromApi?.title ?? previousSession.title;
-          return [newCapsule, { ...previousSession, title }, ...rest];
-        }
-        return [newCapsule, ...rest];
-      });
-    } catch (err) {
-      console.warn("Failed to refetch sessions:", err);
-    }
-  };
-  setTimeout(() => refetchSessions(), 400);
-};
-
-// ── Process loaded messages: convert raw JSON to formatted tables ─────────
-const processLoadedMessages = (msgs: Message[]): Message[] => {
-  return msgs.map(m => {
-    if (m.role !== "ai") return m;
-
-    const text = m.text || "";
-
-    // 🔑 FIRST: Check if this is a GRAPH response
-    const graphData = parseGraphData(text);
-    if (graphData) {
-      console.log("📊 [HISTORY] Graph response detected — keeping as raw JSON for chart");
-      return { ...m, text, isGraphResponse: true };
-    }
-
-    // 🔑 THE FIX: Detect if the history text is a Table JSON
-    try {
-      if (text.trim().startsWith('{') || text.trim().startsWith('[')) {
-        const parsed = JSON.parse(text);
-        if (parsed && (parsed.columns || parsed.data)) {
-          // It's a table! Use the existing render function
-          const tableHTML = renderLargeDataset(text);
-          if (tableHTML) {
-            const rows = extractTableRows(tableHTML);
-            return { ...m, text: tableHTML, tableData: rows, tableTitle: "Results" };
-          }
-        }
-      }
-    } catch (e) {
-      /* Not JSON, ignore */
-    }
-
-    // Check if already formatted (contains HTML tags or wrapper class)
-    if (
-      text.includes('<table') ||
-      text.includes('large-dataset-wrapper') ||
-      text.includes('ai-table')
-    ) {
-      console.log("✅ [HISTORY] Message already HTML formatted - extracting table data");
-      // Try to extract table data from HTML
-      const rows = extractTableRows(text);
-      if (rows.length > 0) {
-        return { ...m, text, tableData: rows, tableTitle: "Results" };
-      }
-      return m;
-    }
-
-    // Extract response content (removes session_id wrapper)
-    const rawJson = extractResponseContent(text);
-    const cleanedText = decodeEntities(rawJson);
-
-    // ALWAYS TRY RENDERING AS UNIFIED TABLE STRUCTURE FIRST (ALL SIZES)
-    const tableHTML = renderLargeDataset(cleanedText);
-    if (tableHTML) {
-      console.log("✅ [HISTORY] Successfully rendered as table structure");
-      const rows = extractTableRows(tableHTML);
-      if (rows.length > 0) {
-        return { ...m, text: tableHTML, tableData: rows, tableTitle: "Results" };
-      }
-      return { ...m, text: tableHTML };
-    }
-
-    // Not tabular data → try to format as text
-    try {
-      const formattedText = formatOutput(cleanedText);
-      // 🔑 EXTRA FIX: If the formatted text still has raw HTML tags, decode them
-      if (formattedText.includes('<div') || formattedText.includes('&lt;')) {
-        return { ...m, text: decodeEntities(formattedText) };
-      }
-      return { ...m, text: formattedText };
-    } catch (err) {
-      console.log("📝 [HISTORY] Fallback to raw text");
-      return { ...m, text: decodeEntities(text) };
-    }
-  });
-};
-
-// ── Switch to an existing session ─────────────────────────────────────────
-const switchSession = async (targetSid: string) => {
-  if (targetSid === sessionId) return; // already active
-  if (isLoading) {
-    setMessages(prev => [...prev, { role: "error", text: "Please wait for the current response to finish before switching chats." }]);
-    return;
-  }
-
-  // Auto-close sidebar on mobile
-  if (responsive.isMobile) {
-    setSidebarOpen(false);
-  }
-
-  // Capture the currently active session ID
-  const currentSid = sessionIdRef.current;
-
-  // Save current messages
-  sessionMessagesRef.current.set(currentSid, messages);
-
-  // Refresh from backend to get latest titles; do not move clicked chat to top (just highlight)
-  const refreshSessions = async () => {
-    if (!loggedInUser) return;
-    try {
-      const res = await fetch(`${baseUrl}/api/session`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userName: userIdFromUrl ?? loggedInUser, historyOnClick: false }),
-      });
-      if (!res.ok) return;
-      const data = await res.json();
-      const fetched: ChatSession[] = (data?.sessions ?? []).map(
-        (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; is_pinned?: boolean; is_archived?: boolean }) => ({
-          id: s.session_id,
-          title: s.title || "Chat",
-          createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
-          updatedAt: s.updated_at ? new Date(s.updated_at).getTime() : undefined,
-          isPinned: s.is_pinned || false,
-          isArchived: s.is_archived || false,
-        })
-      );
-      setChatSessions(prev => {
-        const merged = sortSessionsNewestFirst(fetched);
-        // If current list has a session not in fetched (e.g. new unsaved), prepend it
-        const onlyInPrev = prev.filter(s => !fetched.some(f => f.id === s.id));
-        return sortSessionsNewestFirst([...onlyInPrev, ...merged]);
-      });
-    } catch (err) {
-      console.warn("Failed to refresh sessions:", err);
-    }
-  };
-  refreshSessions();
-
-  // Switch session ID immediately
-  setSessionId(targetSid);
-  sessionIdRef.current = targetSid;
-  accRef.current = "";
-  setIsLoading(false);
-
-  // Check local cache first
-  const cached = sessionMessagesRef.current.get(targetSid);
-  if (cached && cached.length > 0) {
-    const processed = processLoadedMessages(cached);
-    setMessages(processed);
-  } else {
-    // Fetch from backend
-    setHistoryLoading(true);
-    setMessages([]);
-    try {
-      const res = await fetch(`${baseUrl}/api/session`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userName: userIdFromUrl ?? loggedInUser, sessionId: targetSid, historyOnClick: true }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      const history: Message[] = [];
-      //handles is_audio from backend
-      for (const entry of (data?.chat_history ?? [])) {
-        if (entry.query) {
-          if (entry.is_audio) {
-            // query is base64 audio string from DB
-            history.push({
-              role: "user",
-              text: "Voice message",
-              isAudio: true,
-              audioUrl: entry.query,   // base64 → audio player
-              audioDuration: 0         // duration not stored in DB
-            });
-          } else {
-            history.push({ role: "user", text: entry.query });
-          }
-        }
-        if (entry.assistant) {
-          history.push({ role: "ai", text: entry.assistant });
-        }
-      }
-      const processed = processLoadedMessages(history);
-      sessionMessagesRef.current.set(targetSid, processed);
-      setMessages(processed);
-    } catch (err) {
-      console.warn("Failed to fetch session history:", err);
-      setMessages([]);
-    } finally {
-      setHistoryLoading(false);
-    }
-  }
-
-  // Ensure WebSocket connection is available for the target session
-  if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-    connectWS();
-  } else {
-    startPing();
-  }
-};
-
-const handleLogout = async () => {
-  const savePromises: Promise<void>[] = [];
-  sessionMessagesRef.current.forEach((msgs, sid) => {
-    const valid = msgs.filter(m => m.role !== "error");
-    if (valid.length > 0) {
-      savePromises.push(saveChatHistoryRef.current(sid, msgs));
-    }
-  });
-
-  try {
-    await Promise.all(savePromises);
-    console.log("✅ All sessions saved before logout");
-  } catch {
-    console.warn("⚠️ Some sessions failed to save on logout");
-  }
-
-  if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
-  if (idleTimerRef.current) { clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
-  if (wsRef.current) {
-    wsRef.current.close();
-    wsRef.current = null;
-  }
-
-  localStorage.removeItem("loggedInUser");
-  router.replace("/");
-};
-const toggleRecording = async () => {
-  if (isRecording) {
-    mediaRecorderRef.current?.stop();
-    setIsRecording(false);
-  } else {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const rec = new MediaRecorder(stream);
-      rec.start();
-      mediaRecorderRef.current = rec;
-      setIsRecording(true);
-    } catch { alert("Please allow microphone access."); }
-  }
-};
-
-// ── Handle Audio Playback ─────────────────────────────────────────────────
-const handleAudioPlayback = async (idx: number, audioUrl?: string, passedDuration: number = 0) => {
-  if (!audioUrl) return;
-
-  const isCurrentlyPlaying = audioPlayingIndex === idx;
-
-  if (isCurrentlyPlaying) {
-    const audio = audioPlayersRef.current[idx];
-    if (audio) {
-      audio.pause();
-      setAudioPlayingIndex(null);
-    }
-    return;
-  }
-
-  // Pause any other playing audio
-  if (audioPlayingIndex !== null) {
-    const otherAudio = audioPlayersRef.current[audioPlayingIndex];
-    if (otherAudio) otherAudio.pause();
-    setAudioPlayingIndex(null);
-  }
-
-  // Create audio element if not yet created for this index
-  if (!audioPlayersRef.current[idx]) {
-    let playUrl = audioUrl;
-    if (audioUrl.startsWith("data:")) {
-      const res = await fetch(audioUrl);
-      const blob = await res.blob();
-      playUrl = URL.createObjectURL(blob);
-    }
-    const audio = new Audio(playUrl);
-    let animationFrameId: number | null = null;
-
-    // ── FIX BUG 1: load real duration from the audio element itself ──────
-    audio.addEventListener("loadedmetadata", () => {
-      if (isFinite(audio.duration) && audio.duration > 0) {
-        audioDurationMapRef.current[idx] = audio.duration;
-        setAudioDurationMap(prev => ({ ...prev, [idx]: audio.duration }));
-      } else if (passedDuration > 0) {
-        setAudioDurationMap(prev => ({ ...prev, [idx]: passedDuration }));
-      }
+    setMessages(prev => {
+      const updated = [...prev, {
+        role: "user" as const,
+        text: userText
+      }];
+      // Save to per-session store
+      sessionMessagesRef.current.set(sessionId, updated);
+      return updated;
     });
+    // Clear textarea DOM value and debounced state
+    if (inputRef.current) inputRef.current.value = "";
+    rawInputRef.current = "";
+    setInput("");
+    setIsLoading(true);
+    accRef.current = "";
 
-    // ── FIX BUG 3: rAF loop for smooth progress ──────────────────────────
-    const progressLoop = () => {
-      const a = audioPlayersRef.current[idx];
-      if (!a || a.paused) return;
-      const dur = audioDurationMapRef.current[idx] ?? passedDuration;
-      if (dur > 0) {
-        const pct = (a.currentTime / dur) * 100;
-        setAudioProgressMap(prev => ({ ...prev, [idx]: pct }));
-      }
-      animationFrameId = requestAnimationFrame(progressLoop);
-    };
+    ws.send(JSON.stringify({
+      type: "message",
+      messageType: "text",
+      isAudio: false,
+      isText: true,
+      isGraph: isGraphMode,
+      query: userText,
+      userName: loggedInUser,
+      subUserName: userIdFromUrl ?? loggedInUser,
+      userId: userIdInt !== null ? String(userIdInt) : undefined,
+      sessionId,
+      timestamp: Date.now()
+    }));
+  };  // ← THIS CLOSING BRACE WAS MISSING
 
-    audio.onplay = () => {
-      setAudioPlayingIndex(idx);
-      if (animationFrameId !== null) cancelAnimationFrame(animationFrameId);
-      animationFrameId = requestAnimationFrame(progressLoop);
-    };
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  };
 
-    audio.onpause = () => {
-      if (animationFrameId !== null) {
-        cancelAnimationFrame(animationFrameId);
-        animationFrameId = null;
-      }
-      setAudioPlayingIndex(null);
-    };
+  const { theme } = useTheme();
+  const isLanding = messages.length === 0;
 
-    audio.onended = () => {
-      if (animationFrameId !== null) {
-        cancelAnimationFrame(animationFrameId);
-        animationFrameId = null;
-      }
-      setAudioPlayingIndex(null);
-      setAudioProgressMap(prev => ({ ...prev, [idx]: 0 }));
-    };
+  // Mobile/tablet header is hidden while sidebar/menu is open, or when modals are active.
+  const isMobileHeaderVisible = responsive.isMobile && !sidebarOpen && !showUpgradePlan && !showManageAccount;
 
-    audioPlayersRef.current[idx] = audio;
-  }
+  /** Chat input + disclaimer; `landing` = centered column on empty state before first message */
+  const renderChatInputFooter = (variant: "landing" | "default") => {
+    const isGuestOnShared = !loggedInUser && typeof window !== "undefined" && !!new URLSearchParams(window.location.search).get("sharedSessionId");
 
-  // Trigger load so loadedmetadata fires (needed for old-session base64 URLs)
-  const audioElement = audioPlayersRef.current[idx];
-  if (audioElement) {
-    audioElement.play().catch(err => {
-      console.error("❌ Audio play failed:", err.message);
-      setAudioPlayingIndex(null);
-    });
-  }
-};
-
-// ── Send message over the persistent WebSocket ────────────────────────────
-const sendMessage = () => {
-  const domVal = inputRef.current?.value ?? "";
-  if (!domVal.trim() || isLoading) return;
-  const userText = domVal.trim();
-
-  const ws = wsRef.current;
-
-  if (!ws || ws.readyState !== WebSocket.OPEN) {
-    console.warn("Socket not ready for session:", sessionId);
-    setMessages(prev => [...prev, { role: "error", text: "Still connecting. Please wait." }]);
-    return;
-  }
-
-  // Ensure capsule exists and move this session to top when user types (content changed)
-  const now = Date.now();
-  setChatSessions(prev => {
-    const existing = prev.find(s => s.id === sessionId);
-    const rest = prev.filter(s => s.id !== sessionId);
-    if (existing) {
-      return [{ ...existing, updatedAt: now }, ...rest];
-    }
-    const newCapsule: ChatSession = {
-      id: sessionId,
-      title: "New Chat",
-      createdAt: now,
-      updatedAt: now,
-    };
-    return [newCapsule, ...rest];
-  });
-
-  setShowFeaturePlaceholder(false);
-  setMessages(prev => {
-    const updated = [...prev, {
-      role: "user" as const,
-      text: userText
-    }];
-    // Save to per-session store
-    sessionMessagesRef.current.set(sessionId, updated);
-    return updated;
-  });
-  // Clear textarea DOM value and debounced state
-  if (inputRef.current) inputRef.current.value = "";
-  rawInputRef.current = "";
-  setInput("");
-  setIsLoading(true);
-  accRef.current = "";
-
-  ws.send(JSON.stringify({
-    type: "message",
-    messageType: "text",
-    isAudio: false,
-    isText: true,
-    isGraph: isGraphMode,
-    query: userText,
-    userName: loggedInUser,
-    subUserName: userIdFromUrl ?? loggedInUser,
-    userId: userIdInt !== null ? String(userIdInt) : undefined,
-    sessionId,
-    timestamp: Date.now()
-  }));
-};  // ← THIS CLOSING BRACE WAS MISSING
-
-const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
-};
-
-const { theme } = useTheme();
-const isLanding = messages.length === 0;
-
-// Mobile/tablet header is hidden while sidebar/menu is open, or when modals are active.
-const isMobileHeaderVisible = responsive.isMobile && !sidebarOpen && !showUpgradePlan && !showManageAccount;
-
-/** Chat input + disclaimer; `landing` = centered column on empty state before first message */
-const renderChatInputFooter = (variant: "landing" | "default") => (
-  <div
-    className={
-      variant === "landing" ? "input-footer input-footer--start" : "input-footer"
-    }
-  >
-    {voiceRecorder.isRecording && (
-      <div className={`voice-recording-overlay${voiceRecorder.closingRecording ? " closing" : ""}`}>
-        <RecordingInterface
-          recordingTime={voiceRecorder.recordingTime}
-          onCancel={voiceRecorder.cancelRecording}
-          formatTime={voiceRecorder.formatTime}
-        />
-      </div>
-    )}
-
-    {voiceRecorder.recordedAudioBlob ? (
-      <VoicePreviewBar
-        isPlaying={voiceRecorder.isPlaying}
-        playbackTime={voiceRecorder.playbackTime}
-        totalDuration={voiceRecorder.totalDuration}
-        displayTimeText={voiceRecorder.displayTimeText}
-        onTogglePlayback={voiceRecorder.togglePlayback}
-        onDelete={voiceRecorder.deleteRecording}
-        onSend={voiceRecorder.sendVoiceMessage}
-        isLoading={isLoading}
-        wsConnectionState={wsConnectionState}
-      />
-    ) : (
-      <div className="input-wrapper">
-        <textarea
-          ref={inputRef}
-          className="main-input"
-          defaultValue={input}
-          onChange={(e) => {
-            // Update ref immediately (no re-render)
-            rawInputRef.current = e.target.value;
-            // Resize based on DOM measurements
-            resizeTA();
-
-            // Debounce updating the heavier `input` state
-            if (inputDebounceRef.current) {
-              clearTimeout(inputDebounceRef.current);
-              inputDebounceRef.current = null;
-            }
-            inputDebounceRef.current = window.setTimeout(() => {
-              setInput(rawInputRef.current);
-              inputDebounceRef.current = null;
-            }, DEBOUNCE_MS);
-          }}
-          onKeyDown={handleKeyDown}
-          disabled={isLoading || wsConnectionState !== "connected"}
-          placeholder={
-            wsConnectionState === "connected" ? "Ask Anything..." : "Waiting for connection…"
-          }
-          rows={1}
-        />
-        <VoiceMicButton
-          forwardedRef={voiceRecorder.micButtonRef}
-          onClick={voiceRecorder.toggleRecording}
-          disabled={
-            isLoading ||
-            wsConnectionState !== "connected" ||
-            voiceRecorder.recordedAudioBlob !== null
-          }
-        />
-        <button
-          onClick={() => setIsGraphMode((p) => !p)}
-          title={isGraphMode ? "Graph mode ON — click to turn off" : "Click for graph output"}
-          style={{
-            background: isGraphMode
-              ? "linear-gradient(135deg, #d4af37, #f5c249)"
-              : "transparent",
-            border: isGraphMode
-              ? "1px solid #d4af37"
-              : "1px solid rgba(255,255,255,0.15)",
-            borderRadius: 8,
-            padding: "6px 8px",
-            cursor: "pointer",
-            color: isGraphMode ? "#000" : "#9CA3AF",
-            transition: "all 0.2s ease",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <IconChartBar size={18} stroke={1.5} />
-        </button>
-        <button
-          className="send-btn"
-          onClick={sendMessage}
-          disabled={isLoading || wsConnectionState !== "connected" || !(inputRef.current?.value ?? "").trim()}
-        >
-          <IconArrowUp size={16} color="white" stroke={2} />
-        </button>
-      </div>
-    )}
-    {variant === "landing" && (
-      <LandingSuggestedQueries
-        onSelect={(q) => {
-          if (inputDebounceRef.current) { clearTimeout(inputDebounceRef.current); inputDebounceRef.current = null; }
-          if (inputRef.current) {
-            inputRef.current.value = q;
-          }
-          rawInputRef.current = q;
-          setInput(q);
-          requestAnimationFrame(() => inputRef.current?.focus());
-        }}
-        disabled={
-          isLoading ||
-          wsConnectionState !== "connected" ||
-          voiceRecorder.isRecording ||
-          !!voiceRecorder.recordedAudioBlob
-        }
-      />
-    )}
-    <p className="footer-disclaimer">
-    </p>
-  </div>
-);
-
-if (!authChecked) {
-  return (
-    <div
-      style={{
-        minHeight: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: "linear-gradient(135deg, #0A0A0A 0%, #111111 50%, #0A0A0A 100%)",
-      }}
-    >
-      <span style={{ fontSize: 14, color: "#A0AEC0" }}>Checking authentication…</span>
-    </div>
-  );
-}
-
-return (
-  <div className="app-container app-container-with-bg">
-    <BackgroundLayer theme={theme} />
-    {/* Content above background (MainLayout-style) */}
-    <div
-      className={
-        !historyLoading && isLanding
-          ? "app-content-wrapper app-content-wrapper--landing-start"
-          : "app-content-wrapper"
-      }
-    >
-      {/* ── Sidebar ─────────────────────────────────────────────────────── */}
+    return (
       <div
-        className="sidebar-shell"
+        className={
+          variant === "landing" ? "input-footer input-footer--start" : "input-footer"
+        }
+      >
+        {voiceRecorder.isRecording && (
+          <div className={`voice-recording-overlay${voiceRecorder.closingRecording ? " closing" : ""}`}>
+            <RecordingInterface
+              recordingTime={voiceRecorder.recordingTime}
+              onCancel={voiceRecorder.cancelRecording}
+              formatTime={voiceRecorder.formatTime}
+            />
+          </div>
+        )}
+
+        {voiceRecorder.recordedAudioBlob ? (
+          <VoicePreviewBar
+            isPlaying={voiceRecorder.isPlaying}
+            playbackTime={voiceRecorder.playbackTime}
+            totalDuration={voiceRecorder.totalDuration}
+            displayTimeText={voiceRecorder.displayTimeText}
+            onTogglePlayback={voiceRecorder.togglePlayback}
+            onDelete={voiceRecorder.deleteRecording}
+            onSend={voiceRecorder.sendVoiceMessage}
+            isLoading={isLoading}
+            wsConnectionState={wsConnectionState}
+          />
+        ) : (
+          <div className="input-wrapper" style={{ position: 'relative' }}>
+            {/* changes done by megnathan: Added blur overlay and restriction message for guests on shared chats */}
+            {isGuestOnShared && (
+              <div style={{
+                position: 'absolute',
+                inset: 0,
+                background: 'rgba(0, 0, 0, 0.45)',
+                backdropFilter: 'blur(8px)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                zIndex: 100,
+                borderRadius: 10,
+                padding: '0 16px',
+                textAlign: 'center'
+              }}>
+                <span style={{
+                  color: '#fff',
+                  fontSize: responsive.isMobile ? '11px' : '13px',
+                  fontWeight: 500,
+                  lineHeight: 1.4,
+                  textShadow: '0 1px 2px rgba(0,0,0,0.5)'
+                }}>
+                  Please login through SmartFM to continue the chat for having the real-time data updates regarding the facility management.
+                </span>
+              </div>
+            )}
+            <textarea
+              ref={inputRef}
+              className="main-input"
+              defaultValue={input}
+              onChange={(e) => {
+                // Update ref immediately (no re-render)
+                rawInputRef.current = e.target.value;
+                // Resize based on DOM measurements
+                resizeTA();
+
+                // Debounce updating the heavier `input` state
+                if (inputDebounceRef.current) {
+                  clearTimeout(inputDebounceRef.current);
+                  inputDebounceRef.current = null;
+                }
+                inputDebounceRef.current = window.setTimeout(() => {
+                  setInput(rawInputRef.current);
+                  inputDebounceRef.current = null;
+                }, DEBOUNCE_MS);
+              }}
+              onKeyDown={handleKeyDown}
+              disabled={isLoading || wsConnectionState !== "connected" || isGuestOnShared}
+              placeholder={
+                isGuestOnShared ? "" : (wsConnectionState === "connected" ? "Ask Anything..." : "Waiting for connection…")
+              }
+              rows={1}
+            />
+            <VoiceMicButton
+              forwardedRef={voiceRecorder.micButtonRef}
+              onClick={voiceRecorder.toggleRecording}
+              disabled={
+                isLoading ||
+                wsConnectionState !== "connected" ||
+                voiceRecorder.recordedAudioBlob !== null ||
+                isGuestOnShared
+              }
+            />
+            <button
+              onClick={() => setIsGraphMode((p) => !p)}
+              title={isGraphMode ? "Graph mode ON — click to turn off" : "Click for graph output"}
+              style={{
+                background: isGraphMode
+                  ? "linear-gradient(135deg, #d4af37, #f5c249)"
+                  : "transparent",
+                border: isGraphMode
+                  ? "1px solid #d4af37"
+                  : "1px solid rgba(255,255,255,0.15)",
+                borderRadius: 8,
+                padding: "6px 8px",
+                cursor: "pointer",
+                color: isGraphMode ? "#000" : "#9CA3AF",
+                transition: "all 0.2s ease",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <IconChartBar size={18} stroke={1.5} />
+            </button>
+            <button
+              className="send-btn"
+              onClick={sendMessage}
+              disabled={isLoading || wsConnectionState !== "connected" || !(inputRef.current?.value ?? "").trim() || isGuestOnShared}
+            >
+              <IconArrowUp size={16} color="white" stroke={2} />
+            </button>
+          </div>
+        )}
+        {variant === "landing" && (
+          <LandingSuggestedQueries
+            onSelect={(q) => {
+              if (inputDebounceRef.current) { clearTimeout(inputDebounceRef.current); inputDebounceRef.current = null; }
+              if (inputRef.current) {
+                inputRef.current.value = q;
+              }
+              rawInputRef.current = q;
+              setInput(q);
+              requestAnimationFrame(() => inputRef.current?.focus());
+            }}
+            disabled={
+              isLoading ||
+              wsConnectionState !== "connected" ||
+              voiceRecorder.isRecording ||
+              !!voiceRecorder.recordedAudioBlob
+            }
+          />
+        )}
+        <p className="footer-disclaimer">
+        </p>
+      </div>
+    );
+  };
+
+  if (!authChecked) {
+    return (
+      <div
         style={{
-          display: sidebarOpen ? 'flex' : 'none',
-          position: responsive.isMobile && sidebarOpen ? 'fixed' : 'relative',
-          top: 0,
-          left: 0,
-          zIndex: responsive.isMobile && sidebarOpen ? 9999 : 2,
+          minHeight: "100vh",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "linear-gradient(135deg, #0A0A0A 0%, #111111 50%, #0A0A0A 100%)",
         }}
       >
-        <aside className="sidebar">
-          {/* Sidebar Header with Logo */}
-          <div className="sidebar-header">
+        <span style={{ fontSize: 14, color: "#A0AEC0" }}>Checking authentication…</span>
+      </div>
+    );
+  }
 
-            <div style={{ display: "flex", alignItems: "center", flex: 1 }}>
+  return (
+    <div className="app-container app-container-with-bg">
+      <BackgroundLayer theme={theme} />
+      {/* Content above background (MainLayout-style) */}
+      <div
+        className={
+          !historyLoading && isLanding
+            ? "app-content-wrapper app-content-wrapper--landing-start"
+            : "app-content-wrapper"
+        }
+      >
+        {/* ── Sidebar ─────────────────────────────────────────────────────── */}
+        <div
+          className="sidebar-shell"
+          style={{
+            display: sidebarOpen ? 'flex' : 'none',
+            position: responsive.isMobile && sidebarOpen ? 'fixed' : 'relative',
+            top: 0,
+            left: 0,
+            zIndex: responsive.isMobile && sidebarOpen ? 9999 : 2,
+          }}
+        >
+          <aside className="sidebar">
+            {/* Sidebar Header with Logo */}
+            <div className="sidebar-header">
+
+              <div style={{ display: "flex", alignItems: "center", flex: 1 }}>
+                <div
+                  className="brand-box"
+                  style={loginPageClientLogoPath ? { width: "100%", maxWidth: 220, height: "auto", minHeight: 56, maxHeight: 72, padding: 0, border: "none", borderRadius: 0 } : undefined}
+                >
+                  {loginPageClientLogoPath ? (
+                    <img
+                      src={loginPageClientLogoPath}
+                      alt="Client logo"
+                      style={{ width: "100%", maxWidth: 220, height: "auto", maxHeight: 72, objectFit: "contain", display: "block" }}
+                    />
+                  ) : (
+                    <Image src="/icon.png" alt="Nanosoft Ask AI" width={20} height={20} style={{ borderRadius: 0 }} />
+                  )}
+                </div>
+              </div>
+              {/* Close button on mobile */}
+              {responsive.isMobile && !showManageAccount && !showUpgradePlan && (
+                <button
+                  className="sidebar-close-btn"
+                  onClick={() => setSidebarOpen(false)}
+                  title="Close sidebar"
+                  aria-label="Close sidebar"
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: 'var(--color-text)',
+                    cursor: 'pointer',
+                    padding: '8px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    transition: 'all 0.2s ease',
+                  }}
+                >
+                  <IconX size={24} />
+                </button>
+              )}
+              <div className="hamburger-wrapper" ref={menuRef}>
+                <button
+                  className="hamburger-btn"
+                  onClick={() => setMenuOpen((p) => !p)}
+                  title="Profile menu"
+                  aria-label="Open profile menu"
+                >
+                  <IconHamburger />
+                </button>
+                <div className={`profile-dropdown ${menuOpen ? "open" : ""}`}>
+                  <div className="profile-dropdown-inner">
+                    <div className="profile-dropdown-item profile-user-row">
+                      <div className="profile-avatar">
+                        <IconUser />
+                      </div>
+                      <div className="profile-user-info">
+                        {/* Display original userName (if available) while backend uses client_name */}
+                        <span className="profile-userid">{userIdFromUrl ?? loggedInUser}</span>
+                      </div>
+                    </div>
+                    <div className="profile-divider" />
+                    <div className="profile-dropdown-item profile-action-btn">
+                      <ThemeToggle />
+                    </div>
+                    <div className="profile-divider" />
+                    <button
+                      className="profile-dropdown-item profile-action-btn"
+                      onClick={() => {
+                        setShowUpgradePlan(true);
+                        setMenuOpen(false);
+                        setSidebarOpen(false);
+                      }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '10px',
+                        color: '#d4af37',
+                        fontWeight: 600,
+                      }}
+                    >
+                      <IconCrown size={18} />
+                      <span>Upgrade Plan</span>
+                    </button>
+                    <div className="profile-divider" />
+                    <button
+                      className="profile-dropdown-item profile-action-btn"
+                      onClick={() => {
+                        setShowManageAccount(true);
+                        setMenuOpen(false);
+                        setSidebarOpen(false);
+                      }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '10px',
+                        color: 'var(--color-primary)',
+                        fontWeight: 600,
+                      }}
+                    >
+                      <IconUser size={18} />
+                      <span>Manage Account</span>
+                    </button>
+                    <div className="profile-divider" />
+                    <button
+                      className="profile-dropdown-item profile-action-btn profile-logout"
+                      onClick={handleLogout}
+                    >
+                      <IconLogout />
+                      <span>Logout</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* <button className="sidebar-hamburger-btn" onClick={() => setMenuOpen(p => !p)} title="Menu" aria-label="Open menu">
+            <IconHamburger/>
+          </button> */}
+
+            </div>
+            {/* <div className={`sidebar-profile-card ${menuOpen ? "open" : ""}`} ref={menuRef}> */}
+
+
+
+            {/* </div> */}
+
+            {/* + New Chat Button */}
+            <div className="new-chat-container-top">
+              <button className="new-chat-btn" onClick={handleNewChat}>
+                <IconChat width={16} height={16} />
+                <span>+ New Chat</span>
+              </button>
+            </div>
+
+            {/* FEATURES + Chat History Section */}
+            <div className="sidebar-scroll">
+              {/* FEATURES */}
+              <div className="section-title">FEATURES</div>
               <div
-                className="brand-box"
-                style={loginPageClientLogoPath ? { width: "100%", maxWidth: 220, height: "auto", minHeight: 56, maxHeight: 72, padding: 0, border: "none", borderRadius: 0 } : undefined}
+                className={`feature-item ${activeFeature === 'chat' ? 'active' : ''}`}
+                onClick={() => {
+                  setActiveFeature('chat');
+                  handleFeatureClick('chat');
+                }}
               >
-                {loginPageClientLogoPath ? (
-                  <img
-                    src={loginPageClientLogoPath}
-                    alt="Client logo"
-                    style={{ width: "100%", maxWidth: 220, height: "auto", maxHeight: 72, objectFit: "contain", display: "block" }}
+                <IconChat />
+                <span>Chat</span>
+              </div>
+              <div
+                className={`feature-item ${activeFeature === 'archived' ? 'active' : ''}`}
+                onClick={() => {
+                  setActiveFeature('archived');
+                  handleFeatureClick('archived');
+                }}
+              >
+                <IconArchive />
+                <span>Archived</span>
+              </div>
+              <div
+                className={`feature-item ${activeFeature === 'library' ? 'active' : ''}`}
+                onClick={() => {
+                  setActiveFeature('library');
+                  handleFeatureClick('library');
+                }}
+              >
+                <IconLibrary />
+                <span>Library</span>
+              </div>
+
+              <div className="search-section-sidebar" style={{ padding: '8px 12px', marginTop: 16 }}>
+                <div className="search-input-wrapper" style={{ position: 'relative' }}>
+                  <IconChartBar size={16} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }} />
+                  <input
+                    type="text"
+                    placeholder="Search chats..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '8px 10px 8px 34px',
+                      borderRadius: 8,
+                      border: '1px solid var(--color-border)',
+                      background: 'rgba(255,255,255,0.05)',
+                      fontSize: 13,
+                      outline: 'none',
+                      color: 'inherit'
+                    }}
                   />
-                ) : (
-                  <Image src="/icon.png" alt="Nanosoft Ask AI" width={20} height={20} style={{ borderRadius: 0 }} />
+                </div>
+                {searchTerm && (
+                  <div className="search-results-dropdown" style={{
+                    marginTop: 8,
+                    maxHeight: 200,
+                    overflowY: 'auto',
+                    background: 'var(--color-bg-secondary)',
+                    borderRadius: 8,
+                    border: '1px solid var(--color-border)',
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
+                  }}>
+                    {chatSessions.filter(s => s.title.toLowerCase().includes(searchTerm.toLowerCase())).length > 0 ? (
+                      chatSessions
+                        .filter(s => s.title.toLowerCase().includes(searchTerm.toLowerCase()))
+                        .map(s => (
+                          <div
+                            key={s.id}
+                            className="search-result-item"
+                            onClick={() => {
+                              switchSession(s.id);
+                              setSearchTerm("");
+                              setActiveFeature('chat');
+                            }}
+                            style={{
+                              padding: '8px 12px',
+                              cursor: 'pointer',
+                              fontSize: 12,
+                              borderBottom: '1px solid rgba(255,255,255,0.05)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 8
+                            }}
+                          >
+                            <IconChat width={14} height={14} style={{ opacity: 0.5 }} />
+                            <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.title}</span>
+                          </div>
+                        ))
+                    ) : (
+                      <div style={{ padding: '12px', textAlign: 'center', fontSize: 12, opacity: 0.5 }}>No results found</div>
+                    )}
+                  </div>
                 )}
               </div>
+
+              {showFeaturePlaceholder && activeFeature === 'library' && (
+                <div className="feature-placeholder-sidebar">
+                  <div className="feature-placeholder-box">
+                    <div className="feature-placeholder-title">
+                      Library
+                    </div>
+                    <div className="feature-placeholder-subtitle">
+                      Yet to be implemented
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Archived view */}
+              {activeFeature === 'archived' && (
+                <div className="chat-history-box" style={{ marginTop: 24, display: "flex", flexDirection: "column", minHeight: 0 }}>
+                  <div className="chat-history-scroll">
+                    {chatSessions.filter(s => s.isArchived).map(a => (
+                      <div
+                        key={a.id}
+                        className="sidebar-item"
+                        onClick={() => {
+                          // Open archived session history while staying in Archived view
+                          // Do NOT switch the sidebar to Chat or add title back to chatSessions
+                          void switchSession(a.id);
+                        }}
+                        style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
+                      >
+                        <div className="content" style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <IconArchive width={16} height={16} />
+                          <span title={a.title} style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{a.title}</span>
+                        </div>
+                        <div>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleArchiveSession(a.id, false);
+                            }}
+                            title="Unarchive"
+                            style={{ background: 'transparent', border: 'none', color: 'var(--color-text)', cursor: 'pointer', padding: 6, borderRadius: 6 }}
+                          >Unarchive</button>
+                        </div>
+                      </div>
+                    ))}
+                    {chatSessions.filter(s => s.isArchived).length === 0 && (
+                      <div style={{ padding: "12px 16px", fontSize: 12, color: "#7a8f75", fontStyle: "italic" }}>
+                        No archived chats
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Chat History – only visible when Chat feature is active */}
+              {activeFeature === 'chat' && (
+
+                <div className="chat-history-box" style={{ marginTop: 24, display: "flex", flexDirection: "column", minHeight: 0 }}>
+                  <div className="chat-history-scroll">
+                    {chatSessions.filter(s => !s.isArchived).map(s => (
+                      <div
+                        key={s.id}
+                        className={`sidebar-item${s.id === sessionId ? " active" : ""}`}
+                        onClick={() => switchSession(s.id)}
+                        style={{ cursor: "pointer", display: 'flex', alignItems: 'center', gap: 8 }}
+                      >
+                        <div className="content" style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
+                          {s.isPinned ? <IconPin size={16} style={{ color: 'var(--color-primary)' }} /> : <IconChat width={16} height={16} />}
+                          {editingSessionId === s.id ? (
+                            <input
+                              ref={(el) => { editingInputRef.current = el; if (el) el.focus(); }}
+                              value={editingTitle}
+                              onChange={(e) => setEditingTitle(e.target.value)}
+                              onBlur={() => commitRename(s.id)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") { e.preventDefault(); commitRename(s.id); }
+                                if (e.key === "Escape") { setEditingSessionId(null); setEditingTitle(""); }
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                              title={s.title}
+                              style={{
+                                whiteSpace: "nowrap",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                borderRadius: 6,
+                                padding: "6px 8px",
+                                border: "1px solid var(--color-border)",
+                                background: "var(--color-bg-alt)",
+                                color: "var(--color-text)",
+                                width: '100%'
+                              }}
+                            />
+                          ) : (
+                            <span
+                              title={s.title}
+                              style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                            >
+                              {previewTitle(s.title, 2)}
+                            </span>
+                          )}
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center' }}>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const btn = e.currentTarget as HTMLElement;
+                              const pos = computeSessionMenuPos(btn, 140);
+                              const willOpen = sessionMenuOpen !== s.id;
+                              setSessionMenuOpen(willOpen ? s.id : null);
+                              setSessionMenuPos(willOpen ? pos : null);
+                              setSessionMenuVisible(false);
+                            }}
+                            aria-label="Session options"
+                            title="Options"
+                            style={{
+                              background: 'transparent',
+                              border: 'none',
+                              color: 'var(--color-text)',
+                              cursor: 'pointer',
+                              padding: '6px',
+                              borderRadius: 6,
+                            }}
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="5" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="12" cy="19" r="1" /></svg>
+                          </button>
+
+                          {sessionMenuOpen === s.id && sessionMenuPos && (
+                            <div
+                              ref={(el) => { sessionMenuRef.current = el; }}
+                              onClick={(e) => e.stopPropagation()}
+                              className="session-menu"
+                              style={{
+                                position: 'fixed',
+                                top: `${sessionMenuPos.top}px`,
+                                transform: sessionMenuPos.placement === 'above' ? 'translate(calc(-100% + 24px), -100%)' : 'translateX(calc(-100% + 24px))',
+                                left: `${sessionMenuPos.left}px`,
+                                background: 'var(--color-bg-alt)',
+                                border: '1px solid var(--color-border)',
+                                borderRadius: 8,
+                                padding: '6px 8px',
+                                boxShadow: '0 6px 18px rgba(0,0,0,0.4)',
+                                zIndex: 20000,
+                                minWidth: 140,
+                                whiteSpace: 'nowrap',
+                                visibility: sessionMenuVisible ? 'visible' : 'hidden',
+                                pointerEvents: sessionMenuVisible ? 'auto' : 'none',
+                              }}>
+                              <button
+                                onClick={() => { setSessionMenuOpen(null); setSessionMenuPos(null); handleRenameSession(s.id); }}
+                                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 8px', background: 'transparent', border: 'none', color: 'var(--color-text)', cursor: 'pointer' }}
+                              >Rename</button>
+                              <button
+                                onClick={() => { setSessionMenuOpen(null); setSessionMenuPos(null); handlePinSession(s.id, !s.isPinned); }}
+                                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 8px', background: 'transparent', border: 'none', color: 'var(--color-text)', cursor: 'pointer' }}
+                              >{s.isPinned ? 'Unpin' : 'Pin'}</button>
+                              <button
+                                onClick={() => { setSessionMenuOpen(null); setSessionMenuPos(null); handleArchiveSession(s.id, !s.isArchived); }}
+                                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 8px', background: 'transparent', border: 'none', color: 'var(--color-text)', cursor: 'pointer' }}
+                              >{s.isArchived ? 'Unarchive' : 'Archive'}</button>
+                              <button
+                                onClick={() => { setSessionMenuOpen(null); setSessionMenuPos(null); handleDeleteSession(s.id); }}
+                                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 8px', background: 'transparent', border: 'none', color: 'var(--color-text)', cursor: 'pointer' }}
+                              >Delete</button>
+                              <button
+                                onClick={() => { setSessionMenuOpen(null); setSessionMenuPos(null); handleShareSession(s.id); }}
+                                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 8px', background: 'transparent', border: 'none', color: 'var(--color-primary)', cursor: 'pointer', borderTop: '1px solid rgba(255,255,255,0.05)', fontWeight: 600 }}
+                              >Share Chat</button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+
+                    {chatSessions.length === 0 && (
+                      <div style={{ padding: "12px 16px", fontSize: 12, color: "#7a8f75", fontStyle: "italic" }}>
+                        No chats yet — click New Chat to start
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
-            {/* Close button on mobile */}
-            {responsive.isMobile && !showManageAccount && !showUpgradePlan && (
+
+            {/* Profile Card - Toggle on Hamburger Click */}
+
+
+            {/* changes done by megnathan: Removed Beta Version disclaimer and legal notice */}
+
+          </aside>
+        </div>
+
+        {/* ── Main Content ─────────────────────────────────────────────────── */}
+        <div
+          className={
+            !historyLoading && isLanding
+              ? "main-content main-content--landing-start"
+              : "main-content"
+          }
+        >
+
+          {/* Mobile Header with Menu Button - sticky at top (hidden while sidebar is open) */}
+          {isMobileHeaderVisible && (
+            <div
+              style={{
+                position: 'fixed',
+                top: 0,
+                left: 0,
+                right: 0,
+                height: '36px',
+                background: 'var(--color-bg-alt)',
+                borderBottom: '1px solid var(--color-border)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                paddingLeft: '12px',
+                paddingRight: '12px',
+                zIndex: 10000,
+                backdropFilter: 'blur(10px)',
+              }}
+            >
               <button
-                className="sidebar-close-btn"
-                onClick={() => setSidebarOpen(false)}
-                title="Close sidebar"
-                aria-label="Close sidebar"
+                onClick={() => setSidebarOpen(true)}
+                title="Open sidebar"
+                aria-label="Open sidebar"
                 style={{
                   background: 'transparent',
                   border: 'none',
@@ -2750,434 +3213,27 @@ return (
                   transition: 'all 0.2s ease',
                 }}
               >
-                <IconX size={24} />
+                <IconMenu2 size={24} />
               </button>
-            )}
-            <div className="hamburger-wrapper" ref={menuRef}>
-              <button
-                className="hamburger-btn"
-                onClick={() => setMenuOpen((p) => !p)}
-                title="Profile menu"
-                aria-label="Open profile menu"
-              >
-                <IconHamburger />
-              </button>
-              <div className={`profile-dropdown ${menuOpen ? "open" : ""}`}>
-                <div className="profile-dropdown-inner">
-                  <div className="profile-dropdown-item profile-user-row">
-                    <div className="profile-avatar">
-                      <IconUser />
-                    </div>
-                    <div className="profile-user-info">
-                      {/* Display original userName (if available) while backend uses client_name */}
-                      <span className="profile-userid">{userIdFromUrl ?? loggedInUser}</span>
-                    </div>
-                  </div>
-                  <div className="profile-divider" />
-                  <div className="profile-dropdown-item profile-action-btn">
-                    <ThemeToggle />
-                  </div>
-                  <div className="profile-divider" />
-                  <button
-                    className="profile-dropdown-item profile-action-btn"
-                    onClick={() => {
-                      setShowUpgradePlan(true);
-                      setMenuOpen(false);
-                      setSidebarOpen(false);
-                    }}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '10px',
-                      color: '#d4af37',
-                      fontWeight: 600,
-                    }}
-                  >
-                    <IconCrown size={18} />
-                    <span>Upgrade Plan</span>
-                  </button>
-                  <div className="profile-divider" />
-                  <button
-                    className="profile-dropdown-item profile-action-btn"
-                    onClick={() => {
-                      setShowManageAccount(true);
-                      setMenuOpen(false);
-                      setSidebarOpen(false);
-                    }}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '10px',
-                      color: 'var(--color-primary)',
-                      fontWeight: 600,
-                    }}
-                  >
-                    <IconUser size={18} />
-                    <span>Manage Account</span>
-                  </button>
-                  <div className="profile-divider" />
-                  <button
-                    className="profile-dropdown-item profile-action-btn profile-logout"
-                    onClick={handleLogout}
-                  >
-                    <IconLogout />
-                    <span>Logout</span>
-                  </button>
-                </div>
+              <div style={{ fontSize: '14px', fontWeight: '500', flex: 1, textAlign: 'center' }}>
+                Ask AI
               </div>
+              <div style={{ width: '40px' }} />
             </div>
+          )}
 
-            {/* <button className="sidebar-hamburger-btn" onClick={() => setMenuOpen(p => !p)} title="Menu" aria-label="Open menu">
-            <IconHamburger/>
-          </button> */}
-
-          </div>
-          {/* <div className={`sidebar-profile-card ${menuOpen ? "open" : ""}`} ref={menuRef}> */}
-
-
-
-          {/* </div> */}
-
-          {/* + New Chat Button */}
-          <div className="new-chat-container-top">
-            <button className="new-chat-btn" onClick={handleNewChat}>
-              <IconChat width={16} height={16} />
-              <span>+ New Chat</span>
-            </button>
-          </div>
-
-          {/* FEATURES + Chat History Section */}
-          <div className="sidebar-scroll">
-            {/* FEATURES */}
-            <div className="section-title">FEATURES</div>
-            <div
-              className={`feature-item ${activeFeature === 'chat' ? 'active' : ''}`}
-              onClick={() => {
-                setActiveFeature('chat');
-                handleFeatureClick('chat');
-              }}
-            >
-              <IconChat />
-              <span>Chat</span>
-            </div>
-            <div
-              className={`feature-item ${activeFeature === 'archived' ? 'active' : ''}`}
-              onClick={() => {
-                setActiveFeature('archived');
-                handleFeatureClick('archived');
-              }}
-            >
-              <IconArchive />
-              <span>Archived</span>
-            </div>
-            <div
-              className={`feature-item ${activeFeature === 'library' ? 'active' : ''}`}
-              onClick={() => {
-                setActiveFeature('library');
-                handleFeatureClick('library');
-              }}
-            >
-              <IconLibrary />
-              <span>Library</span>
-            </div>
-
-            <div className="search-section-sidebar" style={{ padding: '8px 12px', marginTop: 16 }}>
-              <div className="search-input-wrapper" style={{ position: 'relative' }}>
-                <IconChartBar size={16} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }} />
-                <input
-                  type="text"
-                  placeholder="Search chats..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '8px 10px 8px 34px',
-                    borderRadius: 8,
-                    border: '1px solid var(--color-border)',
-                    background: 'rgba(255,255,255,0.05)',
-                    fontSize: 13,
-                    outline: 'none',
-                    color: 'inherit'
-                  }}
-                />
-              </div>
-              {searchTerm && (
-                <div className="search-results-dropdown" style={{
-                  marginTop: 8,
-                  maxHeight: 200,
-                  overflowY: 'auto',
-                  background: 'var(--color-bg-secondary)',
-                  borderRadius: 8,
-                  border: '1px solid var(--color-border)',
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
-                }}>
-                  {chatSessions.filter(s => s.title.toLowerCase().includes(searchTerm.toLowerCase())).length > 0 ? (
-                    chatSessions
-                      .filter(s => s.title.toLowerCase().includes(searchTerm.toLowerCase()))
-                      .map(s => (
-                        <div
-                          key={s.id}
-                          className="search-result-item"
-                          onClick={() => {
-                            switchSession(s.id);
-                            setSearchTerm("");
-                            setActiveFeature('chat');
-                          }}
-                          style={{
-                            padding: '8px 12px',
-                            cursor: 'pointer',
-                            fontSize: 12,
-                            borderBottom: '1px solid rgba(255,255,255,0.05)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 8
-                          }}
-                        >
-                          <IconChat width={14} height={14} style={{ opacity: 0.5 }} />
-                          <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.title}</span>
-                        </div>
-                      ))
-                  ) : (
-                    <div style={{ padding: '12px', textAlign: 'center', fontSize: 12, opacity: 0.5 }}>No results found</div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {showFeaturePlaceholder && activeFeature === 'library' && (
-              <div className="feature-placeholder-sidebar">
-                <div className="feature-placeholder-box">
-                  <div className="feature-placeholder-title">
-                    Library
-                  </div>
-                  <div className="feature-placeholder-subtitle">
-                    Yet to be implemented
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Archived view */}
-            {activeFeature === 'archived' && (
-              <div className="chat-history-box" style={{ marginTop: 24, display: "flex", flexDirection: "column", minHeight: 0 }}>
-                <div className="chat-history-scroll">
-                  {chatSessions.filter(s => s.isArchived).map(a => (
-                    <div
-                      key={a.id}
-                      className="sidebar-item"
-                      onClick={() => {
-                        // Open archived session history while staying in Archived view
-                        // Do NOT switch the sidebar to Chat or add title back to chatSessions
-                        void switchSession(a.id);
-                      }}
-                      style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
-                    >
-                      <div className="content" style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <IconArchive width={16} height={16} />
-                        <span title={a.title} style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{a.title}</span>
-                      </div>
-                      <div>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleArchiveSession(a.id, false);
-                          }}
-                          title="Unarchive"
-                          style={{ background: 'transparent', border: 'none', color: 'var(--color-text)', cursor: 'pointer', padding: 6, borderRadius: 6 }}
-                        >Unarchive</button>
-                      </div>
-                    </div>
-                  ))}
-                  {chatSessions.filter(s => s.isArchived).length === 0 && (
-                    <div style={{ padding: "12px 16px", fontSize: 12, color: "#7a8f75", fontStyle: "italic" }}>
-                      No archived chats
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Chat History – only visible when Chat feature is active */}
-            {activeFeature === 'chat' && (
-
-              <div className="chat-history-box" style={{ marginTop: 24, display: "flex", flexDirection: "column", minHeight: 0 }}>
-                <div className="chat-history-scroll">
-                  {chatSessions.filter(s => !s.isArchived).map(s => (
-                    <div
-                      key={s.id}
-                      className={`sidebar-item${s.id === sessionId ? " active" : ""}`}
-                      onClick={() => switchSession(s.id)}
-                      style={{ cursor: "pointer", display: 'flex', alignItems: 'center', gap: 8 }}
-                    >
-                      <div className="content" style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
-                        {s.isPinned ? <IconPin size={16} style={{ color: 'var(--color-primary)' }} /> : <IconChat width={16} height={16} />}
-                        {editingSessionId === s.id ? (
-                          <input
-                            ref={(el) => { editingInputRef.current = el; if (el) el.focus(); }}
-                            value={editingTitle}
-                            onChange={(e) => setEditingTitle(e.target.value)}
-                            onBlur={() => commitRename(s.id)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") { e.preventDefault(); commitRename(s.id); }
-                              if (e.key === "Escape") { setEditingSessionId(null); setEditingTitle(""); }
-                            }}
-                            onClick={(e) => e.stopPropagation()}
-                            title={s.title}
-                            style={{
-                              whiteSpace: "nowrap",
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              borderRadius: 6,
-                              padding: "6px 8px",
-                              border: "1px solid var(--color-border)",
-                              background: "var(--color-bg-alt)",
-                              color: "var(--color-text)",
-                              width: '100%'
-                            }}
-                          />
-                        ) : (
-                          <span
-                            title={s.title}
-                            style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
-                          >
-                            {previewTitle(s.title, 2)}
-                          </span>
-                        )}
-                      </div>
-
-                      <div style={{ display: 'flex', alignItems: 'center' }}>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            const btn = e.currentTarget as HTMLElement;
-                            const pos = computeSessionMenuPos(btn, 140);
-                            const willOpen = sessionMenuOpen !== s.id;
-                            setSessionMenuOpen(willOpen ? s.id : null);
-                            setSessionMenuPos(willOpen ? pos : null);
-                            setSessionMenuVisible(false);
-                          }}
-                          aria-label="Session options"
-                          title="Options"
-                          style={{
-                            background: 'transparent',
-                            border: 'none',
-                            color: 'var(--color-text)',
-                            cursor: 'pointer',
-                            padding: '6px',
-                            borderRadius: 6,
-                          }}
-                        >
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="5" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="12" cy="19" r="1" /></svg>
-                        </button>
-
-                        {sessionMenuOpen === s.id && sessionMenuPos && (
-                          <div
-                            ref={(el) => { sessionMenuRef.current = el; }}
-                            onClick={(e) => e.stopPropagation()}
-                            className="session-menu"
-                            style={{
-                              position: 'fixed',
-                              top: `${sessionMenuPos.top}px`,
-                              transform: sessionMenuPos.placement === 'above' ? 'translate(calc(-100% + 24px), -100%)' : 'translateX(calc(-100% + 24px))',
-                              left: `${sessionMenuPos.left}px`,
-                              background: 'var(--color-bg-alt)',
-                              border: '1px solid var(--color-border)',
-                              borderRadius: 8,
-                              padding: '6px 8px',
-                              boxShadow: '0 6px 18px rgba(0,0,0,0.4)',
-                              zIndex: 20000,
-                              minWidth: 140,
-                              whiteSpace: 'nowrap',
-                              visibility: sessionMenuVisible ? 'visible' : 'hidden',
-                              pointerEvents: sessionMenuVisible ? 'auto' : 'none',
-                            }}>
-                            <button
-                              onClick={() => { setSessionMenuOpen(null); setSessionMenuPos(null); handleRenameSession(s.id); }}
-                              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 8px', background: 'transparent', border: 'none', color: 'var(--color-text)', cursor: 'pointer' }}
-                            >Rename</button>
-                            <button
-                              onClick={() => { setSessionMenuOpen(null); setSessionMenuPos(null); handlePinSession(s.id, !s.isPinned); }}
-                              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 8px', background: 'transparent', border: 'none', color: 'var(--color-text)', cursor: 'pointer' }}
-                            >{s.isPinned ? 'Unpin' : 'Pin'}</button>
-                            <button
-                              onClick={() => { setSessionMenuOpen(null); setSessionMenuPos(null); handleArchiveSession(s.id, !s.isArchived); }}
-                              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 8px', background: 'transparent', border: 'none', color: 'var(--color-text)', cursor: 'pointer' }}
-                            >{s.isArchived ? 'Unarchive' : 'Archive'}</button>
-                            <button
-                              onClick={() => { setSessionMenuOpen(null); setSessionMenuPos(null); handleDeleteSession(s.id); }}
-                              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 8px', background: 'transparent', border: 'none', color: 'var(--color-text)', cursor: 'pointer' }}
-                            >Delete</button>
-                            <button
-                              onClick={() => { setSessionMenuOpen(null); setSessionMenuPos(null); handleShareSession(s.id); }}
-                              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 8px', background: 'transparent', border: 'none', color: 'var(--color-primary)', cursor: 'pointer', borderTop: '1px solid rgba(255,255,255,0.05)', fontWeight: 600 }}
-                            >Share Chat</button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-
-                  {chatSessions.length === 0 && (
-                    <div style={{ padding: "12px 16px", fontSize: 12, color: "#7a8f75", fontStyle: "italic" }}>
-                      No chats yet — click New Chat to start
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Profile Card - Toggle on Hamburger Click */}
-
-
-
-          {/* Beta Version Disclaimer */}
-          <div className="sidebar-disclaimer">
-            <IconWarning width={14} height={14} />
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 2 }}>BETA VERSION</div>
-              <div style={{ fontSize: 10, lineHeight: 1.4 }}>
-                NanoSoft Ask AI is currently in beta. Responses may be incomplete or inaccurate and should not be treated as formal legal advice.
-              </div>
-            </div>
-          </div>
-        </aside>
-      </div>
-
-      {/* ── Main Content ─────────────────────────────────────────────────── */}
-      <div
-        className={
-          !historyLoading && isLanding
-            ? "main-content main-content--landing-start"
-            : "main-content"
-        }
-      >
-
-        {/* Mobile Header with Menu Button - sticky at top (hidden while sidebar is open) */}
-        {isMobileHeaderVisible && (
-          <div
-            style={{
-              position: 'fixed',
-              top: 0,
-              left: 0,
-              right: 0,
-              height: '36px',
-              background: 'var(--color-bg-alt)',
-              borderBottom: '1px solid var(--color-border)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              paddingLeft: '12px',
-              paddingRight: '12px',
-              zIndex: 10000,
-              backdropFilter: 'blur(10px)',
-            }}
-          >
+          {/* Mobile Menu Button - legacy, disabled when header is shown */}
+          {false && responsive.isMobile && (
             <button
+              className="mobile-menu-btn"
               onClick={() => setSidebarOpen(true)}
               title="Open sidebar"
               aria-label="Open sidebar"
               style={{
+                position: 'fixed',
+                top: 16,
+                left: 16,
+                zIndex: 1000,
                 background: 'transparent',
                 border: 'none',
                 color: 'var(--color-text)',
@@ -3187,505 +3243,473 @@ return (
                 alignItems: 'center',
                 justifyContent: 'center',
                 transition: 'all 0.2s ease',
+                opacity: sidebarOpen ? 0 : 1,
+                pointerEvents: sidebarOpen ? 'none' : 'auto',
               }}
             >
               <IconMenu2 size={24} />
             </button>
-            <div style={{ fontSize: '14px', fontWeight: '500', flex: 1, textAlign: 'center' }}>
-              Ask AI
-            </div>
-            <div style={{ width: '40px' }} />
-          </div>
-        )}
+          )}
 
-        {/* Mobile Menu Button - legacy, disabled when header is shown */}
-        {false && responsive.isMobile && (
-          <button
-            className="mobile-menu-btn"
-            onClick={() => setSidebarOpen(true)}
-            title="Open sidebar"
-            aria-label="Open sidebar"
-            style={{
-              position: 'fixed',
-              top: 16,
-              left: 16,
-              zIndex: 1000,
-              background: 'transparent',
-              border: 'none',
-              color: 'var(--color-text)',
-              cursor: 'pointer',
-              padding: '8px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              transition: 'all 0.2s ease',
-              opacity: sidebarOpen ? 0 : 1,
-              pointerEvents: sidebarOpen ? 'none' : 'auto',
-            }}
-          >
-            <IconMenu2 size={24} />
-          </button>
-        )}
+          {/* Overlay when sidebar is open on mobile */}
+          {(responsive.isMobile || responsive.isTablet) && sidebarOpen && (
+            <div
+              style={{
+                position: 'fixed',
+                inset: 0,
+                zIndex: 9997,
+                // Blur the background behind the sidebar (mobile/tablet "max blur")
+                backgroundColor: 'rgba(0, 0, 0, 0.35)',
+                backdropFilter: 'blur(30px) saturate(130%)',
+                WebkitBackdropFilter: 'blur(30px) saturate(130%)',
+              }}
+              onClick={() => setSidebarOpen(false)}
+            />
+          )}
 
-        {/* Overlay when sidebar is open on mobile */}
-        {(responsive.isMobile || responsive.isTablet) && sidebarOpen && (
-          <div
-            style={{
-              position: 'fixed',
-              inset: 0,
-              zIndex: 9997,
-              // Blur the background behind the sidebar (mobile/tablet "max blur")
-              backgroundColor: 'rgba(0, 0, 0, 0.35)',
-              backdropFilter: 'blur(30px) saturate(130%)',
-              WebkitBackdropFilter: 'blur(30px) saturate(130%)',
-            }}
-            onClick={() => setSidebarOpen(false)}
-          />
-        )}
-
-        {/* History loading spinner */}
-        {historyLoading && (
-          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <div style={{ textAlign: "center" }}>
-              <div style={{ display: "flex", gap: 6, justifyContent: "center", marginBottom: 8 }}>
-                {[0, 1, 2].map(i => (
-                  <span key={i} style={{
-                    display: "inline-block", width: 8, height: 8,
-                    borderRadius: "50%", background: "#d4af37",
-                    animation: `bounce 1.2s ease-in-out ${i * 0.2}s infinite`,
-                  }} />
-                ))}
-              </div>
-              <span style={{ fontSize: 13, color: "#A0AEC0" }}>Loading chat history…</span>
-            </div>
-          </div>
-        )}
-
-        {/* Landing — welcome shifted up; input vertically centered (only before first message) */}
-        {!historyLoading && isLanding && (
-          <div className="landing-start-column">
-            <div className="landing-start-spacer-top" aria-hidden />
-            <div className="landing-container landing-container--start">
-              <div className="landing-card">
-                <h1
-                  style={{
-                    fontSize: 32,
-                    fontWeight: 700,
-                    marginBottom: 16,
-                    background:
-                      "linear-gradient(180deg, #AE8625 0%, #F7EF8A 35%, #D2AC47 65%, #EDC967 100%)",
-                    backgroundSize: "200% 200%",
-                    WebkitBackgroundClip: "text",
-                    backgroundClip: "text",
-                    WebkitTextFillColor: "transparent",
-                    animation: "goldShine 3s ease-in-out infinite",
-                  }}
-                >
-                  Welcome to Ask AI
-                </h1>
-                <p className="landing-subtitle">{"Let's work together buddy"}</p>
+          {/* History loading spinner */}
+          {historyLoading && (
+            <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <div style={{ textAlign: "center" }}>
+                <div style={{ display: "flex", gap: 6, justifyContent: "center", marginBottom: 8 }}>
+                  {[0, 1, 2].map(i => (
+                    <span key={i} style={{
+                      display: "inline-block", width: 8, height: 8,
+                      borderRadius: "50%", background: "#d4af37",
+                      animation: `bounce 1.2s ease-in-out ${i * 0.2}s infinite`,
+                    }} />
+                  ))}
+                </div>
+                <span style={{ fontSize: 13, color: "#A0AEC0" }}>Loading chat history…</span>
               </div>
             </div>
-            {renderChatInputFooter("landing")}
-            <div className="landing-start-spacer-bottom" aria-hidden />
-          </div>
-        )}
+          )}
 
-        {/* Chat area */}
-        {!historyLoading && !isLanding && (
-          <div className="chat-scroll-area">
-            <div className="messages-container">
-              {messages.map((msg, idx) => {
-                const isUser = msg.role === "user";
-                const isError = msg.role === "error";
-                const isStreaming = msg.streaming === true;
-                const isAudio = msg.isAudio === true;
-                const isGraphMsg = msg.isGraphResponse === true;  // ← Use explicit flag
+          {/* Landing — welcome shifted up; input vertically centered (only before first message) */}
+          {!historyLoading && isLanding && (
+            <div className="landing-start-column">
+              <div className="landing-start-spacer-top" aria-hidden />
+              <div className="landing-container landing-container--start">
+                <div className="landing-card">
+                  <h1
+                    style={{
+                      fontSize: 32,
+                      fontWeight: 700,
+                      marginBottom: 16,
+                      background:
+                        "linear-gradient(180deg, #AE8625 0%, #F7EF8A 35%, #D2AC47 65%, #EDC967 100%)",
+                      backgroundSize: "200% 200%",
+                      WebkitBackgroundClip: "text",
+                      backgroundClip: "text",
+                      WebkitTextFillColor: "transparent",
+                      animation: "goldShine 3s ease-in-out infinite",
+                    }}
+                  >
+                    Welcome to Ask AI
+                  </h1>
+                  <p className="landing-subtitle">{"Let's work together buddy"}</p>
+                </div>
+              </div>
+              {renderChatInputFooter("landing")}
+              <div className="landing-start-spacer-bottom" aria-hidden />
+            </div>
+          )}
 
-                // ✅ Parse graph data ONLY if message is marked as graph response
-                const graphData = isGraphMsg
-                  ? parseGraphData(msg.text)
-                  : null;
+          {/* Chat area */}
+          {!historyLoading && !isLanding && (
+            <div className="chat-scroll-area">
+              <div className="messages-container">
+                {messages.map((msg, idx) => {
+                  const isUser = msg.role === "user";
+                  const isError = msg.role === "error";
+                  const isStreaming = msg.streaming === true;
+                  const isAudio = msg.isAudio === true;
+                  const isGraphMsg = msg.isGraphResponse === true;  // ← Use explicit flag
 
-                // DEBUG: Log rendering decision
-                if (isGraphMsg) {
-                  console.log("✅ [RENDER] Marked as graph message → will render BarChartRenderer", {
-                    parsed: graphData !== null,
-                    type: graphData?.type,
-                  });
-                } else if (!isUser && !isError && !isStreaming) {
-                  console.log("📨 [RENDER] Regular message → will render as HTML", {
-                    textLength: msg.text?.length || 0,
-                  });
-                }
+                  // ✅ Parse graph data ONLY if message is marked as graph response
+                  const graphData = isGraphMsg
+                    ? parseGraphData(msg.text)
+                    : null;
 
-                // Format duration as MM:SS
-                const formatDuration = (seconds: number): string => {
-                  const mins = Math.floor(seconds / 60);
-                  const secs = seconds % 60;
-                  return `${mins}:${secs.toString().padStart(2, "0")}`;
-                };
+                  // DEBUG: Log rendering decision
+                  if (isGraphMsg) {
+                    console.log("✅ [RENDER] Marked as graph message → will render BarChartRenderer", {
+                      parsed: graphData !== null,
+                      type: graphData?.type,
+                    });
+                  } else if (!isUser && !isError && !isStreaming) {
+                    console.log("📨 [RENDER] Regular message → will render as HTML", {
+                      textLength: msg.text?.length || 0,
+                    });
+                  }
 
-                return (
-                  <div key={idx} className={`message-row ${msg.role}`}>
-                    {!isUser && !isError && (
-                      <div className="avatar-box"><IconAI /></div>
-                    )}
+                  // Format duration as MM:SS
+                  const formatDuration = (seconds: number): string => {
+                    const mins = Math.floor(seconds / 60);
+                    const secs = seconds % 60;
+                    return `${mins}:${secs.toString().padStart(2, "0")}`;
+                  };
 
-                    <div className={`message-bubble ${msg.role}${isGraphMsg ? ' graph-message' : ''}${msg.tableData && msg.tableData.length > 0 ? ' table-message' : ''}`}>
-
-                      {isAudio ? (
-                        /* ── Audio Message: Show player UI ── */
-                        (() => {
-                          // BUG 1 FIX: prefer real loaded duration, fall back to stored, then 0
-                          const realDur = audioDurationMap[idx] ?? msg.audioDuration ?? 0;
-                          const progress = audioProgressMap[idx] ?? 0;
-                          // currentTime = progress% of realDur
-                          const currentSec = realDur > 0 ? (progress / 100) * realDur : 0;
-
-                          const fmtSec = (s: number) => {
-                            const m = Math.floor(s / 60);
-                            const sec = Math.floor(s % 60);
-                            return `${m}:${sec.toString().padStart(2, "0")}`;
-                          };
-
-                          return (
-                            <div className="voice-message-container" style={{
-                              fontSize: responsive.isMobile ? '12px' : responsive.isTablet ? '13px' : '14px',
-                              display: 'flex',
-                              gap: responsive.isMobile ? '8px' : '12px',
-                              alignItems: 'center',
-                              width: '100%',
-                            }}>
-                              <button
-                                className="voice-message-play-btn"
-                                onClick={() => handleAudioPlayback(idx, msg.audioUrl, msg.audioDuration || 0)}
-                                disabled={!isUser}
-                              >
-                                {audioPlayingIndex === idx ? <IconPlayerPause size={20} /> : <IconPlayerPlay size={20} />}
-                              </button>
-                              <div style={{ display: "flex", flexDirection: "column", flex: 1, gap: "6px" }}>
-                                <div className="voice-message-progress-wrapper">
-                                  <div
-                                    className="voice-message-progress-bar"
-                                    style={{
-                                      width: `${progress}%`,
-                                      transition: "width 0.1s linear",   // smooth CSS transition
-                                    }}
-                                  />
-                                </div>
-                                {/* BUG 1 FIX: show real duration; if playing show currentTime / total */}
-                                <div className="voice-message-duration" style={{
-                                  fontSize: responsive.isMobile ? '11px' : responsive.isTablet ? '12px' : '13px',
-                                }}>
-                                  {audioPlayingIndex === idx
-                                    ? `${fmtSec(currentSec)} / ${fmtSec(realDur)}`
-                                    : fmtSec(realDur)
-                                  }
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })()
-                      ) : isUser || isError ? (
-                        /* ── User / Error: plain text ── */
-                        <>{msg.text}</>
-
-                      ) : isStreaming ? (
-                        /* ── Streaming: pre-wrap plain text + blinking cursor ── */
-                        <div className="ai-bubble streaming-text">
-                          {msg.text}
-                          <span className="stream-cursor" />
-                        </div>
-
-                      ) : isGraphMsg && graphData ? (
-                        /* ── Graph: Render chart with per-message type switcher ── */
-                        (() => {
-                          const chartSize = getResponsivePieChartSize(responsive.screen);
-                          return (
-                            <div style={{
-                              display: 'flex',
-                              justifyContent: 'center',
-                              alignItems: 'center',
-                              width: '100%',
-                              maxWidth: chartSize.containerMaxWidth,
-                              marginTop: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
-                              marginBottom: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
-                              marginLeft: 'auto',
-                              marginRight: 'auto',
-                              overflow: responsive.isMobile ? 'visible' : 'visible',
-                              paddingLeft: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
-                              paddingRight: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
-                              paddingTop: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
-                              paddingBottom: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
-                            }}>
-                              {(() => {
-                                const msgChartType = msg.chartType || 'vertical-bar';
-
-                                const handleChartTypeChange = (newType: ChartType) => {
-                                  setChartType(newType);
-                                  setMessages(prev => {
-                                    const updated = [...prev];
-                                    updated[idx] = { ...updated[idx], chartType: newType };
-                                    return updated;
-                                  });
-                                };
-
-                                if (msgChartType === 'horizontal-bar') {
-                                  return <HorizontalBarChartRenderer key={`hbar-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
-                                } else if (msgChartType === 'pie') {
-                                  return <PieChartRenderer key={`pie-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
-                                } else if (msgChartType === 'line') {
-                                  return <LineChartRenderer key={`line-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
-                                } else {
-                                  return <BarChartRenderer key={`bar-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
-                                }
-                              })()}
-                            </div>
-                          );
-                        })()
-
-                      ) : msg.tableData && msg.tableData.length > 0 ? (
-                        /* ── Table: Render with TableWithTile component with toggle buttons for table/tile views ── */
-                        <TableWithTile
-                          rows={msg.tableData}
-                          title={msg.tableTitle || "Data"}
-                          htmlTableContent={msg.text}
-                        />
-
-                      ) : (
-                        /* ── Complete: already formatted at [DONE] time ── */
-                        <div className="ai-bubble" style={{
-                          fontSize: responsive.isMobile ? '13px' : responsive.isTablet ? '14px' : '15px',
-                          lineHeight: 1.5,
-                          maxWidth: responsive.isMobile ? '90%' : responsive.isTablet ? '85%' : '75%',
-                          display: 'flex',
-                          justifyContent: 'center',
-                          alignItems: 'flex-start',
-                        }}>
-                          <div dangerouslySetInnerHTML={{ __html: msg.text }} style={{
-                            width: '100%',
-                            textAlign: 'left',
-                          }} />
-                        </div>
+                  return (
+                    <div key={idx} className={`message-row ${msg.role}`}>
+                      {!isUser && !isError && (
+                        <div className="avatar-box"><IconAI /></div>
                       )}
 
+                      <div className={`message-bubble ${msg.role}${isGraphMsg ? ' graph-message' : ''}${msg.tableData && msg.tableData.length > 0 ? ' table-message' : ''}`}>
+
+                        {isAudio ? (
+                          /* ── Audio Message: Show player UI ── */
+                          (() => {
+                            // BUG 1 FIX: prefer real loaded duration, fall back to stored, then 0
+                            const realDur = audioDurationMap[idx] ?? msg.audioDuration ?? 0;
+                            const progress = audioProgressMap[idx] ?? 0;
+                            // currentTime = progress% of realDur
+                            const currentSec = realDur > 0 ? (progress / 100) * realDur : 0;
+
+                            const fmtSec = (s: number) => {
+                              const m = Math.floor(s / 60);
+                              const sec = Math.floor(s % 60);
+                              return `${m}:${sec.toString().padStart(2, "0")}`;
+                            };
+
+                            return (
+                              <div className="voice-message-container" style={{
+                                fontSize: responsive.isMobile ? '12px' : responsive.isTablet ? '13px' : '14px',
+                                display: 'flex',
+                                gap: responsive.isMobile ? '8px' : '12px',
+                                alignItems: 'center',
+                                width: '100%',
+                              }}>
+                                <button
+                                  className="voice-message-play-btn"
+                                  onClick={() => handleAudioPlayback(idx, msg.audioUrl, msg.audioDuration || 0)}
+                                  disabled={!isUser}
+                                >
+                                  {audioPlayingIndex === idx ? <IconPlayerPause size={20} /> : <IconPlayerPlay size={20} />}
+                                </button>
+                                <div style={{ display: "flex", flexDirection: "column", flex: 1, gap: "6px" }}>
+                                  <div className="voice-message-progress-wrapper">
+                                    <div
+                                      className="voice-message-progress-bar"
+                                      style={{
+                                        width: `${progress}%`,
+                                        transition: "width 0.1s linear",   // smooth CSS transition
+                                      }}
+                                    />
+                                  </div>
+                                  {/* BUG 1 FIX: show real duration; if playing show currentTime / total */}
+                                  <div className="voice-message-duration" style={{
+                                    fontSize: responsive.isMobile ? '11px' : responsive.isTablet ? '12px' : '13px',
+                                  }}>
+                                    {audioPlayingIndex === idx
+                                      ? `${fmtSec(currentSec)} / ${fmtSec(realDur)}`
+                                      : fmtSec(realDur)
+                                    }
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })()
+                        ) : isUser || isError ? (
+                          /* ── User / Error: plain text ── */
+                          <>{msg.text}</>
+
+                        ) : isStreaming ? (
+                          /* ── Streaming: pre-wrap plain text + blinking cursor ── */
+                          <div className="ai-bubble streaming-text">
+                            {msg.text}
+                            <span className="stream-cursor" />
+                          </div>
+
+                        ) : isGraphMsg && graphData ? (
+                          /* ── Graph: Render chart with per-message type switcher ── */
+                          (() => {
+                            const chartSize = getResponsivePieChartSize(responsive.screen);
+                            return (
+                              <div style={{
+                                display: 'flex',
+                                justifyContent: 'center',
+                                alignItems: 'center',
+                                width: '100%',
+                                maxWidth: chartSize.containerMaxWidth,
+                                marginTop: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
+                                marginBottom: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
+                                marginLeft: 'auto',
+                                marginRight: 'auto',
+                                overflow: responsive.isMobile ? 'visible' : 'visible',
+                                paddingLeft: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
+                                paddingRight: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
+                                paddingTop: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
+                                paddingBottom: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
+                              }}>
+                                {(() => {
+                                  const msgChartType = msg.chartType || 'vertical-bar';
+
+                                  const handleChartTypeChange = (newType: ChartType) => {
+                                    setChartType(newType);
+                                    setMessages(prev => {
+                                      const updated = [...prev];
+                                      updated[idx] = { ...updated[idx], chartType: newType };
+                                      return updated;
+                                    });
+                                  };
+
+                                  if (msgChartType === 'horizontal-bar') {
+                                    return <HorizontalBarChartRenderer key={`hbar-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
+                                  } else if (msgChartType === 'pie') {
+                                    return <PieChartRenderer key={`pie-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
+                                  } else if (msgChartType === 'line') {
+                                    return <LineChartRenderer key={`line-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
+                                  } else {
+                                    return <BarChartRenderer key={`bar-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
+                                  }
+                                })()}
+                              </div>
+                            );
+                          })()
+
+                        ) : msg.tableData && msg.tableData.length > 0 ? (
+                          /* ── Table: Render with TableWithTile component with toggle buttons for table/tile views ── */
+                          <TableWithTile
+                            rows={msg.tableData}
+                            title={msg.tableTitle || "Data"}
+                            htmlTableContent={msg.text}
+                          />
+
+                        ) : (
+                          /* ── Complete: already formatted at [DONE] time ── */
+                          <div className="ai-bubble" style={{
+                            fontSize: responsive.isMobile ? '13px' : responsive.isTablet ? '14px' : '15px',
+                            lineHeight: 1.5,
+                            maxWidth: responsive.isMobile ? '90%' : responsive.isTablet ? '85%' : '75%',
+                            display: 'flex',
+                            justifyContent: 'center',
+                            alignItems: 'flex-start',
+                          }}>
+                            <div dangerouslySetInnerHTML={{ __html: msg.text }} style={{
+                              width: '100%',
+                              textAlign: 'left',
+                            }} />
+                          </div>
+                        )}
+
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {isLoading && (
+                  <div className="loading-indicator">
+                    <div className="avatar-box"><IconAI /></div>
+                    <div className="loading-dots-box">
+                      {[0, 1, 2].map(i => (
+                        <span key={i} style={{
+                          display: "inline-block", width: 7, height: 7,
+                          borderRadius: "50%", background: "#d4af37",
+                          animation: `bounce 1.2s ease-in-out ${i * 0.2}s infinite`,
+                        }} />
+                      ))}
                     </div>
                   </div>
-                );
-              })}
-
-              {isLoading && (
-                <div className="loading-indicator">
-                  <div className="avatar-box"><IconAI /></div>
-                  <div className="loading-dots-box">
-                    {[0, 1, 2].map(i => (
-                      <span key={i} style={{
-                        display: "inline-block", width: 7, height: 7,
-                        borderRadius: "50%", background: "#d4af37",
-                        animation: `bounce 1.2s ease-in-out ${i * 0.2}s infinite`,
-                      }} />
-                    ))}
-                  </div>
-                </div>
-              )}
-              <div ref={messagesEndRef} />
-            </div>
-          </div>
-        )}
-
-        {/* Input footer — bottom bar after chat starts or while history loads (not duplicated on landing) */}
-        {(historyLoading || !isLanding) && renderChatInputFooter("default")}
-
-        {/* Upgrade Plan Modal */}
-        {showUpgradePlan && (
-          <div
-            className="upgrade-plan-backdrop"
-            style={{
-              position: 'fixed',
-              inset: 0,
-              background: 'rgba(0, 0, 0, 0.60)',
-              backdropFilter: 'blur(12px) saturate(120%)',
-              WebkitBackdropFilter: 'blur(12px) saturate(120%)',
-              zIndex: 10010,
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'center',
-            }}
-            onClick={() => setShowUpgradePlan(false)}
-          >
-            <div
-              className="upgrade-plan-modal"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <button
-                onClick={() => setShowUpgradePlan(false)}
-                className="upgrade-plan-close-btn"
-              >
-                ×
-              </button>
-              <UpgradePlan
-                onManageAccountClick={() => {
-                  setShowUpgradePlan(false);
-                  setShowManageAccount(true);
-                }}
-                onPlanChange={(planName) => {
-                  setCurrentPlan(planName);
-                }}
-              />
-            </div>
-          </div>
-        )}
-
-        {/* Delete Confirmation Modal (rendered via portal to avoid being blurred) */}
-        {typeof document !== 'undefined' && showDeleteModal && createPortal(
-          <div
-            className="modal-backdrop"
-            onClick={() => { setShowDeleteModal(false); setDeleteSessionId(null); setDeleteSessionTitle(""); }}
-          >
-            <div className="confirm-delete-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
-              <h3>Delete chat?</h3>
-              <p>This will delete <strong>{deleteSessionTitle}</strong>.</p>
-              <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 12 }}>
-                <button className="btn btn-secondary" onClick={() => { setShowDeleteModal(false); setDeleteSessionId(null); setDeleteSessionTitle(""); }}>Cancel</button>
-                <button className="btn btn-danger" onClick={() => performDeleteSession()}>Delete</button>
+                )}
+                <div ref={messagesEndRef} />
               </div>
             </div>
-          </div>,
-          document.body
-        )}
+          )}
 
-        {/* Manage Account Full-Screen Page */}
-        {showManageAccount && (
-          <div
-            style={{
-              position: "fixed",
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              width: "100vw",
-              height: "100vh",
-              background: "var(--color-bg)",
-              zIndex: 10000,
-              display: "flex",
-              flexDirection: "column",
-            }}
-          >
-            {!isManageAccountMenuOpen && (
-              <div style={{
-                position: "absolute",
-                top: "20px",
-                right: "20px",
-                zIndex: 10001,
-              }}>
+          {/* Input footer — bottom bar after chat starts or while history loads (not duplicated on landing) */}
+          {(historyLoading || !isLanding) && renderChatInputFooter("default")}
+
+          {/* Upgrade Plan Modal */}
+          {showUpgradePlan && (
+            <div
+              className="upgrade-plan-backdrop"
+              style={{
+                position: 'fixed',
+                inset: 0,
+                background: 'rgba(0, 0, 0, 0.60)',
+                backdropFilter: 'blur(12px) saturate(120%)',
+                WebkitBackdropFilter: 'blur(12px) saturate(120%)',
+                zIndex: 10010,
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+              }}
+              onClick={() => setShowUpgradePlan(false)}
+            >
+              <div
+                className="upgrade-plan-modal"
+                onClick={(e) => e.stopPropagation()}
+              >
                 <button
-                  onClick={() => {
-                    setShowManageAccount(false);
-                    setIsManageAccountMenuOpen(false);
-                  }}
-                  style={{
-                    width: "40px",
-                    height: "40px",
-                    borderRadius: "6px",
-                    border: "1.5px solid var(--color-primary)",
-                    background: "transparent",
-                    color: "var(--color-primary)",
-                    cursor: "pointer",
-                    fontSize: "24px",
-                    fontWeight: 600,
-                    transition: "all 0.3s ease",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                  onMouseEnter={(e) => {
-                    const btn = e.currentTarget as HTMLElement;
-                    btn.style.background = "var(--color-primary)";
-                    btn.style.color = "var(--color-text)";
-                  }}
-                  onMouseLeave={(e) => {
-                    const btn = e.currentTarget as HTMLElement;
-                    btn.style.background = "transparent";
-                    btn.style.color = "var(--color-primary)";
-                  }}
+                  onClick={() => setShowUpgradePlan(false)}
+                  className="upgrade-plan-close-btn"
                 >
                   ×
                 </button>
-              </div>
-            )}
-            <div style={{
-              flex: 1,
-              width: "100%",
-              height: "100%",
-            }}>
-              <ManageAccount
-                currentPlan={currentPlan}
-                profileName={loggedInUser || "My Account"}
-                subUserName={userIdFromUrl ?? loggedInUser ?? ""}
-                externalUserId={loggedInUser ?? ""}
-                onMobileSidebarOpenChange={(open) => setIsManageAccountMenuOpen(open)}
-              />
-            </div>
-          </div>
-        )}
-
-        {/* Walkthrough Popup */}
-        <WalkthroughPopup />
-
-        {/* Share Modal */}
-        {shareModalOpen && (
-          <div style={{
-            position: 'fixed', inset: 0, zIndex: 9999,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            backgroundColor: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)'
-          }}>
-            <div style={{
-              background: 'var(--color-bg-sidebar)', padding: '24px', borderRadius: '16px',
-              width: '90%', maxWidth: '400px', border: '1px solid rgba(255,255,255,0.1)',
-              boxShadow: '0 20px 25px -5px rgba(0,0,0,0.5)', textAlign: 'center'
-            }}>
-              <h3 style={{ margin: '0 0 8px 0', fontSize: '1.25rem', fontWeight: 600 }}>Share Chat</h3>
-              <p style={{ margin: '0 0 20px 0', fontSize: '0.875rem', color: 'var(--color-text-dim)' }}>
-                Anyone with this link can view this conversation.
-              </p>
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: '8px',
-                background: 'rgba(0,0,0,0.2)', padding: '12px', borderRadius: '8px',
-                border: '1px solid rgba(255,255,255,0.05)', marginBottom: '24px'
-              }}>
-                <input
-                  readOnly
-                  value={shareLink}
-                  style={{
-                    flex: 1, background: 'transparent', border: 'none', color: 'var(--color-text)',
-                    fontSize: '0.875rem', outline: 'none', cursor: 'default'
+                <UpgradePlan
+                  onManageAccountClick={() => {
+                    setShowUpgradePlan(false);
+                    setShowManageAccount(true);
+                  }}
+                  onPlanChange={(planName) => {
+                    setCurrentPlan(planName);
                   }}
                 />
-                <button
-                  onClick={() => {
-                    navigator.clipboard.writeText(shareLink);
-                  }}
-                  style={{
-                    background: 'var(--color-primary)', border: 'none', borderRadius: '6px',
-                    padding: '6px 12px', color: '#000', fontWeight: 600, cursor: 'pointer', fontSize: '0.75rem'
-                  }}
-                >Copy</button>
               </div>
-              <button
-                onClick={() => setShareModalOpen(false)}
-                style={{
-                  width: '100%', padding: '10px', borderRadius: '8px', background: 'rgba(255,255,255,0.05)',
-                  border: 'none', color: 'var(--color-text)', cursor: 'pointer', fontWeight: 500
-                }}
-              >Close</button>
             </div>
-          </div>
-        )}
+          )}
+
+          {/* Delete Confirmation Modal (rendered via portal to avoid being blurred) */}
+          {typeof document !== 'undefined' && showDeleteModal && createPortal(
+            <div
+              className="modal-backdrop"
+              onClick={() => { setShowDeleteModal(false); setDeleteSessionId(null); setDeleteSessionTitle(""); }}
+            >
+              <div className="confirm-delete-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+                <h3>Delete chat?</h3>
+                <p>This will delete <strong>{deleteSessionTitle}</strong>.</p>
+                <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 12 }}>
+                  <button className="btn btn-secondary" onClick={() => { setShowDeleteModal(false); setDeleteSessionId(null); setDeleteSessionTitle(""); }}>Cancel</button>
+                  <button className="btn btn-danger" onClick={() => performDeleteSession()}>Delete</button>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
+
+          {/* Manage Account Full-Screen Page */}
+          {showManageAccount && (
+            <div
+              style={{
+                position: "fixed",
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                width: "100vw",
+                height: "100vh",
+                background: "var(--color-bg)",
+                zIndex: 10000,
+                display: "flex",
+                flexDirection: "column",
+              }}
+            >
+              {!isManageAccountMenuOpen && (
+                <div style={{
+                  position: "absolute",
+                  top: "20px",
+                  right: "20px",
+                  zIndex: 10001,
+                }}>
+                  <button
+                    onClick={() => {
+                      setShowManageAccount(false);
+                      setIsManageAccountMenuOpen(false);
+                    }}
+                    style={{
+                      width: "40px",
+                      height: "40px",
+                      borderRadius: "6px",
+                      border: "1.5px solid var(--color-primary)",
+                      background: "transparent",
+                      color: "var(--color-primary)",
+                      cursor: "pointer",
+                      fontSize: "24px",
+                      fontWeight: 600,
+                      transition: "all 0.3s ease",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                    onMouseEnter={(e) => {
+                      const btn = e.currentTarget as HTMLElement;
+                      btn.style.background = "var(--color-primary)";
+                      btn.style.color = "var(--color-text)";
+                    }}
+                    onMouseLeave={(e) => {
+                      const btn = e.currentTarget as HTMLElement;
+                      btn.style.background = "transparent";
+                      btn.style.color = "var(--color-primary)";
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
+              <div style={{
+                flex: 1,
+                width: "100%",
+                height: "100%",
+              }}>
+                <ManageAccount
+                  currentPlan={currentPlan}
+                  profileName={loggedInUser || "My Account"}
+                  subUserName={userIdFromUrl ?? loggedInUser ?? ""}
+                  externalUserId={loggedInUser ?? ""}
+                  onMobileSidebarOpenChange={(open) => setIsManageAccountMenuOpen(open)}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Walkthrough Popup */}
+          <WalkthroughPopup />
+
+          {/* Share Modal */}
+          {shareModalOpen && (
+            <div style={{
+              position: 'fixed', inset: 0, zIndex: 9999,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              backgroundColor: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)'
+            }}>
+              <div style={{
+                background: 'var(--color-bg-sidebar)', padding: '24px', borderRadius: '16px',
+                width: '90%', maxWidth: '400px', border: '1px solid rgba(255,255,255,0.1)',
+                boxShadow: '0 20px 25px -5px rgba(0,0,0,0.5)', textAlign: 'center'
+              }}>
+                <h3 style={{ margin: '0 0 8px 0', fontSize: '1.25rem', fontWeight: 600 }}>Share Chat</h3>
+                <p style={{ margin: '0 0 20px 0', fontSize: '0.875rem', color: 'var(--color-text-dim)' }}>
+                  Anyone with this link can view this conversation.
+                </p>
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: '8px',
+                  background: 'rgba(0,0,0,0.2)', padding: '12px', borderRadius: '8px',
+                  border: '1px solid rgba(255,255,255,0.05)', marginBottom: '24px'
+                }}>
+                  <input
+                    readOnly
+                    value={shareLink}
+                    style={{
+                      flex: 1, background: 'transparent', border: 'none', color: 'var(--color-text)',
+                      fontSize: '0.875rem', outline: 'none', cursor: 'default'
+                    }}
+                  />
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(shareLink);
+                    }}
+                    style={{
+                      background: 'var(--color-primary)', border: 'none', borderRadius: '6px',
+                      padding: '6px 12px', color: '#000', fontWeight: 600, cursor: 'pointer', fontSize: '0.75rem'
+                    }}
+                  >Copy</button>
+                </div>
+                <button
+                  onClick={() => setShareModalOpen(false)}
+                  style={{
+                    width: '100%', padding: '10px', borderRadius: '8px', background: 'rgba(255,255,255,0.05)',
+                    border: 'none', color: 'var(--color-text)', cursor: 'pointer', fontWeight: 500
+                  }}
+                >Close</button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
-  </div>
-);
+  );
 }
 
 // Return the first `n` words of a title, adding an ellipsis if truncated
