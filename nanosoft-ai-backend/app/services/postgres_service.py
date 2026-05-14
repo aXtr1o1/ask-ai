@@ -295,25 +295,23 @@ async def delete_session_from_postgres(session_id: str, user_name: str) -> bool:
         return False
 
 async def toggle_session_public(session_id: str, user_name: str, is_public: bool) -> bool:
-    """Make a session public or private. Returns True on success."""
+    """Make a session public or private. Creates the record if it doesn't exist."""
     try:
         conn = get_pool()
         conn.rollback()
         with conn.cursor() as cur:
             cur.execute(
                 """
-                UPDATE chat_sessions
-                SET is_public = %s, updated_at = NOW()
-                WHERE session_id = %s AND LOWER(user_name) = LOWER(%s)
+                INSERT INTO chat_sessions (session_id, user_name, is_public, chat_history, title, updated_at)
+                VALUES (%s, %s, %s, '[]'::jsonb, 'New Chat', NOW())
+                ON CONFLICT (session_id) DO UPDATE SET
+                    is_public = EXCLUDED.is_public,
+                    updated_at = NOW()
                 """,
-                (is_public, session_id, user_name),
+                (session_id, user_name, is_public),
             )
-            rows_updated = cur.rowcount
             conn.commit()
-        
-        if rows_updated > 0:
-            logger.info(f"✅ Session public status updated | session_id={session_id} | is_public={is_public}")
-        return rows_updated > 0
+        return True
     except Exception as e:
         logger.error(f"❌ Failed to update public status | session_id={session_id} | error={e}", exc_info=True)
         return False
@@ -336,15 +334,15 @@ async def get_public_chat_history(session_id: str, owner: str = None) -> list:
                 )
             row = cur.fetchone()
             conn.rollback()
-            if not row: return []
+            if not row: return None
             
             history, is_public = row
             if not is_public:
                 logger.warning(f"🔒 Attempt to access private session | session_id={session_id}")
-                return []
+                return None
             
             import json
             return history if isinstance(history, list) else json.loads(history)
     except Exception as e:
         logger.error(f"❌ Failed to fetch public history | error={e}")
-        return []
+        return None

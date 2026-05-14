@@ -1121,7 +1121,7 @@ async def share_session_endpoint(payload: dict):
 async def get_shared_history(sessionId: str, owner: str = None):
     from app.services.postgres_service import get_public_chat_history
     history = await get_public_chat_history(sessionId, owner)
-    if not history:
+    if history is None:
         raise HTTPException(status_code=404, detail="Shared session not found or private")
     return {"status": "ok", "history": history}
     

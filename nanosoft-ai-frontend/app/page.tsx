@@ -1364,16 +1364,24 @@ export default function Home() {
           const res = await fetch(url);
           const data = await res.json();
           if (data.status === "ok") {
+            // Map DB fields (query/assistant) to UI fields (role/text)
+            const mappedHistory = (data.history || []).flatMap((m: any) => [
+              { role: "user", text: m.query || "" },
+              { role: "ai", text: typeof m.assistant === "string" && m.assistant.startsWith("{") 
+                  ? JSON.parse(m.assistant).response || m.assistant 
+                  : m.assistant || "" }
+            ]);
             setSessionId(sharedSid);
-            setMessages(data.history);
-            console.log("[share] shared chat loaded");
+            setMessages(mappedHistory);
+            console.log("[share] shared chat loaded and mapped");
+            setAuthChecked(true); 
           }
         } catch (e) {
           console.error("Failed to load shared session:", e);
         }
       };
       fetchShared();
-      // Do NOT return here, we still want to set auth below
+      return; // Stop here if it's a shared session link
     }
 
     const backendUserName = clientNameFromUrl || localStorage.getItem("clientName") || localStorage.getItem("loggedInUser");
@@ -1383,8 +1391,7 @@ export default function Home() {
       setLoggedInUser(backendUserName);
       setAuthChecked(true);
 
-      // 2. Only redirect if we ARE NOT in a shared session
-      if (window.location.search && !sharedSid) {
+      if (window.location.search) {
         router.replace("/");
       }
       return;
@@ -1460,10 +1467,16 @@ export default function Home() {
     throw new Error("NEXT_PUBLIC_API_BASE_URL is not defined");
   }
 
-  const getWsUrl = () =>
-    baseUrl
+  const getWsUrl = () => {
+    const wsBase = baseUrl
       .replace(/^http:/, "ws:")
       .replace(/^https:/, "wss:") + "/api/chat";
+    const params = new URLSearchParams(window.location.search);
+    const owner = params.get("owner");
+    // Priority: URL userName > URL owner > Logged In User > anonymous
+    const user = userIdFromUrl ?? owner ?? loggedInUser ?? "anonymous";
+    return `${wsBase}?sessionId=${sessionId}&userName=${user}`;
+  };
   // const getWsUrl = () =>
   //   process.env.NEXT_PUBLIC_API_BASE_URL
   //     .replace(/^http:/,  "ws:")
@@ -1758,6 +1771,13 @@ export default function Home() {
 
 const handleShareSession = async (sid: string) => {
   try {
+    // 1. Force save the current history to DB first
+    const currentMsgs = sessionMessagesRef.current.get(sid) || messages;
+    if (currentMsgs.length > 0) {
+      await saveChatHistory(sid, currentMsgs);
+    }
+
+    // 2. Now mark it as public
     const res = await fetch(`${baseUrl}/api/sessions/share`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1988,7 +2008,8 @@ useEffect(() => { connectWSRef.current = connectWS; });
 
 // Connect when component mounts (after auth is confirmed)
 useEffect(() => {
-  if (!authChecked || !loggedInUser) return;
+  const sharedSid = new URLSearchParams(window.location.search).get("sharedSessionId");
+  if (!authChecked || (!loggedInUser && !sharedSid)) return;
 
   connectWS();
 
