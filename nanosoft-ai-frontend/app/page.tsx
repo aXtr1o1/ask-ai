@@ -16,7 +16,7 @@ import UpgradePlan from "./components/UpgradePlan";
 import ManageAccount from "./components/ManageAccount/ManageAccount";
 import WalkthroughPopup from "./components/WalkthroughPopup";
 import LandingSuggestedQueries from "./components/LandingSuggestedQueries";
-import { IconUser, IconMicrophone, IconPlayerPlay, IconPlayerPause, IconTrash, IconArrowUp, IconChartBar, IconList, IconLayoutGrid, IconMenu2, IconX, IconCrown } from "@tabler/icons-react";
+import { IconUser, IconMicrophone, IconPlayerPlay, IconPlayerPause, IconTrash, IconArrowUp, IconChartBar, IconList, IconLayoutGrid, IconMenu2, IconX, IconCrown, IconDotsVertical } from "@tabler/icons-react";
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface Message {
   role: "user" | "ai" | "error";
@@ -35,7 +35,7 @@ interface Message {
   tableViewMode?: 'table' | 'tile';  // ← Toggle between table and tile views
 }
 interface FolderItem { id: string; name: string; }
-interface ChatSession { id: string; title: string; createdAt: number; updatedAt?: number; }
+interface ChatSession { id: string; title: string; createdAt: number; updatedAt?: number; isPinned?: boolean; isArchived?: boolean; }
 
 // ─── Extract text from any backend response shape ─────────────────────────────
 // Improved: handles JSON strings without spaces, array join, and reply/content/text fields
@@ -954,6 +954,11 @@ const IconGroupChat = ({ width = 16, height = 16, style }: { width?: number; hei
     <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
   </svg>
 );
+const IconPin = ({ size = 16, style }: { size?: number; style?: React.CSSProperties }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+    <path d="M12 17v5M9 17h6M15 13V4H9v9l-2 4h10l-2-4z" />
+  </svg>
+);
 
 const IconCheckbox = ({ width = 16, height = 16, style }: { width?: number; height?: number; style?: React.CSSProperties }) => (
   <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
@@ -1042,6 +1047,9 @@ export default function Home() {
   const [activeFeature, setActiveFeature] = useState<'chat' | 'archived' | 'library'>('chat');
   const [showFeaturePlaceholder, setShowFeaturePlaceholder] = useState<boolean>(false);
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [shareLink, setShareLink] = useState("");
   const [sessionMenuOpen, setSessionMenuOpen] = useState<string | null>(null);
   const [sessionMenuPos, setSessionMenuPos] = useState<{ top: number; left: number; placement?: 'above' | 'below'; buttonRectTop?: number; buttonRectBottom?: number } | null>(null);
   const sessionMenuRef = useRef<HTMLDivElement | null>(null);
@@ -1229,40 +1237,75 @@ export default function Home() {
             setTokenVerified(true); // ← ADD THIS LINE
 
           } catch (err) {
-            console.error("[auth] verification failed — using stored session");
-            // Fallback to localStorage
-            const storedUserName = localStorage.getItem("userName");
-            const storedClientName = localStorage.getItem("clientName") || localStorage.getItem("loggedInUser");
-            const storedUserId = localStorage.getItem("userId");
+            console.error("[auth] verification failed — checking URL params or stored session");
+            const urlUserName = params.get("userName");
+            const urlClientName = params.get("clientName");
+            const urlUserId = params.get("userId");
+
+            const storedUserName = urlUserName || localStorage.getItem("userName");
+            const storedClientName = urlClientName || localStorage.getItem("clientName") || localStorage.getItem("loggedInUser");
+            const storedUserId = urlUserId || localStorage.getItem("userId");
+
             const storedLogoPath = localStorage.getItem("loginPageClientLogoPath");
             const storedFooterLogoPath = localStorage.getItem("loginFooterLogoPath");
-            if (storedUserName) setUserIdFromUrl(storedUserName);
-            if (storedClientName) setClientNameFromUrl(storedClientName);
-            if (storedUserId) setUserIdInt(parseInt(storedUserId, 10));
+
+            if (storedUserName) {
+              setUserIdFromUrl(storedUserName);
+              localStorage.setItem("userName", storedUserName);
+            }
+            if (storedClientName) {
+              setClientNameFromUrl(storedClientName);
+              localStorage.setItem("clientName", storedClientName);
+              localStorage.setItem("loggedInUser", storedClientName);
+              setLoggedInUser(storedClientName);
+            }
+            if (storedUserId) {
+              setUserIdInt(parseInt(storedUserId, 10));
+              localStorage.setItem("userId", storedUserId);
+            }
             if (storedLogoPath) setLoginPageClientLogoPath(storedLogoPath);
             if (storedFooterLogoPath) setLoginFooterLogoPath(storedFooterLogoPath);
 
-            setTokenVerified(true); // ← ADD THIS LINE TOO
+            setTokenVerified(true);
           }
         };
         verifyJwt();
 
       } else {
-        // No token — fallback to localStorage
-        console.log("[auth] using stored session");
-        const storedUserName = localStorage.getItem("userName");
-        const storedClientName = localStorage.getItem("clientName") || localStorage.getItem("loggedInUser");
-        const storedUserId = localStorage.getItem("userId");
+        // No token — Check for direct URL params first, then fallback to localStorage
+        console.log("[auth] checking URL params or stored session");
+        const urlUserName = params.get("userName");
+        const urlClientName = params.get("clientName");
+        const urlUserId = params.get("userId");
+
+        const storedUserName = urlUserName || localStorage.getItem("userName");
+        const storedClientName = urlClientName || localStorage.getItem("clientName") || localStorage.getItem("loggedInUser");
+        const storedUserId = urlUserId || localStorage.getItem("userId");
+
         const storedLogoPath = localStorage.getItem("loginPageClientLogoPath");
         const storedFooterLogoPath = localStorage.getItem("loginFooterLogoPath");
-        if (storedUserName) setUserIdFromUrl(storedUserName);
-        if (storedClientName) setClientNameFromUrl(storedClientName);
-        if (storedUserId) setUserIdInt(parseInt(storedUserId, 10));
+
+        if (storedUserName) {
+          setUserIdFromUrl(storedUserName);
+          localStorage.setItem("userName", storedUserName);
+        }
+        if (storedClientName) {
+          setClientNameFromUrl(storedClientName);
+          localStorage.setItem("clientName", storedClientName);
+          localStorage.setItem("loggedInUser", storedClientName);
+          setLoggedInUser(storedClientName); // Ensure state is updated immediately
+        }
+        if (storedUserId) {
+          setUserIdInt(parseInt(storedUserId, 10));
+          localStorage.setItem("userId", storedUserId);
+        }
         if (storedLogoPath) setLoginPageClientLogoPath(storedLogoPath);
         if (storedFooterLogoPath) setLoginFooterLogoPath(storedFooterLogoPath);
+
+        setAuthChecked(true); // Signal that auth check is done
       }
     }
-  }, []);
+  }, [setLoggedInUser, setAuthChecked]);
 
   // Mobile viewport height fix (handles dynamic browser chrome on iOS/Android)
   useEffect(() => {
@@ -1313,6 +1356,36 @@ export default function Home() {
     // Wait for JWT verification to finish before checking auth
     if (hasToken && !tokenVerified) return;
 
+    // 1. Check for shared session FIRST
+    const sharedSid = params.get("sharedSessionId");
+    const owner = params.get("owner");
+    if (sharedSid) {
+      const fetchShared = async () => {
+        try {
+          const url = `${baseUrl}/api/share/history?sessionId=${sharedSid}${owner ? `&owner=${owner}` : ""}`;
+          const res = await fetch(url);
+          const data = await res.json();
+          if (data.status === "ok") {
+            // Map DB fields (query/assistant) to UI fields (role/text)
+            const mappedHistory = (data.history || []).flatMap((m: any) => [
+              { role: "user", text: m.query || "" },
+              { role: "ai", text: typeof m.assistant === "string" && m.assistant.startsWith("{") 
+                  ? JSON.parse(m.assistant).response || m.assistant 
+                  : m.assistant || "" }
+            ]);
+            setSessionId(sharedSid);
+            setMessages(mappedHistory);
+            console.log("[share] shared chat loaded and mapped");
+            setAuthChecked(true); 
+          }
+        } catch (e) {
+          console.error("Failed to load shared session:", e);
+        }
+      };
+      fetchShared();
+      return; // Stop here if it's a shared session link
+    }
+
     const backendUserName = clientNameFromUrl || localStorage.getItem("clientName") || localStorage.getItem("loggedInUser");
 
     if (backendUserName) {
@@ -1327,13 +1400,6 @@ export default function Home() {
     }
 
     const stored = localStorage.getItem("loggedInUser");
-    if (!stored) {
-      console.warn("[auth] no session found");
-      setLoggedInUser(null);
-      setAuthChecked(true);
-      return;
-    }
-
     setLoggedInUser(stored);
     setAuthChecked(true);
   }, [router, clientNameFromUrl, tokenVerified]);
@@ -1403,10 +1469,16 @@ export default function Home() {
     throw new Error("NEXT_PUBLIC_API_BASE_URL is not defined");
   }
 
-  const getWsUrl = () =>
-    baseUrl
+  const getWsUrl = () => {
+    const wsBase = baseUrl
       .replace(/^http:/, "ws:")
       .replace(/^https:/, "wss:") + "/api/chat";
+    const params = new URLSearchParams(window.location.search);
+    const owner = params.get("owner");
+    // Priority: URL userName > URL owner > Logged In User > anonymous
+    const user = userIdFromUrl ?? owner ?? loggedInUser ?? "anonymous";
+    return `${wsBase}?sessionId=${sessionId}&userName=${user}`;
+  };
   // const getWsUrl = () =>
   //   process.env.NEXT_PUBLIC_API_BASE_URL
   //     .replace(/^http:/,  "ws:")
@@ -1656,286 +1728,577 @@ export default function Home() {
     }
   };
 
-  // ── User activity detection ───────────────────────────────────────────────
-  const markUserActive = () => {
-    userActiveRef.current = true;
-
-    // Reset idle timer
-    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
-    idleTimerRef.current = setTimeout(() => {
-      userActiveRef.current = false;
-      // Save current session to backend before going idle (keep WebSocket alive)
-      const idleSid = sessionIdRef.current;
-      const idleMsgs = sessionMessagesRef.current.get(idleSid);
-      if (idleMsgs && idleMsgs.filter(m => m.role !== "error").length > 0) {
-        saveChatHistoryRef.current(idleSid, idleMsgs);
-      }
-      console.log("💤 User idle — saved session, keeping WebSocket connection open");
-    }, IDLE_TIMEOUT);
-  };
-
-  useEffect(() => {
-    const events = ["mousemove", "mousedown", "keydown", "scroll", "touchstart"] as const;
-    events.forEach(e => window.addEventListener(e, markUserActive));
-    // Start initial idle timer
-    markUserActive();
-    return () => {
-      events.forEach(e => window.removeEventListener(e, markUserActive));
-      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
-    };
-  }, []);
-
-  const WS_CONNECT_TIMEOUT_MS = 15000; // 15s: fail fast in production if proxy/backend is slow
-
-  const connectWS = () => {
-    // If there's already an open or connecting socket, reuse it
-    if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
-      return;
-    }
-
-    setWsConnectionState('connecting');
-    const ws = new WebSocket(getWsUrl());
-    wsRef.current = ws;
-
-    wsConnectTimeoutRef.current = setTimeout(() => {
-      if (ws.readyState === WebSocket.CONNECTING) {
-        ws.close();
-        setWsConnectionState('failed');
-        console.warn("⚠️ WebSocket connection timeout");
-      }
-      wsConnectTimeoutRef.current = null;
-    }, WS_CONNECT_TIMEOUT_MS);
-
-    ws.onopen = () => {
-      if (wsConnectTimeoutRef.current) {
-        clearTimeout(wsConnectTimeoutRef.current);
-        wsConnectTimeoutRef.current = null;
-      }
-      reconnectDelayRef.current = 2000;
-      setWsConnectionState('connected');
-      console.log("✅ WebSocket connected");
-      startPing();
-    };
-
-    // ── Every message from backend ────────────────────────────────────────
-    ws.onmessage = (event: MessageEvent) => {
-      try {
-        const raw = typeof event.data === "string" ? event.data : "";
-
-        // Ignore pong heartbeat responses
-        if (raw.trim() === "pong") return;
-
-        const jsonStr = raw.startsWith("data: ") ? raw.slice(6) : raw;
-
-        // "[DONE]" = end of this response → finalize bubble, stay connected
-        if (jsonStr.trim() === "[DONE]" || jsonStr.trim() === "__END__") {
-          const finalText = accRef.current;
-          let processedText = finalText;
-          let isGraphResponse = false;
-          let tableData: TableWithTileRow[] | undefined = undefined;
-          let tableTitle: string | undefined = undefined;
-
-          // 🔑 FIRST: Check if this is a GRAPH response (type="graph")
-          const cleanedForGraph = extractResponseContent(finalText);
-          const graphData = parseGraphData(cleanedForGraph);
-          if (graphData) {
-            console.log("📊 [DONE] Graph response detected — will render as bar chart");
-            processedText = cleanedForGraph // ← Keep raw JSON for parseGraphData() in render
-            isGraphResponse = true;
-          } else {
-            // Not a graph → continue with normal processing
-            // 🔑 SECOND: Extract response content (removes session_id wrapper)
-            const cleanedText = extractResponseContent(finalText);
-
-            // 🔑 THIRD: ALWAYS TRY RENDERING AS TABLE STRUCTURE FIRST (ALL SIZES, NO LIMITS)
-            const largeDatasetHTML = renderLargeDataset(cleanedText);
-
-            if (largeDatasetHTML) {
-              // Successfully rendered as unified table structure (any size)
-              processedText = largeDatasetHTML;
-              // Always extract table rows for TableWithTile component
-              const rows = extractTableRows(largeDatasetHTML);
-              if (rows.length > 0) {
-                tableData = rows;
-                tableTitle = "Data";
-                console.log("✅ [DONE] Rendered as unified table structure (" + rows.length + " rows)");
-              }
-            } else {
-              // Not tabular data → format as text output only
-              try {
-                processedText = formatOutput(cleanedText);
-                console.log("📝 [DONE] Formatted as text");
-              } catch (err) {
-                console.log("📝 [DONE] Using raw text", err);
-                processedText = finalText;
-              }
-            }
-          }
-
-          setMessages(prev => {
-            const u = [...prev];
-            const l = u.length - 1;
-            if (u[l]?.role === "ai") {
-              u[l] = {
-                role: "ai",
-                text: processedText,
-                streaming: false,
-                isGraphResponse: isGraphResponse,  // ← Set graph flag
-                chartType: chartType,              // ← Store chart type
-                originalText: finalText,           // ← Store original raw response before HTML processing
-                tableData: tableData,              // ← Store table rows
-                tableTitle: tableTitle              // ← Store table title
-              };
-            }
-            // Persist to per-session store so switching sessions keeps history
-            const activeSid = sessionIdRef.current;
-            sessionMessagesRef.current.set(activeSid, u);
-            return u;
-          });
-          accRef.current = "";          // reset for next message
-          setIsLoading(false);
-          setTimeout(() => inputRef.current?.focus(), 50);
-          return;
-        }
-
-        const part = jsonStr;
-        if (part) {
-          accRef.current += part;
-          const snap = accRef.current;
-
-
-          // Extract text for display during streaming
-          let displayText = snap;
-          try {
-            displayText = extractText(JSON.parse(snap));
-          } catch {
-            // If can't parse yet (incomplete JSON), show what we have
-            displayText = snap;
-          }
-
-
-          setMessages(prev => {
-            const u = [...prev];
-            const l = u.length - 1;
-            // If last message is already our streaming AI bubble → update it
-            if (u[l]?.role === "ai" && u[l]?.streaming === true) {
-              u[l] = { ...u[l], text: displayText, streaming: true };  // ← Preserve chartType
-            } else {
-              // First chunk → create the AI bubble now (only once) with current chartType
-              u.push({ role: "ai", text: displayText, streaming: true, chartType: chartType });
-            }
-            return u;
-          });
-        }
-      } catch { /* non-JSON frame — ignore */ }
-    };
-
-    ws.onclose = (event) => {
-      if (wsConnectTimeoutRef.current) {
-        clearTimeout(wsConnectTimeoutRef.current);
-        wsConnectTimeoutRef.current = null;
-      }
-      // Only react if this is the active socket
-      if (wsRef.current === ws) {
-        wsRef.current = null;
-        setWsConnectionState('failed');
-        console.warn("⚠️ WebSocket closed");
-        if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
-        setIsLoading(false);
-        if (!event.wasClean && userActiveRef.current) {
-          const delay = reconnectDelayRef.current;
-          reconnectDelayRef.current = Math.min(15000, delay * 2);
-          setTimeout(() => connectWS(), delay);
-        }
-      }
-    };
-
-    ws.onerror = () => {
-      if (wsConnectTimeoutRef.current) {
-        clearTimeout(wsConnectTimeoutRef.current);
-        wsConnectTimeoutRef.current = null;
-      }
-      setWsConnectionState('failed');
-      // Log connection error to console only — do not surface as chat bubble
-      console.error("❌ WebSocket error — connection failed, will retry");
-      setIsLoading(false);
-    };
-  };
-
-  // Keep ref in sync so markUserActive can call connectWS
-  useEffect(() => { connectWSRef.current = connectWS; });
-
-  // Connect when component mounts (after auth is confirmed)
-  useEffect(() => {
-    if (!authChecked || !loggedInUser) return;
-
-    connectWS();
-
-    return () => {
-      if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
-      if (idleTimerRef.current) { clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
-      if (wsConnectTimeoutRef.current) { clearTimeout(wsConnectTimeoutRef.current); wsConnectTimeoutRef.current = null; }
-      if (wsRef.current) {
-        wsRef.current.close();
-        wsRef.current = null;
-      }
-    };
-  }, [authChecked, loggedInUser]);
-
-  // Helper: sort sessions newest-first (by updatedAt or createdAt)
-  const sortSessionsNewestFirst = (list: ChatSession[]): ChatSession[] =>
-    [...list].sort((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt));
-
-  // Fetch chat sessions list for sidebar (new at top, old at bottom)
-  useEffect(() => {
-    if (!authChecked || !loggedInUser) return;
-
-    const fetchSessions = async () => {
-      try {
-        const res = await fetch(`${baseUrl}/api/session`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userName: userIdFromUrl ?? loggedInUser, historyOnClick: false }),
+  const handlePinSession = async (sid: string, isPinned: boolean) => {
+    try {
+      const res = await fetch(`${baseUrl}/api/sessions/pin`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: sid,
+          userName: userIdFromUrl ?? loggedInUser,
+          isPinned: isPinned
+        }),
+      });
+      if (res.ok) {
+        setChatSessions(prev => {
+          const updated = prev.map(s => s.id === sid ? { ...s, isPinned } : s);
+          return sortSessionsNewestFirst(updated);
         });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        const fetched: ChatSession[] = (data?.sessions ?? []).map(
-          (s: { session_id: string; title?: string; created_at?: string; updated_at?: string }) => ({
-            id: s.session_id,
-            title: s.title || "Chat",
-            createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
-            updatedAt: s.updated_at ? new Date(s.updated_at).getTime() : undefined,
-          })
-        );
-        setChatSessions(sortSessionsNewestFirst(fetched));
-      } catch (err) {
-        console.warn("Failed to fetch chat sessions:", err);
-        setChatSessions([]);
       }
-    };
-
-    fetchSessions();
-  }, [authChecked, loggedInUser]);
-
-  const handleFeatureClick = (featureName: 'chat' | 'archived' | 'library') => {
-    // Chat and Archived have real views implemented; only Library shows placeholder
-    if (featureName === 'chat') {
-      setShowFeaturePlaceholder(false);
-      return;
+    } catch (e) {
+      console.error("Failed to pin session:", e);
     }
-    setShowFeaturePlaceholder(true);
+  };
+  const handleArchiveSession = async (sid: string, isArchived: boolean) => {
+    try {
+      const res = await fetch(`${baseUrl}/api/sessions/archive`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: sid,
+          userName: userIdFromUrl ?? loggedInUser,
+          isArchived: isArchived
+        }),
+      });
+      if (res.ok) {
+        setChatSessions(prev => {
+          const updated = prev.map(s => s.id === sid ? { ...s, isArchived } : s);
+          return updated;
+        });
+      }
+    } catch (e) {
+      console.error("Failed to archive session:", e);
+    }
   };
 
-  const handleNewChat = async () => {
-    if (isLoading) {
-      setMessages(prev => [...prev, { role: "error", text: "Please wait for the current response to finish before starting a new chat." }]);
-      return;
+const handleShareSession = async (sid: string) => {
+  try {
+    // 1. Force save the current history to DB first
+    const currentMsgs = sessionMessagesRef.current.get(sid) || messages;
+    if (currentMsgs.length > 0) {
+      await saveChatHistory(sid, currentMsgs);
     }
-    // Persist current session messages to ref before leaving
-    const previousSid = sessionId; // chat we're leaving (may have been typed in, so keep it near top after refetch)
-    sessionMessagesRef.current.set(previousSid, messages);
 
+    // 2. Now mark it as public
+    const res = await fetch(`${baseUrl}/api/sessions/share`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId: sid,
+        userName: userIdFromUrl ?? loggedInUser,
+        isPublic: true
+      }),
+    });
+    if (res.ok) {
+      const link = `${window.location.origin}${window.location.pathname}?sharedSessionId=${sid}&owner=${userIdFromUrl ?? loggedInUser}`;
+      setShareLink(link);
+      setShareModalOpen(true);
+    }
+  } catch (e) {
+    console.error("Failed to share session:", e);
+  }
+};
+
+// ── User activity detection ───────────────────────────────────────────────
+const markUserActive = () => {
+  userActiveRef.current = true;
+
+  // Reset idle timer
+  if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+  idleTimerRef.current = setTimeout(() => {
+    userActiveRef.current = false;
+    // Save current session to backend before going idle (keep WebSocket alive)
+    const idleSid = sessionIdRef.current;
+    const idleMsgs = sessionMessagesRef.current.get(idleSid);
+    if (idleMsgs && idleMsgs.filter(m => m.role !== "error").length > 0) {
+      saveChatHistoryRef.current(idleSid, idleMsgs);
+    }
+    console.log("💤 User idle — saved session, keeping WebSocket connection open");
+  }, IDLE_TIMEOUT);
+};
+
+useEffect(() => {
+  const events = ["mousemove", "mousedown", "keydown", "scroll", "touchstart"] as const;
+  events.forEach(e => window.addEventListener(e, markUserActive));
+  // Start initial idle timer
+  markUserActive();
+  return () => {
+    events.forEach(e => window.removeEventListener(e, markUserActive));
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+  };
+}, []);
+
+const WS_CONNECT_TIMEOUT_MS = 15000; // 15s: fail fast in production if proxy/backend is slow
+
+const connectWS = () => {
+  // If there's already an open or connecting socket, reuse it
+  if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
+    return;
+  }
+
+  setWsConnectionState('connecting');
+  const ws = new WebSocket(getWsUrl());
+  wsRef.current = ws;
+
+  wsConnectTimeoutRef.current = setTimeout(() => {
+    if (ws.readyState === WebSocket.CONNECTING) {
+      ws.close();
+      setWsConnectionState('failed');
+      console.warn("⚠️ WebSocket connection timeout");
+    }
+    wsConnectTimeoutRef.current = null;
+  }, WS_CONNECT_TIMEOUT_MS);
+
+  ws.onopen = () => {
+    if (wsConnectTimeoutRef.current) {
+      clearTimeout(wsConnectTimeoutRef.current);
+      wsConnectTimeoutRef.current = null;
+    }
+    reconnectDelayRef.current = 2000;
+    setWsConnectionState('connected');
+    console.log("✅ WebSocket connected");
+    startPing();
+  };
+
+  // ── Every message from backend ────────────────────────────────────────
+  ws.onmessage = (event: MessageEvent) => {
+    try {
+      const raw = typeof event.data === "string" ? event.data : "";
+
+      // Ignore pong heartbeat responses
+      if (raw.trim() === "pong") return;
+
+      const jsonStr = raw.startsWith("data: ") ? raw.slice(6) : raw;
+
+      // "[DONE]" = end of this response → finalize bubble, stay connected
+      if (jsonStr.trim() === "[DONE]" || jsonStr.trim() === "__END__") {
+        const finalText = accRef.current;
+        let processedText = finalText;
+        let isGraphResponse = false;
+        let tableData: TableWithTileRow[] | undefined = undefined;
+        let tableTitle: string | undefined = undefined;
+
+        // 🔑 FIRST: Check if this is a GRAPH response (type="graph")
+        const cleanedForGraph = extractResponseContent(finalText);
+        const graphData = parseGraphData(cleanedForGraph);
+        if (graphData) {
+          console.log("📊 [DONE] Graph response detected — will render as bar chart");
+          processedText = cleanedForGraph // ← Keep raw JSON for parseGraphData() in render
+          isGraphResponse = true;
+        } else {
+          // Not a graph → continue with normal processing
+          // 🔑 SECOND: Extract response content (removes session_id wrapper)
+          const cleanedText = extractResponseContent(finalText);
+
+          // 🔑 THIRD: ALWAYS TRY RENDERING AS TABLE STRUCTURE FIRST (ALL SIZES, NO LIMITS)
+          const largeDatasetHTML = renderLargeDataset(cleanedText);
+
+          if (largeDatasetHTML) {
+            // Successfully rendered as unified table structure (any size)
+            processedText = largeDatasetHTML;
+            // Always extract table rows for TableWithTile component
+            const rows = extractTableRows(largeDatasetHTML);
+            if (rows.length > 0) {
+              tableData = rows;
+              tableTitle = "Data";
+              console.log("✅ [DONE] Rendered as unified table structure (" + rows.length + " rows)");
+            }
+          } else {
+            // Not tabular data → format as text output only
+            try {
+              processedText = formatOutput(cleanedText);
+              console.log("📝 [DONE] Formatted as text");
+            } catch (err) {
+              console.log("📝 [DONE] Using raw text", err);
+              processedText = finalText;
+            }
+          }
+        }
+
+        setMessages(prev => {
+          const u = [...prev];
+          const l = u.length - 1;
+          if (u[l]?.role === "ai") {
+            u[l] = {
+              role: "ai",
+              text: processedText,
+              streaming: false,
+              isGraphResponse: isGraphResponse,  // ← Set graph flag
+              chartType: chartType,              // ← Store chart type
+              originalText: finalText,           // ← Store original raw response before HTML processing
+              tableData: tableData,              // ← Store table rows
+              tableTitle: tableTitle              // ← Store table title
+            };
+          }
+          // Persist to per-session store so switching sessions keeps history
+          const activeSid = sessionIdRef.current;
+          sessionMessagesRef.current.set(activeSid, u);
+          return u;
+        });
+        accRef.current = "";          // reset for next message
+        setIsLoading(false);
+        setTimeout(() => inputRef.current?.focus(), 50);
+        return;
+      }
+
+      const part = jsonStr;
+      if (part) {
+        accRef.current += part;
+        const snap = accRef.current;
+
+
+        // Extract text for display during streaming
+        let displayText = snap;
+        try {
+          displayText = extractText(JSON.parse(snap));
+        } catch {
+          // If can't parse yet (incomplete JSON), show what we have
+          displayText = snap;
+        }
+
+
+        setMessages(prev => {
+          const u = [...prev];
+          const l = u.length - 1;
+          // If last message is already our streaming AI bubble → update it
+          if (u[l]?.role === "ai" && u[l]?.streaming === true) {
+            u[l] = { ...u[l], text: displayText, streaming: true };  // ← Preserve chartType
+          } else {
+            // First chunk → create the AI bubble now (only once) with current chartType
+            u.push({ role: "ai", text: displayText, streaming: true, chartType: chartType });
+          }
+          return u;
+        });
+      }
+    } catch { /* non-JSON frame — ignore */ }
+  };
+
+  ws.onclose = (event) => {
+    if (wsConnectTimeoutRef.current) {
+      clearTimeout(wsConnectTimeoutRef.current);
+      wsConnectTimeoutRef.current = null;
+    }
+    // Only react if this is the active socket
+    if (wsRef.current === ws) {
+      wsRef.current = null;
+      setWsConnectionState('failed');
+      console.warn("⚠️ WebSocket closed");
+      if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
+      setIsLoading(false);
+      if (!event.wasClean && userActiveRef.current) {
+        const delay = reconnectDelayRef.current;
+        reconnectDelayRef.current = Math.min(15000, delay * 2);
+        setTimeout(() => connectWS(), delay);
+      }
+    }
+  };
+
+  ws.onerror = () => {
+    if (wsConnectTimeoutRef.current) {
+      clearTimeout(wsConnectTimeoutRef.current);
+      wsConnectTimeoutRef.current = null;
+    }
+    setWsConnectionState('failed');
+    // Log connection error to console only — do not surface as chat bubble
+    console.error("❌ WebSocket error — connection failed, will retry");
+    setIsLoading(false);
+  };
+};
+
+// Keep ref in sync so markUserActive can call connectWS
+useEffect(() => { connectWSRef.current = connectWS; });
+
+// Connect when component mounts (after auth is confirmed)
+useEffect(() => {
+  const sharedSid = new URLSearchParams(window.location.search).get("sharedSessionId");
+  if (!authChecked || (!loggedInUser && !sharedSid)) return;
+
+  connectWS();
+
+  return () => {
+    if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
+    if (idleTimerRef.current) { clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
+    if (wsConnectTimeoutRef.current) { clearTimeout(wsConnectTimeoutRef.current); wsConnectTimeoutRef.current = null; }
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+  };
+}, [authChecked, loggedInUser]);
+
+// Helper: sort sessions newest-first (by updatedAt or createdAt)
+const sortSessionsNewestFirst = (list: ChatSession[]): ChatSession[] =>
+  [...list].sort((a, b) => {
+    if (a.isPinned && !b.isPinned) return -1;
+    if (!a.isPinned && b.isPinned) return 1;
+    return (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt);
+  });
+
+// Fetch chat sessions list for sidebar (new at top, old at bottom)
+useEffect(() => {
+  if (!authChecked || !loggedInUser) return;
+
+  const fetchSessions = async () => {
+    try {
+      const res = await fetch(`${baseUrl}/api/session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userName: userIdFromUrl ?? loggedInUser, historyOnClick: false }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const fetched: ChatSession[] = (data?.sessions ?? []).map(
+        (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; is_pinned?: boolean; is_archived?: boolean }) => ({
+          id: s.session_id,
+          title: s.title || "Chat",
+          createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
+          updatedAt: s.updated_at ? new Date(s.updated_at).getTime() : undefined,
+          isPinned: s.is_pinned || false,
+          isArchived: s.is_archived || false,
+        })
+      );
+      setChatSessions(sortSessionsNewestFirst(fetched));
+    } catch (err) {
+      console.warn("Failed to fetch chat sessions:", err);
+      setChatSessions([]);
+    }
+  };
+
+  fetchSessions();
+}, [authChecked, loggedInUser]);
+
+const handleFeatureClick = (featureName: 'chat' | 'archived' | 'library') => {
+  // Chat and Archived have real views implemented; only Library shows placeholder
+  if (featureName === 'chat') {
     setShowFeaturePlaceholder(false);
+    return;
+  }
+  setShowFeaturePlaceholder(true);
+};
+
+const handleNewChat = async () => {
+  if (isLoading) {
+    setMessages(prev => [...prev, { role: "error", text: "Please wait for the current response to finish before starting a new chat." }]);
+    return;
+  }
+  // Persist current session messages to ref before leaving
+  const previousSid = sessionId; // chat we're leaving (may have been typed in, so keep it near top after refetch)
+  sessionMessagesRef.current.set(previousSid, messages);
+
+  setShowFeaturePlaceholder(false);
+  setMessages([]);
+  accRef.current = "";
+  setIsLoading(false);
+
+  const newSessionId = generateSessionId();
+  setSessionId(newSessionId);
+  sessionIdRef.current = newSessionId;
+
+  // Auto-close sidebar on mobile
+  if (responsive.isMobile) {
+    setSidebarOpen(false);
+  }
+
+  // Immediately show this new chat at the top of the history list
+  setChatSessions(prev => {
+    const existing = prev.filter(s => s.id !== newSessionId);
+    const newCapsule: ChatSession = {
+      id: newSessionId,
+      title: "New Chat",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    return [newCapsule, ...existing];
+  });
+
+  // Refetch session list; new chat at top, previous chat (just left) second, rest by updated_at
+  const refetchSessions = async () => {
+    try {
+      const res = await fetch(`${baseUrl}/api/session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userName: userIdFromUrl ?? loggedInUser, historyOnClick: false }),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      const fetched: ChatSession[] = (data?.sessions ?? []).map(
+        (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; is_pinned?: boolean; is_archived?: boolean }) => ({
+          id: s.session_id,
+          title: s.title || "Chat",
+          createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
+          updatedAt: s.updated_at ? new Date(s.updated_at).getTime() : undefined,
+          isPinned: s.is_pinned || false,
+          isArchived: s.is_archived || false,
+        })
+      );
+      setChatSessions(prev => {
+        const newCapsule: ChatSession = {
+          id: newSessionId,
+          title: "New Chat",
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+        // Previous chat stays second (just left, not yet saved so backend may have old order)
+        const previousSession = prev.find(s => s.id === previousSid) ?? fetched.find(s => s.id === previousSid);
+        const rest = sortSessionsNewestFirst(
+          fetched.filter(s => s.id !== newSessionId && s.id !== previousSid)
+        );
+        if (previousSession) {
+          const fromApi = fetched.find(s => s.id === previousSid);
+          const title = fromApi?.title ?? previousSession.title;
+          return [newCapsule, { ...previousSession, title }, ...rest];
+        }
+        return [newCapsule, ...rest];
+      });
+    } catch (err) {
+      console.warn("Failed to refetch sessions:", err);
+    }
+  };
+  setTimeout(() => refetchSessions(), 400);
+};
+
+// ── Process loaded messages: convert raw JSON to formatted tables ─────────
+const processLoadedMessages = (msgs: Message[]): Message[] => {
+  return msgs.map(m => {
+    if (m.role !== "ai") return m;
+
+    const text = m.text || "";
+
+    // 🔑 FIRST: Check if this is a GRAPH response
+    const graphData = parseGraphData(text);
+    if (graphData) {
+      console.log("📊 [HISTORY] Graph response detected — keeping as raw JSON for chart");
+      return { ...m, text, isGraphResponse: true };
+    }
+
+    // 🔑 THE FIX: Detect if the history text is a Table JSON
+    try {
+      if (text.trim().startsWith('{') || text.trim().startsWith('[')) {
+        const parsed = JSON.parse(text);
+        if (parsed && (parsed.columns || parsed.data)) {
+          // It's a table! Use the existing render function
+          const tableHTML = renderLargeDataset(text);
+          if (tableHTML) {
+            const rows = extractTableRows(tableHTML);
+            return { ...m, text: tableHTML, tableData: rows, tableTitle: "Results" };
+          }
+        }
+      }
+    } catch (e) {
+      /* Not JSON, ignore */
+    }
+
+    // Check if already formatted (contains HTML tags or wrapper class)
+    if (
+      text.includes('<table') ||
+      text.includes('large-dataset-wrapper') ||
+      text.includes('ai-table')
+    ) {
+      console.log("✅ [HISTORY] Message already HTML formatted - extracting table data");
+      // Try to extract table data from HTML
+      const rows = extractTableRows(text);
+      if (rows.length > 0) {
+        return { ...m, text, tableData: rows, tableTitle: "Results" };
+      }
+      return m;
+    }
+
+    // Extract response content (removes session_id wrapper)
+    const rawJson = extractResponseContent(text);
+    const cleanedText = decodeEntities(rawJson);
+
+    // ALWAYS TRY RENDERING AS UNIFIED TABLE STRUCTURE FIRST (ALL SIZES)
+    const tableHTML = renderLargeDataset(cleanedText);
+    if (tableHTML) {
+      console.log("✅ [HISTORY] Successfully rendered as table structure");
+      const rows = extractTableRows(tableHTML);
+      if (rows.length > 0) {
+        return { ...m, text: tableHTML, tableData: rows, tableTitle: "Results" };
+      }
+      return { ...m, text: tableHTML };
+    }
+
+    // Not tabular data → try to format as text
+    try {
+      const formattedText = formatOutput(cleanedText);
+      // 🔑 EXTRA FIX: If the formatted text still has raw HTML tags, decode them
+      if (formattedText.includes('<div') || formattedText.includes('&lt;')) {
+        return { ...m, text: decodeEntities(formattedText) };
+      }
+      return { ...m, text: formattedText };
+    } catch (err) {
+      console.log("📝 [HISTORY] Fallback to raw text");
+      return { ...m, text: decodeEntities(text) };
+    }
+  });
+};
+
+// ── Switch to an existing session ─────────────────────────────────────────
+const switchSession = async (targetSid: string) => {
+  if (targetSid === sessionId) return; // already active
+  if (isLoading) {
+    setMessages(prev => [...prev, { role: "error", text: "Please wait for the current response to finish before switching chats." }]);
+    return;
+  }
+
+  // Auto-close sidebar on mobile
+  if (responsive.isMobile) {
+    setSidebarOpen(false);
+  }
+
+  // Capture the currently active session ID
+  const currentSid = sessionIdRef.current;
+
+  // Save current messages
+  sessionMessagesRef.current.set(currentSid, messages);
+
+  // Refresh from backend to get latest titles; do not move clicked chat to top (just highlight)
+  const refreshSessions = async () => {
+    if (!loggedInUser) return;
+    try {
+      const res = await fetch(`${baseUrl}/api/session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userName: userIdFromUrl ?? loggedInUser, historyOnClick: false }),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      const fetched: ChatSession[] = (data?.sessions ?? []).map(
+        (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; is_pinned?: boolean; is_archived?: boolean }) => ({
+          id: s.session_id,
+          title: s.title || "Chat",
+          createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
+          updatedAt: s.updated_at ? new Date(s.updated_at).getTime() : undefined,
+          isPinned: s.is_pinned || false,
+          isArchived: s.is_archived || false,
+        })
+      );
+      setChatSessions(prev => {
+        const merged = sortSessionsNewestFirst(fetched);
+        // If current list has a session not in fetched (e.g. new unsaved), prepend it
+        const onlyInPrev = prev.filter(s => !fetched.some(f => f.id === s.id));
+        return sortSessionsNewestFirst([...onlyInPrev, ...merged]);
+      });
+    } catch (err) {
+      console.warn("Failed to refresh sessions:", err);
+    }
+  };
+  refreshSessions();
+
+  // Switch session ID immediately
+  setSessionId(targetSid);
+  sessionIdRef.current = targetSid;
+  accRef.current = "";
+  setIsLoading(false);
+
+  // Check local cache first
+  const cached = sessionMessagesRef.current.get(targetSid);
+  if (cached && cached.length > 0) {
+    const processed = processLoadedMessages(cached);
+    setMessages(processed);
+  } else {
+    // Fetch from backend
+    setHistoryLoading(true);
     setMessages([]);
     accRef.current = "";
     setIsLoading(false);
@@ -2148,57 +2511,21 @@ export default function Home() {
     if (cached && cached.length > 0) {
       const processed = processLoadedMessages(cached);
       setMessages(processed);
-    } else {
-      // Fetch from backend
-      setHistoryLoading(true);
+    } catch (err) {
+      console.warn("Failed to fetch session history:", err);
       setMessages([]);
-      try {
-        const res = await fetch(`${baseUrl}/api/session`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userName: userIdFromUrl ?? loggedInUser, sessionId: targetSid, historyOnClick: true }),
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        const history: Message[] = [];
-        //handles is_audio from backend
-        for (const entry of (data?.chat_history ?? [])) {
-          if (entry.query) {
-            if (entry.is_audio) {
-              // query is base64 audio string from DB
-              history.push({
-                role: "user",
-                text: "Voice message",
-                isAudio: true,
-                audioUrl: entry.query,   // base64 → audio player
-                audioDuration: 0         // duration not stored in DB
-              });
-            } else {
-              history.push({ role: "user", text: entry.query });
-            }
-          }
-          if (entry.assistant) {
-            history.push({ role: "ai", text: entry.assistant });
-          }
-        }
-        const processed = processLoadedMessages(history);
-        sessionMessagesRef.current.set(targetSid, processed);
-        setMessages(processed);
-      } catch (err) {
-        console.warn("Failed to fetch session history:", err);
-        setMessages([]);
-      } finally {
-        setHistoryLoading(false);
-      }
+    } finally {
+      setHistoryLoading(false);
     }
+  }
 
-    // Ensure WebSocket connection is available for the target session
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      connectWS();
-    } else {
-      startPing();
-    }
-  };
+  // Ensure WebSocket connection is available for the target session
+  if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+    connectWS();
+  } else {
+    startPing();
+  }
+};
 
   const handleLogout = async () => {
     const savePromises: Promise<void>[] = [];
@@ -2223,27 +2550,34 @@ export default function Home() {
       wsRef.current = null;
     }
 
-    localStorage.removeItem("loggedInUser");
-    router.replace("/");
-  };
-  const toggleRecording = async () => {
-    if (isRecording) {
-      mediaRecorderRef.current?.stop();
-      setIsRecording(false);
-    } else {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const rec = new MediaRecorder(stream);
-        rec.start();
-        mediaRecorderRef.current = rec;
-        setIsRecording(true);
-      } catch { alert("Please allow microphone access."); }
-    }
-  };
+  if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
+  if (idleTimerRef.current) { clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
+  if (wsRef.current) {
+    wsRef.current.close();
+    wsRef.current = null;
+  }
 
-  // ── Handle Audio Playback ─────────────────────────────────────────────────
-  const handleAudioPlayback = async (idx: number, audioUrl?: string, passedDuration: number = 0) => {
-    if (!audioUrl) return;
+  localStorage.removeItem("loggedInUser");
+  router.replace("/");
+};
+const toggleRecording = async () => {
+  if (isRecording) {
+    mediaRecorderRef.current?.stop();
+    setIsRecording(false);
+  } else {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const rec = new MediaRecorder(stream);
+      rec.start();
+      mediaRecorderRef.current = rec;
+      setIsRecording(true);
+    } catch { alert("Please allow microphone access."); }
+  }
+};
+
+// ── Handle Audio Playback ─────────────────────────────────────────────────
+const handleAudioPlayback = async (idx: number, audioUrl?: string, passedDuration: number = 0) => {
+  if (!audioUrl) return;
 
     const isCurrentlyPlaying = audioPlayingIndex === idx;
 
@@ -2395,137 +2729,139 @@ export default function Home() {
     }));
   };  // ← THIS CLOSING BRACE WAS MISSING
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
-  };
+const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+};
 
-  const { theme } = useTheme();
-  const isLanding = messages.length === 0;
+const { theme } = useTheme();
+const isLanding = messages.length === 0;
 
-  // Mobile/tablet header is hidden while sidebar/menu is open, or when modals are active.
-  const isMobileHeaderVisible = responsive.isMobile && !sidebarOpen && !showUpgradePlan && !showManageAccount;
+// Mobile/tablet header is hidden while sidebar/menu is open, or when modals are active.
+const isMobileHeaderVisible = responsive.isMobile && !sidebarOpen && !showUpgradePlan && !showManageAccount;
 
-  /** Chat input + disclaimer; `landing` = centered column on empty state before first message */
-  const renderChatInputFooter = (variant: "landing" | "default") => (
-    <div
-      className={
-        variant === "landing" ? "input-footer input-footer--start" : "input-footer"
-      }
-    >
-      {voiceRecorder.isRecording && (
-        <div className={`voice-recording-overlay${voiceRecorder.closingRecording ? " closing" : ""}`}>
-          <RecordingInterface
-            recordingTime={voiceRecorder.recordingTime}
-            onCancel={voiceRecorder.cancelRecording}
-            formatTime={voiceRecorder.formatTime}
-          />
-        </div>
-      )}
-
-      {voiceRecorder.recordedAudioBlob ? (
-        <VoicePreviewBar
-          isPlaying={voiceRecorder.isPlaying}
-          playbackTime={voiceRecorder.playbackTime}
-          totalDuration={voiceRecorder.totalDuration}
-          displayTimeText={voiceRecorder.displayTimeText}
-          onTogglePlayback={voiceRecorder.togglePlayback}
-          onDelete={voiceRecorder.deleteRecording}
-          onSend={voiceRecorder.sendVoiceMessage}
-          isLoading={isLoading}
-          wsConnectionState={wsConnectionState}
+/** Chat input + disclaimer; `landing` = centered column on empty state before first message */
+const renderChatInputFooter = (variant: "landing" | "default") => (
+  <div
+    className={
+      variant === "landing" ? "input-footer input-footer--start" : "input-footer"
+    }
+  >
+    {voiceRecorder.isRecording && (
+      <div className={`voice-recording-overlay${voiceRecorder.closingRecording ? " closing" : ""}`}>
+        <RecordingInterface
+          recordingTime={voiceRecorder.recordingTime}
+          onCancel={voiceRecorder.cancelRecording}
+          formatTime={voiceRecorder.formatTime}
         />
-      ) : (
-        <div className="input-wrapper">
-          <textarea
-            ref={inputRef}
-            className="main-input"
-            defaultValue={input}
-            onChange={(e) => {
-              // Update ref immediately (no re-render)
-              rawInputRef.current = e.target.value;
-              // Resize based on DOM measurements
-              resizeTA();
+      </div>
+    )}
 
-              // Debounce updating the heavier `input` state
-              if (inputDebounceRef.current) {
-                clearTimeout(inputDebounceRef.current);
-                inputDebounceRef.current = null;
-              }
-              inputDebounceRef.current = window.setTimeout(() => {
-                setInput(rawInputRef.current);
-                inputDebounceRef.current = null;
-              }, DEBOUNCE_MS);
-            }}
-            onKeyDown={handleKeyDown}
-            disabled={isLoading || wsConnectionState !== "connected"}
-            placeholder={
-              wsConnectionState === "connected" ? "Ask Anything..." : "Waiting for connection…"
+    {voiceRecorder.recordedAudioBlob ? (
+      <VoicePreviewBar
+        isPlaying={voiceRecorder.isPlaying}
+        playbackTime={voiceRecorder.playbackTime}
+        totalDuration={voiceRecorder.totalDuration}
+        displayTimeText={voiceRecorder.displayTimeText}
+        onTogglePlayback={voiceRecorder.togglePlayback}
+        onDelete={voiceRecorder.deleteRecording}
+        onSend={voiceRecorder.sendVoiceMessage}
+        isLoading={isLoading}
+        wsConnectionState={wsConnectionState}
+      />
+    ) : (
+      <div className="input-wrapper">
+        <textarea
+          ref={inputRef}
+          className="main-input"
+          defaultValue={input}
+          onChange={(e) => {
+            // Update ref immediately (no re-render)
+            rawInputRef.current = e.target.value;
+            // Resize based on DOM measurements
+            resizeTA();
+
+            // Debounce updating the heavier `input` state
+            if (inputDebounceRef.current) {
+              clearTimeout(inputDebounceRef.current);
+              inputDebounceRef.current = null;
             }
-            rows={1}
-          />
-          <VoiceMicButton
-            forwardedRef={voiceRecorder.micButtonRef}
-            onClick={voiceRecorder.toggleRecording}
-            disabled={
-              isLoading ||
-              wsConnectionState !== "connected" ||
-              voiceRecorder.recordedAudioBlob !== null
-            }
-          />
-          <button
-            onClick={() => setIsGraphMode((p) => !p)}
-            title={isGraphMode ? "Graph mode ON — click to turn off" : "Click for graph output"}
-            style={{
-              background: isGraphMode
-                ? "linear-gradient(135deg, #d4af37, #f5c249)"
-                : "transparent",
-              border: isGraphMode
-                ? "1px solid #d4af37"
-                : "1px solid rgba(255,255,255,0.15)",
-              borderRadius: 8,
-              padding: "6px 8px",
-              cursor: "pointer",
-              color: isGraphMode ? "#000" : "#9CA3AF",
-              transition: "all 0.2s ease",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <IconChartBar size={18} stroke={1.5} />
-          </button>
-          <button
-            className="send-btn"
-            onClick={sendMessage}
-            disabled={isLoading || wsConnectionState !== "connected" || !(inputRef.current?.value ?? "").trim()}
-          >
-            <IconArrowUp size={16} color="white" stroke={2} />
-          </button>
-        </div>
-      )}
-      {variant === "landing" && (
-        <LandingSuggestedQueries
-          onSelect={(q) => {
-            if (inputDebounceRef.current) { clearTimeout(inputDebounceRef.current); inputDebounceRef.current = null; }
-            if (inputRef.current) {
-              inputRef.current.value = q;
-            }
-            rawInputRef.current = q;
-            setInput(q);
-            requestAnimationFrame(() => inputRef.current?.focus());
+            inputDebounceRef.current = window.setTimeout(() => {
+              setInput(rawInputRef.current);
+              inputDebounceRef.current = null;
+            }, DEBOUNCE_MS);
           }}
+          onKeyDown={handleKeyDown}
+          disabled={isLoading || wsConnectionState !== "connected"}
+          placeholder={
+            wsConnectionState === "connected" ? "Ask Anything..." : "Waiting for connection…"
+          }
+          rows={1}
+        />
+        <VoiceMicButton
+          forwardedRef={voiceRecorder.micButtonRef}
+          onClick={voiceRecorder.toggleRecording}
           disabled={
             isLoading ||
             wsConnectionState !== "connected" ||
-            voiceRecorder.isRecording ||
-            !!voiceRecorder.recordedAudioBlob
+            voiceRecorder.recordedAudioBlob !== null
           }
         />
-      )}
-      <p className="footer-disclaimer">
-      </p>
-    </div>
-  );
+        <button
+          onClick={() => setIsGraphMode((p) => !p)}
+          title={isGraphMode ? "Graph mode ON — click to turn off" : "Click for graph output"}
+          style={{
+            background: isGraphMode
+              ? "linear-gradient(135deg, #d4af37, #f5c249)"
+              : "transparent",
+            border: isGraphMode
+              ? "1px solid #d4af37"
+              : "1px solid rgba(255,255,255,0.15)",
+            borderRadius: 8,
+            padding: "6px 8px",
+            cursor: "pointer",
+            color: isGraphMode ? "#000" : "#9CA3AF",
+            transition: "all 0.2s ease",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <IconChartBar size={18} stroke={1.5} />
+        </button>
+        <button
+          className="send-btn"
+          onClick={sendMessage}
+          disabled={isLoading || wsConnectionState !== "connected" || !(inputRef.current?.value ?? "").trim()}
+        >
+          <IconArrowUp size={16} color="white" stroke={2} />
+        </button>
+      </div>
+    )}
+    {variant === "landing" && (
+      <LandingSuggestedQueries
+        onSelect={(q) => {
+          if (inputDebounceRef.current) { clearTimeout(inputDebounceRef.current); inputDebounceRef.current = null; }
+          if (inputRef.current) {
+            inputRef.current.value = q;
+          }
+          rawInputRef.current = q;
+          setInput(q);
+          requestAnimationFrame(() => inputRef.current?.focus());
+        }}
+        disabled={
+          isLoading ||
+          wsConnectionState !== "connected" ||
+          voiceRecorder.isRecording ||
+          !!voiceRecorder.recordedAudioBlob
+        }
+      />
+    )}
+    <p className="footer-disclaimer">
+    </p>
+  </div>
+);
+
+
 
   if (!authChecked) {
     return (
@@ -3581,7 +3917,8 @@ export default function Home() {
         </div>
       </div>
     </div>
-  );
+  
+);
 }
 
 // Return the first `n` words of a title, adding an ellipsis if truncated

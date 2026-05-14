@@ -26,10 +26,12 @@ async def get_sessions_for_user(user_name: str) -> list:
 
         cursor.execute(
             """
-            SELECT session_id, title, created_at, updated_at
+            SELECT session_id, title, created_at, updated_at,
+                   COALESCE(is_pinned, FALSE)  AS is_pinned,
+                   COALESCE(is_archived, FALSE) AS is_archived
             FROM chat_sessions
             WHERE user_name = %s
-            ORDER BY updated_at DESC
+            ORDER BY COALESCE(is_pinned, FALSE) DESC, updated_at DESC
             """,
             (user_name,)
         )
@@ -37,13 +39,16 @@ async def get_sessions_for_user(user_name: str) -> list:
         rows = cursor.fetchall()
         cols = [desc[0] for desc in cursor.description]
         cursor.close()
+        conn.rollback() # Finish the read-only transaction
 
         sessions = [
             {
-                "session_id": row[cols.index("session_id")],
-                "title":      row[cols.index("title")],
-                "created_at": row[cols.index("created_at")].isoformat() if row[cols.index("created_at")] else None,
-                "updated_at": row[cols.index("updated_at")].isoformat() if row[cols.index("updated_at")] else None,
+                "session_id":  row[cols.index("session_id")],
+                "title":       row[cols.index("title")],
+                "created_at":  row[cols.index("created_at")].isoformat() if row[cols.index("created_at")] else None,
+                "updated_at":  row[cols.index("updated_at")].isoformat() if row[cols.index("updated_at")] else None,
+                "is_pinned":   bool(row[cols.index("is_pinned")]),
+                "is_archived": bool(row[cols.index("is_archived")]),
             }
             for row in rows
         ]
@@ -82,6 +87,7 @@ async def get_chat_history_for_session(user_name: str, session_id: str) -> list:
 
         row = cursor.fetchone()
         cursor.close()
+        conn.rollback() # Finish the read-only transaction
 
         if not row:
             logger.info(f"⚠️ No session found | session_id={session_id} | user_name={user_name}")
