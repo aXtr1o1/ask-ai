@@ -16,6 +16,8 @@ import UpgradePlan from "./components/UpgradePlan";
 import ManageAccount from "./components/ManageAccount/ManageAccount";
 import WalkthroughPopup from "./components/WalkthroughPopup";
 import LandingSuggestedQueries from "./components/LandingSuggestedQueries";
+import { ghostPromptHistoryStorageKey, recordPromptForGhostHistory } from "./lib/ghostInputCompletion";
+import { useGhostInputCompletion } from "./hooks/useGhostInputCompletion";
 import { IconUser, IconMicrophone, IconPlayerPlay, IconPlayerPause, IconTrash, IconArrowUp, IconChartBar, IconList, IconLayoutGrid, IconMenu2, IconX, IconCrown, IconDotsVertical } from "@tabler/icons-react";
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface Message {
@@ -1115,6 +1117,22 @@ export default function Home() {
   // ─── Refs (declare early for use in hooks) ────────────────────────────────
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const {
+    ghostUserSpanRef,
+    ghostSuffixSpanRef,
+    ghostSuffixStrRef,
+    isComposingRef,
+    clearGhostCompletion,
+    syncGhostUserMirror,
+    applyGhostSuffixFromInput,
+  } = useGhostInputCompletion(
+    messages,
+    loggedInUser,
+    rawInputRef,
+    inputRef,
+    isLoading,
+    wsConnectionState,
+  );
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -2499,6 +2517,7 @@ export default function Home() {
   const sendMessage = () => {
     const domVal = inputRef.current?.value ?? "";
     if (!domVal.trim() || isLoading) return;
+    clearGhostCompletion();
     const userText = domVal.trim();
 
     const ws = wsRef.current;
@@ -2508,6 +2527,8 @@ export default function Home() {
       setMessages(prev => [...prev, { role: "error", text: "Still connecting. Please wait." }]);
       return;
     }
+
+    recordPromptForGhostHistory(ghostPromptHistoryStorageKey(loggedInUser), userText);
 
     // Ensure capsule exists and move this session to top when user types (content changed)
     const now = Date.now();
@@ -2540,6 +2561,7 @@ export default function Home() {
     if (inputRef.current) inputRef.current.value = "";
     rawInputRef.current = "";
     setInput("");
+    syncGhostUserMirror();
     setIsLoading(true);
     accRef.current = "";
 
@@ -2559,6 +2581,24 @@ export default function Home() {
   };  // ← THIS CLOSING BRACE WAS MISSING
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Tab" && ghostSuffixStrRef.current) {
+      e.preventDefault();
+      const ta = e.currentTarget;
+      const ghost = ghostSuffixStrRef.current;
+      ta.value = ta.value + ghost;
+      rawInputRef.current = ta.value;
+      ghostSuffixStrRef.current = "";
+      if (ghostSuffixSpanRef.current) ghostSuffixSpanRef.current.textContent = "";
+      resizeTA();
+      syncGhostUserMirror();
+      if (inputDebounceRef.current) {
+        window.clearTimeout(inputDebounceRef.current);
+        inputDebounceRef.current = null;
+      }
+      setInput(ta.value);
+      applyGhostSuffixFromInput();
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   };
 
@@ -2599,33 +2639,55 @@ export default function Home() {
         />
       ) : (
         <div className="input-wrapper">
-          <textarea
-            ref={inputRef}
-            className="main-input"
-            defaultValue={input}
-            onChange={(e) => {
-              // Update ref immediately (no re-render)
-              rawInputRef.current = e.target.value;
-              // Resize based on DOM measurements
-              resizeTA();
+          <div className="main-input-stack">
+            <div
+              className="main-input-ghost-mirror"
+              aria-hidden
+            >
+              <span ref={ghostUserSpanRef} className="ghost-mirror-user" />
+              <span ref={ghostSuffixSpanRef} className="ghost-mirror-suffix" />
+            </div>
+            <textarea
+              ref={inputRef}
+              className="main-input main-input--layered"
+              defaultValue={input}
+              onChange={(e) => {
+                rawInputRef.current = e.target.value;
+                resizeTA();
+                syncGhostUserMirror();
+                applyGhostSuffixFromInput();
 
-              // Debounce updating the heavier `input` state
-              if (inputDebounceRef.current) {
-                clearTimeout(inputDebounceRef.current);
-                inputDebounceRef.current = null;
+                if (inputDebounceRef.current) {
+                  clearTimeout(inputDebounceRef.current);
+                  inputDebounceRef.current = null;
+                }
+                inputDebounceRef.current = window.setTimeout(() => {
+                  setInput(rawInputRef.current);
+                  inputDebounceRef.current = null;
+                }, DEBOUNCE_MS);
+              }}
+              onKeyDown={handleKeyDown}
+              onScroll={(ev) => {
+                const ta = ev.currentTarget;
+                if (ta.scrollTop > 0 || ta.scrollHeight > ta.clientHeight + 2) clearGhostCompletion();
+              }}
+              onCompositionStart={() => {
+                isComposingRef.current = true;
+                clearGhostCompletion();
+              }}
+              onCompositionEnd={() => {
+                isComposingRef.current = false;
+                resizeTA();
+                syncGhostUserMirror();
+                applyGhostSuffixFromInput();
+              }}
+              disabled={isLoading || wsConnectionState !== "connected"}
+              placeholder={
+                wsConnectionState === "connected" ? "Ask Anything..." : "Waiting for connection…"
               }
-              inputDebounceRef.current = window.setTimeout(() => {
-                setInput(rawInputRef.current);
-                inputDebounceRef.current = null;
-              }, DEBOUNCE_MS);
-            }}
-            onKeyDown={handleKeyDown}
-            disabled={isLoading || wsConnectionState !== "connected"}
-            placeholder={
-              wsConnectionState === "connected" ? "Ask Anything..." : "Waiting for connection…"
-            }
-            rows={1}
-          />
+              rows={1}
+            />
+          </div>
           <VoiceMicButton
             forwardedRef={voiceRecorder.micButtonRef}
             onClick={voiceRecorder.toggleRecording}
@@ -2675,6 +2737,9 @@ export default function Home() {
             }
             rawInputRef.current = q;
             setInput(q);
+            resizeTA();
+            syncGhostUserMirror();
+            applyGhostSuffixFromInput();
             requestAnimationFrame(() => inputRef.current?.focus());
           }}
           disabled={
