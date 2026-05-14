@@ -69,6 +69,7 @@ export function parseGraphData(text: string): GraphData | null {
 }
 
 // ─── Download Graph Data as Excel ───────────────────────────────────────────
+/* changes done by megnathan: Updated downloadGraphData to show toast only after file is actually saved or when download starts for fallback. */
 export async function downloadGraphData(graphData: GraphData) {
   if (!graphData.records || graphData.records.length === 0) return;
   const headers = Object.keys(graphData.records[0]);
@@ -112,6 +113,7 @@ export async function downloadGraphData(graphData: GraphData) {
   const blob = new Blob([htmlContent], { type: 'application/vnd.ms-excel' });
 
   let savedName = "Nano data.xls";
+  let isFallback = false;
 
   // Try to use File System Access API (Save As dialog)
   if (typeof window !== "undefined" && "showSaveFilePicker" in window) {
@@ -127,6 +129,7 @@ export async function downloadGraphData(graphData: GraphData) {
       await writable.write(blob);
       await writable.close();
       savedName = handle.name;
+      isFallback = false;
     } catch (err) {
       // If user cancelled, just return
       if ((err as Error).name === 'AbortError') return;
@@ -140,6 +143,7 @@ export async function downloadGraphData(graphData: GraphData) {
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+      isFallback = true;
     }
   } else {
     // Fallback for browsers without File System Access API
@@ -151,13 +155,15 @@ export async function downloadGraphData(graphData: GraphData) {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    isFallback = true;
   }
 
   // Show toast notification
-  showFileSavedToast(savedName);
+  showFileSavedToast(savedName, isFallback);
 }
 
-function showFileSavedToast(filename: string) {
+/* changes done by megnathan: Refactored showFileSavedToast to support fallback messaging and prevent premature 'Saved' notification. */
+function showFileSavedToast(filename: string, isFallback: boolean = false) {
   const isDark = document.documentElement.getAttribute("data-theme") !== "light";
 
   // Theme-aware colours
@@ -191,7 +197,13 @@ function showFileSavedToast(filename: string) {
     white-space: nowrap;
     backdrop-filter: blur(8px);
   `;
-  toast.innerHTML = `<span style="color:${accent};font-size:18px;">✓</span> <span>Saved as <strong style="color:${accent};">"${filename}"</strong></span>`;
+  
+  if (isFallback) {
+    toast.innerHTML = `<span style="color:${accent};font-size:18px;">ℹ</span> <span>Download started...</span>`;
+  } else {
+    toast.innerHTML = `<span style="color:${accent};font-size:18px;">✓</span> <span>Saved as <strong style="color:${accent};">"${filename}"</strong></span>`;
+  }
+  
   document.body.appendChild(toast);
 
   // Animate in

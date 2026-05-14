@@ -2,7 +2,8 @@
 
 import { useState, useRef, useEffect, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
-import { useRouter, useSearchParams } from "next/navigation";
+/* changes done by megnathan: Cleaned up unused imports */
+import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { useResponsive, getResponsivePieChartSize } from "./hooks/useResponsive";
@@ -16,7 +17,13 @@ import UpgradePlan from "./components/UpgradePlan";
 import ManageAccount from "./components/ManageAccount/ManageAccount";
 import WalkthroughPopup from "./components/WalkthroughPopup";
 import LandingSuggestedQueries from "./components/LandingSuggestedQueries";
-import { IconUser, IconMicrophone, IconPlayerPlay, IconPlayerPause, IconTrash, IconArrowUp, IconChartBar, IconList, IconLayoutGrid, IconMenu2, IconX, IconCrown, IconDotsVertical } from "@tabler/icons-react";
+/* changes done by megnathan: Cleaned up icon imports to avoid conflicts with local definitions */
+import { 
+  IconUser, IconMicrophone, IconPlayerPlay, IconPlayerPause, 
+  IconTrash, IconArrowUp, IconChartBar, IconList, 
+  IconLayoutGrid, IconMenu2, IconX, IconCrown, 
+  IconDotsVertical, IconCopy, IconCheck
+} from "@tabler/icons-react";
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface Message {
   role: "user" | "ai" | "error";
@@ -1056,6 +1063,14 @@ export default function Home() {
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [shareModalOpen, setShareModalOpen] = useState(false);
+  /* changes done by megnathan: Added share code states */
+  const [shareCode, setShareCode] = useState<string | null>(null);
+  const [isGeneratingCode, setIsGeneratingCode] = useState(false);
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [inputShareCode, setInputShareCode] = useState("");
+  const [isImporting, setIsImporting] = useState(false);
+  /* changes done by megnathan: Added share code copy feedback state */
+  const [shareCodeCopied, setShareCodeCopied] = useState(false);
   const [shareLink, setShareLink] = useState("");
   const [sessionMenuOpen, setSessionMenuOpen] = useState<string | null>(null);
   const [sessionMenuPos, setSessionMenuPos] = useState<{ top: number; left: number; placement?: 'above' | 'below'; buttonRectTop?: number; buttonRectBottom?: number } | null>(null);
@@ -1801,10 +1816,92 @@ export default function Home() {
       if (res.ok) {
         const link = `${window.location.origin}${window.location.pathname}?sharedSessionId=${sid}&owner=${userIdFromUrl ?? loggedInUser}`;
         setShareLink(link);
+        setShareCode(null); // Reset code when opening modal
         setShareModalOpen(true);
       }
     } catch (e) {
       console.error("Failed to share session:", e);
+    }
+  };
+
+  /* changes done by megnathan: Added share code generation handler (fixed username mismatch) */
+  const handleGenerateShareCode = async () => {
+    if (!sessionId) return;
+    setIsGeneratingCode(true);
+
+    // Use the actual userName (bcg) instead of clientName (poc)
+    const actualUserName = userIdFromUrl ?? localStorage.getItem("userName") ?? loggedInUser;
+
+    try {
+      const res = await fetch(`${baseUrl}/api/sessions/generate-share-code`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: sessionId,
+          userName: actualUserName
+        }),
+      });
+      const data = await res.json();
+      if (data.status === "ok") {
+        setShareCode(data.shareCode);
+      } else {
+        console.error("Server error generating code:", data.detail);
+        alert("Could not generate code: " + (data.detail || "Unknown error"));
+      }
+    } catch (e) {
+      console.error("Failed to generate share code:", e);
+    } finally {
+      setIsGeneratingCode(false);
+    }
+  };
+
+  /* changes done by megnathan: Added import by code handler (improved error logging) */
+  const handleImportByCode = async () => {
+    if (!inputShareCode || inputShareCode.length !== 5) {
+      alert("Please enter a valid 5-digit code.");
+      return;
+    }
+    setIsImporting(true);
+    const actualUserName = userIdFromUrl ?? localStorage.getItem("userName") ?? loggedInUser;
+
+    console.log(`[Import] Starting import for code: ${inputShareCode} | User: ${actualUserName}`);
+
+    try {
+      const res = await fetch(`${baseUrl}/api/sessions/import-by-code`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          shareCode: inputShareCode,
+          userName: actualUserName
+        }),
+      });
+      const data = await res.json();
+
+      if (data.status === "ok") {
+        console.log(`[Import] Success! New Session ID: ${data.newSessionId}`);
+        setImportModalOpen(false);
+        setInputShareCode("");
+
+        try {
+          console.log("[Import] Refreshing session list...");
+          await fetchSessions();
+
+          console.log(`[Import] Selecting new session: ${data.newSessionId}`);
+          switchSession(data.newSessionId);
+          console.log("[Import] Session selection triggered.");
+        } catch (innerError: any) {
+          console.error("[Import] Error during list refresh/selection:", innerError);
+          alert("Import was successful, but failed to load the new chat automatically. Please refresh the page.");
+        }
+      } else {
+        console.warn("[Import] Server returned error:", data.detail);
+        alert(data.detail || "Invalid code or import failed.");
+      }
+    } catch (e: any) {
+      console.error("[Import] Fatal error during fetch:", e);
+      alert(`An error occurred during import: ${e.message || "Unknown error"}`);
+    } finally {
+      setIsImporting(false);
     }
   };
 
@@ -2044,35 +2141,35 @@ export default function Home() {
     });
 
   // Fetch chat sessions list for sidebar (new at top, old at bottom)
-  useEffect(() => {
+  /* changes done by megnathan: Moved fetchSessions outside to make it accessible */
+  const fetchSessions = async () => {
     if (!authChecked || !loggedInUser) return;
+    try {
+      const res = await fetch(`${baseUrl}/api/session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userName: userIdFromUrl ?? loggedInUser, historyOnClick: false }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const fetched: ChatSession[] = (data?.sessions ?? []).map(
+        (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; is_pinned?: boolean; is_archived?: boolean }) => ({
+          id: s.session_id,
+          title: s.title || "Chat",
+          createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
+          updatedAt: s.updated_at ? new Date(s.updated_at).getTime() : undefined,
+          isPinned: s.is_pinned || false,
+          isArchived: s.is_archived || false,
+        })
+      );
+      setChatSessions(sortSessionsNewestFirst(fetched));
+    } catch (err) {
+      console.warn("Failed to fetch chat sessions:", err);
+      setChatSessions([]);
+    }
+  };
 
-    const fetchSessions = async () => {
-      try {
-        const res = await fetch(`${baseUrl}/api/session`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userName: userIdFromUrl ?? loggedInUser, historyOnClick: false }),
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        const fetched: ChatSession[] = (data?.sessions ?? []).map(
-          (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; is_pinned?: boolean; is_archived?: boolean }) => ({
-            id: s.session_id,
-            title: s.title || "Chat",
-            createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
-            updatedAt: s.updated_at ? new Date(s.updated_at).getTime() : undefined,
-            isPinned: s.is_pinned || false,
-            isArchived: s.is_archived || false,
-          })
-        );
-        setChatSessions(sortSessionsNewestFirst(fetched));
-      } catch (err) {
-        console.warn("Failed to fetch chat sessions:", err);
-        setChatSessions([]);
-      }
-    };
-
+  useEffect(() => {
     fetchSessions();
   }, [authChecked, loggedInUser]);
 
@@ -2930,10 +3027,20 @@ export default function Home() {
             {/* </div> */}
 
             {/* + New Chat Button */}
-            <div className="new-chat-container-top">
-              <button className="new-chat-btn" onClick={handleNewChat}>
+            <div className="new-chat-container-top" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <button className="new-chat-btn" onClick={handleNewChat} style={{ flex: 1 }}>
                 <IconChat width={16} height={16} />
                 <span>+ New Chat</span>
+              </button>
+
+              {/* changes done by megnathan: Added import via code menu button */}
+              <button
+                className="new-chat-btn"
+                onClick={() => setImportModalOpen(true)}
+                title="Import chat via code"
+                style={{ width: '40px', padding: '10px 0', justifyContent: 'center' }}
+              >
+                <span style={{ fontSize: '18px', fontWeight: 'bold' }}>...</span>
               </button>
             </div>
 
@@ -3838,8 +3945,11 @@ export default function Home() {
               }}>
                 <h3 style={{ margin: '0 0 8px 0', fontSize: '1.25rem', fontWeight: 600 }}>Share Chat</h3>
                 <p style={{ margin: '0 0 20px 0', fontSize: '0.875rem', color: 'var(--color-text-dim)' }}>
-                  Anyone with this link can view this conversation.
+                  Anyone with this link or code can view this conversation.
                 </p>
+
+                {/* Share Link Section */}
+                <div style={{ textAlign: 'left', marginBottom: '8px', fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-primary)' }}>SHARE LINK</div>
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: '8px',
                   background: 'rgba(0,0,0,0.2)', padding: '12px', borderRadius: '8px',
@@ -3863,6 +3973,50 @@ export default function Home() {
                     }}
                   >Copy</button>
                 </div>
+
+                {/* changes done by megnathan: Added Share via Code section with copy icon */}
+                <div style={{ textAlign: 'left', marginBottom: '8px', fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-primary)' }}>SHARE VIA CODE</div>
+                <div style={{
+                  background: 'rgba(0,0,0,0.2)', padding: '16px', borderRadius: '8px',
+                  border: '1px solid rgba(255,255,255,0.05)', marginBottom: '24px',
+                  display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'center'
+                }}>
+                  {shareCode ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
+                        <div style={{ fontSize: '24px', fontWeight: 800, letterSpacing: '4px', color: 'var(--color-primary)' }}>{shareCode}</div>
+                        <div style={{ fontSize: '10px', opacity: 0.6 }}>Give this 5-digit code to another user</div>
+                      </div>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(shareCode);
+                          setShareCodeCopied(true);
+                          setTimeout(() => setShareCodeCopied(false), 2000);
+                        }}
+                        style={{
+                          background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+                          borderRadius: '8px', padding: '8px', color: 'var(--color-primary)', cursor: 'pointer',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center'
+                        }}
+                        title="Copy Code"
+                      >
+                        {shareCodeCopied ? <IconCheck size={20} /> : <IconCopy size={20} />}
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={handleGenerateShareCode}
+                      disabled={isGeneratingCode}
+                      style={{
+                        background: 'transparent', border: '1px solid var(--color-primary)', borderRadius: '6px',
+                        padding: '8px 16px', color: 'var(--color-primary)', fontWeight: 600, cursor: 'pointer', fontSize: '0.875rem'
+                      }}
+                    >
+                      {isGeneratingCode ? "Generating..." : "Generate Share Code"}
+                    </button>
+                  )}
+                </div>
+
                 <button
                   onClick={() => setShareModalOpen(false)}
                   style={{
@@ -3870,6 +4024,73 @@ export default function Home() {
                     border: 'none', color: 'var(--color-text)', cursor: 'pointer', fontWeight: 500
                   }}
                 >Close</button>
+              </div>
+            </div>
+          )}
+
+          {/* changes done by megnathan: Added Import Modal */}
+          {importModalOpen && (
+            <div style={{
+              position: 'fixed', inset: 0, zIndex: 9999,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              backgroundColor: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)'
+            }}>
+              <div style={{
+                background: 'var(--color-bg-sidebar)', padding: '24px', borderRadius: '16px',
+                width: '90%', maxWidth: '400px', border: '1px solid rgba(255,255,255,0.1)',
+                boxShadow: '0 20px 25px -5px rgba(0,0,0,0.5)', textAlign: 'center'
+              }}>
+                <h3 style={{ margin: '0 0 8px 0', fontSize: '1.25rem', fontWeight: 600 }}>Import Chat via Code</h3>
+                <p style={{ margin: '0 0 20px 0', fontSize: '0.875rem', color: 'var(--color-text-dim)' }}>
+                  Enter the 5-digit code to add a shared chat to your history.
+                </p>
+
+                {/* changes done by megnathan: Refined import placeholder and font size */}
+                <div style={{ marginBottom: '24px' }}>
+                  <input
+                    type="text"
+                    maxLength={5}
+                    placeholder="Enter the code"
+                    className="import-code-input"
+                    value={inputShareCode}
+                    onChange={(e) => setInputShareCode(e.target.value.replace(/[^0-9]/g, ""))}
+                    style={{
+                      width: '100%', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: '8px', padding: '16px', color: 'var(--color-text)',
+                      fontSize: '24px', textAlign: 'center', fontWeight: 800, letterSpacing: '8px',
+                      outline: 'none'
+                    }}
+                  />
+                  <style jsx>{`
+                    .import-code-input::placeholder {
+                      font-size: 16px;
+                      letter-spacing: normal;
+                      font-weight: 500;
+                      opacity: 0.5;
+                    }
+                  `}</style>
+                </div>
+
+                <div style={{ display: 'flex', gap: '12px' }}>
+                  <button
+                    onClick={() => setImportModalOpen(false)}
+                    style={{
+                      flex: 1, padding: '12px', borderRadius: '8px', background: 'rgba(255,255,255,0.05)',
+                      border: 'none', color: 'var(--color-text)', cursor: 'pointer', fontWeight: 500
+                    }}
+                  >Cancel</button>
+                  <button
+                    onClick={handleImportByCode}
+                    disabled={isImporting || inputShareCode.length !== 5}
+                    style={{
+                      flex: 1, padding: '12px', borderRadius: '8px', background: 'var(--color-primary)',
+                      border: 'none', color: '#000', cursor: 'pointer', fontWeight: 700,
+                      opacity: (isImporting || inputShareCode.length !== 5) ? 0.5 : 1
+                    }}
+                  >
+                    {isImporting ? "Importing..." : "Add to My Chats"}
+                  </button>
+                </div>
               </div>
             </div>
           )}

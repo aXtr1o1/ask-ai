@@ -1117,6 +1117,31 @@ async def share_session_endpoint(payload: dict):
         raise HTTPException(status_code=404, detail="Chat session not found for this user")
     return {"status": "ok", "sessionId": session_id, "isPublic": is_public}
 
+#  changes done by megnathan: Added share code generation and import endpoints */
+@api_router.post("/sessions/generate-share-code")
+async def generate_share_code_endpoint(payload: dict):
+    session_id = str(payload.get("sessionId", "")).strip()
+    user_name = str(payload.get("userName", "")).strip()
+    if not session_id or not user_name:
+        raise HTTPException(status_code=400, detail="sessionId and userName are required")
+    from app.services.session_service import generate_share_code
+    code = await generate_share_code(session_id, user_name)
+    if not code:
+        raise HTTPException(status_code=500, detail="Failed to generate share code")
+    return {"status": "ok", "shareCode": code}
+
+@api_router.post("/sessions/import-by-code")
+async def import_by_code_endpoint(payload: dict):
+    share_code = str(payload.get("shareCode", "")).strip()
+    current_user = str(payload.get("userName", "")).strip()
+    if not share_code or not current_user:
+        raise HTTPException(status_code=400, detail="shareCode and userName are required")
+    from app.services.session_service import import_session_by_code
+    new_session_id = await import_session_by_code(share_code, current_user)
+    if not new_session_id:
+        raise HTTPException(status_code=404, detail="Invalid share code or failed to import")
+    return {"status": "ok", "newSessionId": new_session_id}
+
 @chatbot_app.get("/api/share/history")
 async def get_shared_history(sessionId: str, owner: str = None):
     from app.services.postgres_service import get_public_chat_history

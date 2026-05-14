@@ -94,6 +94,7 @@ const TableWithTile = React.memo(function TableWithTile({
   };
 
   // Download handler to export data as Excel with bold headers
+  /* changes done by megnathan: Updated handleDownload to show success toast only after file is actually saved or when download starts for fallback. */
   const handleDownload = async () => {
     const headers = detectedColumns;
     const htmlRows = rows.map(row =>
@@ -137,6 +138,7 @@ const TableWithTile = React.memo(function TableWithTile({
     const blob = new Blob([htmlContent], { type: 'application/vnd.ms-excel' });
 
     let savedName = "Nano data.xls";
+    let isFallback = false;
 
     // Try to use File System Access API (Save As dialog)
     if (typeof window !== "undefined" && "showSaveFilePicker" in window) {
@@ -152,6 +154,7 @@ const TableWithTile = React.memo(function TableWithTile({
         await writable.write(blob);
         await writable.close();
         savedName = handle.name;
+        isFallback = false;
       } catch (err) {
         // If user cancelled, just return
         if ((err as Error).name === 'AbortError') return;
@@ -165,6 +168,7 @@ const TableWithTile = React.memo(function TableWithTile({
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
+        isFallback = true;
       }
     } else {
       // Fallback for browsers without File System Access API
@@ -176,6 +180,7 @@ const TableWithTile = React.memo(function TableWithTile({
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+      isFallback = true;
     }
 
     // Show toast notification
@@ -210,7 +215,14 @@ const TableWithTile = React.memo(function TableWithTile({
       white-space: nowrap;
       backdrop-filter: blur(8px);
     `;
-    toast.innerHTML = `<span style="color:${accent};font-size:18px;">✓</span> <span>Saved as <strong style="color:${accent};">"${savedName}"</strong></span>`;
+    
+    /* changes done by megnathan: Vary toast message based on whether save is confirmed or just started */
+    if (isFallback) {
+      toast.innerHTML = `<span style="color:${accent};font-size:18px;">ℹ</span> <span>Download started...</span>`;
+    } else {
+      toast.innerHTML = `<span style="color:${accent};font-size:18px;">✓</span> <span>Saved as <strong style="color:${accent};">"${savedName}"</strong></span>`;
+    }
+
     document.body.appendChild(toast);
     requestAnimationFrame(() => {
       toast.style.opacity = "1";
@@ -222,6 +234,7 @@ const TableWithTile = React.memo(function TableWithTile({
       setTimeout(() => document.body.removeChild(toast), 350);
     }, 3000);
   };
+
 
   // Toggle container style: absolute on larger screens, inline/static on mobile
   const toggleContainerStyle = {
