@@ -17,6 +17,9 @@ import UpgradePlan from "./components/UpgradePlan";
 import ManageAccount from "./components/ManageAccount/ManageAccount";
 import WalkthroughPopup from "./components/WalkthroughPopup";
 import LandingSuggestedQueries from "./components/LandingSuggestedQueries";
+/* changes done by megnathan: Added imports for the new Ghost Completion feature */
+import { useGhostInputCompletion } from "./hooks/useGhostInputCompletion";
+import { recordPromptForGhostHistory, ghostPromptHistoryStorageKey } from "./lib/ghostInputCompletion";
 /* changes done by megnathan: Cleaned up icon imports to avoid conflicts with local definitions */
 import { 
   IconUser, IconMicrophone, IconPlayerPlay, IconPlayerPause, 
@@ -1069,6 +1072,8 @@ export default function Home() {
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [inputShareCode, setInputShareCode] = useState("");
   const [isImporting, setIsImporting] = useState(false);
+  /* changes done by megnathan: Track which session is actually being shared */
+  const [sessionToShare, setSessionToShare] = useState<string | null>(null);
   /* changes done by megnathan: Added share code copy feedback state */
   const [shareCodeCopied, setShareCodeCopied] = useState(false);
   const [shareLink, setShareLink] = useState("");
@@ -1811,7 +1816,15 @@ export default function Home() {
     }
   };
 
+  /* changes done by megnathan: Instant modal opening to remove lag */
+  const [isSharing, setIsSharing] = useState(false);
   const handleShareSession = async (sid: string) => {
+    setSessionToShare(sid);
+    setShareCode(null);
+    setShareLink("");
+    setShareModalOpen(true); // Open modal immediately
+    setIsSharing(true);      // Show loading inside modal
+    
     try {
       // 1. Force save the current history to DB first
       const currentMsgs = sessionMessagesRef.current.get(sid) || messages;
@@ -1832,20 +1845,21 @@ export default function Home() {
       if (res.ok) {
         const link = `${window.location.origin}${window.location.pathname}?sharedSessionId=${sid}&owner=${userIdFromUrl ?? loggedInUser}`;
         setShareLink(link);
-        setShareCode(null); // Reset code when opening modal
-        setShareModalOpen(true);
       }
     } catch (e) {
       console.error("Failed to share session:", e);
+    } finally {
+      setIsSharing(false);
     }
   };
 
   /* changes done by megnathan: Added share code generation handler (fixed username mismatch) */
+  /* changes done by megnathan: Use target session ID for code generation */
   const handleGenerateShareCode = async () => {
-    if (!sessionId) return;
+    const sid = sessionToShare || sessionId;
+    if (!sid) return;
     setIsGeneratingCode(true);
 
-    // Use the actual userName (bcg) instead of clientName (poc)
     const actualUserName = userIdFromUrl ?? localStorage.getItem("userName") ?? loggedInUser;
 
     try {
@@ -1853,7 +1867,7 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          sessionId: sessionId,
+          sessionId: sid,
           userName: actualUserName
         }),
       });
@@ -2675,7 +2689,9 @@ export default function Home() {
       sessionId,
       timestamp: Date.now()
     }));
-  };  // ← THIS CLOSING BRACE WAS MISSING
+
+    setIsLoading(true);
+  }; 
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Tab" && ghostSuffixStrRef.current) {
@@ -2765,33 +2781,48 @@ export default function Home() {
                 </span>
               </div>
             )}
-            <textarea
-              ref={inputRef}
-              className="main-input"
-              defaultValue={input}
-              onChange={(e) => {
-                // Update ref immediately (no re-render)
-                rawInputRef.current = e.target.value;
-                // Resize based on DOM measurements
-                resizeTA();
+            {/* changes done by megnathan: Used correct CSS classes for perfect Ghost Text alignment */}
+            <div className="main-input-stack">
+              <div className="main-input-ghost-mirror">
+                <span ref={ghostUserSpanRef} className="ghost-mirror-user"></span>
+                <span ref={ghostSuffixSpanRef} className="ghost-mirror-suffix"></span>
+              </div>
+              <textarea
+                ref={inputRef}
+                className="main-input"
+                defaultValue={input}
+                onCompositionStart={() => { isComposingRef.current = true; }}
+                onCompositionEnd={(e) => { 
+                  isComposingRef.current = false; 
+                  syncGhostUserMirror();
+                  applyGhostSuffixFromInput();
+                }}
+                onChange={(e) => {
+                  // Update ref immediately (no re-render)
+                  rawInputRef.current = e.target.value;
+                  // Resize based on DOM measurements
+                  resizeTA();
+                  syncGhostUserMirror();
+                  applyGhostSuffixFromInput();
 
-                // Debounce updating the heavier `input` state
-                if (inputDebounceRef.current) {
-                  clearTimeout(inputDebounceRef.current);
-                  inputDebounceRef.current = null;
+                  // Debounce updating the heavier `input` state
+                  if (inputDebounceRef.current) {
+                    clearTimeout(inputDebounceRef.current);
+                    inputDebounceRef.current = null;
+                  }
+                  inputDebounceRef.current = window.setTimeout(() => {
+                    setInput(rawInputRef.current);
+                    inputDebounceRef.current = null;
+                  }, DEBOUNCE_MS);
+                }}
+                onKeyDown={handleKeyDown}
+                disabled={isLoading || wsConnectionState !== "connected" || isGuestOnShared}
+                placeholder={
+                  isGuestOnShared ? "" : (wsConnectionState === "connected" ? "Ask Anything..." : "Waiting for connection…")
                 }
-                inputDebounceRef.current = window.setTimeout(() => {
-                  setInput(rawInputRef.current);
-                  inputDebounceRef.current = null;
-                }, DEBOUNCE_MS);
-              }}
-              onKeyDown={handleKeyDown}
-              disabled={isLoading || wsConnectionState !== "connected" || isGuestOnShared}
-              placeholder={
-                isGuestOnShared ? "" : (wsConnectionState === "connected" ? "Ask Anything..." : "Waiting for connection…")
-              }
-              rows={1}
-            />
+                rows={1}
+              />
+            </div>
             <VoiceMicButton
               forwardedRef={voiceRecorder.micButtonRef}
               onClick={voiceRecorder.toggleRecording}
@@ -3995,19 +4026,22 @@ export default function Home() {
                 }}>
                   <input
                     readOnly
-                    value={shareLink}
+                    value={isSharing ? "Generating link..." : shareLink}
                     style={{
-                      flex: 1, background: 'transparent', border: 'none', color: 'var(--color-text)',
-                      fontSize: '0.875rem', outline: 'none', cursor: 'default'
+                      flex: 1, background: 'transparent', border: 'none', color: isSharing ? 'var(--color-text-dim)' : 'var(--color-text)',
+                      fontSize: '0.875rem', outline: 'none', cursor: 'default',
+                      fontStyle: isSharing ? 'italic' : 'normal'
                     }}
                   />
                   <button
                     onClick={() => {
-                      navigator.clipboard.writeText(shareLink);
+                      if (!isSharing && shareLink) navigator.clipboard.writeText(shareLink);
                     }}
+                    disabled={isSharing || !shareLink}
                     style={{
                       background: 'var(--color-primary)', border: 'none', borderRadius: '6px',
-                      padding: '6px 12px', color: '#000', fontWeight: 600, cursor: 'pointer', fontSize: '0.75rem'
+                      padding: '6px 12px', color: '#000', fontWeight: 600, cursor: 'pointer', fontSize: '0.75rem',
+                      opacity: (isSharing || !shareLink) ? 0.5 : 1
                     }}
                   >Copy</button>
                 </div>
