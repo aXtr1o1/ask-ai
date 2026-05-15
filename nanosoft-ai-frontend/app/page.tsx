@@ -2,7 +2,8 @@
 
 import { useState, useRef, useEffect, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
-import { useRouter, useSearchParams } from "next/navigation";
+/* changes done by megnathan: Cleaned up unused imports */
+import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { useResponsive, getResponsivePieChartSize } from "./hooks/useResponsive";
@@ -17,7 +18,16 @@ import ManageAccount from "./components/ManageAccount/ManageAccount";
 import WalkthroughPopup from "./components/WalkthroughPopup";
 import LandingSuggestedQueries from "./components/LandingSuggestedQueries";
 import GroupsChat from "./components/GroupsChat";
-import { IconUser, IconMicrophone, IconPlayerPlay, IconPlayerPause, IconTrash, IconArrowUp, IconChartBar, IconList, IconLayoutGrid, IconMenu2, IconX, IconCrown, IconDotsVertical, IconBulb, IconFolder } from "@tabler/icons-react";
+/* changes done by megnathan: Added imports for the new Ghost Completion feature */
+import { useGhostInputCompletion } from "./hooks/useGhostInputCompletion";
+import { recordPromptForGhostHistory, ghostPromptHistoryStorageKey } from "./lib/ghostInputCompletion";
+/* changes done by megnathan: Cleaned up icon imports to avoid conflicts with local definitions */
+import { 
+  IconUser, IconMicrophone, IconPlayerPlay, IconPlayerPause, 
+  IconTrash, IconArrowUp, IconChartBar, IconList, 
+  IconLayoutGrid, IconMenu2, IconX, IconCrown, 
+  IconDotsVertical, IconCopy, IconCheck,IconBulb, IconFolder
+} from "@tabler/icons-react";
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface Message {
   role: "user" | "ai" | "error";
@@ -1060,6 +1070,16 @@ export default function Home() {
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [shareModalOpen, setShareModalOpen] = useState(false);
+  /* changes done by megnathan: Added share code states */
+  const [shareCode, setShareCode] = useState<string | null>(null);
+  const [isGeneratingCode, setIsGeneratingCode] = useState(false);
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [inputShareCode, setInputShareCode] = useState("");
+  const [isImporting, setIsImporting] = useState(false);
+  /* changes done by megnathan: Track which session is actually being shared */
+  const [sessionToShare, setSessionToShare] = useState<string | null>(null);
+  /* changes done by megnathan: Added share code copy feedback state */
+  const [shareCodeCopied, setShareCodeCopied] = useState(false);
   const [shareLink, setShareLink] = useState("");
   const [sessionMenuOpen, setSessionMenuOpen] = useState<string | null>(null);
   const [sessionMenuPos, setSessionMenuPos] = useState<{ top: number; left: number; placement?: 'above' | 'below'; buttonRectTop?: number; buttonRectBottom?: number } | null>(null);
@@ -1159,6 +1179,22 @@ export default function Home() {
   // ─── Refs (declare early for use in hooks) ────────────────────────────────
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const {
+    ghostUserSpanRef,
+    ghostSuffixSpanRef,
+    ghostSuffixStrRef,
+    isComposingRef,
+    clearGhostCompletion,
+    syncGhostUserMirror,
+    applyGhostSuffixFromInput,
+  } = useGhostInputCompletion(
+    messages,
+    loggedInUser,
+    rawInputRef,
+    inputRef,
+    isLoading,
+    wsConnectionState,
+  );
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -1825,7 +1861,15 @@ export default function Home() {
     }
   };
 
+  /* changes done by megnathan: Instant modal opening to remove lag */
+  const [isSharing, setIsSharing] = useState(false);
   const handleShareSession = async (sid: string) => {
+    setSessionToShare(sid);
+    setShareCode(null);
+    setShareLink("");
+    setShareModalOpen(true); // Open modal immediately
+    setIsSharing(true);      // Show loading inside modal
+    
     try {
       // 1. Force save the current history to DB first
       const currentMsgs = sessionMessagesRef.current.get(sid) || messages;
@@ -1846,10 +1890,93 @@ export default function Home() {
       if (res.ok) {
         const link = `${window.location.origin}${window.location.pathname}?sharedSessionId=${sid}&owner=${userIdFromUrl ?? loggedInUser}`;
         setShareLink(link);
-        setShareModalOpen(true);
       }
     } catch (e) {
       console.error("Failed to share session:", e);
+    } finally {
+      setIsSharing(false);
+    }
+  };
+
+  /* changes done by megnathan: Added share code generation handler (fixed username mismatch) */
+  /* changes done by megnathan: Use target session ID for code generation */
+  const handleGenerateShareCode = async () => {
+    const sid = sessionToShare || sessionId;
+    if (!sid) return;
+    setIsGeneratingCode(true);
+
+    const actualUserName = userIdFromUrl ?? localStorage.getItem("userName") ?? loggedInUser;
+
+    try {
+      const res = await fetch(`${baseUrl}/api/sessions/generate-share-code`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: sid,
+          userName: actualUserName
+        }),
+      });
+      const data = await res.json();
+      if (data.status === "ok") {
+        setShareCode(data.shareCode);
+      } else {
+        console.error("Server error generating code:", data.detail);
+        alert("Could not generate code: " + (data.detail || "Unknown error"));
+      }
+    } catch (e) {
+      console.error("Failed to generate share code:", e);
+    } finally {
+      setIsGeneratingCode(false);
+    }
+  };
+
+  /* changes done by megnathan: Added import by code handler (improved error logging) */
+  const handleImportByCode = async () => {
+    if (!inputShareCode || inputShareCode.length !== 5) {
+      alert("Please enter a valid 5-digit code.");
+      return;
+    }
+    setIsImporting(true);
+    const actualUserName = userIdFromUrl ?? localStorage.getItem("userName") ?? loggedInUser;
+
+    console.log(`[Import] Starting import for code: ${inputShareCode} | User: ${actualUserName}`);
+
+    try {
+      const res = await fetch(`${baseUrl}/api/sessions/import-by-code`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          shareCode: inputShareCode,
+          userName: actualUserName
+        }),
+      });
+      const data = await res.json();
+
+      if (data.status === "ok") {
+        console.log(`[Import] Success! New Session ID: ${data.newSessionId}`);
+        setImportModalOpen(false);
+        setInputShareCode("");
+
+        try {
+          console.log("[Import] Refreshing session list...");
+          await fetchSessions();
+
+          console.log(`[Import] Selecting new session: ${data.newSessionId}`);
+          switchSession(data.newSessionId);
+          console.log("[Import] Session selection triggered.");
+        } catch (innerError: any) {
+          console.error("[Import] Error during list refresh/selection:", innerError);
+          alert("Import was successful, but failed to load the new chat automatically. Please refresh the page.");
+        }
+      } else {
+        console.warn("[Import] Server returned error:", data.detail);
+        alert(data.detail || "Invalid code or import failed.");
+      }
+    } catch (e: any) {
+      console.error("[Import] Fatal error during fetch:", e);
+      alert(`An error occurred during import: ${e.message || "Unknown error"}`);
+    } finally {
+      setIsImporting(false);
     }
   };
 
@@ -2089,48 +2216,47 @@ export default function Home() {
     });
 
   // Fetch chat sessions list for sidebar (new at top, old at bottom)
-  useEffect(() => {
-    if (!authChecked || !loggedInUser) return;
+  /* changes done by megnathan: Moved fetchSessions outside to make it accessible */
+  const fetchSessions = async () => {
+    try {
+      const res = await fetch(`${baseUrl}/api/session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userName: userIdFromUrl ?? loggedInUser, historyOnClick: false }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const fetched: ChatSession[] = (data?.sessions ?? []).map(
+        (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; is_pinned?: boolean; is_archived?: boolean; group_name?: string }) => ({
+          id: s.session_id,
+          title: s.title || "Chat",
+          createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
+          updatedAt: s.updated_at ? new Date(s.updated_at).getTime() : undefined,
+          isPinned: s.is_pinned || false,
+          isArchived: s.is_archived || false,
+          group_name: s.group_name,
+        })
+      );
+      setChatSessions(sortSessionsNewestFirst(fetched));
 
-    const fetchSessions = async () => {
-      try {
-        const res = await fetch(`${baseUrl}/api/session`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userName: userIdFromUrl ?? loggedInUser, historyOnClick: false }),
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        const fetched: ChatSession[] = (data?.sessions ?? []).map(
-          (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; is_pinned?: boolean; is_archived?: boolean; group_name?: string }) => ({
-            id: s.session_id,
-            title: s.title || "Chat",
-            createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
-            updatedAt: s.updated_at ? new Date(s.updated_at).getTime() : undefined,
-            isPinned: s.is_pinned || false,
-            isArchived: s.is_archived || false,
-            group_name: s.group_name,
-          })
-        );
-        setChatSessions(sortSessionsNewestFirst(fetched));
-
-        // Derive groups at the same time as sessions — no extra render cycle
-        const uniqueGroupNames = Array.from(new Set(fetched.map(s => s.group_name).filter(Boolean))) as string[];
-        if (uniqueGroupNames.length > 0) {
-          setGroups(uniqueGroupNames.map(name => ({
-            id: name,
-            name,
-            description: "Custom group",
-            chatCount: fetched.filter(s => s.group_name === name).length,
-            updatedAt: new Date().toLocaleDateString(),
-          })));
-        }
-      } catch (err) {
-        console.warn("Failed to fetch chat sessions:", err);
-        setChatSessions([]);
+      // Derive groups at the same time as sessions — no extra render cycle
+      const uniqueGroupNames = Array.from(new Set(fetched.map(s => s.group_name).filter(Boolean))) as string[];
+      if (uniqueGroupNames.length > 0) {
+        setGroups(uniqueGroupNames.map(name => ({
+          id: name,
+          name,
+          description: "Custom group",
+          chatCount: fetched.filter(s => s.group_name === name).length,
+          updatedAt: new Date().toLocaleDateString(),
+        })));
       }
-    };
+    } catch (err) {
+      console.warn("Failed to fetch chat sessions:", err);
+      setChatSessions([]);
+    }
+  };
 
+  useEffect(() => {
     fetchSessions();
   }, [authChecked, loggedInUser]);
 
@@ -2352,12 +2478,13 @@ export default function Home() {
         if (!res.ok) return;
         const data = await res.json();
         const fetched: ChatSession[] = (data?.sessions ?? []).map(
-          (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; group_name?: string }) => ({
+          (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; group_name?: string; is_pinned?: boolean; is_archived?: boolean }) => ({
             id: s.session_id,
             title: s.title || "Chat",
             createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
             updatedAt: s.updated_at ? new Date(s.updated_at).getTime() : undefined,
-            group_name: s.group_name,
+            isPinned: s.is_pinned || false,
+            isArchived: s.is_archived || false,
           })
         );
         setChatSessions(prev => {
@@ -2571,6 +2698,7 @@ export default function Home() {
   const sendMessage = () => {
     const domVal = inputRef.current?.value ?? "";
     if (!domVal.trim() || isLoading) return;
+    clearGhostCompletion();
     const userText = domVal.trim();
 
     const ws = wsRef.current;
@@ -2580,6 +2708,8 @@ export default function Home() {
       setMessages(prev => [...prev, { role: "error", text: "Still connecting. Please wait." }]);
       return;
     }
+
+    recordPromptForGhostHistory(ghostPromptHistoryStorageKey(loggedInUser), userText);
 
     // Ensure capsule exists and move this session to top when user types (content changed)
     const now = Date.now();
@@ -2612,6 +2742,7 @@ export default function Home() {
     if (inputRef.current) inputRef.current.value = "";
     rawInputRef.current = "";
     setInput("");
+    syncGhostUserMirror();
     setIsLoading(true);
     accRef.current = "";
 
@@ -2629,9 +2760,29 @@ export default function Home() {
       group_name: selectedGroupName,
       timestamp: Date.now()
     }));
-  };  // ← THIS CLOSING BRACE WAS MISSING
+
+    setIsLoading(true);
+  }; 
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Tab" && ghostSuffixStrRef.current) {
+      e.preventDefault();
+      const ta = e.currentTarget;
+      const ghost = ghostSuffixStrRef.current;
+      ta.value = ta.value + ghost;
+      rawInputRef.current = ta.value;
+      ghostSuffixStrRef.current = "";
+      if (ghostSuffixSpanRef.current) ghostSuffixSpanRef.current.textContent = "";
+      resizeTA();
+      syncGhostUserMirror();
+      if (inputDebounceRef.current) {
+        window.clearTimeout(inputDebounceRef.current);
+        inputDebounceRef.current = null;
+      }
+      setInput(ta.value);
+      applyGhostSuffixFromInput();
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   };
 
@@ -2642,128 +2793,172 @@ export default function Home() {
   const isMobileHeaderVisible = responsive.isMobile && !sidebarOpen && !showUpgradePlan && !showManageAccount;
 
   /** Chat input + disclaimer; `landing` = centered column on empty state before first message */
-  const renderChatInputFooter = (variant: "landing" | "default") => (
-    <div
-      className={
-        variant === "landing" ? "input-footer input-footer--start" : "input-footer"
-      }
-    >
-      {voiceRecorder.isRecording && (
-        <div className={`voice-recording-overlay${voiceRecorder.closingRecording ? " closing" : ""}`}>
-          <RecordingInterface
-            recordingTime={voiceRecorder.recordingTime}
-            onCancel={voiceRecorder.cancelRecording}
-            formatTime={voiceRecorder.formatTime}
+  const renderChatInputFooter = (variant: "landing" | "default") => {
+    const isGuestOnShared = !loggedInUser && typeof window !== "undefined" && !!new URLSearchParams(window.location.search).get("sharedSessionId");
+
+    return (
+      <div
+        className={
+          variant === "landing" ? "input-footer input-footer--start" : "input-footer"
+        }
+      >
+        {voiceRecorder.isRecording && (
+          <div className={`voice-recording-overlay${voiceRecorder.closingRecording ? " closing" : ""}`}>
+            <RecordingInterface
+              recordingTime={voiceRecorder.recordingTime}
+              onCancel={voiceRecorder.cancelRecording}
+              formatTime={voiceRecorder.formatTime}
+            />
+          </div>
+        )}
+
+        {voiceRecorder.recordedAudioBlob ? (
+          <VoicePreviewBar
+            isPlaying={voiceRecorder.isPlaying}
+            playbackTime={voiceRecorder.playbackTime}
+            totalDuration={voiceRecorder.totalDuration}
+            displayTimeText={voiceRecorder.displayTimeText}
+            onTogglePlayback={voiceRecorder.togglePlayback}
+            onDelete={voiceRecorder.deleteRecording}
+            onSend={voiceRecorder.sendVoiceMessage}
+            isLoading={isLoading}
+            wsConnectionState={wsConnectionState}
           />
-        </div>
-      )}
+        ) : (
+          <div className="input-wrapper" style={{ position: 'relative' }}>
+            {/* changes done by megnathan: Added blur overlay and restriction message for guests on shared chats */}
+            {isGuestOnShared && (
+              <div style={{
+                position: 'absolute',
+                inset: 0,
+                background: 'rgba(0, 0, 0, 0.45)',
+                backdropFilter: 'blur(8px)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                zIndex: 100,
+                borderRadius: 10,
+                padding: '0 16px',
+                textAlign: 'center'
+              }}>
+                <span style={{
+                  color: '#fff',
+                  fontSize: responsive.isMobile ? '11px' : '13px',
+                  fontWeight: 500,
+                  lineHeight: 1.4,
+                  textShadow: '0 1px 2px rgba(0,0,0,0.5)'
+                }}>
+                  Please login through SmartFM to continue the chat for having the real-time data updates regarding the facility management.
+                </span>
+              </div>
+            )}
+            {/* changes done by megnathan: Used correct CSS classes for perfect Ghost Text alignment */}
+            <div className="main-input-stack">
+              <div className="main-input-ghost-mirror">
+                <span ref={ghostUserSpanRef} className="ghost-mirror-user"></span>
+                <span ref={ghostSuffixSpanRef} className="ghost-mirror-suffix"></span>
+              </div>
+              <textarea
+                ref={inputRef}
+                className="main-input"
+                defaultValue={input}
+                onCompositionStart={() => { isComposingRef.current = true; }}
+                onCompositionEnd={(e) => { 
+                  isComposingRef.current = false; 
+                  syncGhostUserMirror();
+                  applyGhostSuffixFromInput();
+                }}
+                onChange={(e) => {
+                  // Update ref immediately (no re-render)
+                  rawInputRef.current = e.target.value;
+                  // Resize based on DOM measurements
+                  resizeTA();
+                  syncGhostUserMirror();
+                  applyGhostSuffixFromInput();
 
-      {voiceRecorder.recordedAudioBlob ? (
-        <VoicePreviewBar
-          isPlaying={voiceRecorder.isPlaying}
-          playbackTime={voiceRecorder.playbackTime}
-          totalDuration={voiceRecorder.totalDuration}
-          displayTimeText={voiceRecorder.displayTimeText}
-          onTogglePlayback={voiceRecorder.togglePlayback}
-          onDelete={voiceRecorder.deleteRecording}
-          onSend={voiceRecorder.sendVoiceMessage}
-          isLoading={isLoading}
-          wsConnectionState={wsConnectionState}
-        />
-      ) : (
-        <div className="input-wrapper">
-          <textarea
-            ref={inputRef}
-            className="main-input"
-            defaultValue={input}
-            onChange={(e) => {
-              // Update ref immediately (no re-render)
-              rawInputRef.current = e.target.value;
-              // Resize based on DOM measurements
-              resizeTA();
-
-              // Debounce updating the heavier `input` state
-              if (inputDebounceRef.current) {
-                clearTimeout(inputDebounceRef.current);
-                inputDebounceRef.current = null;
+                  // Debounce updating the heavier `input` state
+                  if (inputDebounceRef.current) {
+                    clearTimeout(inputDebounceRef.current);
+                    inputDebounceRef.current = null;
+                  }
+                  inputDebounceRef.current = window.setTimeout(() => {
+                    setInput(rawInputRef.current);
+                    inputDebounceRef.current = null;
+                  }, DEBOUNCE_MS);
+                }}
+                onKeyDown={handleKeyDown}
+                disabled={isLoading || wsConnectionState !== "connected" || isGuestOnShared}
+                placeholder={
+                  isGuestOnShared ? "" : (wsConnectionState === "connected" ? "Ask Anything..." : "Waiting for connection…")
+                }
+                rows={1}
+              />
+            </div>
+            <VoiceMicButton
+              forwardedRef={voiceRecorder.micButtonRef}
+              onClick={voiceRecorder.toggleRecording}
+              disabled={
+                isLoading ||
+                wsConnectionState !== "connected" ||
+                voiceRecorder.recordedAudioBlob !== null ||
+                isGuestOnShared
               }
-              inputDebounceRef.current = window.setTimeout(() => {
-                setInput(rawInputRef.current);
-                inputDebounceRef.current = null;
-              }, DEBOUNCE_MS);
+            />
+            <button
+              onClick={() => setIsGraphMode((p) => !p)}
+              title={isGraphMode ? "Graph mode ON — click to turn off" : "Click for graph output"}
+              style={{
+                background: isGraphMode
+                  ? "linear-gradient(135deg, #d4af37, #f5c249)"
+                  : "transparent",
+                border: isGraphMode
+                  ? "1px solid #d4af37"
+                  : "1px solid rgba(255,255,255,0.15)",
+                borderRadius: 8,
+                padding: "6px 8px",
+                cursor: "pointer",
+                color: isGraphMode ? "#000" : "#9CA3AF",
+                transition: "all 0.2s ease",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <IconChartBar size={18} stroke={1.5} />
+            </button>
+            <button
+              className="send-btn"
+              onClick={sendMessage}
+              disabled={isLoading || wsConnectionState !== "connected" || !(inputRef.current?.value ?? "").trim() || isGuestOnShared}
+            >
+              <IconArrowUp size={16} color="white" stroke={2} />
+            </button>
+          </div>
+        )}
+        {variant === "landing" && (
+          <LandingSuggestedQueries
+            onSelect={(q) => {
+              if (inputDebounceRef.current) { clearTimeout(inputDebounceRef.current); inputDebounceRef.current = null; }
+              if (inputRef.current) {
+                inputRef.current.value = q;
+              }
+              rawInputRef.current = q;
+              setInput(q);
+              requestAnimationFrame(() => inputRef.current?.focus());
             }}
-            onKeyDown={handleKeyDown}
-            disabled={isLoading || wsConnectionState !== "connected"}
-            placeholder={
-              wsConnectionState === "connected" ? "Ask Anything..." : "Waiting for connection…"
-            }
-            rows={1}
-          />
-          <VoiceMicButton
-            forwardedRef={voiceRecorder.micButtonRef}
-            onClick={voiceRecorder.toggleRecording}
             disabled={
               isLoading ||
               wsConnectionState !== "connected" ||
-              voiceRecorder.recordedAudioBlob !== null
+              voiceRecorder.isRecording ||
+              !!voiceRecorder.recordedAudioBlob
             }
           />
-          <button
-            onClick={() => setIsGraphMode((p) => !p)}
-            title={isGraphMode ? "Graph mode ON — click to turn off" : "Click for graph output"}
-            style={{
-              background: isGraphMode
-                ? "linear-gradient(135deg, #d4af37, #f5c249)"
-                : "transparent",
-              border: isGraphMode
-                ? "1px solid #d4af37"
-                : "1px solid rgba(255,255,255,0.15)",
-              borderRadius: 8,
-              padding: "6px 8px",
-              cursor: "pointer",
-              color: isGraphMode ? "#000" : "#9CA3AF",
-              transition: "all 0.2s ease",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <IconChartBar size={18} stroke={1.5} />
-          </button>
-          <button
-            className="send-btn"
-            onClick={sendMessage}
-            disabled={isLoading || wsConnectionState !== "connected" || !(inputRef.current?.value ?? "").trim()}
-          >
-            <IconArrowUp size={16} color="white" stroke={2} />
-          </button>
-        </div>
-      )}
-      {variant === "landing" && (
-        <LandingSuggestedQueries
-          onSelect={(q) => {
-            if (inputDebounceRef.current) { clearTimeout(inputDebounceRef.current); inputDebounceRef.current = null; }
-            if (inputRef.current) {
-              inputRef.current.value = q;
-            }
-            rawInputRef.current = q;
-            setInput(q);
-            requestAnimationFrame(() => inputRef.current?.focus());
-          }}
-          disabled={
-            isLoading ||
-            wsConnectionState !== "connected" ||
-            voiceRecorder.isRecording ||
-            !!voiceRecorder.recordedAudioBlob
-          }
-        />
-      )}
-      <p className="footer-disclaimer">
-      </p>
-    </div>
-  );
-
-
+        )}
+        <p className="footer-disclaimer">
+        </p>
+      </div>
+    );
+  };
 
   if (!authChecked) {
     return (
@@ -2972,10 +3167,20 @@ export default function Home() {
             {/* </div> */}
 
             {/* + New Chat Button */}
-            <div className="new-chat-container-top">
-              <button className="new-chat-btn" onClick={handleNewChat}>
+            <div className="new-chat-container-top" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <button className="new-chat-btn" onClick={handleNewChat} style={{ flex: 1 }}>
                 <IconChat width={16} height={16} />
                 <span>+ New Chat</span>
+              </button>
+
+              {/* changes done by megnathan: Added import via code menu button */}
+              <button
+                className="new-chat-btn"
+                onClick={() => setImportModalOpen(true)}
+                title="Import chat via code"
+                style={{ width: '40px', padding: '10px 0', justifyContent: 'center' }}
+              >
+                <span style={{ fontSize: '18px', fontWeight: 'bold' }}>...</span>
               </button>
             </div>
 
@@ -3969,8 +4174,11 @@ export default function Home() {
               }}>
                 <h3 style={{ margin: '0 0 8px 0', fontSize: '1.25rem', fontWeight: 600 }}>Share Chat</h3>
                 <p style={{ margin: '0 0 20px 0', fontSize: '0.875rem', color: 'var(--color-text-dim)' }}>
-                  Anyone with this link can view this conversation.
+                  Anyone with this link or code can view this conversation.
                 </p>
+
+                {/* Share Link Section */}
+                <div style={{ textAlign: 'left', marginBottom: '8px', fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-primary)' }}>SHARE LINK</div>
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: '8px',
                   background: 'rgba(0,0,0,0.2)', padding: '12px', borderRadius: '8px',
@@ -3978,22 +4186,69 @@ export default function Home() {
                 }}>
                   <input
                     readOnly
-                    value={shareLink}
+                    value={isSharing ? "Generating link..." : shareLink}
                     style={{
-                      flex: 1, background: 'transparent', border: 'none', color: 'var(--color-text)',
-                      fontSize: '0.875rem', outline: 'none', cursor: 'default'
+                      flex: 1, background: 'transparent', border: 'none', color: isSharing ? 'var(--color-text-dim)' : 'var(--color-text)',
+                      fontSize: '0.875rem', outline: 'none', cursor: 'default',
+                      fontStyle: isSharing ? 'italic' : 'normal'
                     }}
                   />
                   <button
                     onClick={() => {
-                      navigator.clipboard.writeText(shareLink);
+                      if (!isSharing && shareLink) navigator.clipboard.writeText(shareLink);
                     }}
+                    disabled={isSharing || !shareLink}
                     style={{
                       background: 'var(--color-primary)', border: 'none', borderRadius: '6px',
-                      padding: '6px 12px', color: '#000', fontWeight: 600, cursor: 'pointer', fontSize: '0.75rem'
+                      padding: '6px 12px', color: '#000', fontWeight: 600, cursor: 'pointer', fontSize: '0.75rem',
+                      opacity: (isSharing || !shareLink) ? 0.5 : 1
                     }}
                   >Copy</button>
                 </div>
+
+                {/* changes done by megnathan: Added Share via Code section with copy icon */}
+                <div style={{ textAlign: 'left', marginBottom: '8px', fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-primary)' }}>SHARE VIA CODE</div>
+                <div style={{
+                  background: 'rgba(0,0,0,0.2)', padding: '16px', borderRadius: '8px',
+                  border: '1px solid rgba(255,255,255,0.05)', marginBottom: '24px',
+                  display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'center'
+                }}>
+                  {shareCode ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
+                        <div style={{ fontSize: '24px', fontWeight: 800, letterSpacing: '4px', color: 'var(--color-primary)' }}>{shareCode}</div>
+                        <div style={{ fontSize: '10px', opacity: 0.6 }}>Give this 5-digit code to another user</div>
+                      </div>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(shareCode);
+                          setShareCodeCopied(true);
+                          setTimeout(() => setShareCodeCopied(false), 2000);
+                        }}
+                        style={{
+                          background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+                          borderRadius: '8px', padding: '8px', color: 'var(--color-primary)', cursor: 'pointer',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center'
+                        }}
+                        title="Copy Code"
+                      >
+                        {shareCodeCopied ? <IconCheck size={20} /> : <IconCopy size={20} />}
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={handleGenerateShareCode}
+                      disabled={isGeneratingCode}
+                      style={{
+                        background: 'transparent', border: '1px solid var(--color-primary)', borderRadius: '6px',
+                        padding: '8px 16px', color: 'var(--color-primary)', fontWeight: 600, cursor: 'pointer', fontSize: '0.875rem'
+                      }}
+                    >
+                      {isGeneratingCode ? "Generating..." : "Generate Share Code"}
+                    </button>
+                  )}
+                </div>
+
                 <button
                   onClick={() => setShareModalOpen(false)}
                   style={{
@@ -4005,11 +4260,75 @@ export default function Home() {
             </div>
           )}
 
+          {/* changes done by megnathan: Added Import Modal */}
+          {importModalOpen && (
+            <div style={{
+              position: 'fixed', inset: 0, zIndex: 9999,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              backgroundColor: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)'
+            }}>
+              <div style={{
+                background: 'var(--color-bg-sidebar)', padding: '24px', borderRadius: '16px',
+                width: '90%', maxWidth: '400px', border: '1px solid rgba(255,255,255,0.1)',
+                boxShadow: '0 20px 25px -5px rgba(0,0,0,0.5)', textAlign: 'center'
+              }}>
+                <h3 style={{ margin: '0 0 8px 0', fontSize: '1.25rem', fontWeight: 600 }}>Import Chat via Code</h3>
+                <p style={{ margin: '0 0 20px 0', fontSize: '0.875rem', color: 'var(--color-text-dim)' }}>
+                  Enter the 5-digit code to add a shared chat to your history.
+                </p>
 
+                {/* changes done by megnathan: Refined import placeholder and font size */}
+                <div style={{ marginBottom: '24px' }}>
+                  <input
+                    type="text"
+                    maxLength={5}
+                    placeholder="Enter the code"
+                    className="import-code-input"
+                    value={inputShareCode}
+                    onChange={(e) => setInputShareCode(e.target.value.replace(/[^0-9]/g, ""))}
+                    style={{
+                      width: '100%', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: '8px', padding: '16px', color: 'var(--color-text)',
+                      fontSize: '24px', textAlign: 'center', fontWeight: 800, letterSpacing: '8px',
+                      outline: 'none'
+                    }}
+                  />
+                  <style jsx>{`
+                    .import-code-input::placeholder {
+                      font-size: 16px;
+                      letter-spacing: normal;
+                      font-weight: 500;
+                      opacity: 0.5;
+                    }
+                  `}</style>
+                </div>
+
+                <div style={{ display: 'flex', gap: '12px' }}>
+                  <button
+                    onClick={() => setImportModalOpen(false)}
+                    style={{
+                      flex: 1, padding: '12px', borderRadius: '8px', background: 'rgba(255,255,255,0.05)',
+                      border: 'none', color: 'var(--color-text)', cursor: 'pointer', fontWeight: 500
+                    }}
+                  >Cancel</button>
+                  <button
+                    onClick={handleImportByCode}
+                    disabled={isImporting || inputShareCode.length !== 5}
+                    style={{
+                      flex: 1, padding: '12px', borderRadius: '8px', background: 'var(--color-primary)',
+                      border: 'none', color: '#000', cursor: 'pointer', fontWeight: 700,
+                      opacity: (isImporting || inputShareCode.length !== 5) ? 0.5 : 1
+                    }}
+                  >
+                    {isImporting ? "Importing..." : "Add to My Chats"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
-
   );
 }
 

@@ -2425,6 +2425,61 @@ body {
   outline: none;
 }
 
+/* Inline ghost completion: mirror layer behind transparent textarea */
+.main-input-stack {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+}
+
+.main-input-ghost-mirror {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 0;
+  pointer-events: none;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  overflow: hidden;
+  font-size: clamp(14px, 1.6vw + 0.5rem, 17px);
+  line-height: 1.2;
+  font-weight: 400;
+  font-family: inherit;
+  padding: 3px 0;
+  user-select: none;
+  scrollbar-width: none;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+.main-input-ghost-mirror::-webkit-scrollbar {
+  display: none;
+}
+
+.main-input-ghost-mirror .ghost-mirror-user {
+  color: transparent;
+}
+
+.main-input-ghost-mirror .ghost-mirror-suffix {
+  color: var(--color-text-muted);
+  opacity: 0.62;
+}
+
+.main-input.main-input--layered {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  background: transparent;
+  caret-color: var(--color-text);
+}
+
 .mic-btn {
   transition: all 0.2s;
   cursor: pointer;
