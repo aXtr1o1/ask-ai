@@ -1153,6 +1153,63 @@ async def import_by_code_endpoint(payload: dict):
         raise HTTPException(status_code=404, detail="Invalid share code or failed to import")
     return {"status": "ok", "newSessionId": new_session_id}
 
+
+@api_router.post("/folder/create")
+async def create_folder_endpoint(payload: dict):
+    user_name = str(payload.get("userName", "")).strip()
+    folder_name = str(payload.get("folderName", "")).strip()
+
+    if not user_name or not folder_name:
+        raise HTTPException(status_code=400, detail="userName and folderName are required")
+
+    from app.services.postgres_service import create_folder
+    ok = await create_folder(user_name, folder_name)
+    if not ok:
+        raise HTTPException(status_code=500, detail="Failed to create folder")
+    return {"status": "ok", "folderName": folder_name}
+
+
+@api_router.post("/folder/rename")
+async def rename_folder_endpoint(payload: dict):
+    user_name = str(payload.get("userName", "")).strip()
+    old_folder_name = str(payload.get("oldFolderName", "")).strip()
+    new_folder_name = str(payload.get("newFolderName", "")).strip()
+
+    if not user_name or not old_folder_name or not new_folder_name:
+        raise HTTPException(status_code=400, detail="userName, oldFolderName and newFolderName are required")
+
+    from app.services.postgres_service import rename_folder
+    ok = await rename_folder(user_name, old_folder_name, new_folder_name)
+    if not ok:
+        raise HTTPException(status_code=500, detail="Failed to rename folder")
+    return {"status": "ok", "oldFolderName": old_folder_name, "newFolderName": new_folder_name}
+
+
+@api_router.post("/folder/delete")
+async def delete_folder_endpoint(payload: dict):
+    user_name = str(payload.get("userName", "")).strip()
+    folder_name = str(payload.get("folderName", "")).strip()
+
+    if not user_name or not folder_name:
+        raise HTTPException(status_code=400, detail="userName and folderName are required")
+
+    from app.services.postgres_service import delete_folder
+    ok = await delete_folder(user_name, folder_name)
+    if not ok:
+        raise HTTPException(status_code=500, detail="Failed to delete folder")
+    return {"status": "ok", "folderName": folder_name}
+
+
+@api_router.get("/folders/{user_name}")
+async def get_folders_endpoint(user_name: str):
+    if not user_name:
+        raise HTTPException(status_code=400, detail="userName is required")
+
+    from app.services.postgres_service import get_folders
+    folders = await get_folders(user_name)
+    return {"status": "ok", "folders": folders}
+
+
 @chatbot_app.get("/api/share/history")
 async def get_shared_history(sessionId: str, owner: str = None):
     from app.services.postgres_service import get_public_chat_history

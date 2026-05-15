@@ -17,7 +17,7 @@ import UpgradePlan from "./components/UpgradePlan";
 import ManageAccount from "./components/ManageAccount/ManageAccount";
 import WalkthroughPopup from "./components/WalkthroughPopup";
 import LandingSuggestedQueries from "./components/LandingSuggestedQueries";
-import GroupsChat from "./components/GroupsChat";
+import GroupsChat, { FolderListItem, ChatListItem } from "./components/GroupsChat";
 /* changes done by megnathan: Added imports for the new Ghost Completion feature */
 import { useGhostInputCompletion } from "./hooks/useGhostInputCompletion";
 import { recordPromptForGhostHistory, ghostPromptHistoryStorageKey } from "./lib/ghostInputCompletion";
@@ -954,39 +954,39 @@ const IconUser1 = () => (
   </svg>
 );
 const IconChat = ({ width = 16, height = 16, style }: { width?: number; height?: number; style?: React.CSSProperties }) => (
-  <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+  <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ ...style, width, height, flexShrink: 0 }}>
     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
   </svg>
 );
 const IconArchive = ({ width = 16, height = 16, style }: { width?: number; height?: number; style?: React.CSSProperties }) => (
-  <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+  <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ ...style, width, height, flexShrink: 0 }}>
     <rect x="3" y="4" width="18" height="4" rx="1" /><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8" /><line x1="10" y1="12" x2="14" y2="12" />
   </svg>
 );
 const IconLibrary = ({ width = 16, height = 16, style }: { width?: number; height?: number; style?: React.CSSProperties }) => (
-  <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+  <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ ...style, width, height, flexShrink: 0 }}>
     <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
   </svg>
 );
 const IconShare = ({ width = 16, height = 16, style }: { width?: number; height?: number; style?: React.CSSProperties }) => (
-  <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+  <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ ...style, width, height, flexShrink: 0 }}>
     <circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" /><line x1="8.59" y1="13.51" x2="15.41" y2="17.49" /><line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
   </svg>
 );
 
 const IconPin = ({ size = 16, style }: { size?: number; style?: React.CSSProperties }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ ...style, width: size, height: size, flexShrink: 0 }}>
     <path d="M12 17v5M9 17h6M15 13V4H9v9l-2 4h10l-2-4z" />
   </svg>
 );
 
 const IconCheckbox = ({ width = 16, height = 16, style }: { width?: number; height?: number; style?: React.CSSProperties }) => (
-  <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+  <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ ...style, width, height, flexShrink: 0 }}>
     <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
   </svg>
 );
 const IconWarning = ({ width = 14, height = 14, style }: { width?: number; height?: number; style?: React.CSSProperties }) => (
-  <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+  <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ ...style, width, height, flexShrink: 0 }}>
     <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
   </svg>
 );
@@ -1055,6 +1055,7 @@ export default function Home() {
   const [playbackTime, setPlaybackTime] = useState(0);
   const [slideGestureActive, setSlideGestureActive] = useState(false);
   const [loggedInUser, setLoggedInUser] = useState<string | null>(null); // backend username (client_name)
+  const [userEmail, setUserEmail] = useState<string | null>(null);
   const [authChecked, setAuthChecked] = useState<boolean>(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [showUpgradePlan, setShowUpgradePlan] = useState(false);
@@ -1065,7 +1066,7 @@ export default function Home() {
   const [wsConnectionState, setWsConnectionState] = useState<'connecting' | 'connected' | 'failed'>('connecting');
   const [isGraphMode, setIsGraphMode] = useState<boolean>(false);
   const [chartType, setChartType] = useState<ChartType>('vertical-bar');
-  const [activeFeature, setActiveFeature] = useState<'chat' | 'archived' | 'library'>('chat');
+  const [activeFeature, setActiveFeature] = useState<'chat' | 'archived' | 'groups'>('chat');
   const [showFeaturePlaceholder, setShowFeaturePlaceholder] = useState<boolean>(false);
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
@@ -1091,14 +1092,18 @@ export default function Home() {
 
   // Inline edit state for renaming sessions
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
+  const [editingFolderTitle, setEditingFolderTitle] = useState<string>("");
   const [editingTitle, setEditingTitle] = useState<string>("");
   const editingInputRef = useRef<HTMLInputElement | null>(null);
   const [groups, setGroups] = useState<Group[]>([]);
   const [selectedGroupName, setSelectedGroupName] = useState<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
+  const [openGroupMenuId, setOpenGroupMenuId] = useState<string | null>(null);
+  const [openChatMenuId, setOpenChatMenuId] = useState<string | null>(null);
   const [groupActiveType, setGroupActiveType] = useState<'folder' | 'chat'>('folder');
 
-  const handleCreateGroup = (name: string) => {
+  const handleCreateGroup = async (name: string) => {
     const newGroup: Group = {
       id: Math.random().toString(36).substr(2, 9),
       name,
@@ -1110,6 +1115,19 @@ export default function Home() {
     setSelectedGroupName(name);
     setMessages([]); // Clear messages for new group chat
     setSessionId(generateSessionId()); // New session for the group
+
+    try {
+      await fetch(`${baseUrl}/api/folder/create`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userName: userIdFromUrl ?? loggedInUser,
+          folderName: name
+        }),
+      });
+    } catch (err) {
+      console.warn("Failed to create folder on server:", err);
+    }
   };
   // Archived sessions (store only id/title client-side)
   const [archivedSessions, setArchivedSessions] = useState<ChatSession[]>([]);
@@ -1285,15 +1303,21 @@ export default function Home() {
               throw new Error("Token verification failed");
             }
 
-            const { userName, clientName, userId, cl, fl } = parsed as {
+            const { userName, clientName, userId, cl, fl, email } = parsed as {
               userName?: string;
               clientName?: string;
               userId?: string;
               cl?: string;
               fl?: string;
+              email?: string;
             };
 
             console.log("[auth] token verified");
+
+            if (email) {
+              setUserEmail(email);
+              localStorage.setItem("userEmail", email);
+            }
 
             if (userName) {
               setUserIdFromUrl(userName);
@@ -1336,6 +1360,11 @@ export default function Home() {
 
             const storedLogoPath = localStorage.getItem("loginPageClientLogoPath");
             const storedFooterLogoPath = localStorage.getItem("loginFooterLogoPath");
+            const storedEmail = localStorage.getItem("userEmail");
+
+            if (storedEmail) {
+              setUserEmail(storedEmail);
+            }
 
             if (storedUserName) {
               setUserIdFromUrl(storedUserName);
@@ -1372,6 +1401,11 @@ export default function Home() {
 
         const storedLogoPath = localStorage.getItem("loginPageClientLogoPath");
         const storedFooterLogoPath = localStorage.getItem("loginFooterLogoPath");
+        const storedEmail = localStorage.getItem("userEmail");
+
+        if (storedEmail) {
+          setUserEmail(storedEmail);
+        }
 
         if (storedUserName) {
           setUserIdFromUrl(storedUserName);
@@ -1705,7 +1739,7 @@ export default function Home() {
       return;
     }
     // Small async tick to ensure layout effect ran and sessionMenuPos updated
-    const t = setTimeout(() => setSessionMenuVisible(true), 0);
+    const t = setTimeout(() => setSessionMenuVisible(true), 100);
     return () => clearTimeout(t);
   }, [sessionMenuOpen, sessionMenuPos]);
 
@@ -1816,6 +1850,55 @@ export default function Home() {
       });
     } catch (err) {
       console.warn("Failed to delete session on server:", err);
+    }
+  };
+
+  const handleRenameFolder = async (oldName: string, newName: string) => {
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === oldName) return;
+
+    setGroups(prev => prev.map(g => g.name === oldName ? { ...g, name: trimmed } : g));
+    setChatSessions(prev => prev.map(s => s.group_name === oldName ? { ...s, group_name: trimmed } : s));
+
+    try {
+      await fetch(`${baseUrl}/api/folder/rename`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userName: userIdFromUrl ?? loggedInUser,
+          oldFolderName: oldName,
+          newFolderName: trimmed
+        }),
+      });
+    } catch (err) {
+      console.warn("Failed to rename folder on server:", err);
+    }
+  };
+
+  const handleDeleteFolder = async (folderName: string) => {
+    setGroups(prev => prev.filter(g => g.name !== folderName));
+    setChatSessions(prev => prev.filter(s => s.group_name !== folderName));
+
+    if (selectedGroupName === folderName) {
+      setSelectedGroupName("");
+      setGroupActiveType('chat');
+      const newSid = generateSessionId();
+      setSessionId(newSid);
+      sessionIdRef.current = newSid;
+      setMessages([]);
+    }
+
+    try {
+      await fetch(`${baseUrl}/api/folder/delete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userName: userIdFromUrl ?? loggedInUser,
+          folderName: folderName
+        }),
+      });
+    } catch (err) {
+      console.warn("Failed to delete folder on server:", err);
     }
   };
 
@@ -2240,29 +2323,38 @@ export default function Home() {
         })
       );
       setChatSessions(sortSessionsNewestFirst(fetched));
-
-      // Derive groups at the same time as sessions — no extra render cycle
-      const uniqueGroupNames = Array.from(new Set(fetched.map(s => s.group_name).filter(Boolean))) as string[];
-      if (uniqueGroupNames.length > 0) {
-        setGroups(uniqueGroupNames.map(name => ({
-          id: name,
-          name,
-          description: "Custom group",
-          chatCount: fetched.filter(s => s.group_name === name).length,
-          updatedAt: new Date().toLocaleDateString(),
-        })));
-      }
     } catch (err) {
       console.warn("Failed to fetch chat sessions:", err);
       setChatSessions([]);
     }
   };
 
+  const fetchFolders = async () => {
+    if (!authChecked || !loggedInUser) return;
+    try {
+      const res = await fetch(`${baseUrl}/api/folders/${userIdFromUrl ?? loggedInUser}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data.status === "ok" && data.folders) {
+        setGroups(data.folders.map((name: string) => ({
+          id: name,
+          name,
+          description: "Custom group",
+          chatCount: 0,
+          updatedAt: new Date().toLocaleDateString()
+        })));
+      }
+    } catch (err) {
+      console.warn("Failed to fetch folders from server:", err);
+    }
+  };
+
   useEffect(() => {
     fetchSessions();
+    fetchFolders();
   }, [authChecked, loggedInUser]);
 
-  const handleFeatureClick = (featureName: 'chat' | 'archived' | 'library') => {
+  const handleFeatureClick = (featureName: 'chat' | 'archived' | 'groups') => {
     // Chat and Archived have real views implemented; only Library shows placeholder
     if (featureName === 'chat') {
       setShowFeaturePlaceholder(false);
@@ -2302,6 +2394,7 @@ export default function Home() {
         title: "New Chat",
         createdAt: Date.now(),
         updatedAt: Date.now(),
+        group_name: activeFeature === 'groups' ? (selectedGroupName ?? undefined) : undefined,
       };
       return [newCapsule, ...existing];
     });
@@ -2572,6 +2665,50 @@ export default function Home() {
       startPing();
     }
   };
+
+  // Pre-fetch history for expanded groups to make loading instant
+  useEffect(() => {
+    if (!authChecked || !loggedInUser) return;
+
+    const preFetchHistory = async () => {
+      for (const groupName of expandedGroups) {
+        const chatsInGroup = chatSessions.filter(s => s.group_name === groupName);
+        for (const s of chatsInGroup) {
+          if (!sessionMessagesRef.current.has(s.id)) {
+            try {
+              const res = await fetch(`${baseUrl}/api/session`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ userName: userIdFromUrl ?? loggedInUser, sessionId: s.id, historyOnClick: true }),
+              });
+              if (res.ok) {
+                const data = await res.json();
+                const history: Message[] = [];
+                for (const entry of (data?.chat_history ?? [])) {
+                  if (entry.query) {
+                    if (entry.is_audio) {
+                      history.push({ role: "user", text: "Voice message", isAudio: true, audioUrl: entry.query, audioDuration: 0 });
+                    } else {
+                      history.push({ role: "user", text: entry.query });
+                    }
+                  }
+                  if (entry.assistant) {
+                    history.push({ role: "ai", text: entry.assistant });
+                  }
+                }
+                const processed = processLoadedMessages(history);
+                sessionMessagesRef.current.set(s.id, processed);
+              }
+            } catch (err) {
+              console.warn(`Failed to pre-fetch history for ${s.id}:`, err);
+            }
+          }
+        }
+      }
+    };
+
+    preFetchHistory();
+  }, [expandedGroups, chatSessions, loggedInUser, authChecked, baseUrl, userIdFromUrl]);
 
   const handleLogout = async () => {
     const savePromises: Promise<void>[] = [];
@@ -3034,7 +3171,7 @@ export default function Home() {
       {/* Content above background (MainLayout-style) */}
       <div
         className={
-          !historyLoading && isLanding && (activeFeature === 'chat' || activeFeature === 'library')
+          !historyLoading && isLanding && (activeFeature === 'chat' || activeFeature === 'groups')
             ? "app-content-wrapper app-content-wrapper--landing-start"
             : "app-content-wrapper"
         }
@@ -3218,106 +3355,89 @@ export default function Home() {
                 <span>Archived</span>
               </div>
               <div
-                className={`feature-item ${activeFeature === 'library' ? 'active' : ''}`}
+                className={`feature-item ${activeFeature === 'groups' ? 'active' : ''}`}
                 onClick={() => {
-                  setActiveFeature('library');
-                  handleFeatureClick('library');
+                  setActiveFeature('groups');
+                  handleFeatureClick('groups');
                 }}
               >
                 <IconLibrary />
                 <span style={{ flex: 1 }}>Groups</span>
-                <button
-                  title="Create group"
-                  onClick={(e) => { e.stopPropagation(); setCreateGroupTrigger(prev => prev + 1); }}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    cursor: 'pointer',
-                    padding: '0 4px',
-                    color: 'var(--color-text-secondary)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    borderRadius: '4px',
-                    transition: 'color 0.15s',
-                    fontSize: '18px',
-                    lineHeight: 1,
-                    fontWeight: 300,
-                  }}
-                  onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.color = 'var(--color-accent, #c8932a)')}
-                  onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.color = 'var(--color-text-secondary)')}
-                >+</button>
-              </div>
-
-              {activeFeature === 'library' && groups.map(group => (
-                <div key={group.id}>
-                  <div
-                    className="sidebar-sub-item"
+                {activeFeature === 'groups' && (
+                  <button
+                    title="Create group"
+                    onClick={(e) => { e.stopPropagation(); setCreateGroupTrigger(prev => prev + 1); }}
                     style={{
-                      padding: '6px 12px',
-                      paddingLeft: '36px',
-                      fontSize: '13px',
+                      background: 'none',
+                      border: 'none',
                       cursor: 'pointer',
+                      padding: '0 4px',
+                      color: 'var(--color-text-secondary)',
                       display: 'flex',
                       alignItems: 'center',
-                      gap: '8px',
-                      color: selectedGroupName === group.name && groupActiveType === 'folder' ? 'var(--color-accent, #c8932a)' : 'var(--color-text-secondary)',
-                      background: selectedGroupName === group.name && groupActiveType === 'folder' ? 'rgba(218, 165, 32, 0.12)' : 'transparent',
-                      borderRadius: '8px',
-                      fontWeight: selectedGroupName === group.name && groupActiveType === 'folder' ? 600 : 400,
-                      transition: 'background 0.15s, color 0.15s',
+                      borderRadius: '4px',
+                      transition: 'color 0.15s',
+                      fontSize: '18px',
+                      lineHeight: 1,
+                      fontWeight: 300,
                     }}
-                    onClick={() => {
-                      // Toggle expansion
-                      setExpandedGroups(prev =>
-                        prev.includes(group.name)
-                          ? prev.filter(g => g !== group.name)
-                          : [...prev, group.name]
-                      );
-                      setActiveFeature('library');
-                      setSelectedGroupName(group.name);
-                      setGroupActiveType('folder');
-                      setMessages([]); // This makes isLanding true!
-                      setSessionId(generateSessionId()); // New session for the group
-                    }}
-                  >
-                    <IconFolder width={14} height={14} />
-                    <span>{group.name}</span>
-                  </div>
+                    onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.color = 'var(--color-accent, #c8932a)')}
+                    onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.color = 'var(--color-text-secondary)')}
+                  >+</button>
+                )}
+              </div>
 
-                  {/* Render chats for this group */}
-                  {expandedGroups.includes(group.name) && chatSessions.filter(s => s.group_name === group.name).map(s => (
-                    <div
-                      key={s.id}
-                      className={`sidebar-sub-item ${s.id === sessionId && groupActiveType === 'chat' ? "active" : ""}`}
-                      onClick={() => {
-                        switchSession(s.id);
-                        setActiveFeature('library');
-                        setSelectedGroupName(group.name);
-                        setGroupActiveType('chat');
-                      }}
-                      style={{
-                        padding: '4px 12px',
-                        paddingLeft: '52px',
-                        fontSize: '12px',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                        color: s.id === sessionId && groupActiveType === 'chat' ? 'var(--color-accent, #c8932a)' : 'var(--color-text-secondary)',
-                        background: s.id === sessionId && groupActiveType === 'chat' ? 'rgba(218, 165, 32, 0.10)' : 'transparent',
-                        borderRadius: '8px',
-                        fontWeight: s.id === sessionId && groupActiveType === 'chat' ? 600 : 400,
-                        transition: 'background 0.15s, color 0.15s',
-                      }}
-                    >
-                      <IconChat width={12} height={12} />
-                      <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.title}</span>
+              {activeFeature === 'groups' && (
+                <div style={{ overflowY: 'auto', flex: 1, paddingRight: '4px' }}>
+                  {groups.map(group => (
+                    <div key={group.id}>
+                      <FolderListItem
+                        group={group}
+                        selectedGroupName={selectedGroupName}
+                        groupActiveType={groupActiveType}
+                        editingFolderId={editingFolderId}
+                        editingFolderTitle={editingFolderTitle}
+                        setEditingFolderId={setEditingFolderId}
+                        setEditingFolderTitle={setEditingFolderTitle}
+                        expandedGroups={expandedGroups}
+                        setExpandedGroups={setExpandedGroups}
+                        setActiveFeature={setActiveFeature}
+                        setSelectedGroupName={setSelectedGroupName}
+                        setGroupActiveType={setGroupActiveType}
+                        setMessages={setMessages}
+                        setSessionId={setSessionId}
+                        generateSessionId={generateSessionId}
+                        setChatSessions={setChatSessions}
+                        onRename={handleRenameFolder}
+                        onDelete={handleDeleteFolder}
+                      />
+
+                      {expandedGroups.includes(group.name) && chatSessions.filter(s => s.group_name === group.name).map(s => (
+                        <ChatListItem
+                          key={s.id}
+                          s={s}
+                          sessionId={sessionId}
+                          groupActiveType={groupActiveType}
+                          editingSessionId={editingSessionId}
+                          editingTitle={editingTitle}
+                          setEditingTitle={setEditingTitle}
+                          setEditingSessionId={setEditingSessionId}
+                          commitRename={commitRename}
+                          handleRenameSession={handleRenameSession}
+                          switchSession={switchSession}
+                          setActiveFeature={setActiveFeature}
+                          setSelectedGroupName={setSelectedGroupName}
+                          setGroupActiveType={setGroupActiveType}
+                          group={group}
+                          onDeleteChat={handleDeleteSession}
+                        />
+                      ))}
                     </div>
                   ))}
                 </div>
-              ))}
+              )}
 
-              {activeFeature !== 'library' && (
+              {activeFeature !== 'groups' && (
                 <div className="search-section-sidebar" style={{ padding: '8px 12px', marginTop: 16 }}>
                   <div className="search-input-wrapper" style={{ position: 'relative' }}>
                     <IconSearch style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }} />
@@ -3388,7 +3508,7 @@ export default function Home() {
               {activeFeature === 'archived' && (
                 <div className="chat-history-box" style={{ marginTop: 24, display: "flex", flexDirection: "column", minHeight: 0 }}>
                   <div className="chat-history-scroll">
-                    {chatSessions.filter(s => s.isArchived && !s.group_name).map(a => (
+                    {chatSessions.filter(s => s.isArchived).map(a => (
                       <div
                         key={a.id}
                         className="sidebar-item"
@@ -3399,21 +3519,99 @@ export default function Home() {
                       >
                         <div className="content" style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
                           <IconArchive width={16} height={16} />
-                          <span title={a.title} style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{a.title}</span>
+                          {editingSessionId === a.id ? (
+                            <input
+                              ref={(el) => { editingInputRef.current = el; if (el) el.focus(); }}
+                              value={editingTitle}
+                              onChange={(e) => setEditingTitle(e.target.value)}
+                              onBlur={() => commitRename(a.id)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") { e.preventDefault(); commitRename(a.id); }
+                                if (e.key === "Escape") { setEditingSessionId(null); setEditingTitle(""); }
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                              title={a.title}
+                              style={{
+                                whiteSpace: "nowrap",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                borderRadius: 6,
+                                padding: "4px 6px",
+                                border: "1px solid var(--color-border)",
+                                background: "var(--color-bg-alt)",
+                                color: "var(--color-text)",
+                                width: '100%',
+                                fontSize: '12px'
+                              }}
+                            />
+                          ) : (
+                            <span title={a.title} style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{a.title}</span>
+                          )}
                         </div>
-                        <div>
+                        <div style={{ display: 'flex', alignItems: 'center' }}>
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleArchiveSession(a.id, false);
+                              const btn = e.currentTarget as HTMLElement;
+                              const pos = computeSessionMenuPos(btn, 140);
+                              const willOpen = sessionMenuOpen !== a.id;
+                              setSessionMenuOpen(willOpen ? a.id : null);
+                              setSessionMenuPos(willOpen ? pos : null);
+                              setSessionMenuVisible(false);
                             }}
-                            title="Unarchive"
-                            style={{ background: 'transparent', border: 'none', color: 'var(--color-text)', cursor: 'pointer', padding: 6, borderRadius: 6 }}
-                          >Unarchive</button>
+                            aria-label="Session options"
+                            title="Options"
+                            style={{
+                              background: 'transparent',
+                              border: 'none',
+                              color: 'var(--color-text)',
+                              cursor: 'pointer',
+                              padding: '6px',
+                              borderRadius: 6,
+                            }}
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="5" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="12" cy="19" r="1" /></svg>
+                          </button>
+
+                          {sessionMenuOpen === a.id && sessionMenuPos && typeof document !== 'undefined' && createPortal(
+                            <div
+                              ref={(el) => { sessionMenuRef.current = el; }}
+                              onClick={(e) => e.stopPropagation()}
+                              className="session-menu"
+                              style={{
+                                position: 'fixed',
+                                top: `${sessionMenuPos.top}px`,
+                                transform: sessionMenuPos.placement === 'above' ? 'translate(calc(-100% + 24px), -100%)' : 'translateX(calc(-100% + 24px))',
+                                left: `${sessionMenuPos.left}px`,
+                                background: 'var(--color-bg-alt)',
+                                border: '1px solid var(--color-border)',
+                                borderRadius: 8,
+                                padding: '6px 8px',
+                                boxShadow: '0 6px 18px rgba(0,0,0,0.4)',
+                                zIndex: 20000,
+                                minWidth: 140,
+                                whiteSpace: 'nowrap',
+                                visibility: sessionMenuVisible ? 'visible' : 'hidden',
+                                pointerEvents: sessionMenuVisible ? 'auto' : 'none',
+                                opacity: sessionMenuVisible ? 1 : 0,
+                                transition: 'opacity 0.2s ease-out',
+                                animation: 'none',
+                              }}>
+                              <button
+                                onClick={() => { setSessionMenuOpen(null); setSessionMenuPos(null); handleRenameSession(a.id); }}
+                                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 8px', background: 'transparent', border: 'none', color: 'var(--color-text)', cursor: 'pointer' }}
+                              >Rename</button>
+                              <button
+                                onClick={() => { setSessionMenuOpen(null); setSessionMenuPos(null); handleArchiveSession(a.id, false); }}
+                                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 8px', background: 'transparent', border: 'none', color: 'var(--color-text)', cursor: 'pointer' }}
+                              >Unarchive</button>
+                            </div>,
+                            document.body
+                          )}
                         </div>
                       </div>
                     ))}
-                    {chatSessions.filter(s => s.isArchived && !s.group_name).length === 0 && (
+                     {chatSessions.filter(s => s.isArchived).length === 0 && (
                       <div style={{ padding: "12px 16px", fontSize: 12, color: "#7a8f75", fontStyle: "italic" }}>
                         No archived chats
                       </div>
@@ -3495,7 +3693,7 @@ export default function Home() {
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="5" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="12" cy="19" r="1" /></svg>
                           </button>
 
-                          {sessionMenuOpen === s.id && sessionMenuPos && (
+                          {sessionMenuOpen === s.id && sessionMenuPos && typeof document !== 'undefined' && createPortal(
                             <div
                               ref={(el) => { sessionMenuRef.current = el; }}
                               onClick={(e) => e.stopPropagation()}
@@ -3515,6 +3713,9 @@ export default function Home() {
                                 whiteSpace: 'nowrap',
                                 visibility: sessionMenuVisible ? 'visible' : 'hidden',
                                 pointerEvents: sessionMenuVisible ? 'auto' : 'none',
+                                opacity: sessionMenuVisible ? 1 : 0,
+                                transition: 'opacity 0.2s ease-out',
+                                animation: 'none',
                               }}>
                               <button
                                 onClick={() => { setSessionMenuOpen(null); setSessionMenuPos(null); handleRenameSession(s.id); }}
@@ -3536,7 +3737,8 @@ export default function Home() {
                                 onClick={() => { setSessionMenuOpen(null); setSessionMenuPos(null); handleShareSession(s.id); }}
                                 style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 8px', background: 'transparent', border: 'none', color: 'var(--color-primary)', cursor: 'pointer', borderTop: '1px solid rgba(255,255,255,0.05)', fontWeight: 600 }}
                               >Share Chat</button>
-                            </div>
+                            </div>,
+                            document.body
                           )}
                         </div>
                       </div>
@@ -3673,7 +3875,7 @@ export default function Home() {
           )}
 
           {/* Landing — welcome shifted up; input vertically centered (only before first message) */}
-          {!historyLoading && isLanding && (activeFeature === 'chat' || activeFeature === 'library' || activeFeature === 'archived') && (
+          {!historyLoading && isLanding && (activeFeature === 'chat' || activeFeature === 'groups' || activeFeature === 'archived') && (
             <div className="landing-start-column">
               <div className="landing-start-spacer-top" aria-hidden />
               <div className="landing-container landing-container--start">
@@ -3703,7 +3905,7 @@ export default function Home() {
           )}
 
           {/* Chat area */}
-          {!historyLoading && !isLanding && (activeFeature === 'chat' || activeFeature === 'library') && (
+          {!historyLoading && !isLanding && (activeFeature === 'chat' || activeFeature === 'groups' || activeFeature === 'archived') && (
             <div className="chat-scroll-area">
               {selectedGroupName && (
                 <div style={{ padding: '12px 24px', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -4028,12 +4230,12 @@ export default function Home() {
           )}
 
           {/* Groups view */}
-          {!historyLoading && activeFeature === 'library' && (
+          {!historyLoading && activeFeature === 'groups' && (
             <GroupsChat createGroupTrigger={createGroupTrigger} groups={groups} onCreateGroup={handleCreateGroup} />
           )}
 
           {/* Input footer — bottom bar after chat starts or while history loads (not duplicated on landing) */}
-          {(historyLoading || (!isLanding && (activeFeature === 'chat' || activeFeature === 'library'))) && renderChatInputFooter("default")}
+          {(historyLoading || (!isLanding && (activeFeature === 'chat' || activeFeature === 'groups' || activeFeature === 'archived'))) && renderChatInputFooter("default")}
 
           {/* Upgrade Plan Modal */}
           {showUpgradePlan && (
@@ -4161,7 +4363,8 @@ export default function Home() {
                   currentPlan={currentPlan}
                   profileName={loggedInUser || "My Account"}
                   subUserName={userIdFromUrl ?? loggedInUser ?? ""}
-                  externalUserId={loggedInUser ?? ""}
+                  externalUserId={userIdInt ? String(userIdInt) : (loggedInUser ?? "")}
+                  email={userEmail ?? ""}
                   onMobileSidebarOpenChange={(open) => setIsManageAccountMenuOpen(open)}
                 />
               </div>
