@@ -34,6 +34,8 @@ export default function GroupsChat({ createGroupTrigger = 0, groups = [], onCrea
   const [isCreateGroupModalOpen, setIsCreateGroupModalOpen] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
 
+  const isDuplicate = groups.some(g => g.name.toLowerCase() === newGroupName.trim().toLowerCase());
+
   const isFirstMount = useRef(true);
 
   useEffect(() => {
@@ -93,13 +95,25 @@ export default function GroupsChat({ createGroupTrigger = 0, groups = [], onCrea
                 <input
                   value={newGroupName}
                   onChange={(e) => setNewGroupName(e.target.value)}
-                  placeholder="Copenhagen Trip"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && newGroupName.trim() && !isDuplicate) {
+                      onCreateGroup(newGroupName.trim());
+                      setIsCreateGroupModalOpen(false);
+                      setNewGroupName("");
+                    }
+                  }}
+                  placeholder="Complaints"
                   style={{
                     flex: 1, background: 'transparent', border: 'none', color: 'var(--color-text)',
                     fontSize: '0.95rem', outline: 'none'
                   }}
                 />
               </div>
+              {isDuplicate && (
+                <div style={{ color: '#ff4d4d', fontSize: '0.75rem', marginTop: '4px', paddingLeft: '4px' }}>
+                  Folder name already exists
+                </div>
+              )}
             </div>
 
             <div style={{
@@ -132,15 +146,15 @@ export default function GroupsChat({ createGroupTrigger = 0, groups = [], onCrea
                   setNewGroupName("");
                 }}
                 style={{
-                  background: newGroupName ? 'var(--color-primary)' : 'var(--color-border)',
+                  background: (newGroupName && !isDuplicate) ? 'var(--color-primary)' : 'var(--color-border)',
                   border: 'none', borderRadius: '10px',
-                  padding: '12px 24px', color: newGroupName ? '#000' : 'var(--color-text-muted)',
-                  fontWeight: 600, cursor: newGroupName ? 'pointer' : 'not-allowed',
+                  padding: '12px 24px', color: (newGroupName && !isDuplicate) ? '#000' : 'var(--color-text-muted)',
+                  fontWeight: 600, cursor: (newGroupName && !isDuplicate) ? 'pointer' : 'not-allowed',
                   fontSize: '0.875rem',
                   transition: 'background 0.2s, opacity 0.2s',
-                  boxShadow: newGroupName ? '0 4px 12px rgba(var(--color-primary-rgb), 0.3)' : 'none'
+                  boxShadow: (newGroupName && !isDuplicate) ? '0 4px 12px rgba(var(--color-primary-rgb), 0.3)' : 'none'
                 }}
-                disabled={!newGroupName}
+                disabled={!newGroupName || isDuplicate}
               >
                 Create group
               </button>

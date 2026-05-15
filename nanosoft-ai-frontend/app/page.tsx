@@ -22,11 +22,11 @@ import GroupsChat from "./components/GroupsChat";
 import { useGhostInputCompletion } from "./hooks/useGhostInputCompletion";
 import { recordPromptForGhostHistory, ghostPromptHistoryStorageKey } from "./lib/ghostInputCompletion";
 /* changes done by megnathan: Cleaned up icon imports to avoid conflicts with local definitions */
-import { 
-  IconUser, IconMicrophone, IconPlayerPlay, IconPlayerPause, 
-  IconTrash, IconArrowUp, IconChartBar, IconList, 
-  IconLayoutGrid, IconMenu2, IconX, IconCrown, 
-  IconDotsVertical, IconCopy, IconCheck,IconBulb, IconFolder
+import {
+  IconUser, IconMicrophone, IconPlayerPlay, IconPlayerPause,
+  IconTrash, IconArrowUp, IconChartBar, IconList,
+  IconLayoutGrid, IconMenu2, IconX, IconCrown,
+  IconDotsVertical, IconCopy, IconCheck, IconBulb, IconFolder
 } from "@tabler/icons-react";
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface Message {
@@ -1070,6 +1070,7 @@ export default function Home() {
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [shareLinkCopied, setShareLinkCopied] = useState(false);
   /* changes done by megnathan: Added share code states */
   const [shareCode, setShareCode] = useState<string | null>(null);
   const [isGeneratingCode, setIsGeneratingCode] = useState(false);
@@ -1463,7 +1464,7 @@ export default function Home() {
               }
             ]);
             setSessionId(sharedSid);
-            setMessages(mappedHistory);
+            setMessages(processLoadedMessages(mappedHistory));
             console.log("[share] shared chat loaded and mapped");
             setAuthChecked(true);
           }
@@ -1869,7 +1870,7 @@ export default function Home() {
     setShareLink("");
     setShareModalOpen(true); // Open modal immediately
     setIsSharing(true);      // Show loading inside modal
-    
+
     try {
       // 1. Force save the current history to DB first
       const currentMsgs = sessionMessagesRef.current.get(sid) || messages;
@@ -2218,6 +2219,7 @@ export default function Home() {
   // Fetch chat sessions list for sidebar (new at top, old at bottom)
   /* changes done by megnathan: Moved fetchSessions outside to make it accessible */
   const fetchSessions = async () => {
+    if (!authChecked || !loggedInUser) return;
     try {
       const res = await fetch(`${baseUrl}/api/session`, {
         method: "POST",
@@ -2466,6 +2468,14 @@ export default function Home() {
     // Save current messages
     sessionMessagesRef.current.set(currentSid, messages);
 
+    // Update selected group name based on the target session
+    const targetSession = chatSessions.find(s => s.id === targetSid);
+    if (targetSession && targetSession.group_name) {
+      setSelectedGroupName(targetSession.group_name);
+    } else {
+      setSelectedGroupName(null);
+    }
+
     // Refresh from backend to get latest titles; do not move clicked chat to top (just highlight)
     const refreshSessions = async () => {
       if (!loggedInUser) return;
@@ -2485,6 +2495,7 @@ export default function Home() {
             updatedAt: s.updated_at ? new Date(s.updated_at).getTime() : undefined,
             isPinned: s.is_pinned || false,
             isArchived: s.is_archived || false,
+            group_name: s.group_name,
           })
         );
         setChatSessions(prev => {
@@ -2762,7 +2773,7 @@ export default function Home() {
     }));
 
     setIsLoading(true);
-  }; 
+  };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Tab" && ghostSuffixStrRef.current) {
@@ -2863,8 +2874,8 @@ export default function Home() {
                 className="main-input"
                 defaultValue={input}
                 onCompositionStart={() => { isComposingRef.current = true; }}
-                onCompositionEnd={(e) => { 
-                  isComposingRef.current = false; 
+                onCompositionEnd={(e) => {
+                  isComposingRef.current = false;
                   syncGhostUserMirror();
                   applyGhostSuffixFromInput();
                 }}
@@ -3037,6 +3048,7 @@ export default function Home() {
             top: 0,
             left: 0,
             zIndex: responsive.isMobile && sidebarOpen ? 9999 : 2,
+            filter: (importModalOpen || shareModalOpen) ? 'blur(5px)' : 'none',
           }}
         >
           <aside className="sidebar">
@@ -3143,14 +3155,7 @@ export default function Home() {
                       <IconUser size={18} />
                       <span>Manage Account</span>
                     </button>
-                    <div className="profile-divider" />
-                    <button
-                      className="profile-dropdown-item profile-action-btn profile-logout"
-                      onClick={handleLogout}
-                    >
-                      <IconLogout />
-                      <span>Logout</span>
-                    </button>
+
                   </div>
                 </div>
               </div>
@@ -3692,7 +3697,7 @@ export default function Home() {
                   <p className="landing-subtitle">{selectedGroupName ? `Start a new chat in ${selectedGroupName}` : "Let's work together buddy"}</p>
                 </div>
               </div>
-              {activeFeature !== 'archived' && renderChatInputFooter("landing")}
+              {renderChatInputFooter("landing")}
               <div className="landing-start-spacer-bottom" aria-hidden />
             </div>
           )}
@@ -3700,6 +3705,12 @@ export default function Home() {
           {/* Chat area */}
           {!historyLoading && !isLanding && (activeFeature === 'chat' || activeFeature === 'library') && (
             <div className="chat-scroll-area">
+              {selectedGroupName && (
+                <div style={{ padding: '12px 24px', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <IconFolder size={14} style={{ color: 'var(--color-primary)' }} />
+                  <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text)' }}>{selectedGroupName}</span>
+                </div>
+              )}
               <div className="messages-container">
                 {messages.map((msg, idx) => {
                   const isUser = msg.role === "user";
@@ -4168,8 +4179,10 @@ export default function Home() {
               backgroundColor: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)'
             }}>
               <div style={{
-                background: 'var(--color-bg-sidebar)', padding: '24px', borderRadius: '16px',
-                width: '90%', maxWidth: '400px', border: '1px solid rgba(255,255,255,0.1)',
+                background: (typeof window !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark') ? 'var(--color-bg-sidebar)' : '#ffffff',
+                padding: '24px', borderRadius: '16px',
+                width: '90%', maxWidth: '400px',
+                border: (typeof window !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark') ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(0,0,0,0.1)',
                 boxShadow: '0 20px 25px -5px rgba(0,0,0,0.5)', textAlign: 'center'
               }}>
                 <h3 style={{ margin: '0 0 8px 0', fontSize: '1.25rem', fontWeight: 600 }}>Share Chat</h3>
@@ -4181,8 +4194,10 @@ export default function Home() {
                 <div style={{ textAlign: 'left', marginBottom: '8px', fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-primary)' }}>SHARE LINK</div>
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: '8px',
-                  background: 'rgba(0,0,0,0.2)', padding: '12px', borderRadius: '8px',
-                  border: '1px solid rgba(255,255,255,0.05)', marginBottom: '24px'
+                  background: (typeof window !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark') ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.05)',
+                  padding: '12px', borderRadius: '8px',
+                  border: (typeof window !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark') ? '1px solid rgba(255,255,255,0.05)' : '1px solid rgba(0,0,0,0.1)',
+                  marginBottom: '24px'
                 }}>
                   <input
                     readOnly
@@ -4195,22 +4210,38 @@ export default function Home() {
                   />
                   <button
                     onClick={() => {
-                      if (!isSharing && shareLink) navigator.clipboard.writeText(shareLink);
+                      if (!isSharing && shareLink) {
+                        navigator.clipboard.writeText(shareLink);
+                        setShareLinkCopied(true);
+                        setTimeout(() => setShareLinkCopied(false), 2000);
+                      }
                     }}
                     disabled={isSharing || !shareLink}
                     style={{
                       background: 'var(--color-primary)', border: 'none', borderRadius: '6px',
                       padding: '6px 12px', color: '#000', fontWeight: 600, cursor: 'pointer', fontSize: '0.75rem',
-                      opacity: (isSharing || !shareLink) ? 0.5 : 1
+                      opacity: (isSharing || !shareLink) ? 0.5 : 1,
+                      display: 'flex', alignItems: 'center', gap: '4px'
                     }}
-                  >Copy</button>
+                  >
+                    {shareLinkCopied ? (
+                      <>
+                        <IconCheck size={14} />
+                        Copied
+                      </>
+                    ) : (
+                      "Copy"
+                    )}
+                  </button>
                 </div>
 
                 {/* changes done by megnathan: Added Share via Code section with copy icon */}
                 <div style={{ textAlign: 'left', marginBottom: '8px', fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-primary)' }}>SHARE VIA CODE</div>
                 <div style={{
-                  background: 'rgba(0,0,0,0.2)', padding: '16px', borderRadius: '8px',
-                  border: '1px solid rgba(255,255,255,0.05)', marginBottom: '24px',
+                  background: (typeof window !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark') ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.05)',
+                  padding: '16px', borderRadius: '8px',
+                  border: (typeof window !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark') ? '1px solid rgba(255,255,255,0.05)' : '1px solid rgba(0,0,0,0.1)',
+                  marginBottom: '24px',
                   display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'center'
                 }}>
                   {shareCode ? (
@@ -4226,7 +4257,8 @@ export default function Home() {
                           setTimeout(() => setShareCodeCopied(false), 2000);
                         }}
                         style={{
-                          background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+                          background: (typeof window !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark') ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)',
+                          border: (typeof window !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark') ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(0,0,0,0.1)',
                           borderRadius: '8px', padding: '8px', color: 'var(--color-primary)', cursor: 'pointer',
                           display: 'flex', alignItems: 'center', justifyContent: 'center'
                         }}
@@ -4268,8 +4300,10 @@ export default function Home() {
               backgroundColor: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)'
             }}>
               <div style={{
-                background: 'var(--color-bg-sidebar)', padding: '24px', borderRadius: '16px',
-                width: '90%', maxWidth: '400px', border: '1px solid rgba(255,255,255,0.1)',
+                background: (typeof window !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark') ? 'var(--color-bg-sidebar)' : '#ffffff',
+                padding: '24px', borderRadius: '16px',
+                width: '90%', maxWidth: '400px',
+                border: (typeof window !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark') ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(0,0,0,0.1)',
                 boxShadow: '0 20px 25px -5px rgba(0,0,0,0.5)', textAlign: 'center'
               }}>
                 <h3 style={{ margin: '0 0 8px 0', fontSize: '1.25rem', fontWeight: 600 }}>Import Chat via Code</h3>
@@ -4287,7 +4321,9 @@ export default function Home() {
                     value={inputShareCode}
                     onChange={(e) => setInputShareCode(e.target.value.replace(/[^0-9]/g, ""))}
                     style={{
-                      width: '100%', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.1)',
+                      width: '100%',
+                      background: (typeof window !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark') ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.05)',
+                      border: (typeof window !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark') ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(0,0,0,0.1)',
                       borderRadius: '8px', padding: '16px', color: 'var(--color-text)',
                       fontSize: '24px', textAlign: 'center', fontWeight: 800, letterSpacing: '8px',
                       outline: 'none'
