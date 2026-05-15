@@ -676,6 +676,7 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-height: 0;
   /* only inner chat list scrolls */
 }
 
@@ -686,20 +687,10 @@ body {
   background: rgba(0, 0, 0, 0.2);
   padding: 8px;
   min-height: 80px;
-}
-
-:root[data-theme='light'] .chat-history-box {
-  border-color: rgba(212, 175, 55, 0.5);
-  background: rgba(250, 250, 250, 0.6);
-}
-
-/* Box around chat history / "No chats yet" area */
-.chat-history-box {
-  border: 1px solid rgba(212, 175, 55, 0.35);
-  border-radius: 10px;
-  background: rgba(0, 0, 0, 0.2);
-  padding: 8px;
-  min-height: 80px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 :root[data-theme='light'] .chat-history-box {
@@ -712,6 +703,7 @@ body {
   flex: 1;
   overflow-y: auto;
   padding-right: 2px;
+  max-height: calc(100vh - 320px);
   /* small breathing room on the right */
 }
 
@@ -2433,6 +2425,61 @@ body {
   outline: none;
 }
 
+/* Inline ghost completion: mirror layer behind transparent textarea */
+.main-input-stack {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+}
+
+.main-input-ghost-mirror {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 0;
+  pointer-events: none;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  overflow: hidden;
+  font-size: clamp(14px, 1.6vw + 0.5rem, 17px);
+  line-height: 1.2;
+  font-weight: 400;
+  font-family: inherit;
+  padding: 3px 0;
+  user-select: none;
+  scrollbar-width: none;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+.main-input-ghost-mirror::-webkit-scrollbar {
+  display: none;
+}
+
+.main-input-ghost-mirror .ghost-mirror-user {
+  color: transparent;
+}
+
+.main-input-ghost-mirror .ghost-mirror-suffix {
+  color: var(--color-text-muted);
+  opacity: 0.62;
+}
+
+.main-input.main-input--layered {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  background: transparent;
+  caret-color: var(--color-text);
+}
+
 .mic-btn {
   transition: all 0.2s;
   cursor: pointer;
@@ -3713,6 +3760,16 @@ textarea:focus-visible {
   .sidebar-scroll {
     max-height: calc(100vh - 88px);
   }
+
+  /* iPad: sidebar is a fixed overlay, give history scroll all remaining space */
+  .chat-history-box {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .chat-history-scroll {
+    max-height: calc(100vh - 260px);
+  }
 }
 
 @media (max-width: 640px) {
@@ -3749,6 +3806,16 @@ textarea:focus-visible {
     /* Stack header above chat area */
     padding-top: var(--header-height);
     /* ensure fixed mobile header does not overlap chat */
+  }
+
+  /* Mobile: sidebar is a fixed overlay, give history scroll all remaining space */
+  .chat-history-box {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .chat-history-scroll {
+    max-height: calc(var(--vh, 1vh) * 100 - 260px);
   }
 
   .chat-scroll-area {

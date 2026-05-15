@@ -398,7 +398,7 @@ export default function Usage({ externalUserId, subUserName }: UsageProps) {
                       {metric.label}
                     </p>
                     <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
-                      {metric.data.map((row) => (
+                      {[...metric.data].reverse().map((row) => (
                         <div key={row.date} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
                           <span style={{ fontSize: 11, fontWeight: 800, color: textFaint }}>{row.date}</span>
                           <span style={{ fontSize: 11, fontWeight: 900, color: metric.chartColor }}>

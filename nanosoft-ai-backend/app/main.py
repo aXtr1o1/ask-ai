@@ -209,7 +209,8 @@ async def ws_chat_endpoint(websocket: WebSocket):
                     await save_session_to_postgres_service(
                         session_id = current_session_id,
                         user_name  = session_data.get("sub_user_name") or session_data.get("user_name", ""),
-                        history    = session_data.get("history", [])
+                        history    = session_data.get("history", []),
+                        group_name = session_data.get("group_name")
                     )
                 break
 
@@ -238,6 +239,8 @@ async def ws_chat_endpoint(websocket: WebSocket):
             logger.info(f"📊 isAudio flag received: {is_audio}")
             is_graph = bool(data.get("isGraph", False))
             logger.info(f"📊 isGraph flag received: {is_graph}")
+            group_name = data.get("group_name") or data.get("groupName")
+            logger.info(f"📊 group_name={group_name}")
 
 
 # Changes done by sanjeevan
@@ -487,6 +490,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
                                     "lc_memory": [],
                                     "history": [],
                                     "user_name": user_name,
+                                    "group_name": group_name,
                                     "pending_transcription": None,
                                 }
                             memory_store[session_id]["history"].append({
@@ -556,7 +560,8 @@ async def ws_chat_endpoint(websocket: WebSocket):
                             memory_store[session_id] = {
                                 "lc_memory": [],
                                 "history":   [],
-                                "user_name": user_name
+                                "user_name": user_name,
+                                "group_name": group_name
                             }
 
                         # ── Save original transcription for yes/no handling ───
@@ -749,10 +754,14 @@ async def ws_chat_endpoint(websocket: WebSocket):
                     "history":   [],
                     "user_name":     user_name,
                     "sub_user_name": sub_user_name,
-                    "pending_transcription": None
+                    "pending_transcription": None,
+                    "group_name": group_name
                 }
-                
                 logger.info(f"🆕 Memory initialized for session_id: {session_id}")
+            else:
+                # Update group_name if it was passed
+                if group_name:
+                    memory_store[session_id]["group_name"] = group_name
 
             lc_memory = list(memory_store[session_id]["lc_memory"])
             messages  = [get_system_prompt(user_name)] + lc_memory
@@ -950,7 +959,8 @@ async def ws_chat_endpoint(websocket: WebSocket):
                 await save_session_to_postgres_service(
                     session_id = current_session_id,
                     user_name  = session_data.get("sub_user_name") or session_data.get("user_name", ""),
-                    history    = session_data.get("history", [])
+                    history    = session_data.get("history", []),
+                    group_name = session_data.get("group_name")
                 )
                 logger.info(f"✅ Saved on disconnect | session={current_session_id}")
                 
@@ -1007,7 +1017,8 @@ async def sessions_endpoint(request: SessionRequest):
         await save_session_to_postgres_service(
             session_id = session_id,
             user_name  = user_name,
-            history    = history_pairs
+            history    = history_pairs,
+            group_name = request.group_name
         )
         #Mark this session as saved by frontend
         # So WebSocketDisconnect will NOT save it again
@@ -1071,6 +1082,84 @@ async def delete_session_endpoint(payload: dict):
     if not ok:
         raise HTTPException(status_code=500, detail="Failed to delete session")
     return {"status": "ok", "sessionId": session_id}
+    
+@api_router.post("/sessions/pin")
+async def pin_session_endpoint(payload: dict):
+    user_name = str(payload.get("userName", "")).strip()
+    session_id = str(payload.get("sessionId", "")).strip()
+    is_pinned = bool(payload.get("isPinned", False))
+
+    if not user_name or not session_id:
+        raise HTTPException(status_code=400, detail="userName and sessionId are required")
+
+    from app.services.postgres_service import toggle_pin_session
+    ok = await toggle_pin_session(session_id, user_name, is_pinned)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Chat session not found for this user")
+    return {"status": "ok", "sessionId": session_id, "isPinned": is_pinned}
+
+@api_router.post("/sessions/archive")
+async def archive_session_endpoint(payload: dict):
+    user_name = str(payload.get("userName", "")).strip()
+    session_id = str(payload.get("sessionId", "")).strip()
+    is_archived = bool(payload.get("isArchived", False))
+
+    if not user_name or not session_id:
+        raise HTTPException(status_code=400, detail="userName and sessionId are required")
+
+    from app.services.postgres_service import toggle_archive_session
+    ok = await toggle_archive_session(session_id, user_name, is_archived)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Chat session not found for this user")
+    return {"status": "ok", "sessionId": session_id, "isArchived": is_archived}
+
+@api_router.post("/sessions/share")
+async def share_session_endpoint(payload: dict):
+    user_name = str(payload.get("userName", "")).strip()
+    session_id = str(payload.get("sessionId", "")).strip()
+    is_public = bool(payload.get("isPublic", False))
+
+    if not user_name or not session_id:
+        raise HTTPException(status_code=400, detail="userName and sessionId are required")
+
+    from app.services.postgres_service import toggle_session_public
+    ok = await toggle_session_public(session_id, user_name, is_public)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Chat session not found for this user")
+    return {"status": "ok", "sessionId": session_id, "isPublic": is_public}
+
+#  changes done by megnathan: Added share code generation and import endpoints */
+@api_router.post("/sessions/generate-share-code")
+async def generate_share_code_endpoint(payload: dict):
+    session_id = str(payload.get("sessionId", "")).strip()
+    user_name = str(payload.get("userName", "")).strip()
+    if not session_id or not user_name:
+        raise HTTPException(status_code=400, detail="sessionId and userName are required")
+    from app.services.session_service import generate_share_code
+    code = await generate_share_code(session_id, user_name)
+    if not code:
+        raise HTTPException(status_code=500, detail="Failed to generate share code")
+    return {"status": "ok", "shareCode": code}
+
+@api_router.post("/sessions/import-by-code")
+async def import_by_code_endpoint(payload: dict):
+    share_code = str(payload.get("shareCode", "")).strip()
+    current_user = str(payload.get("userName", "")).strip()
+    if not share_code or not current_user:
+        raise HTTPException(status_code=400, detail="shareCode and userName are required")
+    from app.services.session_service import import_session_by_code
+    new_session_id = await import_session_by_code(share_code, current_user)
+    if not new_session_id:
+        raise HTTPException(status_code=404, detail="Invalid share code or failed to import")
+    return {"status": "ok", "newSessionId": new_session_id}
+
+@chatbot_app.get("/api/share/history")
+async def get_shared_history(sessionId: str, owner: str = None):
+    from app.services.postgres_service import get_public_chat_history
+    history = await get_public_chat_history(sessionId, owner)
+    if history is None:
+        raise HTTPException(status_code=404, detail="Shared session not found or private")
+    return {"status": "ok", "history": history}
     
 @api_router.post("/client_insertion")
 async def client_insertion(request: ClientInsertionRequest):

@@ -215,6 +215,7 @@ class SessionRequest(BaseModel):
     sessionId: str = ""
     chatHistory: Optional[List[FrontendChatMessage]] = None
     historyOnClick: bool = False
+    group_name: Optional[str] = None
 
 class ClientInsertionRequest(BaseModel):
     """Request schema for client insertion"""
