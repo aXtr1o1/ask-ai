@@ -16,7 +16,8 @@ import UpgradePlan from "./components/UpgradePlan";
 import ManageAccount from "./components/ManageAccount/ManageAccount";
 import WalkthroughPopup from "./components/WalkthroughPopup";
 import LandingSuggestedQueries from "./components/LandingSuggestedQueries";
-import { IconUser, IconMicrophone, IconPlayerPlay, IconPlayerPause, IconTrash, IconArrowUp, IconChartBar, IconList, IconLayoutGrid, IconMenu2, IconX, IconCrown, IconDotsVertical } from "@tabler/icons-react";
+import GroupsChat from "./components/GroupsChat";
+import { IconUser, IconMicrophone, IconPlayerPlay, IconPlayerPause, IconTrash, IconArrowUp, IconChartBar, IconList, IconLayoutGrid, IconMenu2, IconX, IconCrown, IconDotsVertical, IconBulb, IconFolder } from "@tabler/icons-react";
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface Message {
   role: "user" | "ai" | "error";
@@ -34,8 +35,14 @@ interface Message {
   tableTitle?: string;        // ← Title for the table
   tableViewMode?: 'table' | 'tile';  // ← Toggle between table and tile views
 }
-interface FolderItem { id: string; name: string; }
-interface ChatSession { id: string; title: string; createdAt: number; updatedAt?: number; isPinned?: boolean; isArchived?: boolean; }
+interface ChatSession { id: string; title: string; createdAt: number; updatedAt?: number; isPinned?: boolean; isArchived?: boolean; group_name?: string; }
+interface Group {
+  id: string;
+  name: string;
+  description: string;
+  chatCount: number;
+  updatedAt: string;
+}
 
 // ─── Extract text from any backend response shape ─────────────────────────────
 // Improved: handles JSON strings without spaces, array join, and reply/content/text fields
@@ -896,11 +903,7 @@ function generateSessionId(): string {
 // Chat history will be implemented later
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
-const IconFolder = () => (
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
-  </svg>
-);
+
 const IconPlus = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
     <path d="M12 5v14M5 12h14" />
@@ -1020,6 +1023,7 @@ export default function Home() {
   // const searchParams  = useSearchParams();
   const responsive = useResponsive();  // Auto-detect screen size
   const [userIdFromUrl, setUserIdFromUrl] = useState<string | null>(null); // display name
+  const [createGroupTrigger, setCreateGroupTrigger] = useState(0);
   const [userIdInt, setUserIdInt] = useState<number | null>(null); // integer user_id for filtering
   const [clientNameFromUrl, setClientNameFromUrl] = useState<string | null>(null); // backend username
   // `input` is the debounced value (used for heavier work).
@@ -1068,12 +1072,31 @@ export default function Home() {
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState<string>("");
   const editingInputRef = useRef<HTMLInputElement | null>(null);
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [selectedGroupName, setSelectedGroupName] = useState<string | null>(null);
+  const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
+  const [groupActiveType, setGroupActiveType] = useState<'folder' | 'chat'>('folder');
+
+  const handleCreateGroup = (name: string) => {
+    const newGroup: Group = {
+      id: Math.random().toString(36).substr(2, 9),
+      name,
+      description: "Custom group",
+      chatCount: 0,
+      updatedAt: new Date().toLocaleDateString()
+    };
+    setGroups(prev => [...prev, newGroup]);
+    setSelectedGroupName(name);
+    setMessages([]); // Clear messages for new group chat
+    setSessionId(generateSessionId()); // New session for the group
+  };
   // Archived sessions (store only id/title client-side)
   const [archivedSessions, setArchivedSessions] = useState<ChatSession[]>([]);
-  // Delete confirmation modal state
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteSessionId, setDeleteSessionId] = useState<string | null>(null);
   const [deleteSessionTitle, setDeleteSessionTitle] = useState<string>("");
+  const [isCreateGroupModalOpen, setIsCreateGroupModalOpen] = useState(false);
+  const [newGroupName, setNewGroupName] = useState("");
 
   // Helper to toggle a global body class used for applying a full-page blur fallback
   const setGlobalBackdropBlur = (enable: boolean) => {
@@ -1095,6 +1118,27 @@ export default function Home() {
       setIsManageAccountMenuOpen(false);
     }
   }, [showManageAccount]);
+
+  // Derive groups from chatSessions so they persist on refresh
+  useEffect(() => {
+    const uniqueGroupNames = Array.from(new Set(chatSessions.map(s => s.group_name).filter(Boolean)));
+
+    setGroups(prev => {
+      const merged = [...prev];
+      uniqueGroupNames.forEach(name => {
+        if (!merged.some(g => g.name === name)) {
+          merged.push({
+            id: name as string,
+            name: name as string,
+            description: "Custom group",
+            chatCount: chatSessions.filter(s => s.group_name === name).length,
+            updatedAt: new Date().toLocaleDateString()
+          });
+        }
+      });
+      return merged;
+    });
+  }, [chatSessions]);
 
   // Load archived sessions from localStorage on mount
   // useEffect(() => {
@@ -1548,6 +1592,7 @@ export default function Home() {
         body: JSON.stringify({
           userName: userIdFromUrl ?? loggedInUser,
           sessionId: sid,
+          group_name: selectedGroupName,
           chatHistory: valid.map(m => ({
             role: m.role,
             text: m.isAudio
@@ -2057,16 +2102,29 @@ export default function Home() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         const fetched: ChatSession[] = (data?.sessions ?? []).map(
-          (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; is_pinned?: boolean; is_archived?: boolean }) => ({
+          (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; is_pinned?: boolean; is_archived?: boolean; group_name?: string }) => ({
             id: s.session_id,
             title: s.title || "Chat",
             createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
             updatedAt: s.updated_at ? new Date(s.updated_at).getTime() : undefined,
             isPinned: s.is_pinned || false,
             isArchived: s.is_archived || false,
+            group_name: s.group_name,
           })
         );
         setChatSessions(sortSessionsNewestFirst(fetched));
+
+        // Derive groups at the same time as sessions — no extra render cycle
+        const uniqueGroupNames = Array.from(new Set(fetched.map(s => s.group_name).filter(Boolean))) as string[];
+        if (uniqueGroupNames.length > 0) {
+          setGroups(uniqueGroupNames.map(name => ({
+            id: name,
+            name,
+            description: "Custom group",
+            chatCount: fetched.filter(s => s.group_name === name).length,
+            updatedAt: new Date().toLocaleDateString(),
+          })));
+        }
       } catch (err) {
         console.warn("Failed to fetch chat sessions:", err);
         setChatSessions([]);
@@ -2131,13 +2189,14 @@ export default function Home() {
         if (!res.ok) return;
         const data = await res.json();
         const fetched: ChatSession[] = (data?.sessions ?? []).map(
-          (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; is_pinned?: boolean; is_archived?: boolean }) => ({
+          (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; is_pinned?: boolean; is_archived?: boolean; group_name?: string }) => ({
             id: s.session_id,
             title: s.title || "Chat",
             createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
             updatedAt: s.updated_at ? new Date(s.updated_at).getTime() : undefined,
             isPinned: s.is_pinned || false,
             isArchived: s.is_archived || false,
+            group_name: s.group_name,
           })
         );
         setChatSessions(prev => {
@@ -2159,6 +2218,18 @@ export default function Home() {
           }
           return [newCapsule, ...rest];
         });
+
+        // Re-derive groups so new group chats appear immediately
+        const uniqueGroupNames = Array.from(new Set(fetched.map(s => s.group_name).filter(Boolean))) as string[];
+        if (uniqueGroupNames.length > 0) {
+          setGroups(uniqueGroupNames.map(name => ({
+            id: name,
+            name,
+            description: "Custom group",
+            chatCount: fetched.filter(s => s.group_name === name).length,
+            updatedAt: new Date().toLocaleDateString(),
+          })));
+        }
       } catch (err) {
         console.warn("Failed to refetch sessions:", err);
       }
@@ -2281,11 +2352,12 @@ export default function Home() {
         if (!res.ok) return;
         const data = await res.json();
         const fetched: ChatSession[] = (data?.sessions ?? []).map(
-          (s: { session_id: string; title?: string; created_at?: string; updated_at?: string }) => ({
+          (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; group_name?: string }) => ({
             id: s.session_id,
             title: s.title || "Chat",
             createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
             updatedAt: s.updated_at ? new Date(s.updated_at).getTime() : undefined,
+            group_name: s.group_name,
           })
         );
         setChatSessions(prev => {
@@ -2554,6 +2626,7 @@ export default function Home() {
       subUserName: userIdFromUrl ?? loggedInUser,
       userId: userIdInt !== null ? String(userIdInt) : undefined,
       sessionId,
+      group_name: selectedGroupName,
       timestamp: Date.now()
     }));
   };  // ← THIS CLOSING BRACE WAS MISSING
@@ -2755,7 +2828,7 @@ export default function Home() {
       {/* Content above background (MainLayout-style) */}
       <div
         className={
-          !historyLoading && isLanding
+          !historyLoading && isLanding && (activeFeature === 'chat' || activeFeature === 'library')
             ? "app-content-wrapper app-content-wrapper--landing-start"
             : "app-content-wrapper"
         }
@@ -2915,6 +2988,8 @@ export default function Home() {
                 onClick={() => {
                   setActiveFeature('chat');
                   handleFeatureClick('chat');
+                  setSelectedGroupName(null);
+                  handleNewChat();
                 }}
               >
                 <IconChat />
@@ -2925,6 +3000,8 @@ export default function Home() {
                 onClick={() => {
                   setActiveFeature('archived');
                   handleFeatureClick('archived');
+                  setSelectedGroupName(null);
+                  setMessages([]); // Clear messages to show landing container
                 }}
               >
                 <IconArchive />
@@ -2938,90 +3015,170 @@ export default function Home() {
                 }}
               >
                 <IconLibrary />
-                <span>Groups</span>
+                <span style={{ flex: 1 }}>Groups</span>
+                <button
+                  title="Create group"
+                  onClick={(e) => { e.stopPropagation(); setCreateGroupTrigger(prev => prev + 1); }}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    padding: '0 4px',
+                    color: 'var(--color-text-secondary)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    borderRadius: '4px',
+                    transition: 'color 0.15s',
+                    fontSize: '18px',
+                    lineHeight: 1,
+                    fontWeight: 300,
+                  }}
+                  onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.color = 'var(--color-accent, #c8932a)')}
+                  onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.color = 'var(--color-text-secondary)')}
+                >+</button>
               </div>
 
-              <div className="search-section-sidebar" style={{ padding: '8px 12px', marginTop: 16 }}>
-                <div className="search-input-wrapper" style={{ position: 'relative' }}>
-                  <IconSearch style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }} />
-                  <input
-                    type="text"
-                    placeholder="Search chats..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
+              {activeFeature === 'library' && groups.map(group => (
+                <div key={group.id}>
+                  <div
+                    className="sidebar-sub-item"
                     style={{
-                      width: '100%',
-                      padding: '8px 10px 8px 34px',
+                      padding: '6px 12px',
+                      paddingLeft: '36px',
+                      fontSize: '13px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      color: selectedGroupName === group.name && groupActiveType === 'folder' ? 'var(--color-accent, #c8932a)' : 'var(--color-text-secondary)',
+                      background: selectedGroupName === group.name && groupActiveType === 'folder' ? 'rgba(218, 165, 32, 0.12)' : 'transparent',
+                      borderRadius: '8px',
+                      fontWeight: selectedGroupName === group.name && groupActiveType === 'folder' ? 600 : 400,
+                      transition: 'background 0.15s, color 0.15s',
+                    }}
+                    onClick={() => {
+                      // Toggle expansion
+                      setExpandedGroups(prev =>
+                        prev.includes(group.name)
+                          ? prev.filter(g => g !== group.name)
+                          : [...prev, group.name]
+                      );
+                      setActiveFeature('library');
+                      setSelectedGroupName(group.name);
+                      setGroupActiveType('folder');
+                      setMessages([]); // This makes isLanding true!
+                      setSessionId(generateSessionId()); // New session for the group
+                    }}
+                  >
+                    <IconFolder width={14} height={14} />
+                    <span>{group.name}</span>
+                  </div>
+
+                  {/* Render chats for this group */}
+                  {expandedGroups.includes(group.name) && chatSessions.filter(s => s.group_name === group.name).map(s => (
+                    <div
+                      key={s.id}
+                      className={`sidebar-sub-item ${s.id === sessionId && groupActiveType === 'chat' ? "active" : ""}`}
+                      onClick={() => {
+                        switchSession(s.id);
+                        setActiveFeature('library');
+                        setSelectedGroupName(group.name);
+                        setGroupActiveType('chat');
+                      }}
+                      style={{
+                        padding: '4px 12px',
+                        paddingLeft: '52px',
+                        fontSize: '12px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        color: s.id === sessionId && groupActiveType === 'chat' ? 'var(--color-accent, #c8932a)' : 'var(--color-text-secondary)',
+                        background: s.id === sessionId && groupActiveType === 'chat' ? 'rgba(218, 165, 32, 0.10)' : 'transparent',
+                        borderRadius: '8px',
+                        fontWeight: s.id === sessionId && groupActiveType === 'chat' ? 600 : 400,
+                        transition: 'background 0.15s, color 0.15s',
+                      }}
+                    >
+                      <IconChat width={12} height={12} />
+                      <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.title}</span>
+                    </div>
+                  ))}
+                </div>
+              ))}
+
+              {activeFeature !== 'library' && (
+                <div className="search-section-sidebar" style={{ padding: '8px 12px', marginTop: 16 }}>
+                  <div className="search-input-wrapper" style={{ position: 'relative' }}>
+                    <IconSearch style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }} />
+                    <input
+                      type="text"
+                      placeholder="Search chats..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '8px 10px 8px 34px',
+                        borderRadius: 8,
+                        border: '1px solid var(--color-border)',
+                        background: 'rgba(255,255,255,0.05)',
+                        fontSize: 13,
+                        outline: 'none',
+                        color: 'inherit'
+                      }}
+                    />
+                  </div>
+                  {searchTerm && (
+                    <div className="search-results-dropdown" style={{
+                      marginTop: 8,
+                      maxHeight: 200,
+                      overflowY: 'auto',
+                      background: 'var(--color-bg-secondary)',
                       borderRadius: 8,
                       border: '1px solid var(--color-border)',
-                      background: 'rgba(255,255,255,0.05)',
-                      fontSize: 13,
-                      outline: 'none',
-                      color: 'inherit'
-                    }}
-                  />
-                </div>
-                {searchTerm && (
-                  <div className="search-results-dropdown" style={{
-                    marginTop: 8,
-                    maxHeight: 200,
-                    overflowY: 'auto',
-                    background: 'var(--color-bg-secondary)',
-                    borderRadius: 8,
-                    border: '1px solid var(--color-border)',
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
-                  }}>
-                    {chatSessions.filter(s => s.title.toLowerCase().includes(searchTerm.toLowerCase())).length > 0 ? (
-                      chatSessions
-                        .filter(s => s.title.toLowerCase().includes(searchTerm.toLowerCase()))
-                        .map(s => (
-                          <div
-                            key={s.id}
-                            className="search-result-item"
-                            onClick={() => {
-                              switchSession(s.id);
-                              setSearchTerm("");
-                              setActiveFeature('chat');
-                            }}
-                            style={{
-                              padding: '8px 12px',
-                              cursor: 'pointer',
-                              fontSize: 12,
-                              borderBottom: '1px solid rgba(255,255,255,0.05)',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 8
-                            }}
-                          >
-                            <IconChat width={14} height={14} style={{ opacity: 0.5 }} />
-                            <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.title}</span>
-                          </div>
-                        ))
-                    ) : (
-                      <div style={{ padding: '12px', textAlign: 'center', fontSize: 12, opacity: 0.5 }}>No results found</div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {showFeaturePlaceholder && activeFeature === 'library' && (
-                <div className="feature-placeholder-sidebar">
-                  <div className="feature-placeholder-box">
-                    <div className="feature-placeholder-title">
-                      Groups
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
+                    }}>
+                      {chatSessions.filter(s => !s.group_name && s.title.toLowerCase().includes(searchTerm.toLowerCase())).length > 0 ? (
+                        chatSessions
+                          .filter(s => !s.group_name && s.title.toLowerCase().includes(searchTerm.toLowerCase()))
+                          .map(s => (
+                            <div
+                              key={s.id}
+                              className="search-result-item"
+                              onClick={() => {
+                                switchSession(s.id);
+                                setSearchTerm("");
+                                setActiveFeature('chat');
+                              }}
+                              style={{
+                                padding: '8px 12px',
+                                cursor: 'pointer',
+                                fontSize: 12,
+                                borderBottom: '1px solid rgba(255,255,255,0.05)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 8
+                              }}
+                            >
+                              <IconChat width={14} height={14} style={{ opacity: 0.5 }} />
+                              <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.title}</span>
+                            </div>
+                          ))
+                      ) : (
+                        <div style={{ padding: '12px', textAlign: 'center', fontSize: 12, opacity: 0.5 }}>No results found</div>
+                      )}
                     </div>
-                    <div className="feature-placeholder-subtitle">
-                      Yet to be implemented
-                    </div>
-                  </div>
+                  )}
                 </div>
               )}
+
+
 
               {/* Archived view */}
               {activeFeature === 'archived' && (
                 <div className="chat-history-box" style={{ marginTop: 24, display: "flex", flexDirection: "column", minHeight: 0 }}>
                   <div className="chat-history-scroll">
-                    {chatSessions.filter(s => s.isArchived).map(a => (
+                    {chatSessions.filter(s => s.isArchived && !s.group_name).map(a => (
                       <div
                         key={a.id}
                         className="sidebar-item"
@@ -3046,7 +3203,7 @@ export default function Home() {
                         </div>
                       </div>
                     ))}
-                    {chatSessions.filter(s => s.isArchived).length === 0 && (
+                    {chatSessions.filter(s => s.isArchived && !s.group_name).length === 0 && (
                       <div style={{ padding: "12px 16px", fontSize: 12, color: "#7a8f75", fontStyle: "italic" }}>
                         No archived chats
                       </div>
@@ -3060,7 +3217,7 @@ export default function Home() {
 
                 <div className="chat-history-box" style={{ marginTop: 24, display: "flex", flexDirection: "column", minHeight: 0 }}>
                   <div className="chat-history-scroll">
-                    {chatSessions.filter(s => !s.isArchived).map(s => (
+                    {chatSessions.filter(s => !s.isArchived && !s.group_name).map(s => (
                       <div
                         key={s.id}
                         className={`sidebar-item${s.id === sessionId ? " active" : ""}`}
@@ -3306,7 +3463,7 @@ export default function Home() {
           )}
 
           {/* Landing — welcome shifted up; input vertically centered (only before first message) */}
-          {!historyLoading && isLanding && (
+          {!historyLoading && isLanding && (activeFeature === 'chat' || activeFeature === 'library' || activeFeature === 'archived') && (
             <div className="landing-start-column">
               <div className="landing-start-spacer-top" aria-hidden />
               <div className="landing-container landing-container--start">
@@ -3325,18 +3482,18 @@ export default function Home() {
                       animation: "goldShine 3s ease-in-out infinite",
                     }}
                   >
-                    Welcome to Ask AI
+                    {selectedGroupName ? `📁 ${selectedGroupName}` : "Welcome to Ask AI"}
                   </h1>
-                  <p className="landing-subtitle">{"Let's work together buddy"}</p>
+                  <p className="landing-subtitle">{selectedGroupName ? `Start a new chat in ${selectedGroupName}` : "Let's work together buddy"}</p>
                 </div>
               </div>
-              {renderChatInputFooter("landing")}
+              {activeFeature !== 'archived' && renderChatInputFooter("landing")}
               <div className="landing-start-spacer-bottom" aria-hidden />
             </div>
           )}
 
           {/* Chat area */}
-          {!historyLoading && !isLanding && (
+          {!historyLoading && !isLanding && (activeFeature === 'chat' || activeFeature === 'library') && (
             <div className="chat-scroll-area">
               <div className="messages-container">
                 {messages.map((msg, idx) => {
@@ -3654,8 +3811,13 @@ export default function Home() {
             </div>
           )}
 
+          {/* Groups view */}
+          {!historyLoading && activeFeature === 'library' && (
+            <GroupsChat createGroupTrigger={createGroupTrigger} groups={groups} onCreateGroup={handleCreateGroup} />
+          )}
+
           {/* Input footer — bottom bar after chat starts or while history loads (not duplicated on landing) */}
-          {(historyLoading || !isLanding) && renderChatInputFooter("default")}
+          {(historyLoading || (!isLanding && (activeFeature === 'chat' || activeFeature === 'library'))) && renderChatInputFooter("default")}
 
           {/* Upgrade Plan Modal */}
           {showUpgradePlan && (
@@ -3842,6 +4004,8 @@ export default function Home() {
               </div>
             </div>
           )}
+
+
         </div>
       </div>
     </div>

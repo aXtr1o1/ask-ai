@@ -103,7 +103,7 @@ async def generate_session_title(history: list) -> str:
 
 
 # ── Save session to PostgreSQL ──────────────────────────────────────────────
-async def save_session_to_postgres_service(session_id: str, user_name: str, history: list):
+async def save_session_to_postgres_service(session_id: str, user_name: str, history: list, group_name: str = None):
     """
     Saves chat session history + generated title to PostgreSQL (chat_sessions).
     Uses upsert on session_id (insert or update).
@@ -123,15 +123,16 @@ async def save_session_to_postgres_service(session_id: str, user_name: str, hist
             try:
                 cur.execute(
                     """
-                    INSERT INTO chat_sessions (session_id, user_name, chat_history, title, updated_at)
-                    VALUES (%s, %s, %s::jsonb, %s, NOW())
+                    INSERT INTO chat_sessions (session_id, user_name, chat_history, title, updated_at, group_name)
+                    VALUES (%s, %s, %s::jsonb, %s, NOW(), %s)
                     ON CONFLICT (session_id) DO UPDATE SET
                         user_name    = EXCLUDED.user_name,
                         chat_history = EXCLUDED.chat_history,
                         title        = EXCLUDED.title,
-                        updated_at   = NOW()
+                        updated_at   = NOW(),
+                        group_name   = EXCLUDED.group_name
                     """,
-                    (session_id, user_name, history_json, title),
+                    (session_id, user_name, history_json, title, group_name),
                 )
             except Exception as conflict_err:
                 if "unique or exclusion constraint" in str(conflict_err).lower() or "on_conflict" in str(conflict_err).lower():
@@ -144,18 +145,18 @@ async def save_session_to_postgres_service(session_id: str, user_name: str, hist
                         cur.execute(
                             """
                             UPDATE chat_sessions
-                            SET user_name = %s, chat_history = %s::jsonb, title = %s, updated_at = NOW()
+                            SET user_name = %s, chat_history = %s::jsonb, title = %s, updated_at = NOW(), group_name = %s
                             WHERE session_id = %s
                             """,
-                            (user_name, history_json, title, session_id),
+                            (user_name, history_json, title, group_name, session_id),
                         )
                     else:
                         cur.execute(
                             """
-                            INSERT INTO chat_sessions (session_id, user_name, chat_history, title, updated_at)
-                            VALUES (%s, %s, %s::jsonb, %s, NOW())
+                            INSERT INTO chat_sessions (session_id, user_name, chat_history, title, updated_at, group_name)
+                            VALUES (%s, %s, %s::jsonb, %s, NOW(), %s)
                             """,
-                            (session_id, user_name, history_json, title),
+                            (session_id, user_name, history_json, title, group_name),
                         )
                 else:
                     raise

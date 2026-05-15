@@ -209,7 +209,8 @@ async def ws_chat_endpoint(websocket: WebSocket):
                     await save_session_to_postgres_service(
                         session_id = current_session_id,
                         user_name  = session_data.get("sub_user_name") or session_data.get("user_name", ""),
-                        history    = session_data.get("history", [])
+                        history    = session_data.get("history", []),
+                        group_name = session_data.get("group_name")
                     )
                 break
 
@@ -238,6 +239,8 @@ async def ws_chat_endpoint(websocket: WebSocket):
             logger.info(f"📊 isAudio flag received: {is_audio}")
             is_graph = bool(data.get("isGraph", False))
             logger.info(f"📊 isGraph flag received: {is_graph}")
+            group_name = data.get("group_name") or data.get("groupName")
+            logger.info(f"📊 group_name={group_name}")
 
 
 # Changes done by sanjeevan
@@ -487,6 +490,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
                                     "lc_memory": [],
                                     "history": [],
                                     "user_name": user_name,
+                                    "group_name": group_name,
                                     "pending_transcription": None,
                                 }
                             memory_store[session_id]["history"].append({
@@ -556,7 +560,8 @@ async def ws_chat_endpoint(websocket: WebSocket):
                             memory_store[session_id] = {
                                 "lc_memory": [],
                                 "history":   [],
-                                "user_name": user_name
+                                "user_name": user_name,
+                                "group_name": group_name
                             }
 
                         # ── Save original transcription for yes/no handling ───
@@ -749,10 +754,14 @@ async def ws_chat_endpoint(websocket: WebSocket):
                     "history":   [],
                     "user_name":     user_name,
                     "sub_user_name": sub_user_name,
-                    "pending_transcription": None
+                    "pending_transcription": None,
+                    "group_name": group_name
                 }
-                
                 logger.info(f"🆕 Memory initialized for session_id: {session_id}")
+            else:
+                # Update group_name if it was passed
+                if group_name:
+                    memory_store[session_id]["group_name"] = group_name
 
             lc_memory = list(memory_store[session_id]["lc_memory"])
             messages  = [get_system_prompt(user_name)] + lc_memory
@@ -950,7 +959,8 @@ async def ws_chat_endpoint(websocket: WebSocket):
                 await save_session_to_postgres_service(
                     session_id = current_session_id,
                     user_name  = session_data.get("sub_user_name") or session_data.get("user_name", ""),
-                    history    = session_data.get("history", [])
+                    history    = session_data.get("history", []),
+                    group_name = session_data.get("group_name")
                 )
                 logger.info(f"✅ Saved on disconnect | session={current_session_id}")
                 
@@ -1007,7 +1017,8 @@ async def sessions_endpoint(request: SessionRequest):
         await save_session_to_postgres_service(
             session_id = session_id,
             user_name  = user_name,
-            history    = history_pairs
+            history    = history_pairs,
+            group_name = request.group_name
         )
         #Mark this session as saved by frontend
         # So WebSocketDisconnect will NOT save it again
