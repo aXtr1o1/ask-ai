@@ -458,18 +458,52 @@ class LangChainService:
                         if not entity or len(entity) > 30: # Safety fallback
                              entity = tool_name.lower()
                         
-                        # 2. Add extra detail from the actual tool arguments used
+                        # 2. Add extra detail to the entity name (Cumulative logic for better detail)
                         if args:
                             if args.get("keyword"):
                                 entity = f"{entity} matching '{args.get('keyword')}'"
-                            elif args.get("complaint_no"):
+                            if args.get("complaint_no"):
                                 entity = f"{entity} '{args.get('complaint_no')}'"
-                            elif args.get("asset_tag_no"):
+                            if args.get("asset_tag_no"):
                                 entity = f"{entity} '{args.get('asset_tag_no')}'"
-                            elif args.get("work_order"):
+                            if args.get("work_order"):
                                 entity = f"{entity} '{args.get('work_order')}'"
-                            elif args.get("asset_type"):
+                            if args.get("asset_type"):
                                 entity = f"{entity} of type '{args.get('asset_type')}'"
+                            if args.get("building"):
+                                entity = f"{entity} in '{args.get('building')}'"
+                            if args.get("floor"):
+                                entity = f"{entity} on '{args.get('floor')}'"
+                            if args.get("locality"):
+                                entity = f"{entity} in locality '{args.get('locality')}'"
+                            if args.get("division"):
+                                entity = f"{entity} for division '{args.get('division')}'"
+                            if args.get("discipline"):
+                                entity = f"{entity} for discipline '{args.get('discipline')}'"
+                            if args.get("trade_group"):
+                                entity = f"{entity} in trade group '{args.get('trade_group')}'"
+                            if args.get("status"):
+                                entity = f"{entity} with status '{args.get('status')}'"
+                            if args.get("priority"):
+                                entity = f"{entity} with priority '{args.get('priority')}'"
+                            if args.get("condition"):
+                                entity = f"{entity} in '{args.get('condition')}' condition"
+                            if args.get("tech"):
+                                entity = f"{entity} assigned to '{args.get('tech')}'"
+                            if args.get("category"):
+                                entity = f"{entity} in category '{args.get('category')}'"
+                            if args.get("contract"):
+                                entity = f"{entity} under contract '{args.get('contract')}'"
+                            if args.get("make"):
+                                entity = f"{entity} made by '{args.get('make')}'"
+                            if args.get("model"):
+                                entity = f"{entity} model '{args.get('model')}'"
+                            if args.get("serial_no"):
+                                entity = f"{entity} with serial number '{args.get('serial_no')}'"
+                            if args.get("is_snagged"):
+                                entity = f"snagged {entity}"
+                            if args.get("is_scraped"):
+                                entity = f"scraped {entity}"
                         
                         # 4. Extract time context
                         time_kw, _ = extract_date_from_query(user_query)
