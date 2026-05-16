@@ -16,8 +16,27 @@ export default function Usage({ externalUserId, subUserName }: UsageProps) {
   const { theme } = useTheme();
   const [animated, setAnimated] = useState(false);
 
+  const [realUserId, setRealUserId] = useState(() => {
+    // Only fallback to clientName if we got the hardcoded "1" from autologin
+    if (externalUserId === "1" && typeof window !== "undefined") {
+      return localStorage.getItem("clientName") || externalUserId;
+    }
+    return externalUserId;
+  });
+
+  const [realUserName, setRealUserName] = useState(subUserName);
+
+  useEffect(() => {
+    const idToUse = externalUserId === "1" && typeof window !== "undefined"
+      ? (localStorage.getItem("clientName") || externalUserId)
+      : externalUserId;
+      
+    setRealUserId(idToUse);
+    setRealUserName(subUserName);
+  }, [externalUserId, subUserName]);
+
   // ── Fetch real data from backend ──────────────────────────
-  const { stats, loading, error, refetch } = useUsageStats(externalUserId, subUserName);  
+  const { stats, loading, error, refetch } = useUsageStats(realUserId, realUserName);  
 
   useEffect(() => {
     setAnimated(true);
