@@ -256,6 +256,28 @@ body {
   animation: goldShine 3s ease-in-out infinite;
 }
 
+/* ─── 4.1 TYPING-STYLE TITLE ANIMATION ─── */
+@keyframes titleReveal {
+  0% {
+    opacity: 0;
+    transform: translateX(-15px);
+    filter: blur(5px);
+    clip-path: inset(0 100% 0 0);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+    filter: blur(0);
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+.title-typing {
+  display: inline-block;
+  animation: titleReveal 0.8s cubic-bezier(0.19, 1, 0.22, 1) forwards;
+  vertical-align: middle;
+}
+
 /* Dropdown slide-down */
 @keyframes dropdownOpen {
   from {

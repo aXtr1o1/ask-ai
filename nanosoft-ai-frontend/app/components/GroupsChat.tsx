@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { IconBulb, IconX, IconDotsVertical, IconFolder, IconFolderPlus, IconChevronRight, IconChevronDown } from "@tabler/icons-react";
+import { IconBulb, IconX, IconDotsVertical, IconFolder, IconFolderPlus, IconChevronRight, IconChevronDown, IconPlus } from "@tabler/icons-react";
 
 
 
@@ -181,8 +181,10 @@ export function FolderListItem({
   setSelectedGroupName,
   setGroupActiveType,
   setMessages,
+  sessionId,
   setSessionId,
   generateSessionId,
+  chatSessions,
   onRename,
   setChatSessions,
   onDelete,
@@ -200,8 +202,10 @@ export function FolderListItem({
   setSelectedGroupName: (name: string) => void;
   setGroupActiveType: (type: 'folder' | 'chat') => void;
   setMessages: (msgs: any) => void;
+  sessionId: string;
   setSessionId: (id: string) => void;
   generateSessionId: () => string;
+  chatSessions: any[];
   onRename: (oldName: string, newName: string) => void;
   setChatSessions: (prev: any) => void;
   onDelete: (folderName: string) => void;
@@ -251,21 +255,31 @@ export function FolderListItem({
         );
         setActiveFeature('groups');
         setSelectedGroupName(group.name);
-        setGroupActiveType('folder');
+        setGroupActiveType('chat');
         setMessages([]); // This makes isLanding true!
-        
-        const newSessionId = generateSessionId();
-        setSessionId(newSessionId);
-        setChatSessions((prev: any) => {
-          const existing = prev.filter((s: any) => s.id !== newSessionId);
-          return [{
-            id: newSessionId,
-            title: "New Chat",
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-            group_name: group.name,
-          }, ...existing];
-        });
+
+        // If we are ALREADY on an empty "New Chat" inside this folder, DO NOT jump!
+        const isCurrentEmpty = chatSessions.some((s: any) => s.id === sessionId && s.group_name === group.name && s.title === "New Chat");
+        if (isCurrentEmpty) {
+          return;
+        }
+
+        const existingEmptyChat = chatSessions.find((s: any) => s.group_name === group.name && s.title === "New Chat");
+        if (existingEmptyChat) {
+          setSessionId(existingEmptyChat.id);
+        } else {
+          const newSessionId = generateSessionId();
+          setSessionId(newSessionId);
+          setChatSessions((prev: any) => {
+            return [{
+              id: newSessionId,
+              title: "New Chat",
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+              group_name: group.name,
+            }, ...prev];
+          });
+        }
       }}
     >
       {expandedGroups.includes(group.name) ? (
@@ -306,7 +320,7 @@ export function FolderListItem({
           }}
         />
       ) : (
-        <span style={{ flex: 1 }}>{group.name}</span>
+        <span key={group.name} className="title-typing" style={{ flex: 1 }}>{group.name}</span>
       )}
       <div style={{ position: 'relative' }} ref={menuRef}>
         <button
@@ -331,7 +345,7 @@ export function FolderListItem({
         >
           <IconDotsVertical width={14} height={14} />
         </button>
-        
+
         {openGroupMenuId === group.id && (
           <div style={{
             position: 'absolute',
@@ -402,10 +416,10 @@ export function FolderListItem({
           className="modal-backdrop"
           onClick={() => { setShowDeleteFolderModal(false); setFolderToDelete(""); }}
         >
-          <div 
-            className="confirm-delete-modal" 
-            onClick={(e) => e.stopPropagation()} 
-            role="dialog" 
+          <div
+            className="confirm-delete-modal"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
             aria-modal="true"
             style={{
               minWidth: '280px',
@@ -421,8 +435,8 @@ export function FolderListItem({
             <h3 style={{ fontSize: '16px', margin: '0 0 12px 0', fontWeight: 'bold', color: '#fff' }}>Delete folder?</h3>
             <p style={{ fontSize: '13px', color: '#aaa', margin: '0 0 24px 0', lineHeight: '1.5' }}>This will delete folder "<strong>{folderToDelete}</strong>".</p>
             <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
-              <button 
-                className="btn btn-secondary" 
+              <button
+                className="btn btn-secondary"
                 onClick={() => { setShowDeleteFolderModal(false); setFolderToDelete(""); }}
                 style={{
                   padding: '8px 16px',
@@ -437,8 +451,8 @@ export function FolderListItem({
               >
                 Cancel
               </button>
-              <button 
-                className="btn btn-danger" 
+              <button
+                className="btn btn-danger"
                 onClick={() => {
                   onDelete(folderToDelete);
                   setShowDeleteFolderModal(false);
@@ -569,7 +583,13 @@ export function ChatListItem({
           }}
         />
       ) : (
-        <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.title}</span>
+        <span 
+          key={s.title}
+          className="title-typing"
+          style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+        >
+          {s.title}
+        </span>
       )}
       <div style={{ position: 'relative' }} ref={chatMenuRef}>
         <button
@@ -594,7 +614,7 @@ export function ChatListItem({
         >
           <IconDotsVertical width={12} height={12} />
         </button>
-        
+
         {openChatMenuId === s.id && (
           <div style={{
             position: 'absolute',

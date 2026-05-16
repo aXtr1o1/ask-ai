@@ -1346,7 +1346,8 @@ export default function Home() {
 
             }
 
-            setTokenVerified(true); // ← ADD THIS LINE
+            setTokenVerified(true);
+            setAuthChecked(true); // Ensure loading screen clears on success
 
           } catch (err) {
             console.error("[auth] verification failed — checking URL params or stored session");
@@ -1384,6 +1385,7 @@ export default function Home() {
             if (storedFooterLogoPath) setLoginFooterLogoPath(storedFooterLogoPath);
 
             setTokenVerified(true);
+            setAuthChecked(true); // Ensure loading screen clears even on error
           }
         };
         verifyJwt();
@@ -1467,6 +1469,7 @@ export default function Home() {
 
   // Add this state at top of component with other states:
   const [tokenVerified, setTokenVerified] = useState(false);
+  const redirectedRef = useRef(false); // Prevents redirect loops
 
   // Auth guard
   useEffect(() => {
@@ -1517,7 +1520,10 @@ export default function Home() {
       setLoggedInUser(backendUserName);
       setAuthChecked(true);
 
-      if (window.location.search) {
+      const params = new URLSearchParams(window.location.search);
+      const isSensitive = params.has("data") || params.has("userName") || params.has("clientName") || params.has("userId");
+      if (isSensitive && !redirectedRef.current) {
+        redirectedRef.current = true;
         router.replace("/");
       }
       return;
@@ -1916,7 +1922,7 @@ export default function Home() {
       if (res.ok) {
         setChatSessions(prev => {
           const updated = prev.map(s => s.id === sid ? { ...s, isPinned } : s);
-          return sortSessionsNewestFirst(updated);
+          return updated;
         });
       }
     } catch (e) {
@@ -2291,12 +2297,21 @@ export default function Home() {
     };
   }, [authChecked, loggedInUser]);
 
-  // Helper: sort sessions newest-first (by updatedAt or createdAt)
-  const sortSessionsNewestFirst = (list: ChatSession[]): ChatSession[] =>
+  // Helper: safely parse date or fallback
+  const parseDateSafe = (dateStr: string | undefined, fallback: number) => {
+    if (!dateStr) return fallback;
+    const parsed = new Date(dateStr).getTime();
+    return isNaN(parsed) ? fallback : parsed;
+  };
+
+  // Helper: sort sessions strictly by createdAt to prevent random swapping
+  const sortSessionsStable = (list: ChatSession[]): ChatSession[] =>
     [...list].sort((a, b) => {
       if (a.isPinned && !b.isPinned) return -1;
       if (!a.isPinned && b.isPinned) return 1;
-      return (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt);
+      const timeA = a.createdAt || 0;
+      const timeB = b.createdAt || 0;
+      return timeB - timeA;
     });
 
   // Fetch chat sessions list for sidebar (new at top, old at bottom)
@@ -2311,21 +2326,26 @@ export default function Home() {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      const fetched: ChatSession[] = (data?.sessions ?? []).map(
-        (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; is_pinned?: boolean; is_archived?: boolean; group_name?: string }) => ({
-          id: s.session_id,
-          title: s.title || "Chat",
-          createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
-          updatedAt: s.updated_at ? new Date(s.updated_at).getTime() : undefined,
-          isPinned: s.is_pinned || false,
-          isArchived: s.is_archived || false,
-          group_name: s.group_name,
-        })
-      );
-      setChatSessions(sortSessionsNewestFirst(fetched));
+      setChatSessions(prev => {
+        const fetched: ChatSession[] = (data?.sessions ?? []).map(
+          (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; is_pinned?: boolean; is_archived?: boolean; group_name?: string }) => {
+            const existing = prev.find(p => p.id === s.session_id);
+            return {
+              id: s.session_id,
+              title: s.title || "Chat",
+              createdAt: parseDateSafe(s.created_at, existing?.createdAt || Date.now()),
+              updatedAt: parseDateSafe(s.updated_at, existing?.updatedAt || Date.now()),
+              isPinned: s.is_pinned || false,
+              isArchived: s.is_archived || false,
+              group_name: s.group_name,
+            };
+          }
+        );
+        const unsavedNewChats = prev.filter(s => s.title === "New Chat" && !fetched.some(f => f.id === s.id));
+        return sortSessionsStable([...unsavedNewChats, ...fetched]);
+      });
     } catch (err) {
       console.warn("Failed to fetch chat sessions:", err);
-      setChatSessions([]);
     }
   };
 
@@ -2386,6 +2406,10 @@ export default function Home() {
       setSidebarOpen(false);
     }
 
+    if (activeFeature === 'groups' && selectedGroupName) {
+      setGroupActiveType('chat');
+    }
+
     // Immediately show this new chat at the top of the history list
     setChatSessions(prev => {
       const existing = prev.filter(s => s.id !== newSessionId);
@@ -2409,47 +2433,44 @@ export default function Home() {
         });
         if (!res.ok) return;
         const data = await res.json();
+        const currentSessions = chatSessions;
         const fetched: ChatSession[] = (data?.sessions ?? []).map(
-          (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; is_pinned?: boolean; is_archived?: boolean; group_name?: string }) => ({
-            id: s.session_id,
-            title: s.title || "Chat",
-            createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
-            updatedAt: s.updated_at ? new Date(s.updated_at).getTime() : undefined,
-            isPinned: s.is_pinned || false,
-            isArchived: s.is_archived || false,
-            group_name: s.group_name,
-          })
-        );
-        setChatSessions(prev => {
-          const newCapsule: ChatSession = {
-            id: newSessionId,
-            title: "New Chat",
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-          };
-          // Previous chat stays second (just left, not yet saved so backend may have old order)
-          const previousSession = prev.find(s => s.id === previousSid) ?? fetched.find(s => s.id === previousSid);
-          const rest = sortSessionsNewestFirst(
-            fetched.filter(s => s.id !== newSessionId && s.id !== previousSid)
-          );
-          if (previousSession) {
-            const fromApi = fetched.find(s => s.id === previousSid);
-            const title = fromApi?.title ?? previousSession.title;
-            return [newCapsule, { ...previousSession, title }, ...rest];
+          (s: any) => {
+            const existing = currentSessions.find(p => p.id === s.session_id);
+            return {
+              id: s.session_id,
+              title: s.title || "Chat",
+              createdAt: parseDateSafe(s.created_at, existing?.createdAt || Date.now()),
+              updatedAt: parseDateSafe(s.updated_at, existing?.updatedAt || Date.now()),
+              isPinned: s.is_pinned || false,
+              isArchived: s.is_archived || false,
+              group_name: s.group_name,
+            };
           }
-          return [newCapsule, ...rest];
+        );
+
+        setChatSessions(prev => {
+          const unsavedNewChats = prev.filter(s => s.title === "New Chat" && !fetched.some(f => f.id === s.id));
+          return sortSessionsStable([...unsavedNewChats, ...fetched]);
         });
 
         // Re-derive groups so new group chats appear immediately
         const uniqueGroupNames = Array.from(new Set(fetched.map(s => s.group_name).filter(Boolean))) as string[];
         if (uniqueGroupNames.length > 0) {
-          setGroups(uniqueGroupNames.map(name => ({
-            id: name,
-            name,
-            description: "Custom group",
-            chatCount: fetched.filter(s => s.group_name === name).length,
-            updatedAt: new Date().toLocaleDateString(),
-          })));
+          setGroups(prevGroups => {
+            const existingNames = prevGroups.map(g => g.name);
+            const newNames = uniqueGroupNames.filter(name => !existingNames.includes(name));
+            return [
+              ...prevGroups.map(g => ({ ...g, chatCount: fetched.filter(s => s.group_name === g.name).length })),
+              ...newNames.map(name => ({
+                id: name,
+                name,
+                description: "Custom group",
+                chatCount: fetched.filter(s => s.group_name === name).length,
+                updatedAt: new Date().toLocaleDateString(),
+              }))
+            ];
+          });
         }
       } catch (err) {
         console.warn("Failed to refetch sessions:", err);
@@ -2580,22 +2601,23 @@ export default function Home() {
         });
         if (!res.ok) return;
         const data = await res.json();
-        const fetched: ChatSession[] = (data?.sessions ?? []).map(
-          (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; group_name?: string; is_pinned?: boolean; is_archived?: boolean }) => ({
-            id: s.session_id,
-            title: s.title || "Chat",
-            createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
-            updatedAt: s.updated_at ? new Date(s.updated_at).getTime() : undefined,
-            isPinned: s.is_pinned || false,
-            isArchived: s.is_archived || false,
-            group_name: s.group_name,
-          })
-        );
         setChatSessions(prev => {
-          const merged = sortSessionsNewestFirst(fetched);
-          // If current list has a session not in fetched (e.g. new unsaved), prepend it
+          const fetched: ChatSession[] = (data?.sessions ?? []).map(
+            (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; group_name?: string; is_pinned?: boolean; is_archived?: boolean }) => {
+              const existing = prev.find(p => p.id === s.session_id);
+              return {
+                id: s.session_id,
+                title: s.title || "Chat",
+                createdAt: parseDateSafe(s.created_at, existing?.createdAt || Date.now()),
+                updatedAt: parseDateSafe(s.updated_at, existing?.updatedAt || Date.now()),
+                isPinned: s.is_pinned || false,
+                isArchived: s.is_archived || false,
+                group_name: s.group_name,
+              };
+            }
+          );
           const onlyInPrev = prev.filter(s => !fetched.some(f => f.id === s.id));
-          return sortSessionsNewestFirst([...onlyInPrev, ...merged]);
+          return sortSessionsStable([...onlyInPrev, ...fetched]);
         });
       } catch (err) {
         console.warn("Failed to refresh sessions:", err);
@@ -3333,10 +3355,14 @@ export default function Home() {
               <div
                 className={`feature-item ${activeFeature === 'chat' ? 'active' : ''}`}
                 onClick={() => {
+                  setSearchTerm("");
                   setActiveFeature('chat');
                   handleFeatureClick('chat');
                   setSelectedGroupName(null);
-                  handleNewChat();
+                  const newSid = generateSessionId();
+                  setSessionId(newSid);
+                  sessionIdRef.current = newSid;
+                  setMessages([]);
                 }}
               >
                 <IconChat />
@@ -3345,6 +3371,7 @@ export default function Home() {
               <div
                 className={`feature-item ${activeFeature === 'archived' ? 'active' : ''}`}
                 onClick={() => {
+                  setSearchTerm("");
                   setActiveFeature('archived');
                   handleFeatureClick('archived');
                   setSelectedGroupName(null);
@@ -3357,6 +3384,7 @@ export default function Home() {
               <div
                 className={`feature-item ${activeFeature === 'groups' ? 'active' : ''}`}
                 onClick={() => {
+                  setSearchTerm("");
                   setActiveFeature('groups');
                   handleFeatureClick('groups');
                 }}
@@ -3405,8 +3433,10 @@ export default function Home() {
                         setSelectedGroupName={setSelectedGroupName}
                         setGroupActiveType={setGroupActiveType}
                         setMessages={setMessages}
+                        sessionId={sessionId}
                         setSessionId={setSessionId}
                         generateSessionId={generateSessionId}
+                        chatSessions={chatSessions}
                         setChatSessions={setChatSessions}
                         onRename={handleRenameFolder}
                         onDelete={handleDeleteFolder}
@@ -3458,47 +3488,6 @@ export default function Home() {
                       }}
                     />
                   </div>
-                  {searchTerm && (
-                    <div className="search-results-dropdown" style={{
-                      marginTop: 8,
-                      maxHeight: 200,
-                      overflowY: 'auto',
-                      background: 'var(--color-bg-secondary)',
-                      borderRadius: 8,
-                      border: '1px solid var(--color-border)',
-                      boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
-                    }}>
-                      {chatSessions.filter(s => !s.group_name && s.title.toLowerCase().includes(searchTerm.toLowerCase())).length > 0 ? (
-                        chatSessions
-                          .filter(s => !s.group_name && s.title.toLowerCase().includes(searchTerm.toLowerCase()))
-                          .map(s => (
-                            <div
-                              key={s.id}
-                              className="search-result-item"
-                              onClick={() => {
-                                switchSession(s.id);
-                                setSearchTerm("");
-                                setActiveFeature('chat');
-                              }}
-                              style={{
-                                padding: '8px 12px',
-                                cursor: 'pointer',
-                                fontSize: 12,
-                                borderBottom: '1px solid rgba(255,255,255,0.05)',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 8
-                              }}
-                            >
-                              <IconChat width={14} height={14} style={{ opacity: 0.5 }} />
-                              <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.title}</span>
-                            </div>
-                          ))
-                      ) : (
-                        <div style={{ padding: '12px', textAlign: 'center', fontSize: 12, opacity: 0.5 }}>No results found</div>
-                      )}
-                    </div>
-                  )}
                 </div>
               )}
 
@@ -3508,7 +3497,7 @@ export default function Home() {
               {activeFeature === 'archived' && (
                 <div className="chat-history-box" style={{ marginTop: 24, display: "flex", flexDirection: "column", minHeight: 0 }}>
                   <div className="chat-history-scroll">
-                    {chatSessions.filter(s => s.isArchived).map(a => (
+                    {chatSessions.filter(s => s.isArchived && (!searchTerm || s.title.toLowerCase().includes(searchTerm.toLowerCase()))).map(a => (
                       <div
                         key={a.id}
                         className="sidebar-item"
@@ -3545,7 +3534,14 @@ export default function Home() {
                               }}
                             />
                           ) : (
-                            <span title={a.title} style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{a.title}</span>
+                            <span 
+                              key={a.title}
+                              className="title-typing"
+                              title={a.title} 
+                              style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                            >
+                              {a.title}
+                            </span>
                           )}
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center' }}>
@@ -3611,7 +3607,7 @@ export default function Home() {
                         </div>
                       </div>
                     ))}
-                     {chatSessions.filter(s => s.isArchived).length === 0 && (
+                    {chatSessions.filter(s => s.isArchived && (!searchTerm || s.title.toLowerCase().includes(searchTerm.toLowerCase()))).length === 0 && (
                       <div style={{ padding: "12px 16px", fontSize: 12, color: "#7a8f75", fontStyle: "italic" }}>
                         No archived chats
                       </div>
@@ -3620,12 +3616,12 @@ export default function Home() {
                 </div>
               )}
 
-              {/* Chat History – only visible when Chat feature is active and not searching */}
-              {activeFeature === 'chat' && !searchTerm && (
+              {/* Chat History – only visible when Chat feature is active */}
+              {activeFeature === 'chat' && (
 
                 <div className="chat-history-box" style={{ marginTop: 24, display: "flex", flexDirection: "column", minHeight: 0 }}>
                   <div className="chat-history-scroll">
-                    {chatSessions.filter(s => !s.isArchived && !s.group_name).map(s => (
+                    {chatSessions.filter(s => !s.isArchived && !s.group_name && (!searchTerm || s.title.toLowerCase().includes(searchTerm.toLowerCase()))).map(s => (
                       <div
                         key={s.id}
                         className={`sidebar-item${s.id === sessionId ? " active" : ""}`}
@@ -3660,7 +3656,9 @@ export default function Home() {
                             />
                           ) : (
                             <span
+                              key={s.title}
                               title={s.title}
+                              className="title-typing"
                               style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
                             >
                               {previewTitle(s.title, 2)}

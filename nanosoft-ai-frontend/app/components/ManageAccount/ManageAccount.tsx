@@ -217,7 +217,7 @@ export default function ManageAccount({
                 transition: "all 0.3s ease",
               }}
             >
-              Settings
+              Account Info
             </button>
           </div>
         </div>
@@ -338,12 +338,8 @@ export default function ManageAccount({
               {/* Name */}
               <div style={{ display: "flex", gap: "16px", flexWrap: "wrap" }}>
                 <div style={{ flex: "1 1 200px" }}>
-                  <label style={{ display: "block", fontSize: "12px", color: isDark ? "#aaa" : "#666", marginBottom: "6px" }}>First Name</label>
-                  <input type="text" value={subUserName || ""} readOnly style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: isDark ? "1px solid rgba(255,255,255,0.15)" : "1px solid #e0e0e0", background: isDark ? "rgba(255,255,255,0.05)" : "#f9f9f9", color: isDark ? "#ffffff" : "#222" }} />
-                </div>
-                <div style={{ flex: "1 1 200px" }}>
-                  <label style={{ display: "block", fontSize: "12px", color: isDark ? "#aaa" : "#666", marginBottom: "6px" }}>Last Name</label>
-                  <input type="text" value={profileName || ""} readOnly style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: isDark ? "1px solid rgba(255,255,255,0.15)" : "1px solid #e0e0e0", background: isDark ? "rgba(255,255,255,0.05)" : "#f9f9f9", color: isDark ? "#ffffff" : "#222" }} />
+                  <label style={{ display: "block", fontSize: "12px", color: isDark ? "#aaa" : "#666", marginBottom: "6px" }}>Name</label>
+                  <input type="text" value={subUserName || ""} readOnly style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: isDark ? "1px solid rgba(255,255,255,0.15)" : "1px solid #e0e0e0", background: isDark ? "rgba(255,255,255,0.05)" : "#f9f9f9", color: isDark ? "#ffffff" : "#222", outline: "none" }} />
                 </div>
               </div>
 
@@ -351,7 +347,7 @@ export default function ManageAccount({
               <div>
                 <label style={{ display: "block", fontSize: "12px", color: isDark ? "#aaa" : "#666", marginBottom: "6px" }}>Email</label>
                 <div style={{ position: "relative" }}>
-                  <input type="email" value={email || accounts[0]?.email || "rolandDonald@mail.com"} readOnly style={{ width: "100%", padding: "10px 12px", paddingRight: "80px", borderRadius: "8px", border: isDark ? "1px solid rgba(255,255,255,0.15)" : "1px solid #e0e0e0", background: isDark ? "rgba(255,255,255,0.05)" : "#f9f9f9", color: isDark ? "#ffffff" : "#222" }} />
+                  <input type="email" value={email || accounts[0]?.email || "rolandDonald@mail.com"} readOnly style={{ width: "100%", padding: "10px 12px", paddingRight: "80px", borderRadius: "8px", border: isDark ? "1px solid rgba(255,255,255,0.15)" : "1px solid #e0e0e0", background: isDark ? "rgba(255,255,255,0.05)" : "#f9f9f9", color: isDark ? "#ffffff" : "#222", outline: "none" }} />
                   {email && (
                     <span style={{ position: "absolute", right: "12px", top: "50%", transform: "translateY(-50%)", fontSize: "12px", color: "#00b074", fontWeight: 700 }}>✓ Verified</span>
                   )}
@@ -361,7 +357,7 @@ export default function ManageAccount({
               {/* User ID */}
               <div>
                 <label style={{ display: "block", fontSize: "12px", color: isDark ? "#aaa" : "#666", marginBottom: "6px" }}>User ID</label>
-                <input type="text" value={externalUserId || ""} readOnly style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: isDark ? "1px solid rgba(255,255,255,0.15)" : "1px solid #e0e0e0", background: isDark ? "rgba(255,255,255,0.05)" : "#f9f9f9", color: isDark ? "#ffffff" : "#222" }} />
+                <input type="text" value={externalUserId || ""} readOnly style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: isDark ? "1px solid rgba(255,255,255,0.15)" : "1px solid #e0e0e0", background: isDark ? "rgba(255,255,255,0.05)" : "#f9f9f9", color: isDark ? "#ffffff" : "#222", outline: "none" }} />
               </div>
 
               {/* current Pack */}
@@ -377,7 +373,7 @@ export default function ManageAccount({
                         borderRadius: "12px",
                         border: isActive ? `2px solid var(--color-primary)` : (isDark ? "1px solid rgba(255,255,255,0.15)" : "1px solid #e0e0e0"),
                         background: isActive ? (isDark ? "rgba(var(--color-primary-rgb), 0.2)" : "rgba(var(--color-primary-rgb), 0.05)") : (isDark ? "rgba(255,255,255,0.05)" : "#f9f9f9"),
-                        cursor: "pointer",
+                        cursor: "default",
                         display: "flex",
                         flexDirection: "column",
                         gap: "8px",
