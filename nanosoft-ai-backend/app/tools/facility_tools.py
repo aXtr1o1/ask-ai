@@ -212,7 +212,7 @@ For all normal filter and list queries:
 Columns you can use in group_by_columns for ASSETS:
 DivisionName, DisciplineName, BuildingName, FloorName,
 LocalityName, StatusName, ConditionName, PriorityName,
-AssetTypeName, MakeName, ModelName, SpotName,
+AssetTypeName, EquipmentName, MakeName, ModelName, SpotName,
 TradeGroupName, ServiceAreaName, YearOfManuf
 
 
@@ -261,6 +261,12 @@ def ASSETS(
 
     logger.info(f"📦 ASSETS TOOL TRIGGERED for user_name: {user_name}")
     
+    # Redirect asset_type to keyword to support fuzzy matching and handle empty database columns
+    if asset_type and not keyword:
+        logger.info("🔄 Redirecting asset_type '%s' to keyword to support fuzzy search and handle empty database columns.", asset_type)
+        keyword = asset_type
+        asset_type = None
+
     resolved_date_from, resolved_date_to = getTime(date_from, date_to)
     
     payload = {
@@ -423,6 +429,13 @@ def PPM(
         return "Error: user_name is required. It is set from the authenticated request."
 
     logger.info(f"🛠️ PPM TOOL TRIGGERED for user_name: {user_name}")
+    
+    # Redirect equipment to keyword to support fuzzy matching and handle empty database columns in PPM
+    if equipment and not keyword:
+        logger.info("🔄 Redirecting equipment '%s' to keyword in PPM tool to support fuzzy search.", equipment)
+        keyword = equipment
+        equipment = None
+
     resolved_date_from, resolved_date_to = getTime(date_from, date_to)
 
     payload = {

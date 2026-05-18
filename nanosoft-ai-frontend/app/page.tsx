@@ -193,6 +193,14 @@ const HIDDEN_COLUMNS = new Set([
   'created_at',
   'updatedat',
   'updated_at',
+  'createduserid',
+  'createdttm',
+  'updatedttm',
+  'updateduserid',
+  'deletestat',
+  'downloadstat',
+  'createdby',
+  'updatedby',
 ]);
 
 function isHiddenColumn(col: string): boolean {
@@ -228,11 +236,11 @@ function buildTable(rows: Record<string, string>[], cols?: string[]): string {
   if (!rows.length) return "";
 
   // Collect column order preserving insertion order
-  const allCols: string[] = cols ?? (() => {
+  const allCols: string[] = (cols ?? (() => {
     const seen: string[] = [];
     rows.forEach(r => Object.keys(r).forEach(k => { if (!seen.includes(k)) seen.push(k); }));
     return seen;
-  })();
+  })()).filter(c => !isHiddenColumn(c));
 
   const thead = `<thead><tr>${allCols.map(c => `<th>${esc(c)}</th>`).join("")}</tr></thead>`;
 
@@ -294,6 +302,15 @@ function renderLargeDataset(text: string): string | null {
     "created_at",
     "updatedat",
     "updated_at",
+    "createduserid",
+    "createdttm",
+    "updatedttm",
+    "updateduserid",
+    "deletestat",
+    "downloadstat",
+    "rmccmcomplaintidpk",
+    "createdby",
+    "updatedby",
   ]);
 
   function isHiddenColumn(col: string) {
@@ -2284,7 +2301,6 @@ export default function Home() {
       setWsConnectionState('failed');
       console.error("❌ WebSocket error — connection failed");
       setIsLoading(false);
-      
       // Auto-reconnect on error
       const sharedSid = new URLSearchParams(window.location.search).get("sharedSessionId");
       if (loggedInUser || sharedSid) {
@@ -2407,9 +2423,62 @@ export default function Home() {
     setShowFeaturePlaceholder(true);
   };
 
+  const showWarningToast = (message: string) => {
+    if (typeof document === "undefined") return;
+    const isDark = document.documentElement.getAttribute("data-theme") !== "light";
+    const bg       = isDark ? "rgba(28, 28, 30, 0.97)"  : "rgba(255, 255, 255, 0.97)";
+    const border    = isDark ? "rgba(212, 175, 55, 0.5)" : "rgba(180, 140, 30, 0.4)";
+    const textColor = isDark ? "#ffffff"                  : "#1a1a1a";
+    const accent    = isDark ? "#D4AF37"                  : "#9A7B20";
+    const shadow    = isDark ? "0 8px 32px rgba(0,0,0,0.5)" : "0 8px 32px rgba(0,0,0,0.15)";
+
+    const toast = document.createElement("div");
+    toast.style.cssText = `
+      position: fixed;
+      bottom: 32px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: ${bg};
+      border: 1px solid ${border};
+      border-radius: 12px;
+      padding: 14px 24px;
+      color: ${textColor};
+      font-size: 14px;
+      font-weight: 500;
+      box-shadow: ${shadow};
+      z-index: 99999;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      opacity: 0;
+      transition: opacity 0.3s ease, transform 0.3s ease;
+      pointer-events: none;
+      white-space: nowrap;
+      backdrop-filter: blur(8px);
+    `;
+    
+    toast.innerHTML = `<span style="color:${accent};font-size:18px;">⚠️</span> <span>${message}</span>`;
+
+    document.body.appendChild(toast);
+    requestAnimationFrame(() => {
+      toast.style.opacity = "1";
+      toast.style.transform = "translateX(-50%) translateY(0)";
+    });
+    setTimeout(() => {
+      toast.style.opacity = "0";
+      toast.style.transform = "translateX(-50%) translateY(20px)";
+      setTimeout(() => {
+        if (toast.parentNode) {
+          toast.parentNode.removeChild(toast);
+        }
+      }, 350);
+    }, 3000);
+  };
+
   const handleNewChat = async () => {
     if (isLoading) {
-      setMessages(prev => [...prev, { role: "error", text: "Please wait for the current response to finish before starting a new chat." }]);
+      showWarningToast("Please wait, don't switch the chat!");
+      console.log("⚠️ Chat creation blocked: Please wait, don't switch the chat!");
       return;
     }
     // Persist current session messages to ref before leaving
@@ -2591,7 +2660,8 @@ export default function Home() {
   const switchSession = async (targetSid: string) => {
     if (targetSid === sessionId) return; // already active
     if (isLoading) {
-      setMessages(prev => [...prev, { role: "error", text: "Please wait for the current response to finish before switching chats." }]);
+      showWarningToast("Please wait, don't switch the chat!");
+      console.log("⚠️ Chat switch blocked: Please wait, don't switch the chat!");
       return;
     }
 
@@ -4230,7 +4300,6 @@ export default function Home() {
                               </div>
                             </div>
                           ))}
-                          
                           {/* Final "Please wait" message that appears after 10s if still loading */}
                           <div style={{
                             position: 'absolute',
@@ -4243,7 +4312,7 @@ export default function Home() {
                             gap: '2px',
                             paddingLeft: '16px'
                           }}>
-                            <span>Still processing, please wait</span>
+                            <span>please wait</span>
                             <div style={{ display: 'flex', gap: '2px', alignItems: 'flex-end', height: '10px', paddingBottom: '2px' }}>
                               {[0, 1, 2].map(i => (
                                 <span key={i} style={{

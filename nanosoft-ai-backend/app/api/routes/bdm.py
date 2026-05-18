@@ -133,10 +133,52 @@ def get_bdm(req: BDMRequest):
         formatted = format_response(raw)
         p_list = formatted.get("p_list", [])
 
+        # Fallback interceptor: if 0 records found and locality was specified but spot_name was not,
+        # retry the query mapping locality to spot_name.
+        if not p_list and req.locality and not req.spot_name:
+            logger.info("🔄 0 records found with locality='%s' in BDM. Retrying query by mapping locality to spot_name...", req.locality)
+            cursor = conn.cursor()
+            cursor.callproc("sp_bdm_query", [
+                req.user_name,
+                req.user_id,
+                req.complaint_no,
+                req.status,
+                req.priority,
+                req.stage,
+                req.complaint_type,
+                req.complaint_mode,
+                req.complaint_nature,
+                req.wo_type,
+                req.service_type,
+                req.division,
+                req.discipline,
+                None,  # p_locality cleared
+                req.building,
+                req.floor,
+                req.contract,
+                req.analysis_tech,
+                req.execution_tech,
+                req.complainer,
+                req.locality,  # p_spot_name mapped
+                req.keyword,
+                req.date_from,
+                req.date_to,
+                req.completed_from,
+                req.completed_to,
+                req.limit,
+                req.offset,
+            ])
+            row = cursor.fetchone()
+            cursor.close()
+            raw = row[0] if row else {}
+            if isinstance(raw, str):
+                raw = json.loads(raw)
+            formatted = format_response(raw)
+            p_list = formatted.get("p_list", [])
+
 
         if p_list:
             fields = list(p_list[0].keys()) if isinstance(p_list[0], dict) else []
-            sample = [r.get("ComplaintNo") or r.get("id") or str(r)[:50] for r in p_list[:3]]
             sample = [r.get("ComplaintNo") or r.get("id") or str(r)[:50] for r in p_list[:3]]
             logger.info("[GET-BDM] Fetched | count=%s | fields=%s | sample_ids=%s", formatted["p_count"], fields[:8], sample)
         else:
