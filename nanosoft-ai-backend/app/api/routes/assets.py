@@ -143,6 +143,97 @@ def get_assets(req: AssetRequest):
         formatted = format_response(raw)
         p_list = formatted.get("p_list", [])
 
+        # Fallback interceptor: if 0 records found and locality was specified but spot_name was not,
+        # retry the query mapping locality to spot_name.
+        if not p_list and req.locality and not req.spot_name:
+            logger.info("🔄 0 records found with locality='%s'. Retrying query by mapping locality to spot_name...", req.locality)
+            cursor = conn.cursor()
+            cursor.callproc("sp_asset_query", [
+                req.user_name,
+                req.user_id,
+                req.asset_tag_no,
+                req.status,
+                req.condition,
+                req.priority,
+                req.asset_type,
+                req.division,
+                req.discipline,
+                None,  # p_locality cleared
+                req.building,
+                req.floor,
+                req.owner,
+                req.make,
+                req.model,
+                req.service_area,
+                req.trade_group,
+                req.locality,  # p_spot_name mapped
+                req.serial_no,
+                req.on_hold,
+                req.is_snagged,
+                req.is_scraped,
+                req.enable_ppm,
+                req.enable_bdm,
+                req.keyword,
+                req.date_from,
+                req.date_to,
+                req.limit,
+                req.offset,
+            ])
+            row = cursor.fetchone()
+            cursor.close()
+            raw = row[0] if row else {}
+            if isinstance(raw, str):
+                raw = json.loads(raw)
+            formatted = format_response(raw)
+            p_list = formatted.get("p_list", [])
+
+        # Fallback interceptor: if 0 records found and keyword was specified, but locality, spot_name, and building were not,
+        # retry by mapping keyword to locality, spot_name, or building.
+        if not p_list and req.keyword and not req.locality and not req.spot_name and not req.building:
+            for field in ("locality", "spot_name", "building"):
+                logger.info("🔄 Retrying query mapping keyword='%s' to %s...", req.keyword, field)
+                cursor = conn.cursor()
+                cursor.callproc("sp_asset_query", [
+                    req.user_name,
+                    req.user_id,
+                    req.asset_tag_no,
+                    req.status,
+                    req.condition,
+                    req.priority,
+                    req.asset_type,
+                    req.division,
+                    req.discipline,
+                    req.keyword if field == "locality" else None,   # p_locality
+                    req.keyword if field == "building" else None,   # p_building
+                    req.floor,
+                    req.owner,
+                    req.make,
+                    req.model,
+                    req.service_area,
+                    req.trade_group,
+                    req.keyword if field == "spot_name" else None,  # p_spot_name
+                    req.serial_no,
+                    req.on_hold,
+                    req.is_snagged,
+                    req.is_scraped,
+                    req.enable_ppm,
+                    req.enable_bdm,
+                    None,                                           # p_keyword cleared
+                    req.date_from,
+                    req.date_to,
+                    req.limit,
+                    req.offset,
+                ])
+                row = cursor.fetchone()
+                cursor.close()
+                raw = row[0] if row else {}
+                if isinstance(raw, str):
+                    raw = json.loads(raw)
+                formatted = format_response(raw)
+                p_list = formatted.get("p_list", [])
+                if p_list:
+                    break
+
         if p_list:
             fields = list(p_list[0].keys()) if isinstance(p_list[0], dict) else []
             sample = [r.get("AssetTagNo") or r.get("id") or str(r)[:50] for r in p_list[:3]]

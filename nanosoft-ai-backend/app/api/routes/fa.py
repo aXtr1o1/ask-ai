@@ -119,6 +119,49 @@ def get_fa(req: FARequest):
             raw = json.loads(raw)
  
         formatted = format_response(raw)
+        p_list = formatted.get("p_list", [])
+
+        # Fallback interceptor: if 0 records found and locality was specified but spot_name was not,
+        # retry the query mapping locality to spot_name.
+        if not p_list and req.locality and not req.spot_name:
+            logger.info("🔄 0 records found with locality='%s' in FA. Retrying query by mapping locality to spot_name...", req.locality)
+            cursor = conn.cursor()
+            cursor.callproc("sp_fa_query", [
+                req.user_name,
+                req.user_id,
+                req.complaint_no,
+                req.priority,
+                req.stage,
+                req.category,
+                req.category_sub,
+                req.division,
+                None,  # p_locality cleared
+                req.building,
+                req.floor,
+                req.locality,  # p_spot_name mapped
+                req.contract,
+                req.tech,
+                req.frequency,
+                req.request_desc,
+                req.is_withdraw,
+                req.is_rework,
+                req.is_active,
+                req.keyword,
+                req.date_from,
+                req.date_to,
+                req.comp_from,
+                req.comp_to,
+                req.limit,
+                req.offset,
+            ])
+            row = cursor.fetchone()
+            cursor.close()
+            raw = row[0] if row else {}
+            if isinstance(raw, str):
+                raw = json.loads(raw)
+            formatted = format_response(raw)
+            p_list = formatted.get("p_list", [])
+
         logger.info("[GET-FA] Fetched | count=%s", formatted["p_count"])
         return formatted
  

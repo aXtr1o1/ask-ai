@@ -129,16 +129,52 @@ def get_ppm(req: PPMRequest):
         formatted = format_response(raw)
         p_list = formatted.get("p_list", [])
 
+        # Fallback interceptor: if 0 records found and locality was specified but spot_name was not,
+        # retry the query mapping locality to spot_name.
+        if not p_list and req.locality and not req.spot_name:
+            logger.info("🔄 0 records found with locality='%s' in PPM. Retrying query by mapping locality to spot_name...", req.locality)
+            cursor = conn.cursor()
+            cursor.callproc("sp_ppm_query", [
+                req.user_name,
+                req.user_id,
+                req.work_order,
+                req.asset_tag_no,
+                req.status,
+                req.stage,
+                req.frequency,
+                req.division,
+                req.discipline,
+                None,  # p_locality cleared
+                req.building,
+                req.floor,
+                req.contract,
+                req.tech,
+                req.equipment,
+                req.locality,  # p_spot_name mapped
+                req.keyword,
+                req.date_from,
+                req.date_to,
+                req.comp_from,
+                req.comp_to,
+                req.sla_min,
+                req.sla_max,
+                req.limit,
+                req.offset,
+            ])
+            row = cursor.fetchone()
+            cursor.close()
+            raw = row[0] if row else {}
+            if isinstance(raw, str):
+                raw = json.loads(raw)
+            formatted = format_response(raw)
+            p_list = formatted.get("p_list", [])
+
 
         if p_list:
             fields = list(p_list[0].keys()) if isinstance(p_list[0], dict) else []
             sample = [r.get("WorkOrder") or r.get("id") or str(r)[:50] for r in p_list[:3]]
             logger.info("[GET-PPM] Fetched | count=%s | fields=%s | sample_ids=%s", formatted["p_count"], fields[:8], sample)
-            sample = [r.get("WorkOrder") or r.get("id") or str(r)[:50] for r in p_list[:3]]
-            logger.info("[GET-PPM] Fetched | count=%s | fields=%s | sample_ids=%s", formatted["p_count"], fields[:8], sample)
         else:
-            logger.info("[GET-PPM] Success | count=0")
-
             logger.info("[GET-PPM] Success | count=0")
 
         return formatted
@@ -150,6 +186,5 @@ def get_ppm(req: PPMRequest):
             logger.error("[GET-PPM] RPC failed | code=%s | message=%s | hint=%s",
                 err_dict.get("code", "?"), err_dict.get("message", err_msg), err_dict.get("hint", ""), exc_info=True)
         else:
-            logger.error("[GET-PPM] RPC failed | error=%s", err_msg, exc_info=True)
             logger.error("[GET-PPM] RPC failed | error=%s", err_msg, exc_info=True)
         raise HTTPException(status_code=500, detail=err_msg)

@@ -164,6 +164,24 @@ class LangChainService:
             f"| total_tokens={self._total_tokens}"
         )
 
+    def _get_content_str(self, msg) -> str:
+        if not msg:
+            return ""
+        content = getattr(msg, "content", msg)
+        if not content:
+            return ""
+        if isinstance(content, list):
+            parts = []
+            for item in content:
+                if isinstance(item, dict) and "text" in item:
+                    parts.append(str(item["text"]))
+                else:
+                    parts.append(str(item))
+            return " ".join(parts)
+        if isinstance(content, str):
+            return content
+        return str(content)
+
     def extract_chunk_text(self, chunk) -> str: # later purpose for the streaming purpose
         content = chunk.content
         if not content:
@@ -383,6 +401,17 @@ class LangChainService:
                     if args.get("date_to") is None and inferred_to is not None:
                         args["date_to"] = inferred_to
 
+                    # Interceptor to prevent incorrect aggregation:
+                    # If the user is clearly asking for a list, details, or all records (e.g. "list", "show", "listed", "all", "records"),
+                    # we must NEVER run in aggregate mode.
+                    list_words = ("list", "show", "get", "fetch", "display", "give", "provide", "retrieve", "all", "detail", "table", "records", "listed")
+                    if any(w in user_query.lower() for w in list_words):
+                        if args.get("is_aggregate"):
+                            logger.info("⚠️ Corrected is_aggregate to False because list/details query was detected")
+                            args["is_aggregate"] = False
+                            args["group_by_columns"] = None
+                            args["aggregate_function"] = None
+
                     try:
                         tool_result = tool_fn.invoke(dict(args))
                         logger.info(f"✅ Tool call succeeded on first try | {tool_name}")
@@ -454,7 +483,7 @@ class LangChainService:
                         # 1. Dynamically identify the subject using the LLM (no hardcoding)
                         subject_prompt = f"Identify the main subject of this query in 1-2 words (e.g., 'assets', 'complaints', 'work orders'): '{user_query}'"
                         subject_res = self.model.invoke([HumanMessage(content=subject_prompt)])
-                        entity = subject_res.content.strip().lower()
+                        entity = self._get_content_str(subject_res).strip().lower()
                         if not entity or len(entity) > 30: # Safety fallback
                              entity = tool_name.lower()
                         
@@ -524,7 +553,7 @@ class LangChainService:
                     previous_ai_was_clarification = False
                     ai_messages_list = [m for m in messages if isinstance(m, AIMessage)]
                     if ai_messages_list:
-                        last_ai_content = ai_messages_list[-1].content or ""
+                        last_ai_content = self._get_content_str(ai_messages_list[-1])
                         previous_ai_was_clarification = any(
                             kw in last_ai_content.lower()
                             for kw in clarification_markers
@@ -573,7 +602,7 @@ class LangChainService:
                     
                     # is_aggregate_query is the new 3rd intent
                     if not tool_was_aggregate:
-                        intent = intent_msg.content.strip().lower()
+                        intent = self._get_content_str(intent_msg).strip().lower()
                         is_count_query     = intent == "count"
                         is_aggregate_query = intent == "aggregate"
                     else:
@@ -619,7 +648,7 @@ class LangChainService:
                          # CALL 3 — Large dataset context call (records=[] so should be small)
                         context_ai_msg = self.model.invoke(messages)
                         self._accumulate_tokens(context_ai_msg)
-                        context_summary = context_ai_msg.content or f"Found {display_count} records for your request."
+                        context_summary = self._get_content_str(context_ai_msg) or f"Found {display_count} records for your request."
                         # context_summary = _append_default_7days(context_summary, user_query)
 
                         context_summary = _append_explicit_today(context_summary, user_query)
@@ -682,7 +711,7 @@ class LangChainService:
                  # CALL 4 — Final answer generation
                 final_ai_msg = self.model.invoke(messages)
                 self._accumulate_tokens(final_ai_msg)
-                final_content = final_ai_msg.content
+                final_content = self._get_content_str(final_ai_msg)
 
                 # FINAL SAFETY NET (NO EMPTY STRING EVER)
 
@@ -908,7 +937,7 @@ class LangChainService:
                     previous_ai_was_clarification_forced = False
                     ai_messages_forced_list = [m for m in messages if isinstance(m, AIMessage)]
                     if ai_messages_forced_list:
-                        last_ai_content_forced = ai_messages_forced_list[-1].content or ""
+                        last_ai_content_forced = self._get_content_str(ai_messages_forced_list[-1])
                         previous_ai_was_clarification_forced = any(
                             kw in last_ai_content_forced.lower()
                             for kw in clarification_markers
@@ -957,7 +986,7 @@ class LangChainService:
                     tool_has_groupby = bool(args.get("group_by_columns"))
 
                     if not tool_was_aggregate:
-                        intent = intent_msg.content.strip().lower()
+                        intent = self._get_content_str(intent_msg).strip().lower()
                         is_count_query     = intent == "count"
                         is_aggregate_query = intent == "aggregate"
                     else:
@@ -1008,7 +1037,7 @@ class LangChainService:
                         # CALL 6  Large dataset context call FORCED path
                         context_ai_msg = self.model.invoke(messages)
                         self._accumulate_tokens(context_ai_msg)
-                        context_summary = context_ai_msg.content or f"Found {display_count} records for your request."
+                        context_summary = self._get_content_str(context_ai_msg) or f"Found {display_count} records for your request."
                         # context_summary = _append_default_7days(context_summary, user_query)
                         context_summary = _append_explicit_today(context_summary, user_query)
 
@@ -1066,7 +1095,7 @@ class LangChainService:
 
                     final_ai_msg = self.model.invoke(messages)
                     self._accumulate_tokens(final_ai_msg)
-                    content = final_ai_msg.content or "No specific data could be retrieved for this query."
+                    content = self._get_content_str(final_ai_msg) or "No specific data could be retrieved for this query."
                     logger.info("✅ Response after forced tool call")                  
                     if is_count_query:
                         context_summary = content   
@@ -1121,7 +1150,7 @@ class LangChainService:
                     context_summary = _append_explicit_today(context_summary, user_query)
                     return content, context_summary, messages
                     
-                content = ai_msg.content
+                content = self._get_content_str(ai_msg)
                 if not content or str(content).strip() == "":
                     content = "No matching records were found for the requested data."
                 logger.info("✅ No tool call — direct response")

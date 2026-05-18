@@ -910,6 +910,38 @@ async def ws_chat_endpoint(websocket: WebSocket):
                 logger.warning("⚠️ update_daily_history failed: %s", str(e)[:200])
                 
 
+            # Convert final_response_text and context_summary to string if they are lists/dicts (defensive parsing)
+            final_text_str = ""
+            if isinstance(final_response_text, list):
+                parts = []
+                for item in final_response_text:
+                    if isinstance(item, dict) and "text" in item:
+                        parts.append(str(item["text"]))
+                    else:
+                        parts.append(str(item))
+                final_text_str = " ".join(parts)
+            elif isinstance(final_response_text, dict):
+                final_text_str = json.dumps(final_response_text)
+            else:
+                final_text_str = str(final_response_text or "")
+
+            context_sum_str = ""
+            if isinstance(context_summary, list):
+                parts = []
+                for item in context_summary:
+                    if isinstance(item, dict) and "text" in item:
+                        parts.append(str(item["text"]))
+                    else:
+                        parts.append(str(item))
+                context_sum_str = " ".join(parts)
+            elif isinstance(context_summary, dict):
+                context_sum_str = json.dumps(context_summary)
+            else:
+                context_sum_str = str(context_summary or "")
+
+            final_response_text = final_text_str
+            context_summary = context_sum_str
+
             # ── CHANGED: TWO SEPARATE MEMORIES
             # ── lc_memory → stores context_summary ONLY (sent to model as past context)
             # ──             prevents token limit errors for large datasets / markdown tables
