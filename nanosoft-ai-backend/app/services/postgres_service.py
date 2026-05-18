@@ -436,7 +436,7 @@ async def get_folders(user_name: str) -> list:
                 """
                 SELECT folder_name FROM "Groups_folderName"
                 WHERE user_name = %s
-                ORDER BY created_at ASC
+                ORDER BY created_at DESC
                 """,
                 (user_name,),
             )

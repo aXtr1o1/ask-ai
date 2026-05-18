@@ -1567,6 +1567,13 @@ export default function Home() {
     }
   }, [showManageAccount]);
 
+  // Handle sidebar close when import or share modal opens (mobile fix)
+  useEffect(() => {
+    if ((importModalOpen || shareModalOpen) && (responsive.isMobile || responsive.isTablet)) {
+      setSidebarOpen(false);
+    }
+  }, [importModalOpen, shareModalOpen, responsive.isMobile, responsive.isTablet]);
+
   // Handle body overflow when manage account modal opens/closes
   useEffect(() => {
     if (showManageAccount) {
@@ -2256,11 +2263,16 @@ export default function Home() {
         console.warn("⚠️ WebSocket closed");
         if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
         setIsLoading(false);
-        if (!event.wasClean && userActiveRef.current) {
+        // Auto-reconnect logic RESTORED
+        if (loggedInUser || new URLSearchParams(window.location.search).get("sharedSessionId")) {
           const delay = reconnectDelayRef.current;
-          reconnectDelayRef.current = Math.min(15000, delay * 2);
-          setTimeout(() => connectWS(), delay);
+          console.log(`[WS] Connection lost. Reconnecting in ${delay}ms...`);
+          reconnectDelayRef.current = Math.min(5000, delay * 1.5);
+          setTimeout(() => {
+            if (wsRef.current === null) connectWS();
+          }, delay);
         }
+
       }
     };
 
@@ -2270,9 +2282,18 @@ export default function Home() {
         wsConnectTimeoutRef.current = null;
       }
       setWsConnectionState('failed');
-      // Log connection error to console only — do not surface as chat bubble
-      console.error("❌ WebSocket error — connection failed, will retry");
+      console.error("❌ WebSocket error — connection failed");
       setIsLoading(false);
+      
+      // Auto-reconnect on error
+      const sharedSid = new URLSearchParams(window.location.search).get("sharedSessionId");
+      if (loggedInUser || sharedSid) {
+        const delay = reconnectDelayRef.current;
+        reconnectDelayRef.current = Math.min(5000, delay * 1.5);
+        setTimeout(() => {
+          if (wsRef.current === null) connectWS();
+        }, delay);
+      }
     };
   };
 
@@ -2304,13 +2325,16 @@ export default function Home() {
     return isNaN(parsed) ? fallback : parsed;
   };
 
-  // Helper: sort sessions strictly by createdAt to prevent random swapping
+  // Helper: sort sessions by recent activity (updatedAt) primarily
   const sortSessionsStable = (list: ChatSession[]): ChatSession[] =>
     [...list].sort((a, b) => {
+      // 1. Pins always stay at the very top
       if (a.isPinned && !b.isPinned) return -1;
       if (!a.isPinned && b.isPinned) return 1;
-      const timeA = a.createdAt || 0;
-      const timeB = b.createdAt || 0;
+
+      // 2. Sort by activity (newest update at top)
+      const timeA = a.updatedAt || a.createdAt || 0;
+      const timeB = b.updatedAt || b.createdAt || 0;
       return timeB - timeA;
     });
 
@@ -3534,10 +3558,10 @@ export default function Home() {
                               }}
                             />
                           ) : (
-                            <span 
+                            <span
                               key={a.title}
                               className="title-typing"
-                              title={a.title} 
+                              title={a.title}
                               style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
                             >
                               {a.title}
@@ -4186,15 +4210,15 @@ export default function Home() {
                             <div key={textIdx} style={{
                               position: 'absolute',
                               opacity: 0,
-                              animation: 'cycle-text-5 10s infinite',
+                              animation: 'cycle-text-5 10s linear',
                               animationDelay: `${textIdx * 2}s`,
+                              animationFillMode: 'forwards',
                               whiteSpace: 'nowrap',
                               display: 'flex',
                               alignItems: 'center',
                               gap: '2px'
                             }}>
                               <span>{text}</span>
-                              {/* Animated dots attached to the text */}
                               <div style={{ display: 'flex', gap: '2px', alignItems: 'flex-end', height: '10px', paddingBottom: '2px' }}>
                                 {[0, 1, 2].map(i => (
                                   <span key={i} style={{
@@ -4206,13 +4230,42 @@ export default function Home() {
                               </div>
                             </div>
                           ))}
+                          
+                          {/* Final "Please wait" message that appears after 10s if still loading */}
+                          <div style={{
+                            position: 'absolute',
+                            opacity: 0,
+                            animation: 'fade-in-final 1s ease-out forwards',
+                            animationDelay: '10s',
+                            whiteSpace: 'nowrap',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '2px',
+                            paddingLeft: '16px'
+                          }}>
+                            <span>Still processing, please wait</span>
+                            <div style={{ display: 'flex', gap: '2px', alignItems: 'flex-end', height: '10px', paddingBottom: '2px' }}>
+                              {[0, 1, 2].map(i => (
+                                <span key={i} style={{
+                                  display: "inline-block", width: 3, height: 3,
+                                  borderRadius: "50%", background: "currentColor",
+                                  animation: `bounce 1.2s ease-in-out ${i * 0.2}s infinite`,
+                                }} />
+                              ))}
+                            </div>
+                          </div>
                         </div>
                       </div>
                       <style>{`
                         @keyframes cycle-text-5 {
                           0% { opacity: 0; transform: translateY(10px); }
                           5%, 15% { opacity: 1; transform: translateY(0); }
-                          20%, 100% { opacity: 0; transform: translateY(-10px); }
+                          20% { opacity: 0; transform: translateY(-10px); }
+                          100% { opacity: 0; transform: translateY(-10px); }
+                        }
+                        @keyframes fade-in-final {
+                          from { opacity: 0; transform: translateY(10px); }
+                          to { opacity: 1; transform: translateY(0); }
                         }
                         @keyframes bounce {
                           0%, 100% { transform: translateY(0); }
@@ -4495,18 +4548,31 @@ export default function Home() {
 
           {/* changes done by megnathan: Added Import Modal */}
           {importModalOpen && (
-            <div style={{
-              position: 'fixed', inset: 0, zIndex: 9999,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              backgroundColor: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)'
-            }}>
-              <div style={{
-                background: (typeof window !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark') ? 'var(--color-bg-sidebar)' : '#ffffff',
-                padding: '24px', borderRadius: '16px',
-                width: '90%', maxWidth: '400px',
-                border: (typeof window !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark') ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(0,0,0,0.1)',
-                boxShadow: '0 20px 25px -5px rgba(0,0,0,0.5)', textAlign: 'center'
-              }}>
+            <div
+              style={{
+                position: 'fixed', inset: 0, zIndex: 9999,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                backgroundColor: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)',
+                pointerEvents: 'auto' // Ensure it captures all touches
+              }}
+              onClick={(e) => {
+                // Prevent backdrop clicks from doing anything
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+            >
+              <div
+                style={{
+                  background: (typeof window !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark') ? 'var(--color-bg-sidebar)' : '#ffffff',
+                  padding: '24px', borderRadius: '16px',
+                  width: '90%', maxWidth: '400px',
+                  border: (typeof window !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark') ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(0,0,0,0.1)',
+                  boxShadow: '0 20px 25px -5px rgba(0,0,0,0.5)', textAlign: 'center',
+                  position: 'relative',
+                  zIndex: 10000
+                }}
+                onClick={(e) => e.stopPropagation()} // Prevent click inside from reaching backdrop
+              >
                 <h3 style={{ margin: '0 0 8px 0', fontSize: '1.25rem', fontWeight: 600 }}>Import Chat via Code</h3>
                 <p style={{ margin: '0 0 20px 0', fontSize: '0.875rem', color: 'var(--color-text-dim)' }}>
                   Enter the 5-digit code to add a shared chat to your history.
@@ -4542,14 +4608,20 @@ export default function Home() {
 
                 <div style={{ display: 'flex', gap: '12px' }}>
                   <button
-                    onClick={() => setImportModalOpen(false)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setImportModalOpen(false);
+                    }}
                     style={{
                       flex: 1, padding: '12px', borderRadius: '8px', background: 'rgba(255,255,255,0.05)',
                       border: 'none', color: 'var(--color-text)', cursor: 'pointer', fontWeight: 500
                     }}
                   >Cancel</button>
                   <button
-                    onClick={handleImportByCode}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleImportByCode();
+                    }}
                     disabled={isImporting || inputShareCode.length !== 5}
                     style={{
                       flex: 1, padding: '12px', borderRadius: '8px', background: 'var(--color-primary)',
