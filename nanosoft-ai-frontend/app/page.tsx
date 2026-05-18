@@ -2301,7 +2301,6 @@ export default function Home() {
       setWsConnectionState('failed');
       console.error("❌ WebSocket error — connection failed");
       setIsLoading(false);
-
       // Auto-reconnect on error
       const sharedSid = new URLSearchParams(window.location.search).get("sharedSessionId");
       if (loggedInUser || sharedSid) {
@@ -4301,7 +4300,6 @@ export default function Home() {
                               </div>
                             </div>
                           ))}
-
                           {/* Final "Please wait" message that appears after 10s if still loading */}
                           <div style={{
                             position: 'absolute',
