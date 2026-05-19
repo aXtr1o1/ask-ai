@@ -201,6 +201,8 @@ const HIDDEN_COLUMNS = new Set([
   'downloadstat',
   'createdby',
   'updatedby',
+  'rmccmcomplaintidpk',
+  'filepath',
 ]);
 
 function isHiddenColumn(col: string): boolean {
@@ -311,6 +313,7 @@ function renderLargeDataset(text: string): string | null {
     "rmccmcomplaintidpk",
     "createdby",
     "updatedby",
+    "filepath",
   ]);
 
   function isHiddenColumn(col: string) {
@@ -1095,6 +1098,7 @@ export default function Home() {
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [inputShareCode, setInputShareCode] = useState("");
   const [isImporting, setIsImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
   /* changes done by megnathan: Track which session is actually being shared */
   const [sessionToShare, setSessionToShare] = useState<string | null>(null);
   /* changes done by megnathan: Added share code copy feedback state */
@@ -2047,10 +2051,11 @@ export default function Home() {
   /* changes done by megnathan: Added import by code handler (improved error logging) */
   const handleImportByCode = async () => {
     if (!inputShareCode || inputShareCode.length !== 5) {
-      alert("Please enter a valid 5-digit code.");
+      setImportError("Please enter a valid 5-digit code.");
       return;
     }
     setIsImporting(true);
+    setImportError(null);
     const actualUserName = userIdFromUrl ?? localStorage.getItem("userName") ?? loggedInUser;
 
     console.log(`[Import] Starting import for code: ${inputShareCode} | User: ${actualUserName}`);
@@ -2080,15 +2085,15 @@ export default function Home() {
           console.log("[Import] Session selection triggered.");
         } catch (innerError: any) {
           console.error("[Import] Error during list refresh/selection:", innerError);
-          alert("Import was successful, but failed to load the new chat automatically. Please refresh the page.");
+          setImportError("Import was successful, but failed to load the new chat automatically.");
         }
       } else {
         console.warn("[Import] Server returned error:", data.detail);
-        alert(data.detail || "Invalid code or import failed.");
+        setImportError(data.detail || "Invalid code or import failed.");
       }
     } catch (e: any) {
       console.error("[Import] Fatal error during fetch:", e);
-      alert(`An error occurred during import: ${e.message || "Unknown error"}`);
+      setImportError(`An error occurred during import: ${e.message || "Unknown error"}`);
     } finally {
       setIsImporting(false);
     }
@@ -3434,7 +3439,11 @@ export default function Home() {
               {/* changes done by megnathan: Added import via code menu button */}
               <button
                 className="new-chat-btn"
-                onClick={() => setImportModalOpen(true)}
+                onClick={() => {
+                  setImportError(null);
+                  setInputShareCode("");
+                  setImportModalOpen(true);
+                }}
                 title="Import chat via code"
                 style={{ width: '40px', padding: '10px 0', justifyContent: 'center' }}
               >
@@ -4655,7 +4664,10 @@ export default function Home() {
                     placeholder="Enter the code"
                     className="import-code-input"
                     value={inputShareCode}
-                    onChange={(e) => setInputShareCode(e.target.value.replace(/[^0-9]/g, ""))}
+                    onChange={(e) => {
+                      setImportError(null);
+                      setInputShareCode(e.target.value.replace(/[^0-9]/g, ""));
+                    }}
                     style={{
                       width: '100%',
                       background: (typeof window !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark') ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.05)',
@@ -4665,6 +4677,18 @@ export default function Home() {
                       outline: 'none'
                     }}
                   />
+                  {importError && (
+                    <div style={{
+                      color: '#ef4444',
+                      fontSize: '13px',
+                      fontWeight: 500,
+                      marginTop: '10px',
+                      textAlign: 'center',
+                      lineHeight: '1.4'
+                    }}>
+                      {importError}
+                    </div>
+                  )}
                   <style jsx>{`
                     .import-code-input::placeholder {
                       font-size: 16px;
@@ -4679,6 +4703,8 @@ export default function Home() {
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
+                      setImportError(null);
+                      setInputShareCode("");
                       setImportModalOpen(false);
                     }}
                     style={{

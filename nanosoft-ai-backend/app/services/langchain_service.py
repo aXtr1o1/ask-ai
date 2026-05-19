@@ -400,18 +400,6 @@ class LangChainService:
                         args["date_from"] = inferred_from
                     if args.get("date_to") is None and inferred_to is not None:
                         args["date_to"] = inferred_to
-
-                    # Interceptor to prevent incorrect aggregation:
-                    # If the user is clearly asking for a list, details, or all records (e.g. "list", "show", "listed", "all", "records"),
-                    # we must NEVER run in aggregate mode.
-                    list_words = ("list", "show", "get", "fetch", "display", "give", "provide", "retrieve", "all", "detail", "table", "records", "listed")
-                    if any(w in user_query.lower() for w in list_words):
-                        if args.get("is_aggregate"):
-                            logger.info("⚠️ Corrected is_aggregate to False because list/details query was detected")
-                            args["is_aggregate"] = False
-                            args["group_by_columns"] = None
-                            args["aggregate_function"] = None
-
                     try:
                         tool_result = tool_fn.invoke(dict(args))
                         logger.info(f"✅ Tool call succeeded on first try | {tool_name}")
