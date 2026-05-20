@@ -177,7 +177,7 @@ FULL PARAMETER CAPABILITIES:
 - asset_type, division, discipline, trade_group: Filter by asset classification.
 - locality, building, floor, service_area: Filter by physical location hierarchy.
 - spot_name, serial_no: Filter by spot or serial number.
-- on_hold, is_snagged, is_scraped: Filter by asset lifecycle flags.
+- on_hold, is_snagged, is_scraped: FILTER by specific boolean value. For "how many OnHolds" breakdown use is_aggregate=True with group_by_columns=['OnHold'] instead.
 - enable_ppm, enable_bdm: Filter by maintenance eligibility configuration.
 - asset_tag_no, keyword: Filter by specific identification or search terms. DO NOT include conversational stop-words, prepositions, articles, or time/date references as keywords.
 - date_from, date_to: Filter by timestamps. Supports relative keywords: 'today', 'yesterday', 'this week', 'last week', 'this month', 'last month', 'this year', 'last year', or 'X days ago' (e.g., '3 days ago').
@@ -193,16 +193,31 @@ When the user asks questions like:
 - "how many assets are in each status?"
 - "compare assets by make or model?"
 - "group assets by building and floor"
+- "how many OnHolds are there?" / "how many on hold?" / "OnHold breakdown"
+- "how many snagged assets?" / "how many scraped?" / "PPM enabled count"
 
 → Set is_aggregate = True
 → Fill group_by_columns with the columns the user mentioned
-   for example ["DivisionName"] or ["BuildingName", "FloorName"]
+   for example ["DivisionName"] or ["BuildingName", "FloorName"] or ["OnHold"]
 → Set aggregate_function based on what user wants
    COUNT for how many, SUM for total of a value, AVG for average
 
+COLUMN VALUE BREAKDOWN (CRITICAL):
+When user asks "how many [ColumnName]?" or "how many [column] are there?" about a
+data column — especially boolean columns (OnHold, IsSnagged, IsScraped, EnablePPM,
+EnableBDM) or categorical columns (StatusName, ConditionName, etc.) — treat it as
+aggregate: is_aggregate=True, group_by_columns=[exact DB column name], aggregate_function="COUNT".
+Do NOT set the corresponding filter parameter (e.g., do NOT set on_hold=true).
+The result should show count per distinct value (true/false for booleans).
+
+Use FILTER (not aggregate) only when user specifies ONE value:
+- "how many assets on hold" → on_hold=true, is_aggregate=False
+- "show snagged assets" → is_snagged=true, is_aggregate=False
+
 IMPORTANT: Only set is_aggregate=True when user mentions a grouping column
-like "per division", "by building", "each status". If user asks "how many total"
-or "how many assets exist" with NO grouping column → set is_aggregate=False.
+like "per division", "by building", "each status", or asks "how many [columnName]".
+If user asks "how many total" or "how many assets exist" with NO grouping column
+→ set is_aggregate=False.
 
 For all normal filter and list queries:
 → is_aggregate = False (default — do not set)
@@ -213,7 +228,8 @@ Columns you can use in group_by_columns for ASSETS:
 DivisionName, DisciplineName, BuildingName, FloorName,
 LocalityName, StatusName, ConditionName, PriorityName,
 AssetTypeName, EquipmentName, MakeName, ModelName, SpotName,
-TradeGroupName, ServiceAreaName, YearOfManuf
+TradeGroupName, ServiceAreaName, YearOfManuf,
+OnHold, IsSnagged, IsScraped, EnablePPM, EnableBDM
 
 
 """,
@@ -374,7 +390,10 @@ When the user asks questions like:
 → Fill group_by_columns with the columns the user mentioned
 → Set aggregate_function based on what user wants
    COUNT for how many, SUM for total, AVG for average
-   
+
+COLUMN VALUE BREAKDOWN: "how many [ColumnName]?" → is_aggregate=True,
+group_by_columns=[column], do NOT set the filter parameter.
+
 IMPORTANT: Only set is_aggregate=True when user mentions a grouping column
 like "per division", "by frequency", "each stage". If user asks "how many total"
 or "how many PPM tasks exist" with NO grouping column → set is_aggregate=False
@@ -537,7 +556,10 @@ When the user asks questions like:
 → Fill group_by_columns with the columns the user mentioned
 → Set aggregate_function based on what user wants
    COUNT for how many, SUM for total, AVG for average
-   
+
+COLUMN VALUE BREAKDOWN: "how many [ColumnName]?" → is_aggregate=True,
+group_by_columns=[column], do NOT set the filter parameter.
+
 IMPORTANT: Only set is_aggregate=True when user mentions a grouping column
 like "per division", "by priority", "each status". If user asks "how many total"
 or "how many complaints exist" with NO grouping column → set is_aggregate=False.
@@ -718,11 +740,13 @@ PARAMETERS:
 - limit, offset: Pagination
  
 AGGREGATE / GROUP BY:
-- is_aggregate=True for "how many FA per division", "breakdown by category"
+- is_aggregate=True for "how many FA per division", "breakdown by category", "how many withdrawn audits"
 - group_by_columns: DivisionName, BuildingName, FloorName, LocalityName,
                     PriorityName, RMStageName, RMCategoryName, RMCategorySubName,
-                    FrequencyName, ContractName, SpotName
+                    FrequencyName, ContractName, SpotName,
+                    IsWithdraw, IsRework, IsActive
 - aggregate_function: COUNT / SUM / AVG
+- COLUMN VALUE BREAKDOWN: "how many [columnName]?" → is_aggregate=True, group_by_columns=[column], do NOT set filter
 """,
     args_schema=FAInput
 )
@@ -882,10 +906,12 @@ PARAMETERS:
 - limit, offset: Pagination
  
 AGGREGATE / GROUP BY:
-- is_aggregate=True for "how many SB per division", "breakdown by frequency"
+- is_aggregate=True for "how many SB per division", "breakdown by frequency", "how many rescheduled"
 - group_by_columns: DivisionName, DisciplineName, BuildingName, FloorName,
-                    LocalityName, PPMStageName, FrequencyName, ServiceTypeName, ContractName
+                    LocalityName, PPMStageName, FrequencyName, ServiceTypeName, ContractName,
+                    IsWithdraw, IsReschedule, IsRework, IsActive
 - aggregate_function: COUNT / SUM / AVG
+- COLUMN VALUE BREAKDOWN: "how many [columnName]?" → is_aggregate=True, group_by_columns=[column], do NOT set filter
 """,
     args_schema=SBInput
 )

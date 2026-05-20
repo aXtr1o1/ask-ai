@@ -568,14 +568,14 @@ class LangChainService:
                         - "aggregate" → user wants a grouped summary or breakdown by category
                                         (e.g. "assets per division?", "breakdown by building",
                                         "complaints by priority", "summarize by status",
-                                        (e.g. "assets per division?", "breakdown by building",
-                                        "complaints by priority", "summarize by status",
-                                        "group by floor and building", "compare by make or model")
+                                        "group by floor and building", "compare by make or model",
+                                        "how many OnHolds are there?", "how many snagged assets?")
                         - "list"      → user wants full records shown as a table
                                         (e.g. "show me assets", "list complaints", "get PPM records")
                         IMPORTANT RULES:
                         - "how many per X" or "count by X" or "breakdown by X" = aggregate (NOT count)
-                        - "how many total" or "how many exist" with no grouping = count
+                        - "how many [ColumnName]?" or "how many [column] are there?" where user names a data column (OnHold, Status, Priority, etc.) = aggregate with value breakdown (NOT count)
+                        - "how many total" or "how many exist" with no grouping column = count
                         - "show", "list", "display", "get", "fetch" = list
                         - "give me X", "show X", "get X" where X is a number = list (NOT count)
                           The number means a limit — user wants to SEE records, not count them.
@@ -951,12 +951,14 @@ class LangChainService:
                         - "aggregate" → user wants a grouped summary or breakdown by category
                                         (e.g. "assets per division?", "breakdown by building",
                                         "complaints by priority", "summarize by status",
-                                        "group by floor and building", "compare by make or model")
+                                        "group by floor and building", "compare by make or model",
+                                        "how many OnHolds are there?", "how many snagged assets?")
                         - "list"      → user wants full records shown as a table
                                         (e.g. "show me assets", "list complaints", "get PPM records")
 
                         IMPORTANT RULES:
                         - " per X" or "count by X" or "breakdown by X" = aggregate (NOT count)
+                        - "how many [ColumnName]?" or "how many [column] are there?" where user names a data column (OnHold, Status, Priority, etc.) = aggregate with value breakdown (NOT count)
                         - "how many total" or "how many exist" with no grouping = count
                         - "show", "list", "display", "get", "fetch" = list
                         - "give me X", "show X", "get X" where X is a number = list (NOT count)
