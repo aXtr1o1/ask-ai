@@ -6,8 +6,8 @@ import logging
 import json
 
 from app.api.models.schemas import PPMRequest
-from app.api.models.schemas import PPMRequest
 from app.api.database.postgres_client import get_pool
+from .utils import generate_fallback_candidates
 
 router = APIRouter()
 
@@ -190,29 +190,7 @@ def get_ppm(req: PPMRequest):
             
             # Process each fallback item
             for field, original_val, is_keyword_mapping in fallback_items:
-                candidates = []
-                val = " ".join(original_val.strip().split())
-                no_dash = val.replace("-", " ")
-                with_dash = val.replace(" ", "-")
-                
-                for text_val in [val, no_dash, with_dash]:
-                    cleaned = " ".join(text_val.split())
-                    candidates.append(cleaned)
-                    words = cleaned.split()
-                    if len(words) > 2:
-                        candidates.append(" ".join(words[:2]))
-                    if len(words) > 1:
-                        w0, w1 = words[0], words[1]
-                        is_generic_prefix = w1.isdigit() or len(w1) == 1
-                        if not is_generic_prefix:
-                            candidates.append(w0)
-                
-                seen = {original_val} if not is_keyword_mapping else set()
-                unique_candidates = []
-                for c in candidates:
-                    if c and c not in seen:
-                        seen.add(c)
-                        unique_candidates.append(c)
+                unique_candidates = generate_fallback_candidates(original_val, is_keyword_mapping)
                 
                 for candidate in unique_candidates:
                     logger.info(

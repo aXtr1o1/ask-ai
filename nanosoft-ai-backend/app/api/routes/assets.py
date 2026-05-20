@@ -7,6 +7,7 @@ import json
 
 from app.api.models.schemas import AssetRequest
 from app.api.database.postgres_client import get_pool
+from .utils import generate_fallback_candidates
 
 router = APIRouter()
 
@@ -187,7 +188,61 @@ def get_assets(req: AssetRequest):
             formatted = format_response(raw)
             p_list = formatted.get("p_list", [])
 
-        # Fallback 2: if 0 records found:
+        # Fallback 2: If 0 records found and we had division, discipline, or asset_type set:
+        # Try setting them as keyword instead to search across all columns.
+        if not p_list:
+            for field in ["division", "discipline", "asset_type"]:
+                val = getattr(req, field, None)
+                if val:
+                    logger.info(f"🔄 Fallback 2: 0 records found for {field}='{val}'. Retrying with keyword='{val}' and {field}=None")
+                    try:
+                        cursor = conn.cursor()
+                        cursor.callproc("sp_asset_query", [
+                            req.user_name,
+                            req.user_id,
+                            req.asset_tag_no,
+                            req.status,
+                            req.condition,
+                            req.priority,
+                            None if field == "asset_type" else req.asset_type,
+                            None if field == "division" else req.division,
+                            None if field == "discipline" else req.discipline,
+                            req.locality,
+                            req.building,
+                            req.floor,
+                            req.owner,
+                            req.make,
+                            req.model,
+                            req.service_area,
+                            req.trade_group,
+                            req.spot_name,
+                            req.serial_no,
+                            req.on_hold,
+                            req.is_snagged,
+                            req.is_scraped,
+                            req.enable_ppm,
+                            req.enable_bdm,
+                            val,  # use val as keyword filter
+                            req.date_from,
+                            req.date_to,
+                            req.limit,
+                            req.offset,
+                        ])
+                        row = cursor.fetchone()
+                        cursor.close()
+                        raw_val = row[0] if row else {}
+                        if isinstance(raw_val, str):
+                            raw_val = json.loads(raw_val)
+                        formatted = format_response(raw_val)
+                        p_list = formatted.get("p_list", [])
+                        if p_list:
+                            logger.info("✅ Assets fallback retry succeeded by mapping %s to keyword!", field)
+                            formatted["fallback_applied"] = {"field": field, "value": val}
+                            break
+                    except Exception as e:
+                        logger.warning(f"Failed fallback retrying {field} as keyword: {e}")
+
+        # Fallback 3: if 0 records found:
         # A) Try to simplify/trim any specified location filter (building, locality, spot_name).
         # B) Try mapping the keyword to location/entity fields (spot_name, building, locality),
         #    including simplifying/trimming the keyword value itself.
@@ -208,29 +263,7 @@ def get_assets(req: AssetRequest):
             
             # Process each fallback item
             for field, original_val, is_keyword_mapping in fallback_items:
-                candidates = []
-                val = " ".join(original_val.strip().split())
-                no_dash = val.replace("-", " ")
-                with_dash = val.replace(" ", "-")
-                
-                for text_val in [val, no_dash, with_dash]:
-                    cleaned = " ".join(text_val.split())
-                    candidates.append(cleaned)
-                    words = cleaned.split()
-                    if len(words) > 2:
-                        candidates.append(" ".join(words[:2]))
-                    if len(words) > 1:
-                        w0, w1 = words[0], words[1]
-                        is_generic_prefix = w1.isdigit() or len(w1) == 1
-                        if not is_generic_prefix:
-                            candidates.append(w0)
-                
-                seen = {original_val} if not is_keyword_mapping else set()
-                unique_candidates = []
-                for c in candidates:
-                    if c and c not in seen:
-                        seen.add(c)
-                        unique_candidates.append(c)
+                unique_candidates = generate_fallback_candidates(original_val, is_keyword_mapping)
                 
                 for candidate in unique_candidates:
                     logger.info(

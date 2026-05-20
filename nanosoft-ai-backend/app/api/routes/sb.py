@@ -5,7 +5,8 @@ import difflib
  
 from app.api.models.schemas import SBRequest
 from app.api.database.postgres_client import get_pool
- 
+from .utils import generate_fallback_candidates
+
 router_sb = APIRouter()
  
 logger_sb = logging.getLogger("sb_route")
@@ -211,35 +212,15 @@ def get_sb(req: SBRequest):
             
             # Process each fallback item
             for field, original_val, is_keyword_mapping in fallback_items:
-                candidates = []
-                val = " ".join(original_val.strip().split())
-                no_dash = val.replace("-", " ")
-                with_dash = val.replace(" ", "-")
-                
-                for text_val in [val, no_dash, with_dash]:
-                    cleaned = " ".join(text_val.split())
-                    candidates.append(cleaned)
-                    words = cleaned.split()
-                    if len(words) > 2:
-                        candidates.append(" ".join(words[:2]))
-                    if len(words) > 1:
-                        w0, w1 = words[0], words[1]
-                        is_generic_prefix = w1.isdigit() or len(w1) == 1
-                        if not is_generic_prefix:
-                            candidates.append(w0)
+                unique_candidates = generate_fallback_candidates(original_val, is_keyword_mapping)
                 
                 # Fetch fuzzy candidates from DB values (only for actual location filters)
                 if not is_keyword_mapping:
                     db_vals = get_db_candidates(conn, field)
                     fuzzy_matches = find_close_matches(original_val, db_vals)
-                    candidates.extend(fuzzy_matches)
-                
-                seen = {original_val} if not is_keyword_mapping else set()
-                unique_candidates = []
-                for c in candidates:
-                    if c and c not in seen:
-                        seen.add(c)
-                        unique_candidates.append(c)
+                    for fm in fuzzy_matches:
+                        if fm and fm not in unique_candidates and fm != original_val:
+                            unique_candidates.append(fm)
                 
                 for candidate in unique_candidates:
                     logger_sb.info(

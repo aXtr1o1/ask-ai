@@ -4,7 +4,8 @@ import json
  
 from app.api.models.schemas import FARequest
 from app.api.database.postgres_client import get_pool
- 
+from .utils import generate_fallback_candidates
+
 router = APIRouter()
  
 logger = logging.getLogger("fa_route")
@@ -162,6 +163,49 @@ def get_fa(req: FARequest):
             formatted = format_response(raw)
             p_list = formatted.get("p_list", [])
 
+        # Fallback 1.5: if 0 records found and a potential composite prefix (category or category_sub) is set with floor:
+        # Retry mapping floor to f"{prefix} {floor}" (e.g. "Parking Floor 5") with category and category_sub cleared.
+        if not p_list and req.floor:
+            prefix = req.category_sub or req.category
+            if prefix and prefix.lower() not in ("audit", "facility audit", "complaint", "complaints"):
+                logger.info("🔄 0 records found. Retrying with floor='%s %s', category=None, category_sub=None...", prefix, req.floor)
+                cursor = conn.cursor()
+                cursor.callproc("sp_fa_query", [
+                    req.user_name,
+                    req.user_id,
+                    req.complaint_no,
+                    req.priority,
+                    req.stage,
+                    None,  # p_category cleared
+                    None,  # p_category_sub cleared
+                    req.division,
+                    req.locality,
+                    req.building,
+                    f"{prefix} {req.floor}",  # map combined to floor
+                    req.spot_name,
+                    req.contract,
+                    req.tech,
+                    req.frequency,
+                    req.request_desc,
+                    req.is_withdraw,
+                    req.is_rework,
+                    req.is_active,
+                    req.keyword,
+                    req.date_from,
+                    req.date_to,
+                    req.comp_from,
+                    req.comp_to,
+                    req.limit,
+                    req.offset,
+                ])
+                row = cursor.fetchone()
+                cursor.close()
+                raw_val = row[0] if row else {}
+                if isinstance(raw_val, str):
+                    raw_val = json.loads(raw_val)
+                formatted = format_response(raw_val)
+                p_list = formatted.get("p_list", [])
+
         # Fallback 2: if 0 records found:
         # A) Try to simplify/trim any specified location filter (building, locality, spot_name).
         # B) Try mapping the keyword to location/entity fields (spot_name, building, locality),
@@ -183,29 +227,7 @@ def get_fa(req: FARequest):
             
             # Process each fallback item
             for field, original_val, is_keyword_mapping in fallback_items:
-                candidates = []
-                val = " ".join(original_val.strip().split())
-                no_dash = val.replace("-", " ")
-                with_dash = val.replace(" ", "-")
-                
-                for text_val in [val, no_dash, with_dash]:
-                    cleaned = " ".join(text_val.split())
-                    candidates.append(cleaned)
-                    words = cleaned.split()
-                    if len(words) > 2:
-                        candidates.append(" ".join(words[:2]))
-                    if len(words) > 1:
-                        w0, w1 = words[0], words[1]
-                        is_generic_prefix = w1.isdigit() or len(w1) == 1
-                        if not is_generic_prefix:
-                            candidates.append(w0)
-                
-                seen = {original_val} if not is_keyword_mapping else set()
-                unique_candidates = []
-                for c in candidates:
-                    if c and c not in seen:
-                        seen.add(c)
-                        unique_candidates.append(c)
+                unique_candidates = generate_fallback_candidates(original_val, is_keyword_mapping)
                 
                 for candidate in unique_candidates:
                     logger.info(
