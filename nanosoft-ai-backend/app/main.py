@@ -73,8 +73,8 @@ api_router = APIRouter(prefix="/api", tags=["api"])
 # Structure:
 # {
 #   "session-abc-123": {
-#     "lc_memory": [HumanMessage, AIMessage, ...],
-#     "history": [...],
+#     "lc_memory": [HumanMessage, AIMessage, ...],  # trimmed by MAX_HISTORY (model only)
+#     "history": [...],  # full transcript for DB / reload (not capped by MAX_HISTORY)
 #     "user_name": "v4demo"
 #   }
 # }
@@ -957,11 +957,11 @@ async def ws_chat_endpoint(websocket: WebSocket):
             final_response_text = final_text_str
             context_summary = context_sum_str
 
-            # ── CHANGED: TWO SEPARATE MEMORIES
-            # ── lc_memory → stores context_summary ONLY (sent to model as past context)
-            # ──             prevents token limit errors for large datasets / markdown tables
-            # ── history   → stores final_response_text (full data: markdown table / large JSON)
-            # ──             saved to DB on session end, loaded by frontend for display
+            # ── TWO SEPARATE MEMORIES
+            # ── lc_memory → context_summary pairs; only last MAX_HISTORY turns are kept
+            # ──             (sent to model). MAX_HISTORY=0 → no prior turns in prompt.
+            # ── history   → full transcript (final_response_text); never trimmed by MAX_HISTORY;
+            # ──             saved to DB on session end / used when frontend POSTs session.
             memory_store[session_id]["lc_memory"].append(HumanMessage(content=user_query))
             memory_store[session_id]["lc_memory"].append(AIMessage(content=context_summary))
             logger.info(f"🧠 lc_memory updated with context_summary | session={session_id}")

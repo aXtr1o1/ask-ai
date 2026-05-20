@@ -17,6 +17,16 @@ def test_lc_memory_for_model_zero_avoids_python_slice_quirk():
     assert cap_history(history, 0) == []
 
 
+def test_trim_session_max_zero_clears_lc_memory_keeps_history():
+    session = {
+        "history": [{"query": "a", "assistant": "b"}],
+        "lc_memory": [HumanMessage(content="x"), AIMessage(content="y")],
+    }
+    trim_session(session, 0)
+    assert session["history"] == [{"query": "a", "assistant": "b"}]
+    assert session["lc_memory"] == []
+
+
 def test_lc_memory_for_model_keeps_last_n_pairs():
     lc = [
         HumanMessage(content="1"),
@@ -32,7 +42,7 @@ def test_lc_memory_for_model_keeps_last_n_pairs():
     assert result[-1].content == "3"
 
 
-def test_trim_session_in_place():
+def test_trim_session_only_trims_lc_memory_for_model():
     lc_memory = []
     for i in range(5):
         lc_memory.append(HumanMessage(content=str(i)))
@@ -42,5 +52,5 @@ def test_trim_session_in_place():
         "lc_memory": lc_memory,
     }
     trim_session(session, 2)
-    assert len(session["history"]) == 2
+    assert len(session["history"]) == 5
     assert len(session["lc_memory"]) == 4
