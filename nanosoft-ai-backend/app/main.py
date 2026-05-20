@@ -32,7 +32,13 @@ from app.models.schemas import SessionRequest, ClientInsertionRequest
 from app.services.audio_service import convert_audio_to_text, get_audio_duration_seconds
 from app.services.quota_service import quota_fallback_service
 from app.voiceAgent_endpoint import voice_agent_router
-from app.state import memory_store, MAX_HISTORY, frontend_saved_sessions
+from app.state import (
+    memory_store,
+    MAX_HISTORY,
+    frontend_saved_sessions,
+    lc_memory_for_model,
+    trim_session,
+)
 
 logger = logging.getLogger("chatbot_app")
 logger.setLevel(logging.INFO)
@@ -175,8 +181,12 @@ def print_memory(session_id: str):
         print(f"  [{i}] Query:     {display_query}")
         print(f"       Assistant: {item['assistant'][:100]}{'...' if len(item['assistant']) > 100 else ''}")
  
-    print(f"\n🤖 LC_MEMORY ({len(lc_memory) // 2} pairs | last {settings.MAX_HISTORY} sent to model)")
-    pairs = list(zip(lc_memory[0::2], lc_memory[1::2]))
+    sent_to_model = lc_memory_for_model(lc_memory, settings.MAX_HISTORY)
+    print(
+        f"\n🤖 LC_MEMORY ({len(lc_memory) // 2} stored | "
+        f"{len(sent_to_model) // 2} sent to model | MAX_HISTORY={settings.MAX_HISTORY})"
+    )
+    pairs = list(zip(sent_to_model[0::2], sent_to_model[1::2]))
     for i, (h, a) in enumerate(pairs, 1):
         h_content = (h.content or "")
         # ── lc_memory stores the transcribed text not base64
@@ -422,6 +432,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
                                 "is_audio":  True
                             })
                             logger.info("✅ Table sent on user audio YES | records=%d", len(pending_table_audio))
+                            trim_session(memory_store[session_id], MAX_HISTORY)
                             print_memory(session_id)
                             continue
 
@@ -445,6 +456,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
                                 "is_audio":  True
                             })
                             logger.info("✅ User declined table via audio")
+                            trim_session(memory_store[session_id], MAX_HISTORY)
                             print_memory(session_id)
                             continue
 
@@ -677,6 +689,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
                     })
                     
                     logger.info(f"✅ Quota fallback response sent | context: {context_summary}")
+                    trim_session(memory_store[session_id], MAX_HISTORY)
                     print_memory(session_id)
                     continue  # ← CRITICAL: Skip process_query completely
                 
@@ -711,6 +724,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
                             "is_audio":  is_audio
                         })
                         logger.info("✅ Table sent on user YES | records=%d", len(pending_table))
+                        trim_session(memory_store[session_id], MAX_HISTORY)
                         print_memory(session_id)
                         continue
 
@@ -734,6 +748,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
                             "is_audio":  is_audio
                         })
                         logger.info("✅ User declined table")
+                        trim_session(memory_store[session_id], MAX_HISTORY)
                         print_memory(session_id)
                         continue
 
@@ -763,7 +778,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
                 if group_name:
                     memory_store[session_id]["group_name"] = group_name
 
-            lc_memory = list(memory_store[session_id]["lc_memory"])
+            lc_memory = lc_memory_for_model(memory_store[session_id]["lc_memory"], MAX_HISTORY)
             messages  = [get_system_prompt(user_name)] + lc_memory
             messages.append(HumanMessage(content=user_query))
 
@@ -977,9 +992,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
             })
             logger.info(f"💾 history updated with full response | session={session_id}")
 
-            if len(memory_store[session_id]["history"]) > MAX_HISTORY:
-                memory_store[session_id]["history"]   = memory_store[session_id]["history"][-MAX_HISTORY:]
-                memory_store[session_id]["lc_memory"] = memory_store[session_id]["lc_memory"][-(MAX_HISTORY * 2):]
+            trim_session(memory_store[session_id], MAX_HISTORY)
 
             print_memory(session_id)
 
