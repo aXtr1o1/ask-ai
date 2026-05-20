@@ -6,7 +6,7 @@ import urllib.request
 import urllib.error
 from datetime import datetime, timezone
 from urllib.parse import urlparse
-
+from typing import Optional
 import psycopg2
 
 # Add nanosoft-ai-backend root to Python path for settings import
@@ -47,7 +47,7 @@ def get_db_connection(dbname: str):
 # ══════════════════════════════════════════════════════════════════════════════
 # HELPER: Call login API and return fresh raw JWT token
 # ══════════════════════════════════════════════════════════════════════════════
-def fetch_fresh_token(base_url: str, label: str) -> str | None:
+def fetch_fresh_token(base_url: str, label: str) -> Optional[str]:
     """
     Calls the login endpoint derived from base_url.
     Returns the raw JWT token string (without 'Bearer' prefix), or None on failure.
