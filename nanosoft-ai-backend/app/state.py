@@ -26,6 +26,9 @@ def lc_memory_for_model(lc_memory: list, max_pairs: int) -> list:
 
 
 def trim_session(session: dict, max_history: int) -> None:
-    """In-place trim session history and lc_memory to max_history turns."""
-    session["history"] = cap_history(session.get("history", []), max_history)
+    """In-place trim ``lc_memory`` (model context only).
+
+    ``history`` is the full transcript for DB / frontend reload and is never
+    capped by ``MAX_HISTORY``.
+    """
     session["lc_memory"] = lc_memory_for_model(session.get("lc_memory", []), max_history)
