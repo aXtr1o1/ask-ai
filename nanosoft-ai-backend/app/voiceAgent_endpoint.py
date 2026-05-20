@@ -6,7 +6,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 from app.models.schemas import ChatRequest
 from app.prompts.system_prompt import get_system_prompt
 from app.services.langchain_service import langchain_service
-from app.state import memory_store, MAX_HISTORY
+from app.state import memory_store, MAX_HISTORY, lc_memory_for_model, trim_session
 
 logger = logging.getLogger("chatbot_app")
 voice_agent_router = APIRouter(tags=["voice-agent"])
@@ -28,7 +28,6 @@ async def http_chat_endpoint(request: ChatRequest):
     if not session_id:
         raise HTTPException(status_code=400, detail="sessionId is required")
 
-    max_history = MAX_HISTORY
     if session_id not in memory_store:
         memory_store[session_id] = {
             "lc_memory": [],
@@ -38,7 +37,7 @@ async def http_chat_endpoint(request: ChatRequest):
             "pending_transcription": None,
         }
 
-    lc_memory = list(memory_store[session_id]["lc_memory"])
+    lc_memory = lc_memory_for_model(memory_store[session_id]["lc_memory"], MAX_HISTORY)
     messages = [get_system_prompt(user_name)] + lc_memory
     messages.append(HumanMessage(content=user_query))
 
@@ -66,9 +65,7 @@ async def http_chat_endpoint(request: ChatRequest):
         }
     )
 
-    if len(memory_store[session_id]["history"]) > max_history:
-        memory_store[session_id]["history"] = memory_store[session_id]["history"][-max_history:]
-        memory_store[session_id]["lc_memory"] = memory_store[session_id]["lc_memory"][-(max_history * 2):]
+    trim_session(memory_store[session_id], MAX_HISTORY)
 
     return {
         "session_id": session_id,
