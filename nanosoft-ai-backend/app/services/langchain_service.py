@@ -304,6 +304,8 @@ class LangChainService:
             self._total_output_tokens = 0
             self._total_tokens        = 0
             
+            fallback_applied = None
+            
             # ── Get current user query for summary log ───────────────────────
             current_user_query = ""
             for m in reversed(messages):
@@ -423,6 +425,8 @@ class LangChainService:
 
                     # Extract p_list and p_count from API response shape
                     if isinstance(parsed, dict):
+                        if parsed.get("fallback_applied"):
+                            fallback_applied = parsed.get("fallback_applied")
                         if "p_list" in parsed:
                             p_count = parsed.get("p_count", 0)
                             p_list = parsed.get("p_list", [])
@@ -642,6 +646,11 @@ class LangChainService:
                         context_summary = _append_explicit_today(context_summary, user_query)
                         logger.info("✅ Context summary generated for large dataset | context='%s'", context_summary[:80])
 
+                        if fallback_applied:
+                            fld = fallback_applied.get("field", "")
+                            val = fallback_applied.get("value", "")
+                            logger.info(f"🔄 Fallback applied (large dataset): {fld} = {val}")
+
                         large_dataset_response = json.dumps({
                             "context_summary": context_summary,
                             "records": p_list # full raw data sent directly to frontend
@@ -732,6 +741,10 @@ class LangChainService:
                         if tool_was_aggregate and is_graph:  # ← ADD is_graph CHECK
                             logger.info("📊 [GRAPH] Wrapping aggregate as graph JSON | records=%d", len(p_list_for_model))
                             graph_context = f"Here is the graph result for your query."
+                            if fallback_applied:
+                                fld = fallback_applied.get("field", "")
+                                val = fallback_applied.get("value", "")
+                                logger.info(f"🔄 Fallback applied (graph): {fld} = {val}")
                             graph_response = self.build_graph_response(graph_context, p_list_for_model)
                             self._log_query_summary(current_user_query)
                             return graph_response, context_summary, messages
@@ -791,6 +804,12 @@ class LangChainService:
                 # context_summary = _append_default_7days(context_summary, user_query)
                 final_content = _append_explicit_today(final_content, user_query)
                 context_summary = _append_explicit_today(context_summary, user_query)
+
+                if fallback_applied:
+                    fld = fallback_applied.get("field", "")
+                    val = fallback_applied.get("value", "")
+                    logger.info(f"🔄 Fallback applied (normal): {fld} = {val}")
+
                 return final_content, context_summary, messages
 
             else:
@@ -833,12 +852,26 @@ class LangChainService:
                     forced_date_from, forced_date_to = extract_date_from_query(user_query)
                     logger.info("📅 Forced tool date extraction | date_from=%s | date_to=%s", forced_date_from, forced_date_to)
 
+                    # Extract keyword using helper
+                    cleaned_kw = _clean_query_for_fallback(user_query)
+                    generic_terms = {
+                        "assets", "asset", "equipment", "equipments",
+                        "ppm", "preventive", "planned", "preventive maintenance",
+                        "bdm", "breakdown", "breakdowns", "complaint", "complaints", "failure", "failures",
+                        "fa", "facility audit", "audit", "audits",
+                        "sb", "schedule based", "schedule-based", "work order", "work orders", "task", "tasks"
+                    }
+                    if cleaned_kw and cleaned_kw.lower() in generic_terms:
+                        cleaned_kw = None
+
                     args = {
                         "user_name": user_name,
                         "user_id": str(user_id) if user_id is not None else None,
                         "limit": None,
                         "is_aggregate": any(kw in user_query.lower() for kw in aggregate_keywords)
                     }
+                    if cleaned_kw:
+                        args["keyword"] = cleaned_kw
 
                     # ✅ Only add dates if found in query
                     if forced_date_from is not None:
@@ -848,6 +881,7 @@ class LangChainService:
 
                     logger.info("🔍 Calling forced tool | tool=%s | user_name=%s", tool_name, user_name)
 
+                    fallback_applied = None
                     try:
                         tool_result = tool_fn.invoke(dict(args))
                         logger.info(f"✅ Forced tool call succeeded | {tool_name}")
@@ -861,6 +895,9 @@ class LangChainService:
                     except json.JSONDecodeError:
                         parsed = {}
                      #handle indexed dict from cache same as normal path
+                    if isinstance(parsed, dict):
+                        if parsed.get("fallback_applied"):
+                            fallback_applied = parsed.get("fallback_applied")
                     if isinstance(parsed, dict) and "p_list" in parsed:
                         p_list  = parsed.get("p_list", [])
                         p_count = parsed.get("p_count", len(p_list))
@@ -1026,8 +1063,12 @@ class LangChainService:
                         context_ai_msg = self.model.invoke(messages)
                         self._accumulate_tokens(context_ai_msg)
                         context_summary = self._get_content_str(context_ai_msg) or f"Found {display_count} records for your request."
-                        # context_summary = _append_default_7days(context_summary, user_query)
                         context_summary = _append_explicit_today(context_summary, user_query)
+
+                        if fallback_applied:
+                            fld = fallback_applied.get("field", "")
+                            val = fallback_applied.get("value", "")
+                            logger.info(f"🔄 Fallback applied (forced large dataset): {fld} = {val}")
 
                         large_dataset_response = json.dumps({
                             "context_summary": context_summary,
@@ -1095,6 +1136,10 @@ class LangChainService:
                         if is_graph and tool_was_aggregate:  # ← BOTH conditions must be true
                             logger.info("📊 [GRAPH FORCED] Wrapping aggregate as graph JSON...")
                             graph_context = f"Here is the graph result for your query."
+                            if fallback_applied:
+                                fld = fallback_applied.get("field", "")
+                                val = fallback_applied.get("value", "")
+                                logger.info(f"🔄 Fallback applied (forced graph): {fld} = {val}")
                             graph_response = self.build_graph_response(graph_context, p_list_for_model)
                             return graph_response, context_summary, messages
                         
@@ -1136,6 +1181,12 @@ class LangChainService:
                     # context_summary = _append_default_7days(context_summary, user_query)
                     content = _append_explicit_today(content, user_query)
                     context_summary = _append_explicit_today(context_summary, user_query)
+
+                    if fallback_applied:
+                        fld = fallback_applied.get("field", "")
+                        val = fallback_applied.get("value", "")
+                        logger.info(f"🔄 Fallback applied (forced normal): {fld} = {val}")
+
                     return content, context_summary, messages
                     
                 content = self._get_content_str(ai_msg)

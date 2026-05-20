@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 import logging
 import json
+import difflib
  
 from app.api.models.schemas import SBRequest
 from app.api.database.postgres_client import get_pool
@@ -23,6 +24,35 @@ def format_response_sb(data):
         return {"p_list": p_list, "p_count": p_count}
     safe_list = data if isinstance(data, list) else []
     return {"p_list": safe_list, "p_count": len(safe_list)}
+
+
+def get_db_candidates(conn, field: str) -> list:
+    column_map = {
+        "building": "BuildingName",
+        "locality": "LocalityName",
+        "spot_name": "SpotName"
+    }
+    col = column_map.get(field)
+    if not col:
+        return []
+    try:
+        cursor = conn.cursor()
+        query = f'SELECT DISTINCT "{col}" FROM public."ScheduleBased" WHERE "{col}" IS NOT NULL AND "{col}" <> \'\''
+        cursor.execute(query)
+        rows = cursor.fetchall()
+        cursor.close()
+        return [row[0] for row in rows if row[0]]
+    except Exception as e:
+        logger_sb.error("Error fetching DB candidates for %s: %s", field, str(e))
+        return []
+
+
+def find_close_matches(original_val: str, db_vals: list) -> list:
+    if not original_val or not db_vals:
+        return []
+    val_map = {v.lower(): v for v in db_vals if v}
+    matches = difflib.get_close_matches(original_val.lower(), list(val_map.keys()), n=3, cutoff=0.5)
+    return [val_map[m] for m in matches]
  
  
 @router_sb.post("/get-sb")
@@ -160,7 +190,108 @@ def get_sb(req: SBRequest):
             formatted = format_response_sb(raw)
             p_list = formatted.get("p_list", [])
 
+        # Fallback 2: if 0 records found:
+        # A) Try to simplify/trim any specified location filter (building, locality, spot_name).
+        # B) Try mapping the keyword to location/entity fields (spot_name, building, locality),
+        #    including simplifying/trimming the keyword value itself.
+        if not p_list:
+            fallback_items = []
+            
+            # Add specified location filters
+            for field in ["building", "locality", "spot_name"]:
+                original_val = getattr(req, field, None)
+                if original_val:
+                    fallback_items.append((field, original_val, False))
+            
+            # Add keyword mapping targets if keyword is provided
+            if req.keyword:
+                for field in ["spot_name", "building", "locality"]:
+                    if not getattr(req, field, None):  # Only map to fields not already set
+                        fallback_items.append((field, req.keyword, True))
+            
+            # Process each fallback item
+            for field, original_val, is_keyword_mapping in fallback_items:
+                candidates = []
+                val = " ".join(original_val.strip().split())
+                no_dash = val.replace("-", " ")
+                with_dash = val.replace(" ", "-")
+                
+                for text_val in [val, no_dash, with_dash]:
+                    cleaned = " ".join(text_val.split())
+                    candidates.append(cleaned)
+                    words = cleaned.split()
+                    if len(words) > 2:
+                        candidates.append(" ".join(words[:2]))
+                    if len(words) > 1:
+                        w0, w1 = words[0], words[1]
+                        is_generic_prefix = w1.isdigit() or len(w1) == 1
+                        if not is_generic_prefix:
+                            candidates.append(w0)
+                
+                # Fetch fuzzy candidates from DB values (only for actual location filters)
+                if not is_keyword_mapping:
+                    db_vals = get_db_candidates(conn, field)
+                    fuzzy_matches = find_close_matches(original_val, db_vals)
+                    candidates.extend(fuzzy_matches)
+                
+                seen = {original_val} if not is_keyword_mapping else set()
+                unique_candidates = []
+                for c in candidates:
+                    if c and c not in seen:
+                        seen.add(c)
+                        unique_candidates.append(c)
+                
+                for candidate in unique_candidates:
+                    logger_sb.info(
+                        "🔄 Retrying SB query mapping %s%s to candidate='%s'...",
+                        "keyword to " if is_keyword_mapping else "",
+                        field,
+                        candidate
+                    )
+                    cursor = conn.cursor()
+                    cursor.callproc("sp_sb_query", [
+                        req.user_name,
+                        req.user_id,
+                        req.work_order,
+                        req.stage,
+                        req.division,
+                        req.discipline,
+                        candidate if field == "locality" else req.locality,
+                        candidate if field == "building" else req.building,
+                        req.floor,
+                        candidate if field == "spot_name" else req.spot_name,
+                        req.contract,
+                        req.frequency,
+                        req.service_type,
+                        req.tech,
+                        req.is_withdraw,
+                        req.is_reschedule,
+                        req.is_rework,
+                        req.is_active,
+                        None if is_keyword_mapping else req.keyword,  # clear keyword if we map it
+                        req.date_from,
+                        req.date_to,
+                        req.comp_from,
+                        req.comp_to,
+                        req.limit,
+                        req.offset,
+                    ])
+                    row = cursor.fetchone()
+                    cursor.close()
+                    raw_val = row[0] if row else {}
+                    if isinstance(raw_val, str):
+                        raw_val = json.loads(raw_val)
+                    formatted = format_response_sb(raw_val)
+                    p_list = formatted.get("p_list", [])
+                    if p_list:
+                        logger_sb.info("✅ SB fallback retry succeeded with %s='%s'!", field, candidate)
+                        formatted["fallback_applied"] = {"field": field, "value": candidate}
+                        break
+                if p_list:
+                    break
+
         logger_sb.info("[GET-SB] Fetched | count=%s", formatted["p_count"])
+
         return formatted
  
     except Exception as e:

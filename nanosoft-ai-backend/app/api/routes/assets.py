@@ -187,50 +187,101 @@ def get_assets(req: AssetRequest):
             formatted = format_response(raw)
             p_list = formatted.get("p_list", [])
 
-        # Fallback interceptor: if 0 records found and keyword was specified, but locality, spot_name, and building were not,
-        # retry by mapping keyword to locality, spot_name, or building.
-        if not p_list and req.keyword and not req.locality and not req.spot_name and not req.building:
-            for field in ("locality", "spot_name", "building"):
-                logger.info("🔄 Retrying query mapping keyword='%s' to %s...", req.keyword, field)
-                cursor = conn.cursor()
-                cursor.callproc("sp_asset_query", [
-                    req.user_name,
-                    req.user_id,
-                    req.asset_tag_no,
-                    req.status,
-                    req.condition,
-                    req.priority,
-                    req.asset_type,
-                    req.division,
-                    req.discipline,
-                    req.keyword if field == "locality" else None,   # p_locality
-                    req.keyword if field == "building" else None,   # p_building
-                    req.floor,
-                    req.owner,
-                    req.make,
-                    req.model,
-                    req.service_area,
-                    req.trade_group,
-                    req.keyword if field == "spot_name" else None,  # p_spot_name
-                    req.serial_no,
-                    req.on_hold,
-                    req.is_snagged,
-                    req.is_scraped,
-                    req.enable_ppm,
-                    req.enable_bdm,
-                    None,                                           # p_keyword cleared
-                    req.date_from,
-                    req.date_to,
-                    req.limit,
-                    req.offset,
-                ])
-                row = cursor.fetchone()
-                cursor.close()
-                raw = row[0] if row else {}
-                if isinstance(raw, str):
-                    raw = json.loads(raw)
-                formatted = format_response(raw)
-                p_list = formatted.get("p_list", [])
+        # Fallback 2: if 0 records found:
+        # A) Try to simplify/trim any specified location filter (building, locality, spot_name).
+        # B) Try mapping the keyword to location/entity fields (spot_name, building, locality),
+        #    including simplifying/trimming the keyword value itself.
+        if not p_list:
+            fallback_items = []
+            
+            # Add specified location filters
+            for field in ["building", "locality", "spot_name"]:
+                original_val = getattr(req, field, None)
+                if original_val:
+                    fallback_items.append((field, original_val, False))
+            
+            # Add keyword mapping targets if keyword is provided
+            if req.keyword:
+                for field in ["spot_name", "building", "locality"]:
+                    if not getattr(req, field, None):  # Only map to fields not already set
+                        fallback_items.append((field, req.keyword, True))
+            
+            # Process each fallback item
+            for field, original_val, is_keyword_mapping in fallback_items:
+                candidates = []
+                val = " ".join(original_val.strip().split())
+                no_dash = val.replace("-", " ")
+                with_dash = val.replace(" ", "-")
+                
+                for text_val in [val, no_dash, with_dash]:
+                    cleaned = " ".join(text_val.split())
+                    candidates.append(cleaned)
+                    words = cleaned.split()
+                    if len(words) > 2:
+                        candidates.append(" ".join(words[:2]))
+                    if len(words) > 1:
+                        w0, w1 = words[0], words[1]
+                        is_generic_prefix = w1.isdigit() or len(w1) == 1
+                        if not is_generic_prefix:
+                            candidates.append(w0)
+                
+                seen = {original_val} if not is_keyword_mapping else set()
+                unique_candidates = []
+                for c in candidates:
+                    if c and c not in seen:
+                        seen.add(c)
+                        unique_candidates.append(c)
+                
+                for candidate in unique_candidates:
+                    logger.info(
+                        "🔄 Retrying assets query mapping %s%s to candidate='%s'...",
+                        "keyword to " if is_keyword_mapping else "",
+                        field,
+                        candidate
+                    )
+                    cursor = conn.cursor()
+                    cursor.callproc("sp_asset_query", [
+                        req.user_name,
+                        req.user_id,
+                        req.asset_tag_no,
+                        req.status,
+                        req.condition,
+                        req.priority,
+                        req.asset_type,
+                        req.division,
+                        req.discipline,
+                        candidate if field == "locality" else req.locality,
+                        candidate if field == "building" else req.building,
+                        req.floor,
+                        req.owner,
+                        req.make,
+                        req.model,
+                        req.service_area,
+                        req.trade_group,
+                        candidate if field == "spot_name" else req.spot_name,
+                        req.serial_no,
+                        req.on_hold,
+                        req.is_snagged,
+                        req.is_scraped,
+                        req.enable_ppm,
+                        req.enable_bdm,
+                        None if is_keyword_mapping else req.keyword,  # clear keyword if we map it
+                        req.date_from,
+                        req.date_to,
+                        req.limit,
+                        req.offset,
+                    ])
+                    row = cursor.fetchone()
+                    cursor.close()
+                    raw_val = row[0] if row else {}
+                    if isinstance(raw_val, str):
+                        raw_val = json.loads(raw_val)
+                    formatted = format_response(raw_val)
+                    p_list = formatted.get("p_list", [])
+                    if p_list:
+                        logger.info("✅ Assets fallback retry succeeded with %s='%s'!", field, candidate)
+                        formatted["fallback_applied"] = {"field": field, "value": candidate}
+                        break
                 if p_list:
                     break
 
