@@ -345,6 +345,22 @@ class LangChainService:
                 )
                 return clarification, clarification, messages
 
+            # ── QUERY REWRITING STEP ──
+            from app.prompts.system_prompt import QUERY_REWRITER_PROMPT
+            
+            rewriter_msg = self.model.invoke([
+                HumanMessage(content=QUERY_REWRITER_PROMPT.format(query=current_user_query))
+            ])
+            self._accumulate_tokens(rewriter_msg)
+            rewritten_query = self._get_content_str(rewriter_msg).strip()
+            logger.info(f"🔄 Rewritten Query: '{current_user_query}' -> '{rewritten_query}'")
+
+            # Replace the last message content with the rewritten query so the tool agent gets the clean version
+            for m in reversed(messages):
+                if isinstance(m, HumanMessage):
+                    m.content = rewritten_query
+                    break
+
             # CALL 1 — First model call
             ai_msg = self.model.invoke(messages)
             
