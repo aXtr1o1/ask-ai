@@ -52,9 +52,8 @@ def get_sb(req: SBRequest):
                 req.building,
                 req.floor,
                 req.locality,
-                req.stage,
+                req.status,
                 req.frequency,
-                req.service_type,
                 req.date_from,
                 req.date_to,
                 group_by_str,
@@ -87,25 +86,28 @@ def get_sb(req: SBRequest):
             req.user_id,
             req.work_order,
             req.stage,
+            req.frequency,
+            req.service_type,         # NEW
             req.division,
             req.discipline,
-            req.locality,
+            None,  # p_locality cleared
             req.building,
             req.floor,
-            req.spot_name,
+            req.locality,  # p_spot_name mapped
             req.contract,
-            req.frequency,
-            req.service_type,
             req.tech,
-            req.is_withdraw,
-            req.is_reschedule,
-            req.is_rework,
-            req.is_active,
+            req.is_withdraw,          # NEW
+            req.is_reschedule,        # NEW
+            req.is_rework,            # NEW
+            req.is_active,            # NEW
+            req.is_draft,             # NEW
             req.keyword,
             req.date_from,
             req.date_to,
             req.comp_from,
             req.comp_to,
+            req.sla_min,
+            req.sla_max,
             req.limit,
             req.offset,
         ])
@@ -118,48 +120,7 @@ def get_sb(req: SBRequest):
             raw = json.loads(raw)
  
         formatted = format_response_sb(raw)
-        p_list = formatted.get("p_list", [])
-
-        # Fallback interceptor: if 0 records found and locality was specified but spot_name was not,
-        # retry the query mapping locality to spot_name.
-        if not p_list and req.locality and not req.spot_name:
-            logger_sb.info("🔄 0 records found with locality='%s' in SB. Retrying query by mapping locality to spot_name...", req.locality)
-            cursor = conn.cursor()
-            cursor.callproc("sp_sb_query", [
-                req.user_name,
-                req.user_id,
-                req.work_order,
-                req.stage,
-                req.division,
-                req.discipline,
-                None,  # p_locality cleared
-                req.building,
-                req.floor,
-                req.locality,  # p_spot_name mapped
-                req.contract,
-                req.frequency,
-                req.service_type,
-                req.tech,
-                req.is_withdraw,
-                req.is_reschedule,
-                req.is_rework,
-                req.is_active,
-                req.keyword,
-                req.date_from,
-                req.date_to,
-                req.comp_from,
-                req.comp_to,
-                req.limit,
-                req.offset,
-            ])
-            row = cursor.fetchone()
-            cursor.close()
-            raw = row[0] if row else {}
-            if isinstance(raw, str):
-                raw = json.loads(raw)
-            formatted = format_response_sb(raw)
-            p_list = formatted.get("p_list", [])
-
+ 
         logger_sb.info("[GET-SB] Fetched | count=%s", formatted["p_count"])
         return formatted
  

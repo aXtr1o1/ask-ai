@@ -96,10 +96,14 @@ def get_bdm(req: BDMRequest):
             req.user_name,
             req.user_id,
             req.complaint_no,
+            req.asset_tag_no,         # NEW
+            req.asset_barcode,        # NEW
+            req.client_wo_no,         # NEW
             req.status,
             req.priority,
             req.stage,
             req.complaint_type,
+            req.complaint_header,     # NEW
             req.complaint_mode,
             req.complaint_nature,
             req.wo_type,
@@ -109,11 +113,12 @@ def get_bdm(req: BDMRequest):
             req.locality,
             req.building,
             req.floor,
+            req.spot_name,
             req.contract,
+            req.complainer,
+            req.register_by,          # NEW
             req.analysis_tech,
             req.execution_tech,
-            req.complainer,
-            req.spot_name,
             req.keyword,
             req.date_from,
             req.date_to,
@@ -142,10 +147,14 @@ def get_bdm(req: BDMRequest):
                 req.user_name,
                 req.user_id,
                 req.complaint_no,
+                req.asset_tag_no,         # NEW
+                req.asset_barcode,        # NEW
+                req.client_wo_no,         # NEW
                 req.status,
                 req.priority,
                 req.stage,
                 req.complaint_type,
+                req.complaint_header,     # NEW
                 req.complaint_mode,
                 req.complaint_nature,
                 req.wo_type,
@@ -155,11 +164,12 @@ def get_bdm(req: BDMRequest):
                 None,  # p_locality cleared
                 req.building,
                 req.floor,
+                req.locality,  # p_spot_name mapped
                 req.contract,
+                req.complainer,
+                req.register_by,          # NEW
                 req.analysis_tech,
                 req.execution_tech,
-                req.complainer,
-                req.locality,  # p_spot_name mapped
                 req.keyword,
                 req.date_from,
                 req.date_to,

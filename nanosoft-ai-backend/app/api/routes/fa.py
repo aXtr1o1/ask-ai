@@ -86,6 +86,8 @@ def get_fa(req: FARequest):
             req.user_name,
             req.user_id,
             req.complaint_no,
+            req.complaint_code,       # NEW
+            req.x_complaint_no,       # NEW
             req.priority,
             req.stage,
             req.category,
@@ -101,7 +103,9 @@ def get_fa(req: FARequest):
             req.request_desc,
             req.is_withdraw,
             req.is_rework,
+            req.is_bms,               # NEW
             req.is_active,
+            req.is_draft,             # NEW
             req.keyword,
             req.date_from,
             req.date_to,
@@ -130,6 +134,8 @@ def get_fa(req: FARequest):
                 req.user_name,
                 req.user_id,
                 req.complaint_no,
+                req.complaint_code,       # NEW
+                req.x_complaint_no,       # NEW
                 req.priority,
                 req.stage,
                 req.category,
@@ -145,7 +151,9 @@ def get_fa(req: FARequest):
                 req.request_desc,
                 req.is_withdraw,
                 req.is_rework,
+                req.is_bms,               # NEW
                 req.is_active,
+                req.is_draft,             # NEW
                 req.keyword,
                 req.date_from,
                 req.date_to,

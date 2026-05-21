@@ -102,35 +102,42 @@ def get_assets(req: AssetRequest):
         cursor = conn.cursor()
 
         cursor.callproc("sp_asset_query", [
-            req.user_name,
-            req.user_id,
-            req.asset_tag_no,
-            req.status,
-            req.condition,
-            req.priority,
-            req.asset_type,
-            req.division,
-            req.discipline,
-            req.locality,
-            req.building,
-            req.floor,
-            req.owner,
-            req.make,
-            req.model,
-            req.service_area,
-            req.trade_group,
-            req.spot_name,
-            req.serial_no,
-            req.on_hold,
-            req.is_snagged,
-            req.is_scraped,
-            req.enable_ppm,
-            req.enable_bdm,
-            req.keyword,
-            req.date_from,
-            req.date_to,
-            req.limit,
-            req.offset,
+            req.user_name,        # p_user_name
+            req.user_id,          # p_user_id
+            req.asset_tag_no,     # p_asset_tag_no
+            req.asset_barcode,    # p_asset_barcode
+            req.equipment_name,   # p_equipment_name
+            req.equipment_ref_no, # p_equipment_ref_no
+            req.serial_no,        # p_serial_no
+            req.status,           # p_status
+            req.condition,        # p_condition
+            req.priority,         # p_priority
+            req.asset_type,       # p_asset_type
+            req.division,         # p_division
+            req.discipline,       # p_discipline
+            req.locality,         # p_locality
+            req.building,         # p_building
+            req.floor,            # p_floor
+            req.spot_name,        # p_spot_name
+            req.owner,            # p_owner
+            req.make,             # p_make
+            req.model,            # p_model
+            req.service_area,     # p_service_area
+            req.trade_group,      # p_trade_group
+            req.drawing_no,       # p_drawing_no
+            req.remarks,          # p_remarks
+            req.on_hold,          # p_on_hold
+            req.is_snagged,       # p_is_snagged
+            req.is_scraped,       # p_is_scraped
+            req.enable_ppm,       # p_enable_ppm
+            req.enable_bdm,       # p_enable_bdm
+            req.enable_bms,       # p_enable_bms
+            req.enable_dsm,       # p_enable_dsm
+            req.keyword,          # p_keyword
+            req.date_from,        # p_date_from
+            req.date_to,          # p_date_to
+            req.limit,            # p_limit
+            req.offset,           # p_offset
         ])
 
         row = cursor.fetchone()
@@ -152,27 +159,34 @@ def get_assets(req: AssetRequest):
                 req.user_name,
                 req.user_id,
                 req.asset_tag_no,
+                req.asset_barcode,
+                req.equipment_name,
+                req.equipment_ref_no,
+                req.serial_no,
                 req.status,
                 req.condition,
                 req.priority,
                 req.asset_type,
                 req.division,
                 req.discipline,
-                None,  # p_locality cleared
+                None,             # p_locality cleared
                 req.building,
                 req.floor,
+                req.locality,     # p_spot_name mapped
                 req.owner,
                 req.make,
                 req.model,
                 req.service_area,
                 req.trade_group,
-                req.locality,  # p_spot_name mapped
-                req.serial_no,
+                req.drawing_no,
+                req.remarks,
                 req.on_hold,
                 req.is_snagged,
                 req.is_scraped,
                 req.enable_ppm,
                 req.enable_bdm,
+                req.enable_bms,
+                req.enable_dsm,
                 req.keyword,
                 req.date_from,
                 req.date_to,
@@ -197,6 +211,10 @@ def get_assets(req: AssetRequest):
                     req.user_name,
                     req.user_id,
                     req.asset_tag_no,
+                    req.asset_barcode,
+                    req.equipment_name,
+                    req.equipment_ref_no,
+                    req.serial_no,
                     req.status,
                     req.condition,
                     req.priority,
@@ -206,18 +224,21 @@ def get_assets(req: AssetRequest):
                     req.keyword if field == "locality" else None,   # p_locality
                     req.keyword if field == "building" else None,   # p_building
                     req.floor,
+                    req.keyword if field == "spot_name" else None,  # p_spot_name
                     req.owner,
                     req.make,
                     req.model,
                     req.service_area,
                     req.trade_group,
-                    req.keyword if field == "spot_name" else None,  # p_spot_name
-                    req.serial_no,
+                    req.drawing_no,
+                    req.remarks,
                     req.on_hold,
                     req.is_snagged,
                     req.is_scraped,
                     req.enable_ppm,
                     req.enable_bdm,
+                    req.enable_bms,
+                    req.enable_dsm,
                     None,                                           # p_keyword cleared
                     req.date_from,
                     req.date_to,
