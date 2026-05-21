@@ -566,20 +566,18 @@ class LangChainService:
                         HumanMessage(content=f"""
                         Classify this user query into one of three intents:
                         - "count"     → user wants ONLY a single total number
-                                        (e.g. "how many assets exist?", "total complaints count", "how many complaints are open?")
-                                        (e.g. "how many assets exist?", "total complaints count", "how many complaints are open?")
+                                        (e.g. "how many assets exist?", "total complaints count", "how many complaints are open?", "get the total count")
                         - "aggregate" → user wants a grouped summary or breakdown by category
                                         (e.g. "assets per division?", "breakdown by building",
                                         "complaints by priority", "summarize by status",
-                                        "group by floor and building", "compare by make or model",
-                                        "how many OnHolds are there?", "how many snagged assets?")
+                                        "group by floor and building", "compare by make or model")
                         - "list"      → user wants full records shown as a table
                                         (e.g. "show me assets", "list complaints", "get PPM records")
                         IMPORTANT RULES:
                         - "how many per X" or "count by X" or "breakdown by X" = aggregate (NOT count)
-                        - "how many [ColumnName]?" or "how many [column] are there?" where user names a data column (OnHold, Status, Priority, etc.) = aggregate with value breakdown (NOT count)
-                        - "how many total" or "how many exist" with no grouping column = count
-                        - "show", "list", "display", "get", "fetch" = list
+                        - IF the query explicitly asks for a count/number (e.g., "get the count", "show total", "fetch how many"), it MUST be classified as count (NOT list).
+                        - "how many total" or "how many exist" or "how many" with no grouping column = count
+                        - "show", "list", "display", "get", "fetch" = list (ONLY if there are no counting words like "count", "how many", "total")
                         - "give me X", "show X", "get X" where X is a number = list (NOT count)
                           The number means a limit — user wants to SEE records, not count them.
 
