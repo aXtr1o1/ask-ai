@@ -227,10 +227,14 @@ def get_bdm(req: BDMRequest):
                         req.user_name,
                         req.user_id,
                         req.complaint_no,
+                        req.asset_tag_no,         # NEW
+                        req.asset_barcode,        # NEW
+                        req.client_wo_no,         # NEW
                         req.status,
                         req.priority,
                         req.stage,
                         req.complaint_type,
+                        req.complaint_header,     # NEW
                         req.complaint_mode,
                         req.complaint_nature,
                         req.wo_type,
@@ -240,18 +244,17 @@ def get_bdm(req: BDMRequest):
                         candidate if field == "locality" else req.locality,
                         candidate if field == "building" else req.building,
                         req.floor,
+                        candidate if field == "spot_name" else req.spot_name,
                         req.contract,
+                        req.complainer,
+                        req.register_by,          # NEW
                         req.analysis_tech,
                         req.execution_tech,
-                        req.complainer,
-                        candidate if field == "spot_name" else req.spot_name,
                         None if is_keyword_mapping else req.keyword,  # clear keyword if we map it
                         req.date_from,
                         req.date_to,
                         req.completed_from,
                         req.completed_to,
-                        (str(req.limit) if req.limit is not None else None),
-                        (int(req.offset) if req.offset is not None else 0),
                     ])
                     row = cursor.fetchone()
                     cursor.close()
