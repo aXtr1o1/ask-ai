@@ -354,6 +354,18 @@ class LangChainService:
             if ai_msg.tool_calls:
                 logger.info(f"🛠 Tool calls: {[tc['name'] for tc in ai_msg.tool_calls]}")
 
+                # Deduplicate tool calls with identical names and arguments
+                unique_tool_calls = []
+                seen_keys = set()
+                for tc in ai_msg.tool_calls:
+                    call_key = (tc["name"], json.dumps(tc.get("args") or {}, sort_keys=True))
+                    if call_key not in seen_keys:
+                        seen_keys.add(call_key)
+                        unique_tool_calls.append(tc)
+                    else:
+                        logger.info("♻️ Discarding duplicate tool call: %s", tc["name"])
+                ai_msg.tool_calls = unique_tool_calls
+
                 messages.append(ai_msg)
 
                 # ── MULTI-TOOL PATH: 2+ tool calls → render multiple tables ──────────────
@@ -382,6 +394,13 @@ class LangChainService:
                                 return v
                         return name.replace("get_", "").replace("_", " ").title()
 
+                    # Detect if a common limit is requested across datasets
+                    _has_number = bool(_re.search(r'\b\d+\b', user_query))
+                    common_limit = next((int(tc["args"]["limit"]) for tc in ai_msg.tool_calls if tc.get("args") and isinstance(tc["args"].get("limit"), (int, str)) and str(tc["args"]["limit"]).isdigit()), None)
+                    if common_limit is None and _has_number:
+                        num_match = _re.search(r'\b(\d+)\b', user_query)
+                        common_limit = int(num_match.group(1)) if num_match else None
+
                     for tool_call in ai_msg.tool_calls:
                         tool_name = tool_call["name"]
                         tool_fn = self.tool_map[tool_name]
@@ -393,16 +412,19 @@ class LangChainService:
                         if user_id is not None:
                             args["user_id"] = str(user_id)
 
+                        # Set default limit to common_limit if not explicitly specified for this tool call
+                        if args.get("limit") is None and common_limit is not None:
+                            args["limit"] = common_limit
+
                         # Respect specific count; clear limit only if no number mentioned
-                        _has_number = bool(_re.search(r'\b\d+\b', user_query))
                         list_pats = ("list", "show me", "get ", "fetch ", "display",
                                      "give me", "provide", "retrieve", "show ")
                         count_pats = ("how many", "total", "number of", "count of", "count ")
-                        if any(p in user_query.lower() for p in count_pats) and args.get("limit") is not None:
+                        if any(p in user_query.lower() for p in count_pats) and not _has_number and args.get("limit") is not None:
                             args["limit"] = None
                         elif any(p in user_query.lower() for p in list_pats) and not _has_number:
                             args["limit"] = None
-                        # else: keep the LLM-supplied limit (e.g. 5 when user said "show 5")
+                        # else: keep the limit (which was either parsed by LLM or propagated from common_limit)
 
                         # Infer dates
                         inferred_from, inferred_to = extract_date_from_query(user_query)
@@ -440,6 +462,14 @@ class LangChainService:
                                     break
 
                         friendly_name = _friendly(tool_name)
+                        if args.get("is_aggregate") and args.get("group_by_columns"):
+                            import re as _re_agg
+                            formatted_cols = [
+                                _re_agg.sub(r'(?<!^)(?=[A-Z])', ' ', col)
+                                for col in args.get("group_by_columns", [])
+                            ]
+                            friendly_name = f"{friendly_name} by {', '.join(formatted_cols)}"
+
                         messages.append(
                             ToolMessage(
                                 content=json.dumps({

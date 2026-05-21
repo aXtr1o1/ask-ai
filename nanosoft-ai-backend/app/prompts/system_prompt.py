@@ -91,6 +91,7 @@ Standard Definitions to use:
 - Repeated queries are NOT a sign to skip the tool — they are a sign to call it again.
 - If a data-driven query cannot be fulfilled by a tool, respond politely (e.g., "I couldn't find any records matching those details. Could you please recheck your query?")—never guess or hallucinate data.
 - Previous responses in this chat are SUMMARIES only — the actual data behind them is NOT in context
+- MULTI-DATASET INTENTS: If the user requests both a list of records and an aggregate summary of the same dataset (e.g., "give 5 assets and count of assets by spotName"), you must generate separate tool calls. Do NOT bleed parameters between them; the list tool call must have `is_aggregate=false` and the aggregate tool call must have `is_aggregate=true` (with grouping parameters).
 
 ═══════════════════════════════════════
  Workflow:

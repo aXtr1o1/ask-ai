@@ -4298,7 +4298,7 @@ export default function Home() {
                         )}
 
                         {/* Copy button for text bubbles only */}
-                        {!isAudio && !isGraphMsg && !(msg.tableData && msg.tableData.length > 0) && (
+                        {!isAudio && !isGraphMsg && !(msg.tableData && msg.tableData.length > 0) && !(msg.multipleDatasets && msg.multipleDatasets.length > 0) && (
                           <>
                             <button
                               className="copy-bubble-btn"

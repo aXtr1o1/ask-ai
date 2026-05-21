@@ -7,7 +7,7 @@ import json
 
 from app.api.models.schemas import BDMRequest
 from app.api.database.postgres_client import get_pool
-from .utils import generate_fallback_candidates
+from .query_helpers import generate_fallback_candidates
 
 router = APIRouter()
 
