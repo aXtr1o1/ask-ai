@@ -121,10 +121,10 @@ def get_sb(req: SBRequest):
             req.service_type,         # NEW
             req.division,
             req.discipline,
-            None,  # p_locality cleared
+            req.locality,
             req.building,
             req.floor,
-            req.locality,  # p_spot_name mapped
+            req.spot_name,
             req.contract,
             req.tech,
             req.is_withdraw,          # NEW

@@ -483,9 +483,7 @@ class LangChainService:
                                     _score = _info.get("confidence", 10)
                                     _value = _info.get("value", args.get(_field, ""))
                                     if _score < 7:
-                                        logger.info("🎯 Confidence | %s='%s' score=%s → LOW → moved to keyword", _field, _value, _score)
-                                        if not args.get("keyword"):
-                                            args["keyword"] = str(_value)
+                                        logger.info("🎯 Confidence | %s='%s' score=%s → LOW → dropped", _field, _value, _score)
                                         args.pop(_field, None)
                                     else:
                                         logger.info("🎯 Confidence | %s='%s' score=%s → OK → kept", _field, _value, _score)
@@ -687,9 +685,7 @@ class LangChainService:
                                 _score = _info.get("confidence", 10)
                                 _value = _info.get("value", args.get(_field, ""))
                                 if _score < 7:
-                                    logger.info("🎯 Confidence | %s='%s' score=%s → LOW → moved to keyword", _field, _value, _score)
-                                    if not args.get("keyword"):
-                                        args["keyword"] = str(_value)
+                                    logger.info("🎯 Confidence | %s='%s' score=%s → LOW → dropped", _field, _value, _score)
                                     args.pop(_field, None)
                                 else:
                                     logger.info("🎯 Confidence | %s='%s' score=%s → OK → kept", _field, _value, _score)
