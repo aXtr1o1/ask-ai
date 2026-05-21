@@ -130,8 +130,6 @@ def get_assets(req: AssetRequest):
             req.keyword,
             req.date_from,
             req.date_to,
-            req.limit,
-            req.offset,
         ])
 
         row = cursor.fetchone()
@@ -142,7 +140,14 @@ def get_assets(req: AssetRequest):
             raw = json.loads(raw)
 
         formatted = format_response(raw)
+        # Apply Python-level limit/offset since SP doesn't accept these params
         p_list = formatted.get("p_list", [])
+        if req.offset:
+            p_list = p_list[req.offset:]
+        if req.limit is not None:
+            p_list = p_list[:req.limit]
+        formatted["p_list"] = p_list
+        formatted["p_count"] = len(p_list)
 
         # Fallback interceptor: if 0 records found and locality was specified but spot_name was not,
         # retry the query mapping locality to spot_name.
@@ -177,8 +182,6 @@ def get_assets(req: AssetRequest):
                 req.keyword,
                 req.date_from,
                 req.date_to,
-                req.limit,
-                req.offset,
             ])
             row = cursor.fetchone()
             cursor.close()
@@ -225,8 +228,6 @@ def get_assets(req: AssetRequest):
                             val,  # use val as keyword filter
                             req.date_from,
                             req.date_to,
-                            req.limit,
-                            req.offset,
                         ])
                         row = cursor.fetchone()
                         cursor.close()
@@ -301,8 +302,6 @@ def get_assets(req: AssetRequest):
                         None if is_keyword_mapping else req.keyword,  # clear keyword if we map it
                         req.date_from,
                         req.date_to,
-                        req.limit,
-                        req.offset,
                     ])
                     row = cursor.fetchone()
                     cursor.close()

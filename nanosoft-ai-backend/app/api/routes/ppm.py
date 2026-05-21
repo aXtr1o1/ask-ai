@@ -115,8 +115,6 @@ def get_ppm(req: PPMRequest):
             req.comp_to,
             req.sla_min,
             req.sla_max,
-            req.limit,
-            req.offset,
         ])
 
         row = cursor.fetchone()
@@ -127,7 +125,14 @@ def get_ppm(req: PPMRequest):
             raw = json.loads(raw)
 
         formatted = format_response(raw)
+        # Apply Python-level limit/offset since SP doesn't accept these params
         p_list = formatted.get("p_list", [])
+        if req.offset:
+            p_list = p_list[req.offset:]
+        if req.limit is not None:
+            p_list = p_list[:req.limit]
+        formatted["p_list"] = p_list
+        formatted["p_count"] = len(p_list)
 
         # Fallback interceptor: if 0 records found and locality was specified but spot_name was not,
         # retry the query mapping locality to spot_name.
@@ -158,8 +163,6 @@ def get_ppm(req: PPMRequest):
                 req.comp_to,
                 req.sla_min,
                 req.sla_max,
-                req.limit,
-                req.offset,
             ])
             row = cursor.fetchone()
             cursor.close()
@@ -224,8 +227,6 @@ def get_ppm(req: PPMRequest):
                         req.comp_to,
                         req.sla_min,
                         req.sla_max,
-                        req.limit,
-                        req.offset,
                     ])
                     row = cursor.fetchone()
                     cursor.close()

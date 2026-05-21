@@ -44,6 +44,9 @@ interface Message {
   tableData?: TableWithTileRow[];  // ← Store table rows for TableWithTile component
   tableTitle?: string;        // ← Title for the table
   tableViewMode?: 'table' | 'tile';  // ← Toggle between table and tile views
+  // ← Multiple datasets (type="multiple_datasets" from backend)
+  multipleDatasets?: { name: string; rows: TableWithTileRow[]; html: string }[];
+  multiSummary?: string;  // ← context_summary from the backend
 }
 interface ChatSession { id: string; title: string; createdAt: number; updatedAt?: number; isPinned?: boolean; isArchived?: boolean; group_name?: string; }
 interface Group {
@@ -2186,17 +2189,60 @@ export default function Home() {
             processedText = cleanedForGraph // ← Keep raw JSON for parseGraphData() in render
             isGraphResponse = true;
           } else {
-            // Not a graph → continue with normal processing
-            // 🔑 SECOND: Extract response content (removes session_id wrapper)
-            const cleanedText = extractResponseContent(finalText);
+            // 🔑 SECOND: Check if this is a MULTIPLE_DATASETS response
+            let multipleDatasets: { name: string; rows: TableWithTileRow[]; html: string }[] | undefined;
+            let multiSummary: string | undefined;
+            try {
+              const outerParsed = JSON.parse(finalText);
+              const innerStr = outerParsed?.response ?? finalText;
+              const inner = typeof innerStr === "string" ? JSON.parse(innerStr) : innerStr;
+              if (inner?.type === "multiple_datasets" && Array.isArray(inner?.datasets)) {
+                console.log("📋 [DONE] Multiple datasets response detected — rendering", inner.datasets.length, "tables");
+                multiSummary = inner.context_summary || "Here are the results of your query.";
+                multipleDatasets = inner.datasets.map((ds: { name: string; records: any[] }) => {
+                  // Build JSON that renderLargeDataset understands — same pipeline as single table
+                  const dsJsonStr = JSON.stringify({
+                    context_summary: ds.name,
+                    records: (ds.records || []).filter((rec: Record<string, any>) => {
+                      // Remove records where all values are null/empty (defensive)
+                      return Object.values(rec).some(v => v !== null && v !== undefined && v !== "");
+                    })
+                  });
+                  const html = renderLargeDataset(dsJsonStr) || "";
+                  const rows = extractTableRows(html);
+                  return { name: ds.name, rows, html };
+                });
+                processedText = multiSummary || "Here are the results of your query.";
+                setMessages(prev => {
+                  const u = [...prev];
+                  const l = u.length - 1;
+                  if (u[l]?.role === "ai") {
+                    u[l] = {
+                      role: "ai",
+                      text: multiSummary!,
+                      streaming: false,
+                      originalText: finalText,
+                      multipleDatasets,
+                      multiSummary,
+                    };
+                  }
+                  const activeSid = sessionIdRef.current;
+                  sessionMessagesRef.current.set(activeSid, u);
+                  return u;
+                });
+                accRef.current = "";
+                setIsLoading(false);
+                setTimeout(() => inputRef.current?.focus(), 50);
+                return;
+              }
+            } catch { /* not a multiple_datasets JSON */ }
 
-            // 🔑 THIRD: ALWAYS TRY RENDERING AS TABLE STRUCTURE FIRST (ALL SIZES, NO LIMITS)
+            // Not a graph, not multiple_datasets → continue with normal processing
+            const cleanedText = extractResponseContent(finalText);
             const largeDatasetHTML = renderLargeDataset(cleanedText);
 
             if (largeDatasetHTML) {
-              // Successfully rendered as unified table structure (any size)
               processedText = largeDatasetHTML;
-              // Always extract table rows for TableWithTile component
               const rows = extractTableRows(largeDatasetHTML);
               if (rows.length > 0) {
                 tableData = rows;
@@ -2204,7 +2250,6 @@ export default function Home() {
                 console.log("✅ [DONE] Rendered as unified table structure (" + rows.length + " rows)");
               }
             } else {
-              // Not tabular data → format as text output only
               try {
                 processedText = formatOutput(cleanedText);
                 console.log("📝 [DONE] Formatted as text");
@@ -2431,11 +2476,11 @@ export default function Home() {
   const showWarningToast = (message: string) => {
     if (typeof document === "undefined") return;
     const isDark = document.documentElement.getAttribute("data-theme") !== "light";
-    const bg       = isDark ? "rgba(28, 28, 30, 0.97)"  : "rgba(255, 255, 255, 0.97)";
-    const border    = isDark ? "rgba(212, 175, 55, 0.5)" : "rgba(180, 140, 30, 0.4)";
-    const textColor = isDark ? "#ffffff"                  : "#1a1a1a";
-    const accent    = isDark ? "#D4AF37"                  : "#9A7B20";
-    const shadow    = isDark ? "0 8px 32px rgba(0,0,0,0.5)" : "0 8px 32px rgba(0,0,0,0.15)";
+    const bg = isDark ? "rgba(28, 28, 30, 0.97)" : "rgba(255, 255, 255, 0.97)";
+    const border = isDark ? "rgba(212, 175, 55, 0.5)" : "rgba(180, 140, 30, 0.4)";
+    const textColor = isDark ? "#ffffff" : "#1a1a1a";
+    const accent = isDark ? "#D4AF37" : "#9A7B20";
+    const shadow = isDark ? "0 8px 32px rgba(0,0,0,0.5)" : "0 8px 32px rgba(0,0,0,0.15)";
 
     const toast = document.createElement("div");
     toast.style.cssText = `
@@ -2461,7 +2506,7 @@ export default function Home() {
       white-space: nowrap;
       backdrop-filter: blur(8px);
     `;
-    
+
     toast.innerHTML = `<span style="color:${accent};font-size:18px;">⚠️</span> <span>${message}</span>`;
 
     document.body.appendChild(toast);
@@ -2591,6 +2636,39 @@ export default function Home() {
       if (graphData) {
         console.log("📊 [HISTORY] Graph response detected — keeping as raw JSON for chart");
         return { ...m, text, originalText: text, isGraphResponse: true };
+      }
+
+      // 🔑 Check if this is a MULTIPLE_DATASETS response
+      try {
+        if (text.trim().startsWith('{')) {
+          const parsed = JSON.parse(text);
+          const innerStr = parsed?.response ?? text;
+          const inner = typeof innerStr === "string" ? JSON.parse(innerStr) : innerStr;
+          if (inner?.type === "multiple_datasets" && Array.isArray(inner?.datasets)) {
+            console.log("📋 [HISTORY] Multiple datasets response detected — rendering tables");
+            const multiSummary = inner.context_summary || "Here are the results of your query.";
+            const multipleDatasets = inner.datasets.map((ds: { name: string; records: any[] }) => {
+              const dsJsonStr = JSON.stringify({
+                context_summary: ds.name,
+                records: (ds.records || []).filter((rec: Record<string, any>) => {
+                  return Object.values(rec).some(v => v !== null && v !== undefined && v !== "");
+                })
+              });
+              const html = renderLargeDataset(dsJsonStr) || "";
+              const rows = extractTableRows(html);
+              return { name: ds.name, rows, html };
+            });
+            return {
+              ...m,
+              text: multiSummary,
+              originalText: text,
+              multipleDatasets,
+              multiSummary
+            };
+          }
+        }
+      } catch (e) {
+        /* Not JSON, ignore */
       }
 
       // 🔑 Detect if the history text is a Table JSON (records/data/columns key)
@@ -4053,7 +4131,7 @@ export default function Home() {
                       )}
 
                       <div
-                        className={`message-bubble ${msg.role}${isGraphMsg ? ' graph-message' : ''}${msg.tableData && msg.tableData.length > 0 ? ' table-message' : ''}`}
+                        className={`message-bubble ${msg.role}${isGraphMsg ? ' graph-message' : ''}${(msg.tableData && msg.tableData.length > 0) || (msg.multipleDatasets && msg.multipleDatasets.length > 0) ? ' table-message' : ''}`}
                         style={{ position: 'relative' }}
                       >
 
@@ -4167,6 +4245,34 @@ export default function Home() {
                               </div>
                             );
                           })()
+
+                        ) : msg.multipleDatasets && msg.multipleDatasets.length > 0 ? (
+                          /* ── Multiple Tables: render summary + one TableWithTile per dataset ── */
+                          <div style={{ width: '100%' }}>
+                            {msg.multiSummary && (
+                              <div style={{
+                                marginBottom: '16px',
+                                fontSize: responsive.isMobile ? '13px' : '14px',
+                                lineHeight: 1.6,
+                                color: 'var(--color-text)',
+                                padding: '10px 14px',
+                                background: 'var(--color-surface-2, rgba(255,255,255,0.05))',
+                                borderRadius: '8px',
+                                borderLeft: '3px solid var(--color-accent, #D4AF37)',
+                              }}>
+                                {msg.multiSummary}
+                              </div>
+                            )}
+                            {msg.multipleDatasets.map((ds, dsIdx) => (
+                              <div key={dsIdx} style={{ marginBottom: dsIdx < msg.multipleDatasets!.length - 1 ? '24px' : 0 }}>
+                                <TableWithTile
+                                  rows={ds.rows}
+                                  title={ds.name}
+                                  htmlTableContent={ds.html}
+                                />
+                              </div>
+                            ))}
+                          </div>
 
                         ) : msg.tableData && msg.tableData.length > 0 ? (
                           /* ── Table: Render with TableWithTile component with toggle buttons for table/tile views ── */

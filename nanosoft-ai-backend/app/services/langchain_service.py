@@ -5,7 +5,7 @@ import logging
 from typing import Any
 import re as _re
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage
 
 from app.config import settings
 from app.tools.facility_tools import ASSETS, PPM, BDM, FA, SB
@@ -355,6 +355,152 @@ class LangChainService:
                 logger.info(f"🛠 Tool calls: {[tc['name'] for tc in ai_msg.tool_calls]}")
 
                 messages.append(ai_msg)
+
+                # ── MULTI-TOOL PATH: 2+ tool calls → render multiple tables ──────────────
+                if len(ai_msg.tool_calls) > 1:
+                    logger.info("🛠 Running multi-tool execution path with %d tool calls", len(ai_msg.tool_calls))
+
+                    # Extract the current user query
+                    user_query = ""
+                    for m in reversed(messages):
+                        if isinstance(m, HumanMessage):
+                            user_query = (m.content or "") if isinstance(m.content, str) else ""
+                            break
+
+                    executed_tools = []
+                    TOOL_FRIENDLY_NAMES = {
+                        "ASSETS": "Assets",
+                        "BDM": "BDM Complaints",
+                        "PPM": "PPM Work Orders",
+                        "FA": "Facility Audit Complaints",
+                        "SB": "Schedule Based Work Orders"
+                    }
+                    def _friendly(name: str) -> str:
+                        u = name.upper()
+                        for k, v in TOOL_FRIENDLY_NAMES.items():
+                            if k in u:
+                                return v
+                        return name.replace("get_", "").replace("_", " ").title()
+
+                    for tool_call in ai_msg.tool_calls:
+                        tool_name = tool_call["name"]
+                        tool_fn = self.tool_map[tool_name]
+                        if tool_call.get("args") is None:
+                            tool_call["args"] = {}
+                        args = dict(tool_call["args"])
+                        args.pop("user_id", None)
+                        args["user_name"] = user_name
+                        if user_id is not None:
+                            args["user_id"] = str(user_id)
+
+                        # Respect specific count; clear limit only if no number mentioned
+                        _has_number = bool(_re.search(r'\b\d+\b', user_query))
+                        list_pats = ("list", "show me", "get ", "fetch ", "display",
+                                     "give me", "provide", "retrieve", "show ")
+                        count_pats = ("how many", "total", "number of", "count of", "count ")
+                        if any(p in user_query.lower() for p in count_pats) and args.get("limit") is not None:
+                            args["limit"] = None
+                        elif any(p in user_query.lower() for p in list_pats) and not _has_number:
+                            args["limit"] = None
+                        # else: keep the LLM-supplied limit (e.g. 5 when user said "show 5")
+
+                        # Infer dates
+                        inferred_from, inferred_to = extract_date_from_query(user_query)
+                        if args.get("date_from") is None and inferred_from is not None:
+                            args["date_from"] = inferred_from
+                        if args.get("date_to") is None and inferred_to is not None:
+                            args["date_to"] = inferred_to
+
+                        try:
+                            tool_result = tool_fn.invoke(dict(args))
+                            logger.info("✅ Multi-tool call succeeded: %s", tool_name)
+                        except Exception as e:
+                            logger.error("❌ Multi-tool call failed for %s: %s", tool_name, e)
+                            continue
+
+                        parsed = tool_result
+                        if isinstance(tool_result, str):
+                            try:
+                                parsed = json.loads(tool_result)
+                            except json.JSONDecodeError:
+                                logger.warning("Multi-tool %s returned non-JSON: %s", tool_name, tool_result[:100])
+                                continue
+
+                        if isinstance(parsed, dict):
+                            p_list = parsed.get("p_list", list(parsed.values()) if "p_list" not in parsed else [])
+                        else:
+                            p_list = parsed if isinstance(parsed, list) else []
+
+                        display_count = len(p_list)
+                        if p_list and isinstance(p_list[0], dict):
+                            for key in ("total_count", "total_count_over", "full_count", "overall_count"):
+                                val = p_list[0].get(key)
+                                if isinstance(val, (int, float)) and val >= 0:
+                                    display_count = int(val)
+                                    break
+
+                        friendly_name = _friendly(tool_name)
+                        messages.append(
+                            ToolMessage(
+                                content=json.dumps({
+                                    "dataset_name": friendly_name,
+                                    "message": f"{display_count} records found",
+                                    "records": p_list[:25]
+                                }),
+                                tool_call_id=tool_call["id"]
+                            )
+                        )
+                        executed_tools.append({
+                            "tool_name": tool_name,
+                            "friendly_name": friendly_name,
+                            "p_list": p_list,
+                            "display_count": display_count,
+                        })
+
+                    # No data at all → short-circuit
+                    if not executed_tools or all(len(t["p_list"]) == 0 for t in executed_tools):
+                        msg = "No records were found for your request."
+                        return msg, msg, messages
+
+                    # ── MULTI-TABLE SYSTEM PROMPT ─────────────────────────────────
+                    # Injected ONLY for multi-table responses so the LLM knows the
+                    # frontend will render the tables separately — it must write only
+                    # a concise plain-text summary, never reproduce table markup.
+                    multi_table_system_prompt = SystemMessage(content=(
+                        "You are summarising a multi-dataset query result. "
+                        "The frontend will render each dataset as a separate interactive table automatically. "
+                        "Your ONLY job is to write 2-3 friendly sentences that tell the user what was found "
+                        "(mention each dataset name and its record count). "
+                        "Do NOT include any markdown tables, HTML, bullet lists, or raw data. "
+                        "Keep your response short, plain, and conversational."
+                    ))
+
+                    summary_messages = [multi_table_system_prompt] + messages[:]
+                    summary_messages.append(HumanMessage(content=(
+                        f"The user asked: '{user_query}'.\n"
+                        "Datasets retrieved:\n" +
+                        "\n".join(f"- {t['friendly_name']}: {t['display_count']} records" for t in executed_tools) +
+                        "\n\nWrite your 2-3 sentence summary now."
+                    )))
+
+                    summary_ai_msg = self.model.invoke(summary_messages)
+                    self._accumulate_tokens(summary_ai_msg)
+                    context_summary = self._get_content_str(summary_ai_msg) or "Here are the results of your query."
+
+                    # Build the structured multi-dataset JSON the frontend expects
+                    multiple_datasets_response = json.dumps({
+                        "type": "multiple_datasets",
+                        "context_summary": context_summary,
+                        "datasets": [
+                            {"name": t["friendly_name"], "records": t["p_list"]}
+                            for t in executed_tools
+                        ]
+                    })
+
+                    self._log_query_summary(current_user_query)
+                    return multiple_datasets_response, context_summary, messages
+
+                # ── SINGLE-TOOL PATH ─────────────────────────────────────────────
                 is_count_query     = False
                 is_aggregate_query = False
                 display_count      = 0
