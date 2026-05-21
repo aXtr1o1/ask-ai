@@ -440,9 +440,7 @@ function renderLargeDataset(text: string): string | null {
       if (val === null || val === undefined) {
         cell = "—";
       } else if (typeof val === "boolean") {
-        cell = `<span style="font-weight:600;color:${val ? "#22c55e" : "#ef44440"}">
-                ${val ? "✓" : "✗"}
-                </span>`;
+        cell = escapeHTML(val ? "True" : "False");
       } else if (typeof val === "object") {
         const str = JSON.stringify(val);
         cell = escapeHTML(str.length > 50 ? str.slice(0, 50) + "…" : str);
@@ -572,7 +570,7 @@ function formatLargeDatasetTable(largeDataData: any): string {
       if (val === null || val === undefined) {
         cellContent = "—";
       } else if (typeof val === "boolean") {
-        cellContent = `<span style="font-weight:600;color:${val ? '#22c55e' : '#ef4444'};">${val ? '✓' : '✗'}</span>`;
+        cellContent = esc(val ? "True" : "False");
       } else if (typeof val === "object") {
         const str = JSON.stringify(val);
         cellContent = esc(str.length > 50 ? str.substring(0, 50) + "…" : str);

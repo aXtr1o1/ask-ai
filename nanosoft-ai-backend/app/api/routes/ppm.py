@@ -96,6 +96,7 @@ def get_ppm(req: PPMRequest):
             req.user_id,
             req.work_order,
             req.asset_tag_no,
+            req.equipment_ref_no,     # NEW
             req.status,
             req.stage,
             req.frequency,
@@ -104,10 +105,10 @@ def get_ppm(req: PPMRequest):
             req.locality,
             req.building,
             req.floor,
+            req.spot_name,
             req.contract,
             req.tech,
             req.equipment,
-            req.spot_name,
             req.keyword,
             req.date_from,
             req.date_to,
@@ -144,6 +145,7 @@ def get_ppm(req: PPMRequest):
                 req.user_id,
                 req.work_order,
                 req.asset_tag_no,
+                req.equipment_ref_no,     # NEW
                 req.status,
                 req.stage,
                 req.frequency,
@@ -152,10 +154,10 @@ def get_ppm(req: PPMRequest):
                 None,  # p_locality cleared
                 req.building,
                 req.floor,
+                req.locality,  # p_spot_name mapped
                 req.contract,
                 req.tech,
                 req.equipment,
-                req.locality,  # p_spot_name mapped
                 req.keyword,
                 req.date_from,
                 req.date_to,

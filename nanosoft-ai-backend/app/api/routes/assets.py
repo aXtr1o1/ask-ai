@@ -103,33 +103,42 @@ def get_assets(req: AssetRequest):
         cursor = conn.cursor()
 
         cursor.callproc("sp_asset_query", [
-            req.user_name,
-            req.user_id,
-            req.asset_tag_no,
-            req.status,
-            req.condition,
-            req.priority,
-            req.asset_type,
-            req.division,
-            req.discipline,
-            req.locality,
-            req.building,
-            req.floor,
-            req.owner,
-            req.make,
-            req.model,
-            req.service_area,
-            req.trade_group,
-            req.spot_name,
-            req.serial_no,
-            req.on_hold,
-            req.is_snagged,
-            req.is_scraped,
-            req.enable_ppm,
-            req.enable_bdm,
-            req.keyword,
-            req.date_from,
-            req.date_to,
+            req.user_name,        # p_user_name
+            req.user_id,          # p_user_id
+            req.asset_tag_no,     # p_asset_tag_no
+            req.asset_barcode,    # p_asset_barcode
+            req.equipment_name,   # p_equipment_name
+            req.equipment_ref_no, # p_equipment_ref_no
+            req.serial_no,        # p_serial_no
+            req.status,           # p_status
+            req.condition,        # p_condition
+            req.priority,         # p_priority
+            req.asset_type,       # p_asset_type
+            req.division,         # p_division
+            req.discipline,       # p_discipline
+            req.locality,         # p_locality
+            req.building,         # p_building
+            req.floor,            # p_floor
+            req.spot_name,        # p_spot_name
+            req.owner,            # p_owner
+            req.make,             # p_make
+            req.model,            # p_model
+            req.service_area,     # p_service_area
+            req.trade_group,      # p_trade_group
+            req.drawing_no,       # p_drawing_no
+            req.remarks,          # p_remarks
+            req.on_hold,          # p_on_hold
+            req.is_snagged,       # p_is_snagged
+            req.is_scraped,       # p_is_scraped
+            req.enable_ppm,       # p_enable_ppm
+            req.enable_bdm,       # p_enable_bdm
+            req.enable_bms,       # p_enable_bms
+            req.enable_dsm,       # p_enable_dsm
+            req.keyword,          # p_keyword
+            req.date_from,        # p_date_from
+            req.date_to,          # p_date_to
+            req.limit,            # p_limit
+            req.offset,           # p_offset
         ])
 
         row = cursor.fetchone()
@@ -158,27 +167,34 @@ def get_assets(req: AssetRequest):
                 req.user_name,
                 req.user_id,
                 req.asset_tag_no,
+                req.asset_barcode,
+                req.equipment_name,
+                req.equipment_ref_no,
+                req.serial_no,
                 req.status,
                 req.condition,
                 req.priority,
                 req.asset_type,
                 req.division,
                 req.discipline,
-                None,  # p_locality cleared
+                None,             # p_locality cleared
                 req.building,
                 req.floor,
+                req.locality,     # p_spot_name mapped
                 req.owner,
                 req.make,
                 req.model,
                 req.service_area,
                 req.trade_group,
-                req.locality,  # p_spot_name mapped
-                req.serial_no,
+                req.drawing_no,
+                req.remarks,
                 req.on_hold,
                 req.is_snagged,
                 req.is_scraped,
                 req.enable_ppm,
                 req.enable_bdm,
+                req.enable_bms,
+                req.enable_dsm,
                 req.keyword,
                 req.date_from,
                 req.date_to,
@@ -191,129 +207,57 @@ def get_assets(req: AssetRequest):
             formatted = format_response(raw)
             p_list = formatted.get("p_list", [])
 
-        # Fallback 2: If 0 records found and we had division, discipline, or asset_type set:
-        # Try setting them as keyword instead to search across all columns.
-        if not p_list:
-            for field in ["division", "discipline", "asset_type"]:
-                val = getattr(req, field, None)
-                if val:
-                    logger.info(f"🔄 Fallback 2: 0 records found for {field}='{val}'. Retrying with keyword='{val}' and {field}=None")
-                    try:
-                        cursor = conn.cursor()
-                        cursor.callproc("sp_asset_query", [
-                            req.user_name,
-                            req.user_id,
-                            req.asset_tag_no,
-                            req.status,
-                            req.condition,
-                            req.priority,
-                            None if field == "asset_type" else req.asset_type,
-                            None if field == "division" else req.division,
-                            None if field == "discipline" else req.discipline,
-                            req.locality,
-                            req.building,
-                            req.floor,
-                            req.owner,
-                            req.make,
-                            req.model,
-                            req.service_area,
-                            req.trade_group,
-                            req.spot_name,
-                            req.serial_no,
-                            req.on_hold,
-                            req.is_snagged,
-                            req.is_scraped,
-                            req.enable_ppm,
-                            req.enable_bdm,
-                            val,  # use val as keyword filter
-                            req.date_from,
-                            req.date_to,
-                        ])
-                        row = cursor.fetchone()
-                        cursor.close()
-                        raw_val = row[0] if row else {}
-                        if isinstance(raw_val, str):
-                            raw_val = json.loads(raw_val)
-                        formatted = format_response(raw_val)
-                        p_list = formatted.get("p_list", [])
-                        if p_list:
-                            logger.info("✅ Assets fallback retry succeeded by mapping %s to keyword!", field)
-                            formatted["fallback_applied"] = {"field": field, "value": val}
-                            break
-                    except Exception as e:
-                        logger.warning(f"Failed fallback retrying {field} as keyword: {e}")
-
-        # Fallback 3: if 0 records found:
-        # A) Try to simplify/trim any specified location filter (building, locality, spot_name).
-        # B) Try mapping the keyword to location/entity fields (spot_name, building, locality),
-        #    including simplifying/trimming the keyword value itself.
-        if not p_list:
-            fallback_items = []
-            
-            # Add specified location filters
-            for field in ["building", "locality", "spot_name"]:
-                original_val = getattr(req, field, None)
-                if original_val:
-                    fallback_items.append((field, original_val, False))
-            
-            # Add keyword mapping targets if keyword is provided
-            if req.keyword:
-                for field in ["spot_name", "building", "locality"]:
-                    if not getattr(req, field, None):  # Only map to fields not already set
-                        fallback_items.append((field, req.keyword, True))
-            
-            # Process each fallback item
-            for field, original_val, is_keyword_mapping in fallback_items:
-                unique_candidates = generate_fallback_candidates(original_val, is_keyword_mapping)
-                
-                for candidate in unique_candidates:
-                    logger.info(
-                        "🔄 Retrying assets query mapping %s%s to candidate='%s'...",
-                        "keyword to " if is_keyword_mapping else "",
-                        field,
-                        candidate
-                    )
-                    cursor = conn.cursor()
-                    cursor.callproc("sp_asset_query", [
-                        req.user_name,
-                        req.user_id,
-                        req.asset_tag_no,
-                        req.status,
-                        req.condition,
-                        req.priority,
-                        req.asset_type,
-                        req.division,
-                        req.discipline,
-                        candidate if field == "locality" else req.locality,
-                        candidate if field == "building" else req.building,
-                        req.floor,
-                        req.owner,
-                        req.make,
-                        req.model,
-                        req.service_area,
-                        req.trade_group,
-                        candidate if field == "spot_name" else req.spot_name,
-                        req.serial_no,
-                        req.on_hold,
-                        req.is_snagged,
-                        req.is_scraped,
-                        req.enable_ppm,
-                        req.enable_bdm,
-                        None if is_keyword_mapping else req.keyword,  # clear keyword if we map it
-                        req.date_from,
-                        req.date_to,
-                    ])
-                    row = cursor.fetchone()
-                    cursor.close()
-                    raw_val = row[0] if row else {}
-                    if isinstance(raw_val, str):
-                        raw_val = json.loads(raw_val)
-                    formatted = format_response(raw_val)
-                    p_list = formatted.get("p_list", [])
-                    if p_list:
-                        logger.info("✅ Assets fallback retry succeeded with %s='%s'!", field, candidate)
-                        formatted["fallback_applied"] = {"field": field, "value": candidate}
-                        break
+        # Fallback interceptor: if 0 records found and keyword was specified, but locality, spot_name, and building were not,
+        # retry by mapping keyword to locality, spot_name, or building.
+        if not p_list and req.keyword and not req.locality and not req.spot_name and not req.building:
+            for field in ("locality", "spot_name", "building"):
+                logger.info("🔄 Retrying query mapping keyword='%s' to %s...", req.keyword, field)
+                cursor = conn.cursor()
+                cursor.callproc("sp_asset_query", [
+                    req.user_name,
+                    req.user_id,
+                    req.asset_tag_no,
+                    req.asset_barcode,
+                    req.equipment_name,
+                    req.equipment_ref_no,
+                    req.serial_no,
+                    req.status,
+                    req.condition,
+                    req.priority,
+                    req.asset_type,
+                    req.division,
+                    req.discipline,
+                    req.keyword if field == "locality" else None,   # p_locality
+                    req.keyword if field == "building" else None,   # p_building
+                    req.floor,
+                    req.keyword if field == "spot_name" else None,  # p_spot_name
+                    req.owner,
+                    req.make,
+                    req.model,
+                    req.service_area,
+                    req.trade_group,
+                    req.drawing_no,
+                    req.remarks,
+                    req.on_hold,
+                    req.is_snagged,
+                    req.is_scraped,
+                    req.enable_ppm,
+                    req.enable_bdm,
+                    req.enable_bms,
+                    req.enable_dsm,
+                    None,                                           # p_keyword cleared
+                    req.date_from,
+                    req.date_to,
+                    req.limit,
+                    req.offset,
+                ])
+                row = cursor.fetchone()
+                cursor.close()
+                raw = row[0] if row else {}
+                if isinstance(raw, str):
+                    raw = json.loads(raw)
+                formatted = format_response(raw)
+                p_list = formatted.get("p_list", [])
                 if p_list:
                     break
 

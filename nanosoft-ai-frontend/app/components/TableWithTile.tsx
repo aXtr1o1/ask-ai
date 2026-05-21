@@ -79,7 +79,7 @@ const TableWithTile = React.memo(function TableWithTile({
   // Format cell values safely for JSONB / object values
   const formatCellValue = (val: any) => {
     if (val === null || val === undefined) return "—";
-    if (typeof val === 'boolean') return val ? '✓' : '✗';
+    if (typeof val === 'boolean') return val ? 'True' : 'False';
     if (typeof val === 'number') return String(val);
     if (Array.isArray(val)) return val.length === 0 ? '—' : val.map(v => typeof v === 'object' ? JSON.stringify(v) : String(v)).join(', ');
     if (typeof val === 'object') {
