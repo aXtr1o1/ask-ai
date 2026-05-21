@@ -345,21 +345,10 @@ class LangChainService:
                 )
                 return clarification, clarification, messages
 
-            # ── QUERY REWRITING STEP ──
-            from app.prompts.system_prompt import QUERY_REWRITER_PROMPT
-            
-            rewriter_msg = self.model.invoke([
-                HumanMessage(content=QUERY_REWRITER_PROMPT.format(query=current_user_query))
-            ])
-            self._accumulate_tokens(rewriter_msg)
-            rewritten_query = self._get_content_str(rewriter_msg).strip()
-            logger.info(f"🔄 Rewritten Query: '{current_user_query}' -> '{rewritten_query}'")
+            # ── QUERY REWRITING STEP REMOVED ──
+            # The original user query is passed directly to the model.
+            logger.info(f"💬 Direct Query (No Rewriter): '{current_user_query}'")
 
-            # Replace the last message content with the rewritten query so the tool agent gets the clean version
-            for m in reversed(messages):
-                if isinstance(m, HumanMessage):
-                    m.content = rewritten_query
-                    break
 
             # CALL 1 — First model call
             ai_msg = self.model.invoke(messages)
@@ -448,6 +437,61 @@ class LangChainService:
                             args["date_from"] = inferred_from
                         if args.get("date_to") is None and inferred_to is not None:
                             args["date_to"] = inferred_to
+
+                        # ── CONFIDENCE CHECK STEP ──────────────────────────────────────────
+                        _SKIP_CONFIDENCE_FIELDS = {
+                            "user_id", "user_name", "offset", "limit", "is_aggregate",
+                            "group_by_columns", "aggregate_function", "date_from", "date_to",
+                            "comp_from", "comp_to", "sla_min", "sla_max", "completed_from",
+                            "completed_to", "keyword"
+                        }
+                        _fields_to_check = {
+                            k: v for k, v in args.items()
+                            if k not in _SKIP_CONFIDENCE_FIELDS
+                            and v is not None
+                            and isinstance(v, str)
+                        }
+                        if _fields_to_check:
+                            _schema_props = {}
+                            if hasattr(tool_fn, "args_schema") and tool_fn.args_schema:
+                                try:
+                                    _schema_props = tool_fn.args_schema.schema().get("properties", {})
+                                except Exception:
+                                    pass
+
+                            _mappings_str = ""
+                            for k, v in _fields_to_check.items():
+                                _desc = _schema_props.get(k, {}).get("description", "No description available")
+                                _mappings_str += f"- Field: '{k}'\n  Value: \"{v}\"\n  Schema Rule: {_desc}\n\n"
+
+                            _conf_prompt = (
+                                f"The user asked: \"{user_query}\"\n"
+                                f"The following values were mapped to tool fields.\n"
+                                f"Rate confidence (0-10) that each value truly belongs to that field based STRICTLY on the schema rules and examples provided.\n\n"
+                                f"Mappings:\n"
+                                f"{_mappings_str}"
+                                f"Respond ONLY with a valid JSON object. No explanation. Example:\n"
+                                + '{"floor": {"value": "Ground Floor", "confidence": 9}, "building": {"value": "Royal Pavilion", "confidence": 8}}'
+                            )
+                            _conf_msg = self.model.invoke([HumanMessage(content=_conf_prompt)])
+                            self._accumulate_tokens(_conf_msg)
+                            _conf_raw = self._get_content_str(_conf_msg).strip()
+                            try:
+                                _conf_raw_clean = _re.sub(r"```(?:json)?", "", _conf_raw).strip().strip("`").strip()
+                                _conf_data = json.loads(_conf_raw_clean)
+                                for _field, _info in _conf_data.items():
+                                    _score = _info.get("confidence", 10)
+                                    _value = _info.get("value", args.get(_field, ""))
+                                    if _score < 7:
+                                        logger.info("🎯 Confidence | %s='%s' score=%s → LOW → moved to keyword", _field, _value, _score)
+                                        if not args.get("keyword"):
+                                            args["keyword"] = str(_value)
+                                        args.pop(_field, None)
+                                    else:
+                                        logger.info("🎯 Confidence | %s='%s' score=%s → OK → kept", _field, _value, _score)
+                            except Exception as _ce:
+                                logger.warning("⚠️ Confidence check parse failed: %s | raw=%s", _ce, _conf_raw[:120])
+                        # ── END CONFIDENCE CHECK ───────────────────────────────────────────
 
                         try:
                             tool_result = tool_fn.invoke(dict(args))
@@ -597,6 +641,62 @@ class LangChainService:
                         args["date_from"] = inferred_from
                     if args.get("date_to") is None and inferred_to is not None:
                         args["date_to"] = inferred_to
+
+                    # ── CONFIDENCE CHECK STEP (SINGLE TOOL) ───────────────────────────────
+                    _SKIP_CONF = {
+                        "user_id", "user_name", "offset", "limit", "is_aggregate",
+                        "group_by_columns", "aggregate_function", "date_from", "date_to",
+                        "comp_from", "comp_to", "sla_min", "sla_max", "completed_from",
+                        "completed_to", "keyword"
+                    }
+                    _fields_to_check = {
+                        k: v for k, v in args.items()
+                        if k not in _SKIP_CONF
+                        and v is not None
+                        and isinstance(v, str)
+                    }
+                    if _fields_to_check:
+                        _schema_props = {}
+                        if hasattr(tool_fn, "args_schema") and tool_fn.args_schema:
+                            try:
+                                _schema_props = tool_fn.args_schema.schema().get("properties", {})
+                            except Exception:
+                                pass
+
+                        _mappings_str = ""
+                        for k, v in _fields_to_check.items():
+                            _desc = _schema_props.get(k, {}).get("description", "No description available")
+                            _mappings_str += f"- Field: '{k}'\n  Value: \"{v}\"\n  Schema Rule: {_desc}\n\n"
+
+                        _conf_prompt = (
+                            f"The user asked: \"{user_query}\"\n"
+                            f"The following values were mapped to tool fields.\n"
+                            f"Rate confidence (0-10) that each value truly belongs to that field based STRICTLY on the schema rules and examples provided.\n\n"
+                            f"Mappings:\n"
+                            f"{_mappings_str}"
+                            f"Respond ONLY with a valid JSON object. No explanation. Example:\n"
+                            + '{"status": {"value": "Offline", "confidence": 9}, "floor": {"value": "Ground Floor", "confidence": 8}}'
+                        )
+                        _conf_msg = self.model.invoke([HumanMessage(content=_conf_prompt)])
+                        self._accumulate_tokens(_conf_msg)
+                        _conf_raw = self._get_content_str(_conf_msg).strip()
+                        try:
+                            _conf_raw_clean = _re.sub(r"```(?:json)?", "", _conf_raw).strip().strip("`").strip()
+                            _conf_data = json.loads(_conf_raw_clean)
+                            for _field, _info in _conf_data.items():
+                                _score = _info.get("confidence", 10)
+                                _value = _info.get("value", args.get(_field, ""))
+                                if _score < 7:
+                                    logger.info("🎯 Confidence | %s='%s' score=%s → LOW → moved to keyword", _field, _value, _score)
+                                    if not args.get("keyword"):
+                                        args["keyword"] = str(_value)
+                                    args.pop(_field, None)
+                                else:
+                                    logger.info("🎯 Confidence | %s='%s' score=%s → OK → kept", _field, _value, _score)
+                        except Exception as _ce:
+                            logger.warning("⚠️ Confidence check parse failed: %s | raw=%s", _ce, _conf_raw[:120])
+                    # ── END CONFIDENCE CHECK ───────────────────────────────────────────────
+
                     try:
                         tool_result = tool_fn.invoke(dict(args))
                         logger.info(f"✅ Tool call succeeded on first try | {tool_name}")

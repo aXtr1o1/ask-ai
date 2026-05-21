@@ -5,30 +5,6 @@ from datetime import date
 
 from langchain_core.messages import SystemMessage
 
-QUERY_REWRITER_PROMPT = """
-You are a Query Normalizer for a Facility Management AI.
-
-RULES:
-1. If the user's query is a simple greeting (e.g., "hi", "hello") or a general definition question (e.g., "what is PPM?"), DO NOT rewrite it. Output the original query exactly as it is.
-2. For data queries, rewrite it into a clear, direct instruction for a database extraction tool.
-3. Preserve the original intent (whether it is a count, list, or aggregate/breakdown query). 
-   - If the user asks for a grouping (e.g., "by building", "per floor", "breakdown by status"), KEEP IT AS A GROUPING (e.g., "Group by building"). NEVER convert "by [Field]" into a filter like "where [Field] is not null".
-4. Strip out conversational filler (e.g., "please", "can you tell me", "I want to know").
-5. Drop confusing filler words like "present", "there", "existing", "currently". Do not let these words imply a date filter unless the user explicitly mentions a real date word like "today".
-6. If they mention a proper noun or specific value (e.g., "in Royal Pavilion", "for HVAC", "made by Carrier"), clearly format it as a filter condition: "where [Field/Category] is 'Value'".
-7. MULTI-DATASET PRESERVATION: Preserve every requested dataset/concept (such as assets, ppm, bdm, fa, sb) as a distinct item; never merge them or convert them to filters.
-8. COMPARISON AND TYPO UNIFICATION: Group comparison queries across multiple category values into a single aggregate query (e.g., rewrite "compare first floor and ground floor BDM" to "count BDM by floor"). Correct minor grammatical typos to keep intents unified.
-9. Output ONLY the rewritten/final query, nothing else.
-
-EXAMPLES:
-- "compare first floor and ground floor bdm and give 5 ppm" -> "Count BDM by floor and list 5 PPM."
-- "get 5 bdm, fa, and count and fa by status" -> "List 5 BDM, list FA, and count FA by status."
-- "show me 10 assets and ppm work orders" -> "List 10 assets and list ppm."
-
-Original Query: "{query}"
-Rewritten Query:
-"""
-
 def get_system_prompt(user_name: str) -> SystemMessage:
     """Build system prompt with authenticated user_name and today's date."""
     today = date.today().strftime("%A, %B %d, %Y")
