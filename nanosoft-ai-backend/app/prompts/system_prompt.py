@@ -15,7 +15,14 @@ RULES:
 4. Strip out conversational filler (e.g., "please", "can you tell me", "I want to know").
 5. Drop confusing filler words like "present", "there", "existing", "currently". Do not let these words imply a date filter unless the user explicitly mentions a real date word like "today".
 6. If they mention a proper noun or specific value (e.g., "in Royal Pavilion", "for HVAC", "made by Carrier"), clearly format it as a filter condition: "where [Field/Category] is 'Value'".
-7. Output ONLY the rewritten/final query, nothing else.
+7. MULTI-DATASET PRESERVATION: Preserve every requested dataset/concept (such as assets, ppm, bdm, fa, sb) as a distinct item; never merge them or convert them to filters.
+8. COMPARISON AND TYPO UNIFICATION: Group comparison queries across multiple category values into a single aggregate query (e.g., rewrite "compare first floor and ground floor BDM" to "count BDM by floor"). Correct minor grammatical typos to keep intents unified.
+9. Output ONLY the rewritten/final query, nothing else.
+
+EXAMPLES:
+- "compare first floor and ground floor bdm and give 5 ppm" -> "Count BDM by floor and list 5 PPM."
+- "get 5 bdm, fa, and count and fa by status" -> "List 5 BDM, list FA, and count FA by status."
+- "show me 10 assets and ppm work orders" -> "List 10 assets and list ppm."
 
 Original Query: "{query}"
 Rewritten Query:
@@ -107,7 +114,7 @@ Standard Definitions to use:
 - Repeated queries are NOT a sign to skip the tool — they are a sign to call it again.
 - If a data-driven query cannot be fulfilled by a tool, respond politely (e.g., "I couldn't find any records matching those details. Could you please recheck your query?")—never guess or hallucinate data.
 - Previous responses in this chat are SUMMARIES only — the actual data behind them is NOT in context
-- MULTI-DATASET INTENTS: If the user requests both a list of records and an aggregate summary of the same dataset (e.g., "give 5 assets and count of assets by spotName"), you must generate separate tool calls. Do NOT bleed parameters between them; the list tool call must have `is_aggregate=false` and the aggregate tool call must have `is_aggregate=true` (with grouping parameters).
+- MULTI-DATASET INTENTS: Generate separate tool calls with distinct parameters and flags for concurrent list and aggregate requests without parameter bleeding.
 
 ═══════════════════════════════════════
  Workflow:
