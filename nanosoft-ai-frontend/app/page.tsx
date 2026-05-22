@@ -4292,15 +4292,17 @@ export default function Home() {
                                 {msg.multiSummary}
                               </div>
                             )}
-                            {msg.multipleDatasets.map((ds, dsIdx) => (
-                              <div key={dsIdx} style={{ marginBottom: dsIdx < msg.multipleDatasets!.length - 1 ? '24px' : 0 }}>
-                                <TableWithTile
-                                  rows={ds.rows}
-                                  title={ds.name}
-                                  htmlTableContent={ds.html}
-                                />
-                              </div>
-                            ))}
+                            {msg.multipleDatasets
+                              .filter(ds => (ds.rows && ds.rows.length > 0) || ds.html)
+                              .map((ds, dsIdx, filteredArr) => (
+                                <div key={dsIdx} style={{ marginBottom: dsIdx < filteredArr.length - 1 ? '24px' : 0 }}>
+                                  <TableWithTile
+                                    rows={ds.rows}
+                                    title={ds.name}
+                                    htmlTableContent={ds.html}
+                                  />
+                                </div>
+                              ))}
                           </div>
 
                         ) : msg.tableData && msg.tableData.length > 0 ? (
