@@ -92,7 +92,7 @@ def get_assets(req: AssetRequest):
     )
     logger.debug("[GET-ASSETS] Full payload: %s", req.model_dump())
 
-    if getattr(req, "is_aggregate", False) and req.group_by_columns:
+    if getattr(req, "is_aggregate", False):
         logger.info("📊 [GET-ASSETS] AGGREGATE MODE detected → calling sp_asset_aggregate")
         try:
             conn = get_pool()

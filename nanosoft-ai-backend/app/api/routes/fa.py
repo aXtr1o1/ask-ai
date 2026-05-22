@@ -81,12 +81,12 @@ def get_fa(req: FARequest):
         req.user_name, req.limit, req.offset
     )
 
-    if getattr(req, "is_aggregate", False) and req.group_by_columns:
+    if getattr(req, "is_aggregate", False):
         logger.info("📊 [GET-FA] AGGREGATE MODE → calling sp_fa_aggregate")
         try:
             conn = get_pool()
             cursor = conn.cursor()
-            group_by_str = ",".join(req.group_by_columns)
+            group_by_str = ",".join(req.group_by_columns) if req.group_by_columns else None
             agg_function = req.aggregate_function or "COUNT"
             logger.info("📊 [GET-FA] group_by=%s | function=%s", group_by_str, agg_function)
             cursor.callproc("sp_fa_aggregate", [

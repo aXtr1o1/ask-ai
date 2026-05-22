@@ -86,7 +86,7 @@ def get_bdm(req: BDMRequest):
     )
     logger.debug("[GET-BDM] Full payload: %s", req.model_dump())
 
-    if getattr(req, "is_aggregate", False) and req.group_by_columns:
+    if getattr(req, "is_aggregate", False):
         logger.info("📊 [GET-BDM] AGGREGATE MODE detected → calling sp_bdm_aggregate")
         try:
             conn = get_pool()

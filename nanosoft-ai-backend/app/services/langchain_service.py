@@ -589,7 +589,7 @@ class LangChainService:
                                 "records": t["p_list"],
                                 "search_context": t.get("search_context"),
                             }
-                            for t in executed_tools
+                            for t in executed_tools if len(t["p_list"]) > 0
                         ]
                     })
 

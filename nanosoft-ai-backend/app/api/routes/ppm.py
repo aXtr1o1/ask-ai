@@ -79,7 +79,7 @@ def get_ppm(req: PPMRequest):
     )
     logger.debug("[GET-PPM] Full payload: %s", req.model_dump())
 
-    if getattr(req, "is_aggregate", False) and req.group_by_columns:
+    if getattr(req, "is_aggregate", False):
         logger.info("📊 [GET-PPM] AGGREGATE MODE detected → calling sp_ppm_aggregate")
         try:
             conn = get_pool()
