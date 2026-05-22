@@ -71,9 +71,10 @@ def _infer_intent_from_query(query: str) -> str | None:
     """Fast intent detection for common phrasing (avoids extra model call)."""
     q = (query or "").lower()
     if _re.search(
-        r"\b(how many|count of|number of)\s+.+\s+(per|by|each)\b"
+        r"\b(how many|count of|number of)\s+.+\s+(per|by|each|wise)\b"
         r"|\b(breakdown|grouped by|distribution)\b"
-        r"|\bhow many per\b|\bcount by\b",
+        r"|\bhow many per\b|\bcount by\b"
+        r"|\bwise\b.*\bcounts?\b|\bcounts?\b.*\b(per|by|wise)\b",
         q,
     ):
         return "aggregate"
@@ -362,12 +363,12 @@ class LangChainService:
             _q = current_user_query.lower()
 
             # complaint ambiguity check
-            _complaint_ambiguous = bool(_re.search(r'\bcomplaints?\b', _q_clean))
-            _complaint_clear     = bool(_re.search(r'\b(fa|bdm|facility audit|breakdown)\b', _q_clean))
+            _complaint_ambiguous = bool(_re.search(r'\bcomplaints?\b', _q))
+            _complaint_clear     = bool(_re.search(r'\b(fa|bdm|facility audit|breakdown)\b', _q))
 
             # work order ambiguity check
-            _workorder_ambiguous = bool(_re.search(r'\b(work\s*orders?|scheduled|compliance|work\s*order)\b', _q_clean))
-            _workorder_clear     = bool(_re.search(r'\b(ppm|sb|preventive|schedule[\s\-]based)\b', _q_clean))
+            _workorder_ambiguous = bool(_re.search(r'\b(work\s*orders?|scheduled|compliance|work\s*order)\b', _q))
+            _workorder_clear     = bool(_re.search(r'\b(ppm|sb|preventive|schedule[\s\-]based)\b', _q))
 
             if _complaint_ambiguous and not _complaint_clear:
                 logger.info("🔀 Ambiguous complaint query intercepted before model | query='%s'", current_user_query)

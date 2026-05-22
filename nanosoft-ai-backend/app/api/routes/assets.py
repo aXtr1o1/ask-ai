@@ -11,7 +11,6 @@ from .query_search_fallback import (
     ASSET_TEXT_FILTER_FIELDS,
     apply_limit_offset,
     enrich_with_search_fallback,
-    is_empty_query_result,
     merge_format_response,
 )
 
