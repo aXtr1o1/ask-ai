@@ -318,16 +318,17 @@ class LangChainService:
 
             # ── AMBIGUITY PRE-CHECK (runs before model, before lc_memory influence) ──
             import re as _re
-
-            _q = current_user_query.lower()
+            
+            # Remove newlines so the whole query is treated as a single string
+            _q_clean = current_user_query.lower().replace('\n', ' ')
 
             # complaint ambiguity check
-            _complaint_ambiguous = bool(_re.search(r'\bcomplaints?\b', _q))
-            _complaint_clear     = bool(_re.search(r'\b(fa|bdm|facility audit|breakdown)\b', _q))
+            _complaint_ambiguous = bool(_re.search(r'\bcomplaints?\b', _q_clean))
+            _complaint_clear     = bool(_re.search(r'\b(fa|bdm|facility audit|breakdown)\b', _q_clean))
 
             # work order ambiguity check
-            _workorder_ambiguous = bool(_re.search(r'\b(work\s*orders?|scheduled|compliance|work\s*order)\b', _q))
-            _workorder_clear     = bool(_re.search(r'\b(ppm|sb|preventive|schedule[\s\-]based)\b', _q))
+            _workorder_ambiguous = bool(_re.search(r'\b(work\s*orders?|scheduled|compliance|work\s*order)\b', _q_clean))
+            _workorder_clear     = bool(_re.search(r'\b(ppm|sb|preventive|schedule[\s\-]based)\b', _q_clean))
 
             if _complaint_ambiguous and not _complaint_clear:
                 logger.info("🔀 Ambiguous complaint query intercepted before model | query='%s'", current_user_query)
@@ -344,6 +345,7 @@ class LangChainService:
                     "Please clarify so I can fetch the correct data."
                 )
                 return clarification, clarification, messages
+
 
             # ── QUERY REWRITING STEP REMOVED ──
             # The original user query is passed directly to the model.
@@ -949,16 +951,22 @@ class LangChainService:
                         self._log_query_summary(current_user_query)
                         return large_dataset_response, context_summary, messages
 
+                    if is_count_query:
+                        content_json = json.dumps({
+                            "total_count": display_count
+                        })
+                    else:
+                        content_json = json.dumps({
+                            "message": f"{display_count} records found",
+                            "records_returned": len(p_list),
+                            "total_count": display_count,
+                            "displayed_count": len(p_list_for_model),
+                            "records": p_list_for_model
+                        })
+
                     messages.append(
                         ToolMessage(
-                            content=json.dumps({
-                                "message": f"{display_count} records found",
-                                "records_returned": len(p_list),
-                                "total_count": display_count,
-                                "displayed_count": len(p_list_for_model),
-            
-                                "records": [] if is_count_query else p_list_for_model
-                            }),
+                            content=content_json,
                             tool_call_id=tool_call["id"]
                         )
                     )
