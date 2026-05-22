@@ -169,7 +169,7 @@ MAPPING DIRECTIVES:
 - status: Map if user mentions "Status" or "Status Name".
 - spot_name: Map if user mentions "Spot", "Spot Name", or "Location Spot".
 - serial_no: Map if user mentions "Serial", "Serial No", "Serial Number", or "S/N".
-- keyword: Mandatory fallback for any terms not labeled as a field.
+- keyword: General text search when a value does not map cleanly to another field.
 
 FULL PARAMETER CAPABILITIES:
 - user_name: Required for user isolation and ownership.
@@ -284,12 +284,6 @@ def ASSETS(
 
     logger.info(f"📦 ASSETS TOOL TRIGGERED for user_name: {user_name}")
     
-    # Redirect asset_type to keyword to support fuzzy matching and handle empty database columns
-    if asset_type and not keyword:
-        logger.info("🔄 Redirecting asset_type '%s' to keyword to support fuzzy search and handle empty database columns.", asset_type)
-        keyword = asset_type
-        asset_type = None
-
     resolved_date_from, resolved_date_to = getTime(date_from, date_to)
     
     payload = {
@@ -375,7 +369,7 @@ MAPPING DIRECTIVES:
 - discipline: Map if user mentions "Discipline", "Discipline Name", or "DisciplineName".
 - status: Map if user mentions "Status" or "Status Name".
 - spot_name: Map if user mentions "Spot", "Spot Name", or "Location Spot".
-- keyword: Mandatory fallback for any terms not labeled as a field.
+- keyword: General text search when a value does not map cleanly to another field.
 
 FULL PARAMETER CAPABILITIES:
 - user_name: Required for user isolation and ownership.
@@ -464,12 +458,6 @@ def PPM(
 
     logger.info(f"🛠️ PPM TOOL TRIGGERED for user_name: {user_name}")
     
-    # Redirect equipment to keyword to support fuzzy matching and handle empty database columns in PPM
-    if equipment and not keyword:
-        logger.info("🔄 Redirecting equipment '%s' to keyword in PPM tool to support fuzzy search.", equipment)
-        keyword = equipment
-        equipment = None
-
     resolved_date_from, resolved_date_to = getTime(date_from, date_to)
 
     payload = {
@@ -543,7 +531,7 @@ MAPPING DIRECTIVES:
 - discipline: Map if user mentions "Discipline", "Discipline Name", or "DisciplineName".
 - status: Map if user mentions "Status" or "Status Name".
 - spot_name: Map if user mentions "Spot", "Spot Name", or "Location Spot".
-- keyword: Mandatory fallback for any terms not labeled as a field.
+- keyword: General text search when a value does not map cleanly to another field.
 
 FULL PARAMETER CAPABILITIES:
 - user_name: Required for user isolation and ownership.

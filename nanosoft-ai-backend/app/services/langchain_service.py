@@ -10,6 +10,12 @@ from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, System
 from app.config import settings
 from app.tools.facility_tools import ASSETS, PPM, BDM, FA, SB
 from app.services.quota_service import quota_fallback_service
+from app.services.keyword_match_context import (
+    append_match_explanation,
+    extract_from_tool_response,
+    format_keyword_count_reply,
+    search_context_prompt_block,
+)
 
 import json
 
@@ -47,14 +53,13 @@ def extract_date_from_query(query: str):
         return "today", "today"
     
     # ── Dynamic pattern: X days/weeks/months/years ago/before ──
-    import re
-    match = re.search(r"(\d+)\s*(day|week|month|year)s?\s*(ago|before)", q)
+    match = _re.search(r"(\d+)\s*(day|week|month|year)s?\s*(ago|before)", q)
     if match:
         found_phrase = match.group(0)
         return found_phrase, found_phrase
 
     # ── Match explicit month names (e.g. "March", "April 2026") ──
-    month_match = re.search(r"\b(january|february|march|april|may|june|july|august|september|october|november|december)(?:\s+\d{4})?\b", q)
+    month_match = _re.search(r"\b(january|february|march|april|may|june|july|august|september|october|november|december)(?:\s+\d{4})?\b", q)
     if month_match:
         found_month = month_match.group(0).title()
         return found_month, found_month
@@ -62,29 +67,24 @@ def extract_date_from_query(query: str):
     return None, None
 
 
-# def _needs_default_last_7_days(query: str) -> bool:
-#     q = (query or "").lower()
-#     time_keywords = (
-#         "today", "yesterday", "last week", "this week", "week",
-#         "last month", "this month", "month",
-#         "last year", "this year", "year",
-#         "day", "days", "date", "present", "current"
-#     )
-#     if any(k in q for k in time_keywords):
-#         return False
-#     if _re.search(r"\b\d{4}-\d{2}-\d{2}\b", q):
-#         return False
-#     return True
-
-
-# def _append_default_7days(text: str, query: str) -> str:
-#     # Logic disabled as per user request
-#     return text
-    # if _needs_default_last_7_days(query):
-    #     suffix = " (This is for the last 7 days)"
-    #     if suffix not in text:
-    #         return text + suffix
-    # return text
+def _infer_intent_from_query(query: str) -> str | None:
+    """Fast intent detection for common phrasing (avoids extra model call)."""
+    q = (query or "").lower()
+    if _re.search(
+        r"\b(how many|count of|number of)\s+.+\s+(per|by|each)\b"
+        r"|\b(breakdown|grouped by|distribution)\b"
+        r"|\bhow many per\b|\bcount by\b",
+        q,
+    ):
+        return "aggregate"
+    if _re.search(
+        r"\b(how many|total count|number of|count of|how many total|get the count|show total)\b",
+        q,
+    ):
+        return "count"
+    if _re.search(r"\b(show|list|get |fetch |display|give me|retrieve|provide)\b", q):
+        return "list"
+    return None
 
 
 def _append_explicit_today(text: str, query: str) -> str:
@@ -113,17 +113,42 @@ def _append_explicit_today(text: str, query: str) -> str:
     if "today" not in base.lower():
         return f"{base} This is for today.".strip()
     return base
-def _clean_query_for_fallback(query: str) -> str:
-    """Strip command prefixes and common suffixes to isolate the user's core request context."""
-    q = (query or "").lower()
-    # Remove common prefixes
-    q = _re.sub(r"^(?:show me all|list all|find all|get all|search for|show me|list|find|get|give me|tell me about|how many|when was|is there any|do you have|where is|what is)\s+", "", q)
-    # Remove trailing question marks and common suffixes
-    q = _re.sub(r"\s+(?:located|completed|done|finished|available|status|count|total)\??$", "", q)
-    q = _re.sub(r"\?$", "", q)
-    # Remove leading filler words
-    q = _re.sub(r"^(?:all|any|every|the|a|an)\s+", "", q).strip()
-    return q
+
+
+def _enrich_entity_from_args(entity: str, args: dict) -> str:
+    """Append filter context to entity label for empty-result messages."""
+    if not args:
+        return entity
+    if args.get("keyword"):
+        entity = f"{entity} matching '{args.get('keyword')}'"
+    for key, label in (
+        ("complaint_no", "complaint"),
+        ("asset_tag_no", "asset tag"),
+        ("work_order", "work order"),
+        ("asset_type", "type"),
+        ("building", "building"),
+        ("floor", "floor"),
+        ("locality", "locality"),
+        ("division", "division"),
+        ("discipline", "discipline"),
+        ("trade_group", "trade group"),
+        ("status", "status"),
+        ("priority", "priority"),
+        ("condition", "condition"),
+        ("tech", "technician"),
+        ("category", "category"),
+        ("contract", "contract"),
+        ("make", "make"),
+        ("model", "model"),
+        ("serial_no", "serial number"),
+    ):
+        if args.get(key):
+            entity = f"{entity} ({label} '{args.get(key)}')"
+    if args.get("is_snagged"):
+        entity = f"snagged {entity}"
+    if args.get("is_scraped"):
+        entity = f"scraped {entity}"
+    return entity
 
 
 class LangChainService:
@@ -141,7 +166,8 @@ class LangChainService:
                 "FA":     FA,
                 "SB":     SB,
             }
-            logger.info("🚀 LangChainService initialized with ASSETS, PPM, BDM tools")
+            self._last_search_context = None
+            logger.info("🚀 LangChainService initialized with ASSETS, PPM, BDM, FA, SB tools")
         except Exception as e:
             logger.error(f"❌ LangChainService init failed: {e}", exc_info=True)
             raise
@@ -163,6 +189,21 @@ class LangChainService:
             f"| output_tokens={self._total_output_tokens} "
             f"| total_tokens={self._total_tokens}"
         )
+
+    @staticmethod
+    def _entity_label_from_tool(tool_name: str) -> str:
+        t = (tool_name or "").upper()
+        if "ASSET" in t:
+            return "assets"
+        if "PPM" in t:
+            return "PPM work orders"
+        if "BDM" in t:
+            return "BDM complaints"
+        if "FA" in t:
+            return "FA complaints"
+        if "SB" in t:
+            return "SB work orders"
+        return "records"
 
     def _get_content_str(self, msg) -> str:
         if not msg:
@@ -231,7 +272,8 @@ class LangChainService:
                 is_aggregate_query: bool,
                 user_query: str,
                 display_count: int,
-                p_list_for_model: list
+                p_list_for_model: list,
+                search_context: dict | None = None,
             ) -> str:
                 """
                 Build the prompt for final model call.
@@ -240,11 +282,11 @@ class LangChainService:
                                 followed by a question asking if user wants the table
                 """
                 if is_count_query:
+                    match_hint = search_context_prompt_block(search_context)
                     return (
-                        "Use the above tool results and give the final answer. "
-                        "Reply in one crisp and friendly sentence using the total_count. "
-                        "Include what was asked (e.g. 'There are X open complaints.'). "
-                        "Do not render any table."
+                        "Use the above tool results. Reply in one crisp, friendly sentence using total_count. "
+                        "Do not render a table."
+                        + (match_hint if match_hint else "")
                     )
 
                 elif is_aggregate_query:
@@ -270,10 +312,12 @@ class LangChainService:
                         f"USER QUERY: {user_query}\n"
                         f"TOTAL RECORDS: {display_count}\n"
                         f"DISPLAYED RECORDS: {len(p_list_for_model)}\n"
-                        f"DATA PREVIEW: {p_list_for_model}\n\n"
+                        f"DATA PREVIEW: {p_list_for_model}\n"
+                        f"{search_context_prompt_block(search_context)}"
                         "TASK:\n"
                         "Act as a technical building analyst. Summarize the findings in 2-3 friendly, grammatically professional sentences.\n"
                         "PRIMARY GOAL: You MUST directly and specifically answer the user's query or specific comparison/question using the DATA PREVIEW. If the user asks for specific items, locations, or statuses, focus your summary directly on those items first.\n"
+                        "If MATCH CONTEXT is provided, add one short sentence with field names and counts only (same style as summary_line).\n"
                         "SECONDARY GOAL: Focus on synthesizing patterns—like shared locations, identical statuses, or equipment types—rather than listing items one by one.\n"
                         "STRICT RULES:\n"
                         "1. Do NOT start with 'Here are' or 'Here is'.\n"
@@ -307,8 +351,6 @@ class LangChainService:
             self._total_output_tokens = 0
             self._total_tokens        = 0
             
-            fallback_applied = None
-            
             # ── Get current user query for summary log ───────────────────────
             current_user_query = ""
             for m in reversed(messages):
@@ -317,8 +359,6 @@ class LangChainService:
                     break
 
             # ── AMBIGUITY PRE-CHECK (runs before model, before lc_memory influence) ──
-            import re as _re
-
             _q = current_user_query.lower()
 
             # complaint ambiguity check
@@ -438,59 +478,6 @@ class LangChainService:
                         if args.get("date_to") is None and inferred_to is not None:
                             args["date_to"] = inferred_to
 
-                        # ── CONFIDENCE CHECK STEP ──────────────────────────────────────────
-                        _SKIP_CONFIDENCE_FIELDS = {
-                            "user_id", "user_name", "offset", "limit", "is_aggregate",
-                            "group_by_columns", "aggregate_function", "date_from", "date_to",
-                            "comp_from", "comp_to", "sla_min", "sla_max", "completed_from",
-                            "completed_to", "keyword"
-                        }
-                        _fields_to_check = {
-                            k: v for k, v in args.items()
-                            if k not in _SKIP_CONFIDENCE_FIELDS
-                            and v is not None
-                            and isinstance(v, str)
-                        }
-                        if _fields_to_check:
-                            _schema_props = {}
-                            if hasattr(tool_fn, "args_schema") and tool_fn.args_schema:
-                                try:
-                                    _schema_props = tool_fn.args_schema.schema().get("properties", {})
-                                except Exception:
-                                    pass
-
-                            _mappings_str = ""
-                            for k, v in _fields_to_check.items():
-                                _desc = _schema_props.get(k, {}).get("description", "No description available")
-                                _mappings_str += f"- Field: '{k}'\n  Value: \"{v}\"\n  Schema Rule: {_desc}\n\n"
-
-                            _conf_prompt = (
-                                f"The user asked: \"{user_query}\"\n"
-                                f"The following values were mapped to tool fields.\n"
-                                f"Rate confidence (0-10) that each value truly belongs to that field based STRICTLY on the schema rules and examples provided.\n\n"
-                                f"Mappings:\n"
-                                f"{_mappings_str}"
-                                f"Respond ONLY with a valid JSON object. No explanation. Example:\n"
-                                + '{"floor": {"value": "Ground Floor", "confidence": 9}, "building": {"value": "Royal Pavilion", "confidence": 8}}'
-                            )
-                            _conf_msg = self.model.invoke([HumanMessage(content=_conf_prompt)])
-                            self._accumulate_tokens(_conf_msg)
-                            _conf_raw = self._get_content_str(_conf_msg).strip()
-                            try:
-                                _conf_raw_clean = _re.sub(r"```(?:json)?", "", _conf_raw).strip().strip("`").strip()
-                                _conf_data = json.loads(_conf_raw_clean)
-                                for _field, _info in _conf_data.items():
-                                    _score = _info.get("confidence", 10)
-                                    _value = _info.get("value", args.get(_field, ""))
-                                    if _score < 7:
-                                        logger.info("🎯 Confidence | %s='%s' score=%s → LOW → dropped", _field, _value, _score)
-                                        args.pop(_field, None)
-                                    else:
-                                        logger.info("🎯 Confidence | %s='%s' score=%s → OK → kept", _field, _value, _score)
-                            except Exception as _ce:
-                                logger.warning("⚠️ Confidence check parse failed: %s | raw=%s", _ce, _conf_raw[:120])
-                        # ── END CONFIDENCE CHECK ───────────────────────────────────────────
-
                         try:
                             tool_result = tool_fn.invoke(dict(args))
                             logger.info("✅ Multi-tool call succeeded: %s", tool_name)
@@ -511,6 +498,14 @@ class LangChainService:
                         else:
                             p_list = parsed if isinstance(parsed, list) else []
 
+                        ds_search_context = None
+                        if isinstance(parsed, dict):
+                            ds_search_context = extract_from_tool_response(
+                                parsed,
+                                keyword_used=args.get("keyword"),
+                                entity=self._entity_label_from_tool(tool_name),
+                            )
+
                         display_count = len(p_list)
                         if p_list and isinstance(p_list[0], dict):
                             for key in ("total_count", "total_count_over", "full_count", "overall_count"):
@@ -528,13 +523,16 @@ class LangChainService:
                             ]
                             friendly_name = f"{friendly_name} by {', '.join(formatted_cols)}"
 
+                        _tm_payload: dict = {
+                            "dataset_name": friendly_name,
+                            "message": f"{display_count} records found",
+                            "records": p_list[:25],
+                        }
+                        if ds_search_context:
+                            _tm_payload["search_context"] = ds_search_context
                         messages.append(
                             ToolMessage(
-                                content=json.dumps({
-                                    "dataset_name": friendly_name,
-                                    "message": f"{display_count} records found",
-                                    "records": p_list[:25]
-                                }),
+                                content=json.dumps(_tm_payload),
                                 tool_call_id=tool_call["id"]
                             )
                         )
@@ -543,6 +541,7 @@ class LangChainService:
                             "friendly_name": friendly_name,
                             "p_list": p_list,
                             "display_count": display_count,
+                            "search_context": ds_search_context,
                         })
 
                     # No data at all → short-circuit
@@ -555,20 +554,25 @@ class LangChainService:
                     # frontend will render the tables separately — it must write only
                     # a concise plain-text summary, never reproduce table markup.
                     multi_table_system_prompt = SystemMessage(content=(
-                        "You are summarising a multi-dataset query result. "
-                        "The frontend will render each dataset as a separate interactive table automatically. "
-                        "Your ONLY job is to write 2-3 friendly sentences that tell the user what was found "
-                        "(mention each dataset name and its record count). "
-                        "Do NOT include any markdown tables, HTML, bullet lists, or raw data. "
-                        "Keep your response short, plain, and conversational."
+                        "Summarise multi-dataset tool results in 2-3 friendly sentences. "
+                        "Name each dataset and its record count. "
+                        "If match context is given, one short phrase per dataset with field names and counts. "
+                        "No tables, HTML, bullets, or raw rows."
                     ))
 
                     summary_messages = [multi_table_system_prompt] + messages[:]
+                    _multi_sc_lines = []
+                    for t in executed_tools:
+                        line = f"- {t['friendly_name']}: {t['display_count']} records"
+                        sc = t.get("search_context")
+                        if sc and sc.get("summary_line"):
+                            line += f" ({sc['summary_line']})"
+                        _multi_sc_lines.append(line)
                     summary_messages.append(HumanMessage(content=(
                         f"The user asked: '{user_query}'.\n"
                         "Datasets retrieved:\n" +
-                        "\n".join(f"- {t['friendly_name']}: {t['display_count']} records" for t in executed_tools) +
-                        "\n\nWrite your 2-3 sentence summary now."
+                        "\n".join(_multi_sc_lines) +
+                        "\n\nWrite your 2-3 sentence summary now. If match counts are provided, one short sentence with field names and counts only."
                     )))
 
                     summary_ai_msg = self.model.invoke(summary_messages)
@@ -580,7 +584,11 @@ class LangChainService:
                         "type": "multiple_datasets",
                         "context_summary": context_summary,
                         "datasets": [
-                            {"name": t["friendly_name"], "records": t["p_list"]}
+                            {
+                                "name": t["friendly_name"],
+                                "records": t["p_list"],
+                                "search_context": t.get("search_context"),
+                            }
                             for t in executed_tools
                         ]
                     })
@@ -640,58 +648,7 @@ class LangChainService:
                     if args.get("date_to") is None and inferred_to is not None:
                         args["date_to"] = inferred_to
 
-                    # ── CONFIDENCE CHECK STEP (SINGLE TOOL) ───────────────────────────────
-                    _SKIP_CONF = {
-                        "user_id", "user_name", "offset", "limit", "is_aggregate",
-                        "group_by_columns", "aggregate_function", "date_from", "date_to",
-                        "comp_from", "comp_to", "sla_min", "sla_max", "completed_from",
-                        "completed_to", "keyword"
-                    }
-                    _fields_to_check = {
-                        k: v for k, v in args.items()
-                        if k not in _SKIP_CONF
-                        and v is not None
-                        and isinstance(v, str)
-                    }
-                    if _fields_to_check:
-                        _schema_props = {}
-                        if hasattr(tool_fn, "args_schema") and tool_fn.args_schema:
-                            try:
-                                _schema_props = tool_fn.args_schema.schema().get("properties", {})
-                            except Exception:
-                                pass
-
-                        _mappings_str = ""
-                        for k, v in _fields_to_check.items():
-                            _desc = _schema_props.get(k, {}).get("description", "No description available")
-                            _mappings_str += f"- Field: '{k}'\n  Value: \"{v}\"\n  Schema Rule: {_desc}\n\n"
-
-                        _conf_prompt = (
-                            f"The user asked: \"{user_query}\"\n"
-                            f"The following values were mapped to tool fields.\n"
-                            f"Rate confidence (0-10) that each value truly belongs to that field based STRICTLY on the schema rules and examples provided.\n\n"
-                            f"Mappings:\n"
-                            f"{_mappings_str}"
-                            f"Respond ONLY with a valid JSON object. No explanation. Example:\n"
-                            + '{"status": {"value": "Offline", "confidence": 9}, "floor": {"value": "Ground Floor", "confidence": 8}}'
-                        )
-                        _conf_msg = self.model.invoke([HumanMessage(content=_conf_prompt)])
-                        self._accumulate_tokens(_conf_msg)
-                        _conf_raw = self._get_content_str(_conf_msg).strip()
-                        try:
-                            _conf_raw_clean = _re.sub(r"```(?:json)?", "", _conf_raw).strip().strip("`").strip()
-                            _conf_data = json.loads(_conf_raw_clean)
-                            for _field, _info in _conf_data.items():
-                                _score = _info.get("confidence", 10)
-                                _value = _info.get("value", args.get(_field, ""))
-                                if _score < 7:
-                                    logger.info("🎯 Confidence | %s='%s' score=%s → LOW → dropped", _field, _value, _score)
-                                    args.pop(_field, None)
-                                else:
-                                    logger.info("🎯 Confidence | %s='%s' score=%s → OK → kept", _field, _value, _score)
-                        except Exception as _ce:
-                            logger.warning("⚠️ Confidence check parse failed: %s | raw=%s", _ce, _conf_raw[:120])
-                    # ── END CONFIDENCE CHECK ───────────────────────────────────────────────
+                    search_context = None
 
                     try:
                         tool_result = tool_fn.invoke(dict(args))
@@ -716,17 +673,29 @@ class LangChainService:
 
                     # Extract p_list and p_count from API response shape
                     if isinstance(parsed, dict):
-                        if parsed.get("fallback_applied"):
-                            fallback_applied = parsed.get("fallback_applied")
                         if "p_list" in parsed:
                             p_count = parsed.get("p_count", 0)
                             p_list = parsed.get("p_list", [])
                         else:
                             p_list = list(parsed.values())
                             p_count = len(p_list)
+                        search_context = extract_from_tool_response(
+                            parsed,
+                            keyword_used=args.get("keyword"),
+                            entity=self._entity_label_from_tool(tool_name),
+                        )
+                        self._last_search_context = search_context
+                        if search_context:
+                            logger.info(
+                                "🔍 Match context | mode=%s | summary=%s",
+                                search_context.get("search_mode")
+                                or ("keyword" if search_context.get("keyword") else "?"),
+                                (search_context.get("summary_line") or "")[:120],
+                            )
                     else:
                         p_list = parsed if isinstance(parsed, list) else []
                         p_count = len(p_list)
+                        self._last_search_context = None
 
                     # For count queries: SP may return total in rows (COUNT(*) OVER ()) — prefer that
                     
@@ -763,61 +732,11 @@ class LangChainService:
                         logger.info("📊 No records found for tool %s", tool_name)
                         self._log_query_summary(current_user_query)
                         
-                        # 1. Dynamically identify the subject using the LLM (no hardcoding)
-                        subject_prompt = f"Identify the main subject of this query in 1-2 words (e.g., 'assets', 'complaints', 'work orders'): '{user_query}'"
-                        subject_res = self.model.invoke([HumanMessage(content=subject_prompt)])
-                        entity = self._get_content_str(subject_res).strip().lower()
-                        if not entity or len(entity) > 30: # Safety fallback
-                             entity = tool_name.lower()
-                        
-                        # 2. Add extra detail to the entity name (Cumulative logic for better detail)
-                        if args:
-                            if args.get("keyword"):
-                                entity = f"{entity} matching '{args.get('keyword')}'"
-                            if args.get("complaint_no"):
-                                entity = f"{entity} '{args.get('complaint_no')}'"
-                            if args.get("asset_tag_no"):
-                                entity = f"{entity} '{args.get('asset_tag_no')}'"
-                            if args.get("work_order"):
-                                entity = f"{entity} '{args.get('work_order')}'"
-                            if args.get("asset_type"):
-                                entity = f"{entity} of type '{args.get('asset_type')}'"
-                            if args.get("building"):
-                                entity = f"{entity} in '{args.get('building')}'"
-                            if args.get("floor"):
-                                entity = f"{entity} on '{args.get('floor')}'"
-                            if args.get("locality"):
-                                entity = f"{entity} in locality '{args.get('locality')}'"
-                            if args.get("division"):
-                                entity = f"{entity} for division '{args.get('division')}'"
-                            if args.get("discipline"):
-                                entity = f"{entity} for discipline '{args.get('discipline')}'"
-                            if args.get("trade_group"):
-                                entity = f"{entity} in trade group '{args.get('trade_group')}'"
-                            if args.get("status"):
-                                entity = f"{entity} with status '{args.get('status')}'"
-                            if args.get("priority"):
-                                entity = f"{entity} with priority '{args.get('priority')}'"
-                            if args.get("condition"):
-                                entity = f"{entity} in '{args.get('condition')}' condition"
-                            if args.get("tech"):
-                                entity = f"{entity} assigned to '{args.get('tech')}'"
-                            if args.get("category"):
-                                entity = f"{entity} in category '{args.get('category')}'"
-                            if args.get("contract"):
-                                entity = f"{entity} under contract '{args.get('contract')}'"
-                            if args.get("make"):
-                                entity = f"{entity} made by '{args.get('make')}'"
-                            if args.get("model"):
-                                entity = f"{entity} model '{args.get('model')}'"
-                            if args.get("serial_no"):
-                                entity = f"{entity} with serial number '{args.get('serial_no')}'"
-                            if args.get("is_snagged"):
-                                entity = f"snagged {entity}"
-                            if args.get("is_scraped"):
-                                entity = f"scraped {entity}"
-                        
-                        # 4. Extract time context
+                        entity = _enrich_entity_from_args(
+                            self._entity_label_from_tool(tool_name), args
+                        )
+
+                        # Extract time context
                         time_kw, _ = extract_date_from_query(user_query)
                         time_context = f" for {time_kw}" if time_kw else ""
                                 
@@ -831,7 +750,6 @@ class LangChainService:
                     #  call 2 -updated from 2 intents (count/list) to 3 intents (count/aggregate/list)
                     # ── Build combined query using previous human message for intent context ──
                     # ── Build combined query ONLY if previous AI response was a clarification ──
-                    import re as _re
                     clarification_markers = ["do you mean", "please clarify"]
                     previous_ai_was_clarification = False
                     ai_messages_list = [m for m in messages if isinstance(m, AIMessage)]
@@ -854,38 +772,33 @@ class LangChainService:
                         combined_query_for_intent = user_query
                         logger.info(f"🔍 Intent classification (normal) | query='{combined_query_for_intent}'")
 
-                    intent_msg = self.model.invoke([
-                        HumanMessage(content=f"""
-                        Classify this user query into one of three intents:
-                        - "count"     → user wants ONLY a single total number
-                                        (e.g. "how many assets exist?", "total complaints count", "how many complaints are open?", "get the total count")
-                        - "aggregate" → user wants a grouped summary or breakdown by category
-                                        (e.g. "assets per division?", "breakdown by building",
-                                        "complaints by priority", "summarize by status",
-                                        "group by floor and building", "compare by make or model")
-                        - "list"      → user wants full records shown as a table
-                                        (e.g. "show me assets", "list complaints", "get PPM records")
-                        IMPORTANT RULES:
-                        - "how many per X" or "count by X" or "breakdown by X" = aggregate (NOT count)
-                        - IF the query explicitly asks for a count/number (e.g., "get the count", "show total", "fetch how many"), it MUST be classified as count (NOT list).
-                        - "how many total" or "how many exist" or "how many" with no grouping column = count
-                        - "show", "list", "display", "get", "fetch" = list (ONLY if there are no counting words like "count", "how many", "total")
-                        - "give me X", "show X", "get X" where X is a number = list (NOT count)
-                          The number means a limit — user wants to SEE records, not count them.
-
-                        Query: "{combined_query_for_intent}"
-
-                        Reply with ONLY one word: count or aggregate or list
-                        """)
-                    ])
-                    self._accumulate_tokens(intent_msg)
-
-                    
-                    # is_aggregate_query is the new 3rd intent
                     if not tool_was_aggregate:
-                        intent = self._get_content_str(intent_msg).strip().lower()
-                        is_count_query     = intent == "count"
-                        is_aggregate_query = intent == "aggregate"
+                        inferred_intent = _infer_intent_from_query(combined_query_for_intent)
+                        if inferred_intent:
+                            intent = inferred_intent
+                            is_count_query = intent == "count"
+                            is_aggregate_query = intent == "aggregate"
+                            logger.info("🔍 Intent inferred (no LLM) | intent=%s", intent)
+                        else:
+                            intent_msg = self.model.invoke([
+                                HumanMessage(content=f"""
+                                Classify this user query into one of three intents:
+                                - "count"     → user wants ONLY a single total number
+                                - "aggregate" → user wants a grouped summary or breakdown by category
+                                - "list"      → user wants full records shown as a table
+                                Rules: "how many per X" / "breakdown by X" = aggregate;
+                                "how many total" with no grouping = count;
+                                "show/list/get" without counting words = list.
+
+                                Query: "{combined_query_for_intent}"
+
+                                Reply with ONLY one word: count or aggregate or list
+                                """)
+                            ])
+                            self._accumulate_tokens(intent_msg)
+                            intent = self._get_content_str(intent_msg).strip().lower()
+                            is_count_query = intent == "count"
+                            is_aggregate_query = intent == "aggregate"
                     else:
                         # intent already set above by tool_has_groupby check — do NOT override
                         intent = "count" if is_count_query else "aggregate"
@@ -918,60 +831,82 @@ class LangChainService:
                                 tool_call_id=tool_call["id"]
                             )
                         )
+                        _large_ctx_hint = ""
+                        if search_context and search_context.get("summary_line"):
+                            _large_ctx_hint = (
+                                f" Include one sentence like: {search_context['summary_line']}"
+                            )
                         messages.append(
                             HumanMessage(content=(
                                 f"The user asked: '{user_query}'. "
-                                f"The system found {display_count} records. "
-                                "Write 1 friendly sentence confirming what was found and the total count. "
-                                "Do NOT list individual records. Keep it concise."
+                                f"The system found {display_count} records."
+                                f"{_large_ctx_hint} "
+                                "Write 1-2 friendly sentences. Do NOT list individual records. Keep it concise."
                             ))
                         )
                          # CALL 3 — Large dataset context call (records=[] so should be small)
                         context_ai_msg = self.model.invoke(messages)
                         self._accumulate_tokens(context_ai_msg)
                         context_summary = self._get_content_str(context_ai_msg) or f"Found {display_count} records for your request."
-                        # context_summary = _append_default_7days(context_summary, user_query)
-
                         context_summary = _append_explicit_today(context_summary, user_query)
+                        context_summary = append_match_explanation(context_summary, search_context)
                         logger.info("✅ Context summary generated for large dataset | context='%s'", context_summary[:80])
 
-                        if fallback_applied:
-                            fld = fallback_applied.get("field", "")
-                            val = fallback_applied.get("value", "")
-                            logger.info(f"🔄 Fallback applied (large dataset): {fld} = {val}")
-
                         large_dataset_response = json.dumps({
+                            "type": "large_dataset",
                             "context_summary": context_summary,
-                            "records": p_list # full raw data sent directly to frontend
+                            "records": p_list,
+                            "search_context": search_context,
                         })
                         logger.info("✅ Large dataset JSON prepared: %d records", len(p_list))
 
                         self._log_query_summary(current_user_query)
                         return large_dataset_response, context_summary, messages
 
+                    _tool_payload = {
+                        "message": f"{display_count} records found",
+                        "records_returned": len(p_list),
+                        "total_count": display_count,
+                        "displayed_count": len(p_list_for_model),
+                        "records": [] if is_count_query else p_list_for_model,
+                    }
+                    if search_context:
+                        _tool_payload["search_context"] = search_context
                     messages.append(
                         ToolMessage(
-                            content=json.dumps({
-                                "message": f"{display_count} records found",
-                                "records_returned": len(p_list),
-                                "total_count": display_count,
-                                "displayed_count": len(p_list_for_model),
-            
-                                "records": [] if is_count_query else p_list_for_model
-                            }),
+                            content=json.dumps(_tool_payload),
                             tool_call_id=tool_call["id"]
                         )
                     )
 
-                #  STEP 3 — Call model again to generate final answe
-                if is_count_query:
+                #  STEP 3 — Call model again to generate final answer
+                _entity_label = self._entity_label_from_tool(tool_name)
+                if search_context:
+                    search_context["total_records"] = display_count
+
+                _use_keyword_count_reply = bool(
+                    is_count_query
+                    and search_context
+                    and (
+                        search_context.get("keyword")
+                        or search_context.get("search_mode") == "field_filter"
+                    )
+                )
+
+                if _use_keyword_count_reply:
+                    logger.info(
+                        "🔢 Count + %s — using polished single-sentence reply",
+                        search_context.get("search_mode", "keyword"),
+                    )
+                elif is_count_query:
                     logger.info("🔢 Sending count-only prompt to model")
                     messages.append(HumanMessage(content=self._build_final_prompt(
                         is_count_query,
                         is_aggregate_query,
                         user_query,
                         display_count,
-                        p_list_for_model
+                        p_list_for_model,
+                        search_context,
                     )))
 
                 elif is_aggregate_query:
@@ -981,7 +916,8 @@ class LangChainService:
                     is_aggregate_query,
                     user_query,
                     display_count,
-                    p_list_for_model
+                    p_list_for_model,
+                    search_context,
                 )))
 
                 else:
@@ -991,23 +927,31 @@ class LangChainService:
                     is_aggregate_query,
                     user_query,
                     display_count,
-                    p_list_for_model
+                    p_list_for_model,
+                    search_context,
                 )))
 
-                 # CALL 4 — Final answer generation
-                final_ai_msg = self.model.invoke(messages)
-                self._accumulate_tokens(final_ai_msg)
-                final_content = self._get_content_str(final_ai_msg)
+                # CALL 4 — Final answer generation
+                if _use_keyword_count_reply:
+                    final_content = format_keyword_count_reply(
+                        search_context, entity=_entity_label
+                    )
+                else:
+                    final_ai_msg = self.model.invoke(messages)
+                    self._accumulate_tokens(final_ai_msg)
+                    final_content = self._get_content_str(final_ai_msg)
 
-                # FINAL SAFETY NET (NO EMPTY STRING EVER)
-
-                if not final_content or str(final_content).strip() == "":
-                    final_content = "No data records were found matching your request."
-                    logger.info("final_ai_content is empty")
+                    if not final_content or str(final_content).strip() == "":
+                        final_content = "No data records were found matching your request."
+                        logger.info("final_ai_content is empty")
 
                 # aggregate context summary same as count (one sentence)
                 # because aggregate answer starts with a summary sentence
                 if is_count_query:
+                    if not _use_keyword_count_reply:
+                        final_content = append_match_explanation(
+                            final_content, search_context, entity=_entity_label
+                        )
                     context_summary = final_content
                     logger.info("🧠 Count query context_summary='%s'", context_summary[:80])
                 elif is_aggregate_query:
@@ -1029,11 +973,7 @@ class LangChainService:
                         # ── Only build graph if tool actually ran in aggregate mode ──
                         if tool_was_aggregate and is_graph:  # ← ADD is_graph CHECK
                             logger.info("📊 [GRAPH] Wrapping aggregate as graph JSON | records=%d", len(p_list_for_model))
-                            graph_context = f"Here is the graph result for your query."
-                            if fallback_applied:
-                                fld = fallback_applied.get("field", "")
-                                val = fallback_applied.get("value", "")
-                                logger.info(f"🔄 Fallback applied (graph): {fld} = {val}")
+                            graph_context = "Here is the graph result for your query."
                             graph_response = self.build_graph_response(graph_context, p_list_for_model)
                             self._log_query_summary(current_user_query)
                             return graph_response, context_summary, messages
@@ -1057,6 +997,8 @@ class LangChainService:
                             summary_lines.append(stripped)
                    
                     context_summary = " ".join(summary_lines) if summary_lines else f"Found {display_count} records for your request."
+                    final_content = append_match_explanation(final_content, search_context)
+                    context_summary = append_match_explanation(context_summary, search_context)
                     logger.info("🧠 List query context_summary='%s'", context_summary[:80])
 
                 # ── Stash table data for two-step yes/no flow ──
@@ -1089,15 +1031,8 @@ class LangChainService:
                         f"**Tip:** Try modifying your question by adding a category (for example: by type, date, or status) so that I can generate a meaningful chart"
 
                     )
-                # final_content = _append_default_7days(final_content, user_query)
-                # context_summary = _append_default_7days(context_summary, user_query)
                 final_content = _append_explicit_today(final_content, user_query)
                 context_summary = _append_explicit_today(context_summary, user_query)
-
-                if fallback_applied:
-                    fld = fallback_applied.get("field", "")
-                    val = fallback_applied.get("value", "")
-                    logger.info(f"🔄 Fallback applied (normal): {fld} = {val}")
 
                 return final_content, context_summary, messages
 

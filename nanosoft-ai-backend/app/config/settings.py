@@ -15,7 +15,7 @@ PG_PASSWORD = os.getenv("PG_PASSWORD", "testpass")
 
 # Google AI
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "fake-api-key-for-testing")  
-GOOGLE_AI_MODEL = os.getenv("GOOGLE_AI_MODEL", "gemini-1.5-flash")  
+GOOGLE_AI_MODEL = os.getenv("GOOGLE_AI_MODEL", "gemini-2.5-flash").strip()  
 
 # App Config
 MAX_HISTORY = int(os.getenv("MAX_HISTORY", "5"))

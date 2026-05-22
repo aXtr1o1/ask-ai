@@ -410,12 +410,16 @@ async def ws_chat_endpoint(websocket: WebSocket):
 
                         if reply_table in YES_WORDS:
                             pending_ctx = session_data_audio.get("pending_table_context") or _build_table_context("", pending_transcription)
+                            pending_search_context = session_data_audio.get("pending_search_context")
                             table_response = json.dumps({
+                                "type": "large_dataset",
                                 "context_summary": pending_ctx,
-                                "records": pending_table_audio
+                                "records": pending_table_audio,
+                                "search_context": pending_search_context,
                             })
                             memory_store[session_id]["pending_table"] = None
                             memory_store[session_id]["pending_table_context"] = None
+                            memory_store[session_id]["pending_search_context"] = None
 
                             await websocket.send_text(json.dumps({
                                 "session_id": session_id,
@@ -702,12 +706,16 @@ async def ws_chat_endpoint(websocket: WebSocket):
 
                     if reply in YES_WORDS:
                         pending_ctx = session_data.get("pending_table_context") or _build_table_context("", user_query)
+                        pending_search_context = session_data.get("pending_search_context")
                         table_response = json.dumps({
+                            "type": "large_dataset",
                             "context_summary": pending_ctx,
-                            "records": pending_table
+                            "records": pending_table,
+                            "search_context": pending_search_context,
                         })
                         memory_store[session_id]["pending_table"] = None
                         memory_store[session_id]["pending_table_context"] = None
+                        memory_store[session_id]["pending_search_context"] = None
 
                         await websocket.send_text(json.dumps({
                             "session_id": session_id,
@@ -980,7 +988,11 @@ async def ws_chat_endpoint(websocket: WebSocket):
             if pending_table:
                 memory_store[session_id]["pending_table"] = pending_table
                 memory_store[session_id]["pending_table_context"] = _build_table_context(context_summary, query_to_store)
+                memory_store[session_id]["pending_search_context"] = getattr(
+                    langchain_service, "_last_search_context", None
+                )
                 langchain_service._last_pending_table = None  # clear after stashing
+                langchain_service._last_search_context = None
                 logger.info(f"📋 Stashed pending_table | records={len(pending_table)} | context_saved=True")
 
             memory_store[session_id]["history"].append({

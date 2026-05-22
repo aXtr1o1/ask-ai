@@ -206,10 +206,34 @@ const HIDDEN_COLUMNS = new Set([
   'updatedby',
   'rmccmcomplaintidpk',
   'filepath',
+  '_matched_fields',
+  'matchedfields',
 ]);
 
 function isHiddenColumn(col: string): boolean {
   return HIDDEN_COLUMNS.has(col.toLowerCase().replace(/[\s_]/g, ""));
+}
+
+type SearchContext = {
+  summary_line?: string;
+  total_records?: number;
+  field_match_counts_friendly?: Record<string, number>;
+};
+
+function buildSearchContextBanner(sc: SearchContext | null | undefined): string {
+  if (!sc) return "";
+
+  if (sc.summary_line) {
+    return `<div class="keyword-search-banner" role="status">${esc(sc.summary_line)}</div>`;
+  }
+
+  const counts = sc.field_match_counts_friendly;
+  if (!counts || Object.keys(counts).length === 0) return "";
+
+  const total = sc.total_records ?? 0;
+  const parts = Object.entries(counts).map(([field, n]) => `${esc(field)}: ${n}`);
+  const line = `Found ${total} record${total !== 1 ? "s" : ""} from ${parts.join(", ")}.`;
+  return `<div class="keyword-search-banner" role="status">${line}</div>`;
 }
 
 // ── Status badge renderer ─────────────────────────────────────────────────────
@@ -317,6 +341,8 @@ function renderLargeDataset(text: string): string | null {
     "createdby",
     "updatedby",
     "filepath",
+    "_matched_fields",
+    "matchedfields",
   ]);
 
   function isHiddenColumn(col: string) {
@@ -398,9 +424,10 @@ function renderLargeDataset(text: string): string | null {
   }
 
   const context = parsed.context_summary || `Dataset contains ${records.length} records`;
+  const searchBanner = buildSearchContextBanner(parsed.search_context as SearchContext);
 
   if (!records.length) {
-    return `<div class="large-dataset-context">${escapeHTML(context)}</div>`;
+    return `${searchBanner}<div class="large-dataset-context">${escapeHTML(context)}</div>`;
   }
 
   // ─────────────────────────────────────────
@@ -480,6 +507,7 @@ function renderLargeDataset(text: string): string | null {
   // Final HTML
   // ─────────────────────────────────────────
   const table = `
+  ${searchBanner}
   <div class="large-dataset-context">
     ${escapeHTML(context)}
   </div>
@@ -498,6 +526,7 @@ function renderLargeDataset(text: string): string | null {
 function formatLargeDatasetTable(largeDataData: any): string {
   let records = largeDataData.records || [];
   const context = largeDataData.context_summary || "";
+  const searchBanner = buildSearchContextBanner(largeDataData.search_context as SearchContext);
 
   // Handle case where records might not be an array
   if (!Array.isArray(records)) {
@@ -619,7 +648,7 @@ function formatLargeDatasetTable(largeDataData: any): string {
     : "";
 
 
-  const fullHTML = contextHTML + tableHTML;
+  const fullHTML = searchBanner + contextHTML + tableHTML;
   console.log(` HTML generated - length: ${fullHTML.length}, has table-wrapper: ${fullHTML.includes('large-dataset-wrapper')}`);
   return fullHTML;
 }
@@ -2197,10 +2226,11 @@ export default function Home() {
               if (inner?.type === "multiple_datasets" && Array.isArray(inner?.datasets)) {
                 console.log("📋 [DONE] Multiple datasets response detected — rendering", inner.datasets.length, "tables");
                 multiSummary = inner.context_summary || "Here are the results of your query.";
-                multipleDatasets = inner.datasets.map((ds: { name: string; records: any[] }) => {
+                multipleDatasets = inner.datasets.map((ds: { name: string; records: any[]; search_context?: SearchContext }) => {
                   // Build JSON that renderLargeDataset understands — same pipeline as single table
                   const dsJsonStr = JSON.stringify({
                     context_summary: ds.name,
+                    search_context: ds.search_context,
                     records: (ds.records || []).filter((rec: Record<string, any>) => {
                       // Remove records where all values are null/empty (defensive)
                       return Object.values(rec).some(v => v !== null && v !== undefined && v !== "");
@@ -2645,9 +2675,10 @@ export default function Home() {
           if (inner?.type === "multiple_datasets" && Array.isArray(inner?.datasets)) {
             console.log("📋 [HISTORY] Multiple datasets response detected — rendering tables");
             const multiSummary = inner.context_summary || "Here are the results of your query.";
-            const multipleDatasets = inner.datasets.map((ds: { name: string; records: any[] }) => {
+            const multipleDatasets = inner.datasets.map((ds: { name: string; records: any[]; search_context?: SearchContext }) => {
               const dsJsonStr = JSON.stringify({
                 context_summary: ds.name,
+                search_context: ds.search_context,
                 records: (ds.records || []).filter((rec: Record<string, any>) => {
                   return Object.values(rec).some(v => v !== null && v !== undefined && v !== "");
                 })
