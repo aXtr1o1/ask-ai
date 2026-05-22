@@ -565,8 +565,10 @@ COLUMN VALUE BREAKDOWN: "how many [ColumnName]?" → is_aggregate=True,
 group_by_columns=[column], do NOT set the filter parameter.
 
 IMPORTANT: Only set is_aggregate=True when user mentions a grouping column
-like "per division", "by priority", "each status". If user asks "how many total"
-or "how many complaints exist" with NO grouping column → set is_aggregate=False.
+like "per division", "by priority", "each status", or "BuildingName" breakdown.
+"low count" / "lowest count" = smallest numeric counts — do NOT set priority.
+Only set priority for P1–P4 or explicit "low priority" / "critical".
+If user asks "how many total" with NO grouping column → set is_aggregate=False.
 
 For all normal filter and list queries:
 → is_aggregate = False (default — do not set)
@@ -754,7 +756,8 @@ PARAMETERS:
 - limit, offset: Pagination
  
 AGGREGATE / GROUP BY:
-- is_aggregate=True for "how many FA per division", "breakdown by category", "how many withdrawn audits"
+- is_aggregate=True for "how many FA per division", "breakdown by category", "BuildingName" counts
+- "low count" / "lowest" = smallest counts — do NOT set priority unless user says P4 / low priority
 - group_by_columns: DivisionName, BuildingName, FloorName, LocalityName,
                     PriorityName, RMStageName, RMCategoryName, RMCategorySubName,
                     FrequencyName, ContractName, SpotName,

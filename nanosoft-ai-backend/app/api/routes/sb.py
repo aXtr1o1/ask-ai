@@ -10,6 +10,7 @@ from .query_search_fallback import (
     enrich_with_search_fallback,
     merge_format_response,
 )
+from app.services.tool_payload_validator import validate_aggregate_request
 
 router_sb = APIRouter()
 
@@ -80,6 +81,10 @@ def get_sb(req: SBRequest):
     )
 
     if getattr(req, "is_aggregate", False):
+        try:
+            validate_aggregate_request(True, req.group_by_columns)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
         logger_sb.info("📊 [GET-SB] AGGREGATE MODE → calling sp_sb_aggregate")
         try:
             conn = get_pool()

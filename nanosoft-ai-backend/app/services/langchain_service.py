@@ -16,6 +16,7 @@ from app.services.keyword_match_context import (
     format_keyword_count_reply,
     search_context_prompt_block,
 )
+from app.services.tool_payload_validator import normalize_tool_args
 
 import json
 
@@ -477,6 +478,9 @@ class LangChainService:
                         if args.get("date_to") is None and inferred_to is not None:
                             args["date_to"] = inferred_to
 
+                        args = normalize_tool_args(tool_name, user_query, args)
+                        tool_call["args"] = args
+
                         try:
                             tool_result = tool_fn.invoke(dict(args))
                             logger.info("✅ Multi-tool call succeeded: %s", tool_name)
@@ -647,6 +651,9 @@ class LangChainService:
                         args["date_from"] = inferred_from
                     if args.get("date_to") is None and inferred_to is not None:
                         args["date_to"] = inferred_to
+
+                    args = normalize_tool_args(tool_name, user_query, args)
+                    tool_call["args"] = args
 
                     search_context = None
 
