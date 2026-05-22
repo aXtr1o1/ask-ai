@@ -48,8 +48,8 @@ def extract_date_from_query(query: str):
         return "yesterday", "yesterday"
     elif "today" in q:
         return "today", "today"
-    elif "present" in q or "current" in q or "now" in q:
-        # Treat present/current wording as today's data
+    elif "current" in q or "now" in q:
+        # Treat current/now wording as today's data
         return "today", "today"
     
     # ── Dynamic pattern: X days/weeks/months/years ago/before ──
@@ -91,15 +91,10 @@ def _infer_intent_from_query(query: str) -> str | None:
 def _append_explicit_today(text: str, query: str) -> str:
     """Ensure responses mention the same time wording user asked for."""
     q = (query or "").lower()
-    if not any(k in q for k in ("today", "present", "current", "now")):
+    if not any(k in q for k in ("today", "current", "now")):
         return (text or "").strip()
 
     base = (text or "").strip()
-
-    if "present" in q:
-        if "present" not in base.lower():
-            return f"{base} This is for present data.".strip()
-        return base
 
     if "current" in q:
         if "current" not in base.lower():
@@ -298,6 +293,7 @@ class LangChainService:
                         "Act as a technical building analyst. Write ONLY a 2-4 sentence insight summary.\n"
                         "PRIMARY GOAL: You MUST directly and specifically answer the user's query or specific comparison/question using the tool results. For example, if the user asks to compare specific elements, categories, or floors (e.g., 'compare Ground Floor and First Floor BDM'), you MUST focus directly on those elements, compare their exact counts/values from the data, and explicitly address the comparison.\n"
                         "FALLBACK GOAL: If the user's query is general or does not specify items to compare, summarize the overall distribution, highlighting the highest/most significant values and key trends.\n"
+                        "IMPORTANT: If the user asks for 'highest', 'lowest', 'top', or 'bottom', you MUST explicitly name the specific item(s) and their count in your summary. If there is a massive tie (e.g. 20 items with 1 count), just name 1 or 2 examples.\n"
                         "STRICT RULES:\n"
                         "1. Do NOT get distracted by unrelated data (such as unassigned, null, or other categories) if the user's query targets specific items.\n"
                         "2. Do NOT mention internal database IDs or technical tool names.\n"
@@ -318,6 +314,7 @@ class LangChainService:
                         "TASK:\n"
                         "Act as a technical building analyst. Summarize the findings in 2-3 friendly, grammatically professional sentences.\n"
                         "PRIMARY GOAL: You MUST directly and specifically answer the user's query or specific comparison/question using the DATA PREVIEW. If the user asks for specific items, locations, or statuses, focus your summary directly on those items first.\n"
+                        "IMPORTANT: If the user asks for 'highest', 'lowest', 'top', or 'bottom', you MUST explicitly name the specific item(s) and their count in your summary. If there is a massive tie (e.g. 20 items with 1 count), just name 1 or 2 examples.\n"
                         "If MATCH CONTEXT is provided, add one short sentence with field names and counts only (same style as summary_line).\n"
                         "SECONDARY GOAL: Focus on synthesizing patterns—like shared locations, identical statuses, or equipment types—rather than listing items one by one.\n"
                         "STRICT RULES:\n"
@@ -528,7 +525,7 @@ class LangChainService:
                         _tm_payload: dict = {
                             "dataset_name": friendly_name,
                             "message": f"{display_count} records found",
-                            "records": p_list[:25],
+                            "records": p_list if len(p_list) <= 30 else p_list[:25] + p_list[-10:],
                         }
                         if ds_search_context:
                             _tm_payload["search_context"] = ds_search_context
@@ -559,6 +556,7 @@ class LangChainService:
                         "Summarise multi-dataset tool results in 2-3 friendly sentences. "
                         "Name each dataset and its record count. "
                         "If match context is given, one short phrase per dataset with field names and counts. "
+                        "IMPORTANT: If the user asks for 'highest', 'lowest', 'top', or 'bottom', you MUST explicitly name the specific item(s) and their count in your summary. If there is a massive tie (e.g. 20 items with 1 count), just name 1 or 2 examples.\n"
                         "No tables, HTML, bullets, or raw rows."
                     ))
 
