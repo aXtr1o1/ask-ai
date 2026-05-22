@@ -362,12 +362,12 @@ class LangChainService:
             _q = current_user_query.lower()
 
             # complaint ambiguity check
-            _complaint_ambiguous = bool(_re.search(r'\bcomplaints?\b', _q))
-            _complaint_clear     = bool(_re.search(r'\b(fa|bdm|facility audit|breakdown)\b', _q))
+            _complaint_ambiguous = bool(_re.search(r'\bcomplaints?\b', _q_clean))
+            _complaint_clear     = bool(_re.search(r'\b(fa|bdm|facility audit|breakdown)\b', _q_clean))
 
             # work order ambiguity check
-            _workorder_ambiguous = bool(_re.search(r'\b(work\s*orders?|scheduled|compliance|work\s*order)\b', _q))
-            _workorder_clear     = bool(_re.search(r'\b(ppm|sb|preventive|schedule[\s\-]based)\b', _q))
+            _workorder_ambiguous = bool(_re.search(r'\b(work\s*orders?|scheduled|compliance|work\s*order)\b', _q_clean))
+            _workorder_clear     = bool(_re.search(r'\b(ppm|sb|preventive|schedule[\s\-]based)\b', _q_clean))
 
             if _complaint_ambiguous and not _complaint_clear:
                 logger.info("🔀 Ambiguous complaint query intercepted before model | query='%s'", current_user_query)
@@ -384,6 +384,7 @@ class LangChainService:
                     "Please clarify so I can fetch the correct data."
                 )
                 return clarification, clarification, messages
+
 
             # ── QUERY REWRITING STEP REMOVED ──
             # The original user query is passed directly to the model.
