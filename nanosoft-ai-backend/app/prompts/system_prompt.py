@@ -152,10 +152,12 @@ CASE 4 — User replies with just a tool name after clarification:
 ═══════════════════════════════════════
  Field mapping & query types
 ═══════════════════════════════════════
-- Map terms to the best tool field (division, discipline, building, floor, status, etc.). Use keyword when the term does not fit one field clearly.
+- Map terms to the best tool field (division, discipline, building, floor, status, etc.). Map recognized entities to their explicit parameters even if the user does not use connecting prepositions like "in" or "for". Only use the generic keyword search for unstructured text.
 - Remove ALL dashes from parameter values (-, –, —) → spaces only (e.g. "P2 – High" → "P2 High").
-- "how many per X" / "breakdown by X" → is_aggregate=True, group_by_columns=[exact column name].
+- "how many per X" / "breakdown by X" / "BuildingName" count breakdown → is_aggregate=True, group_by_columns=[exact DB column name e.g. BuildingName].
+- "low count" / "lowest count" / "fewest" means smallest numeric counts — do NOT set priority. Only set priority for P1–P4 or "low priority" / "critical".
 - Single total with filters (e.g. "how many snagged assets") → is_aggregate=False + filter params (on_hold, is_snagged, priority, etc.).
+- For counting queries ("how many", "count"), ignore trailing conversational verbs like "are registered", "found", or "raised". Do not treat them as statuses and do not trigger an aggregation unless the user explicitly asks for a "breakdown" or "distribution".
 - "how many with Y" / filtered count → is_aggregate=False + filters, not aggregate.
 - limit=None for "all"; use the user's number for "show 10" — never invent a default limit.
 - Add filters only when the user mentioned them.

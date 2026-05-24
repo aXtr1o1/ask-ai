@@ -216,7 +216,7 @@ def extract_from_tool_response(
         return build_field_filter_context(
             filter_field=str(ff["field"]),
             filter_value=str(ff["value"]),
-            total_records=0,
+            total_records=int(parsed.get("p_count") or len(parsed.get("p_list") or [])),
             entity=entity,
         )
     return None

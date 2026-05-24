@@ -47,9 +47,9 @@ class AssetsInput(BaseModel):
     date_to: Optional[str] = Field(None, description="End date range. Use YYYY-MM-DD.")
     limit: Optional[int] = Field(default=None, description="Max number of results. Only set if user asks for a specific number. For count queries MUST omit.")
     offset: Optional[int] = Field(default=None, description="Pagination offset. Omit unless requested.")
-    is_aggregate: Optional[bool] = Field(default=False, description="Set True when user asks grouping/breakdown questions like 'how many per division', 'breakdown by building'. For normal filter/list queries leave as False.")
+    is_aggregate: Optional[bool] = Field(default=False, description="Set True ONLY when the user explicitly asks for a distribution or breakdown across a category (e.g., 'breakdown by building', 'complaints per division'). Leave False for simple filtering or total counts.")
     group_by_columns: Optional[List[str]] = Field(default=None, description="List of columns to group by. Only fill when is_aggregate=True. CRITICAL: Do NOT map generic English words to column names. Valid columns: DivisionName, DisciplineName, BuildingName, FloorName, LocalityName, StatusName, ConditionName, PriorityName, AssetTypeName, EquipmentName, MakeName, ModelName, SpotName, TradeGroupName, ServiceAreaName, OnHold, IsSnagged, IsScraped, IsEnablePPM, IsEnableBDM.")
-    aggregate_function: Optional[str] = Field(default=None, description="Aggregation function. COUNT for how many, SUM for total, AVG for average. Only when is_aggregate=True.")
+    aggregate_function: Optional[str] = Field(default=None, description="The mathematical function to apply when grouping data. Use COUNT, SUM, or AVG for grouped distributions. Do not use this field for a simple total count.")
     
 
 
@@ -82,9 +82,9 @@ class PPMInput(BaseModel):
     sla_max: Optional[int] = Field(None, description="Maximum SLADuration. Map if user mentions 'SLA Max'.")
     limit: Optional[int] = Field(default=None, description="Max number of results. Only set if user asks for a specific number. For count queries MUST omit.")
     offset: Optional[int] = Field(default=None, description="Pagination offset. Omit unless requested.")
-    is_aggregate: Optional[bool] = Field(default=False, description="Set True only when user asks grouping or summary questions like 'how many PPM per division', 'breakdown by frequency'. For normal filter/list queries leave as False.")
+    is_aggregate: Optional[bool] = Field(default=False, description="Set True ONLY when the user explicitly asks for a distribution or breakdown across a category (e.g., 'breakdown by frequency', 'PPM per division'). Leave False for simple filtering or total counts.")
     group_by_columns: Optional[List[str]] = Field(default=None, description="List of columns to group by. Only fill when is_aggregate=True. CRITICAL: Do NOT map generic English words to column names. Valid columns: DivisionName, DisciplineName, BuildingName, FloorName, LocalityName, FrequencyName, PPMStatus, PPMStageName, ContractName, SpotName.")
-    aggregate_function: Optional[str] = Field(default=None, description="Aggregation function. COUNT for how many, SUM for total, AVG for average. Only when is_aggregate=True.")
+    aggregate_function: Optional[str] = Field(default=None, description="The mathematical function to apply when grouping data. Use COUNT, SUM, or AVG for grouped distributions. Do not use this field for a simple total count.")
     
 
 
@@ -98,8 +98,13 @@ class BDMInput(BaseModel):
     asset_barcode: Optional[str] = Field(None, description="Barcode of the asset linked to this complaint. Map if user mentions 'Barcode'. Example values: 1731251675376, 1731251675374. Null if no asset is associated.")
     client_wo_no: Optional[str] = Field(None, description="Client work order number. Map if user mentions 'Client WO' or 'ClientWoNo'.")
     status: Optional[str] = Field(None, description="Current status of the BDM complaint or work order. Map if user mentions 'Status' or 'Status Name'. Example values: Open, Closed.")
+<<<<<<< HEAD
     priority: Optional[str] = Field(None, description="Priority level assigned to the complaint. Map if user mentions 'Priority' or 'Urgency Level'. Example values: P1 Critical, P2 High, P3 Medium, P4 Low.")
     stage: Optional[str] = Field(None, description="Current workflow stage of the complaint. Map if user mentions 'Stage' or 'Complaint Stage'. Example values: Staff Yet to be Allocated, Technician Assigned, Preliminary Confirmed & Open, Execution Completed & Closed.")
+=======
+    priority: Optional[str] = Field(None, description="Priority level assigned to the complaint. Map ONLY for P1–P4 or explicit priority/urgency (e.g. P4 Low, low priority). NEVER map 'low count', 'lowest', or 'fewest' to this field. Example values: P1 Critical, P2 High, P3 Medium, P4 Low.")
+    stage: Optional[str] = Field(None, description="Current workflow stage of the complaint. Map if user mentions 'Stage' or 'Complaint Stage'. Example values: Complaint / Service Request Raised, Staff Assigned for Analysis / Job Estimation, Staff Assigned for Work Execution, Complaint / Service Request - Closed.")
+>>>>>>> 6c9cd928f5988e78bbe98f1c6a7e86792845b2d1
     complaint_type: Optional[str] = Field(None, description="Type of complaint raised. Map if user mentions 'Complaint Type' or 'Category'. Example values: Corrective Maintenance, Service Request.")
     complaint_header: Optional[str] = Field(None, description="Complaint header name. Map if user mentions 'Complaint Header' or 'ComplaintHeaderName'.")
     complaint_mode: Optional[str] = Field(None, description="Channel through which the complaint was submitted. Map if user mentions 'Complaint Mode' or 'Reporting Mode'. Example values: By Call, By Community Portal.")
@@ -124,9 +129,9 @@ class BDMInput(BaseModel):
     completed_to: Optional[str] = Field(None, description="Resolution end range (BDMWOCompletedDate). Use YYYY-MM-DD.")
     limit: Optional[int] = Field(default=None, description="Max number of results. Only set if user asks for a specific number. For count queries MUST omit.")
     offset: Optional[int] = Field(default=None, description="Pagination offset. Omit unless requested.")
-    is_aggregate: Optional[bool] = Field(default=False, description="Set True only when user asks grouping or summary questions. For normal filter/list queries leave as False.")
+    is_aggregate: Optional[bool] = Field(default=False, description="Set True ONLY when the user explicitly asks for a distribution or breakdown across a category (e.g., 'breakdown by status', 'complaints per division'). Leave False for simple filtering or total counts.")
     group_by_columns: Optional[List[str]] = Field(default=None, description="Columns to group by. CRITICAL: Do NOT map generic English words to column names. Valid: DivisionName, DisciplineName, BuildingName, FloorName, LocalityName, WoStatus, PriorityName, StageName, ComplaintTypeName, ComplaintModeName, SpotName, ContractName.")
-    aggregate_function: Optional[str] = Field(default=None, description="COUNT for how many, SUM for total, AVG for average. Only when is_aggregate=True.")
+    aggregate_function: Optional[str] = Field(default=None, description="The mathematical function to apply when grouping data. Use COUNT, SUM, or AVG for grouped distributions. Do not use this field for a simple total count.")
     
 class FAInput(BaseModel):
     """Schema for FA tool. Covers Facility Audit scheduled inspection complaints (FacilityAudit table)."""
@@ -135,8 +140,8 @@ class FAInput(BaseModel):
     complaint_no: Optional[str] = Field(None, description="Unique numeric complaint number that identifies this FA record. Map if user mentions a specific complaint number. Example values: 55, 56, 57, 58, 59, 60, 61, 62, 63.")
     complaint_code: Optional[str] = Field(None, description="Internal CCM complaint code assigned by the system. Map if user explicitly mentions 'Complaint Code' or 'CCM Code'.")
     x_complaint_no: Optional[str] = Field(None, description="External cross-reference complaint number. Map if user mentions 'X Complaint No' or 'External Complaint Number'.")
-    priority: Optional[str] = Field(None, description="Maintenance priority level assigned to the FA complaint. Map if user mentions 'Priority'. Example values: P1 Critical, P2 High, P3 Medium, P4 Low.")
-    stage: Optional[str] = Field(None, description="Current workflow stage describing where the FA complaint stands in its lifecycle. Map if user mentions 'Stage' or 'Status Step'. Example values: Staff Yet to be Allocated, Technician Assigned, Preliminary Confirmed & Open, Execution Completed & Closed.")
+    priority: Optional[str] = Field(None, description="Maintenance priority level assigned to the FA complaint. Map ONLY for P1–P4 or explicit priority wording. NEVER map 'low count' or 'lowest' to this field. Example values: P1 Critical, P2 High, P3 Medium, P4 Low.")
+    stage: Optional[str] = Field(None, description="Current workflow stage describing where the FA complaint stands in its lifecycle. Map if user mentions 'Stage' or 'Status Step'. Example values: Facility Audit Request Raised, Staf Assigned for Work Execution.")
     category: Optional[str] = Field(None, description="High-level audit inspection category. Map ONLY if user asks for the Audit Category or inspection type. Do NOT use this if the user uses 'category' generically (e.g. 'categories of buildings'). Example values: Pest Control Checks.")
     category_sub: Optional[str] = Field(None, description="Specific sub-category under the audit category providing more detail on the inspection type. Map if user mentions 'Sub Category' or specific check name. Example values: RODENT ACTIVITY.")
     division: Optional[str] = Field(None, description="Organizational division or department responsible for this FA complaint. Map if user mentions 'Division' or 'DivisionName'. Example values: Housekeeping.")
@@ -160,9 +165,9 @@ class FAInput(BaseModel):
     comp_to: Optional[str] = Field(None, description="Completion end date range. Use YYYY-MM-DD.")
     limit: Optional[int] = Field(default=None, description="Max records to return. Only set if user asks for a specific number. Omit for count queries.")
     offset: Optional[int] = Field(default=None, description="Pagination offset. Omit unless requested.")
-    is_aggregate: Optional[bool] = Field(default=False, description="Set True only for grouping or breakdown queries like 'how many FA per division', 'breakdown by category'. Leave False for normal filter or list queries.")
+    is_aggregate: Optional[bool] = Field(default=False, description="Set True ONLY when the user explicitly asks for a distribution or breakdown across a category (e.g., 'breakdown by category', 'FA per division'). Leave False for simple filtering or total counts.")
     group_by_columns: Optional[List[str]] = Field(default=None, description="Columns to group by when is_aggregate=True. CRITICAL: Do NOT map generic English words (like 'category') to columns. ONLY include RMCategoryName if the user explicitly asks for Audit Category. Valid values: DivisionName, BuildingName, FloorName, LocalityName, PriorityName, RMStageName, RMCategoryName, RMCategorySubName, FrequencyName, ContractName, SpotName, IsRMWithdraw, IsRMRework, IsActive.")
-    aggregate_function: Optional[str] = Field(default=None, description="Aggregation function to apply. COUNT for how many, SUM for totals, AVG for averages. Only set when is_aggregate=True.")
+    aggregate_function: Optional[str] = Field(default=None, description="The mathematical function to apply when grouping data. Use COUNT, SUM, or AVG for grouped distributions. Do not use this field for a simple total count.")
  
  
 class SBInput(BaseModel):
@@ -195,9 +200,9 @@ class SBInput(BaseModel):
     sla_max: Optional[float] = Field(None, description="Maximum SLA hours allowed for this SB work order. Map if user mentions 'SLA Max' or maximum SLA.")
     limit: Optional[int] = Field(default=None, description="Max records to return. Only set if user asks for a specific number. Omit for count queries.")
     offset: Optional[int] = Field(default=None, description="Pagination offset. Omit unless requested.")
-    is_aggregate: Optional[bool] = Field(default=False, description="Set True only for grouping or breakdown queries like 'how many SB per division', 'breakdown by frequency'. Leave False for normal filter or list queries.")
+    is_aggregate: Optional[bool] = Field(default=False, description="Set True ONLY when the user explicitly asks for a distribution or breakdown across a category (e.g., 'breakdown by frequency', 'SB per division'). Leave False for simple filtering or total counts.")
     group_by_columns: Optional[List[str]] = Field(default=None, description="Columns to group by when is_aggregate=True. CRITICAL: Do NOT map generic English words to column names. Valid values: DivisionName, DisciplineName, BuildingName, FloorName, LocalityName, PPMStageName, FrequencyName, ServiceTypeName, ContractName, SpotName.")
-    aggregate_function: Optional[str] = Field(default=None, description="Aggregation function to apply. COUNT for how many, SUM for totals, AVG for averages. Only set when is_aggregate=True.")
+    aggregate_function: Optional[str] = Field(default=None, description="The mathematical function to apply when grouping data. Use COUNT, SUM, or AVG for grouped distributions. Do not use this field for a simple total count.")
 
 
 

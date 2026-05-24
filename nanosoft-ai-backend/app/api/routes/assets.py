@@ -13,6 +13,7 @@ from .query_search_fallback import (
     enrich_with_search_fallback,
     merge_format_response,
 )
+from app.services.tool_payload_validator import validate_aggregate_request
 
 router = APIRouter()
 
@@ -92,7 +93,11 @@ def get_assets(req: AssetRequest):
     )
     logger.debug("[GET-ASSETS] Full payload: %s", req.model_dump())
 
-    if getattr(req, "is_aggregate", False) and req.group_by_columns:
+    if getattr(req, "is_aggregate", False):
+        try:
+            validate_aggregate_request(True, req.group_by_columns)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
         logger.info("📊 [GET-ASSETS] AGGREGATE MODE detected → calling sp_asset_aggregate")
         try:
             conn = get_pool()

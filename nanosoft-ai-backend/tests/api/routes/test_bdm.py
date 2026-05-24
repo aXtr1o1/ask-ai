@@ -60,7 +60,15 @@ def test_get_bdm_aggregate():
     assert called_proc == "sp_bdm_aggregate"
 
 
-# Test 3: Check DB failure raises HTTP 500 with error message
+# Test 3: Aggregate without group_by returns 400
+def test_get_bdm_aggregate_missing_group_by():
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException) as exc:
+        get_bdm(BDMRequest(user_name="testuser", is_aggregate=True, group_by_columns=None))
+    assert exc.value.status_code == 400
+
+
+# Test 4: Check DB failure raises HTTP 500 with error message
 def test_get_bdm_db_error():
     # Fake DB raises an exception
     mock_conn = MagicMock()
