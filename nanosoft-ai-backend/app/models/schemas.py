@@ -71,7 +71,7 @@ class PPMInput(BaseModel):
     floor: Optional[str] = Field(None, description="Floor within the building where the PPM asset is located. Map if user mentions 'Floor' or 'PPM Floor'. CRITICAL: NEVER translate ordinal words to numbers. If the user types 'first floor' or 'second floor', you MUST pass 'first floor' or 'second floor' exactly as typed. Do NOT translate it to 'Floor 1' or 'Floor 2'. Example values: Ground Floor, Roof Level.")
     spot_name: Optional[str] = Field(None, description="Specific spot or room within the floor where the PPM work order is raised for. Map if user mentions a specific room or interior area. Example values: Electrical Room, Telephone room, AHU_R1201, Common Area.")
     equipment: Optional[str] = Field(None, description="Name of the equipment or asset the PPM work order is for. Map if user mentions specific equipment. Example values: Fire Extinguisher, Chiller 1, AHU, Pump, Generator.")
-    contract: Optional[str] = Field(None, description="Name of the maintenance contract under which the PPM is raised. Map if user mentions 'Contract' or 'Agreement'. Example values: Facility Management Residential Area, Maintenance of MEP Equipments (DEMO).")
+    contract: Optional[str] = Field(None, description="Name of the maintenance contract under which the PPM is raised. Map if user mentions 'Contract' or 'Agreement'. Example values: Facility Management Residential Area.")
     tech: Optional[str] = Field(None, description="Name of the technician assigned to carry out this PPM work order. Map if user mentions 'Technician' or 'Assigned Staff'. Example values: Technician, John Smith.")
     keyword: Optional[str] = Field(None, description="General text search when the term does not map cleanly to another field.")
     date_from: Optional[str] = Field(None, description="Start range. Use YYYY-MM-DD.")
@@ -105,14 +105,42 @@ class BDMInput(BaseModel):
     complaint_mode: Optional[str] = Field(None, description="Channel through which the complaint was submitted. Map if user mentions 'Complaint Mode' or 'Reporting Mode'. Example values: By Call, By Community Portal.")
     complaint_nature: Optional[str] = Field(None, description="Short description of the nature or subject of the complaint. Map if user mentions 'Nature', 'Failure', or 'Issue'. Example values: Water leakage in common area, light flickering, AC very noisy, Chiller vibration, fire related issues.")
     wo_type: Optional[str] = Field(None, description="Type of work order raised for the complaint. Map if user mentions 'Work Order Type' or 'WO'. Example values: General.")
-    service_type: Optional[str] = Field(None, description="Type of service the complaint falls under. Map if user mentions 'Service Type' or 'Service'. Example values: Air Conditioning Services, Plumbing Services, Electrical Services, Environmental Services, IT Service Management.")
-    division: Optional[str] = Field(None, description="Division or system the complaint belongs to. Map if user mentions 'Division', 'Division Name', or 'DivisionName'. Example values: Plumbing System, Electrical System, HVAC System, Fire Fighting and Alarm system, Housekeeping, Kitchen Handling Equipments.")
-    discipline: Optional[str] = Field(None, description="Technical discipline linked to the complaint. Map if user mentions 'Discipline', 'Discipline Name', or 'DisciplineName'. Example values: CHILLER, Plumbing, Electrical, Fire Extinguisher.")
+    service_type: Optional[str] = Field(
+        None,
+        description=(
+            "Service category (ServiceTypeName). USE when the user names a category ending in "
+            "'Services' (e.g. 'Electrical Services', 'Plumbing Services') or says 'service type'. "
+            "Do NOT map '... System' or bare 'division' here. "
+            "Example values: Air Conditioning Services, Plumbing Services, Electrical Services, "
+            "Environmental Services, IT Service Management."
+        ),
+    )
+    division: Optional[str] = Field(
+        None,
+        description=(
+            "Division/system category (DivisionName). Map ONLY when the user explicitly uses the word 'Division' or explicitly names a building system like 'Fire System' or 'Cooling System'. "
+            "NEVER map entire sentences or conversational phrases like 'in the system'. "
+            "If the user says '... Services', use service_type instead — NOT this field. "
+            "Example values: Plumbing System, Electrical System, HVAC System, "
+            "Fire Fighting and Alarm system, Kitchen Handling Equipments. "
+            "Bare 'Housekeeping' without 'Services' may be division — 'Housekeeping Services' "
+            "is always service_type, never division."
+        ),
+    )
+    discipline: Optional[str] = Field(
+        None,
+        description=(
+            "Technical discipline (DisciplineName). USE only when the user says 'discipline' or "
+            "a short trade name (e.g. 'Electrical', 'Plumbing', 'CHILLER') — NOT 'Electrical "
+            "Services' or 'Electrical System'. "
+            "Example values: CHILLER, Plumbing, Electrical, Fire Extinguisher."
+        ),
+    )
     locality: Optional[str] = Field(None, description="Physical location zone or geographic area where the complaint was raised. Do NOT map indoor rooms here — map those to 'spot_name'. Example values: Terminal - A2, Airside Area, Ajman, Doha, Terminal A1.")
     building: Optional[str] = Field(None, description="Name of the building where the complaint was raised. Map if user mentions 'Building'. Example values: WATER TREATMENT PLANT, Warehouse building, Building 1 - Residential High Rise, Passenger Terminal Building T1 (Demo), Runway 18/36.")
     floor: Optional[str] = Field(None, description="Floor within the building where the complaint was raised. Map if user mentions 'Floor'. CRITICAL: NEVER translate ordinal words to numbers. If the user types 'first floor' or 'second floor', you MUST pass 'first floor' or 'second floor' exactly as typed. Do NOT translate it to 'Floor 1' or 'Floor 2'. Example values: Ground Floor.")
     spot_name: Optional[str] = Field(None, description="Specific spot or room within the floor where the complaint was raised. Map if user mentions a specific room or interior area. Example values: Common Area 9, Appartement-59, Warehouse building.")
-    contract: Optional[str] = Field(None, description="Name of the maintenance contract under which this complaint is raised. Map if user mentions 'Contract' or 'Service Provider'. Example values: Maintenance of MEP Equipments (DEMO), Facility Management Residential Area.")
+    contract: Optional[str] = Field(None, description="Name of the maintenance contract under which this complaint is raised. Map if user mentions 'Contract' or 'Service Provider'. Example values: Facility Management Residential Area.")
     complainer: Optional[str] = Field(None, description="Name of the person who raised or submitted the complaint. Example values: eashaktech, Mohamed, naina muhamed, gowthaman, technician.")
     register_by: Optional[str] = Field(None, description="Username of the person who registered or created the complaint in the system. Map if user mentions 'Registered By' or 'RegisterBy'. Example values: helpdesk, admin, technician, eashaktech.")
     analysis_tech: Optional[str] = Field(None, description="Name of the technician assigned for the analysis or job estimation phase. Map if user mentions 'Analysis Technician' or 'Inspector'. Example values: Technician, eashaktech, Employee18.")
@@ -125,7 +153,16 @@ class BDMInput(BaseModel):
     limit: Optional[int] = Field(default=None, description="Max number of results. Only set if user asks for a specific number. For count queries MUST omit.")
     offset: Optional[int] = Field(default=None, description="Pagination offset. Omit unless requested.")
     is_aggregate: Optional[bool] = Field(default=False, description="Set True ONLY when the user explicitly asks for a distribution or breakdown across a category (e.g., 'breakdown by status', 'complaints per division'). Leave False for simple filtering or total counts.")
-    group_by_columns: Optional[List[str]] = Field(default=None, description="Columns to group by. CRITICAL: Do NOT map generic English words to column names. Valid: DivisionName, DisciplineName, BuildingName, FloorName, LocalityName, WoStatus, PriorityName, StageName, ComplaintTypeName, ComplaintModeName, SpotName, ContractName.")
+    group_by_columns: Optional[List[str]] = Field(
+        default=None,
+        description=(
+            "Columns to group by when is_aggregate=True. Compare two '... Services' types "
+            "(e.g. Electrical Services vs Housekeeping Services) → ['ServiceTypeName'] only. "
+            "Valid: DivisionName, DisciplineName, BuildingName, FloorName, LocalityName, "
+            "WoStatus, PriorityName, StageName, ComplaintTypeName, ComplaintModeName, "
+            "ServiceTypeName, SpotName, ContractName."
+        ),
+    )
     aggregate_function: Optional[str] = Field(default=None, description="The mathematical function to apply when grouping data. Use COUNT, SUM, or AVG for grouped distributions. Do not use this field for a simple total count.")
     
 class FAInput(BaseModel):
@@ -136,8 +173,25 @@ class FAInput(BaseModel):
     complaint_code: Optional[str] = Field(None, description="Internal CCM complaint code assigned by the system. Map if user explicitly mentions 'Complaint Code' or 'CCM Code'.")
     x_complaint_no: Optional[str] = Field(None, description="External cross-reference complaint number. Map if user mentions 'X Complaint No' or 'External Complaint Number'.")
     priority: Optional[str] = Field(None, description="Maintenance priority level assigned to the FA complaint. Map ONLY for P1–P4 or explicit priority wording. NEVER map 'low count' or 'lowest' to this field. Example values: P1 Critical, P2 High, P3 Medium, P4 Low.")
-    stage: Optional[str] = Field(None, description="Current workflow stage describing where the FA complaint stands in its lifecycle. Map if user mentions 'Stage' or 'Status Step'. Example values: Facility Audit Request Raised, Staf Assigned for Work Execution.")
-    category: Optional[str] = Field(None, description="High-level audit inspection category. Map ONLY if user asks for the Audit Category or inspection type. Do NOT use this if the user uses 'category' generically (e.g. 'categories of buildings'). Example values: Pest Control Checks.")
+    stage: Optional[str] = Field(
+        None,
+        description=(
+            "Workflow stage (RMStageName). FA has NO separate status/WoStatus field. "
+            "Map user 'Open' or 'Closed' HERE (e.g. stage='Closed' matches 'Facility Audit - Closed'). "
+            "Do NOT use category or keyword for Open/Closed. "
+            "Example values: Facility Audit Request Raised, Facility Audit - Closed, "
+            "Staf Assigned for Work Execution."
+        ),
+    )
+    category: Optional[str] = Field(
+        None,
+        description=(
+            "Audit inspection category (RMCategoryName) — e.g. Pest Control Checks. Map ONLY "
+            "for 'audit category', 'inspection category', or a named audit type. Do NOT map "
+            "'BuildingName Category', 'building categories', or 'categories of buildings' — "
+            "those mean group_by_columns=['BuildingName'], not this field."
+        ),
+    )
     category_sub: Optional[str] = Field(None, description="Specific sub-category under the audit category providing more detail on the inspection type. Map if user mentions 'Sub Category' or specific check name. Example values: RODENT ACTIVITY.")
     division: Optional[str] = Field(None, description="Organizational division or department responsible for this FA complaint. Map if user mentions 'Division' or 'DivisionName'. Example values: Housekeeping.")
     locality: Optional[str] = Field(None, description="Geographic zone, district, or outdoor site area where the FA complaint is located. Do NOT use for indoor rooms or floors — map those to spot_name or floor. Example values: Doha, Ajman, Terminal A1.")
@@ -161,7 +215,16 @@ class FAInput(BaseModel):
     limit: Optional[int] = Field(default=None, description="Max records to return. Only set if user asks for a specific number. Omit for count queries.")
     offset: Optional[int] = Field(default=None, description="Pagination offset. Omit unless requested.")
     is_aggregate: Optional[bool] = Field(default=False, description="Set True ONLY when the user explicitly asks for a distribution or breakdown across a category (e.g., 'breakdown by category', 'FA per division'). Leave False for simple filtering or total counts.")
-    group_by_columns: Optional[List[str]] = Field(default=None, description="Columns to group by when is_aggregate=True. CRITICAL: Do NOT map generic English words (like 'category') to columns. ONLY include RMCategoryName if the user explicitly asks for Audit Category. Valid values: DivisionName, BuildingName, FloorName, LocalityName, PriorityName, RMStageName, RMCategoryName, RMCategorySubName, FrequencyName, ContractName, SpotName, IsRMWithdraw, IsRMRework, IsActive.")
+    group_by_columns: Optional[List[str]] = Field(
+        default=None,
+        description=(
+            "Columns to group by when is_aggregate=True. 'BuildingName Category' or "
+            "'building categories' → ['BuildingName'] only. RMCategoryName only for explicit "
+            "audit/inspection category. Valid: DivisionName, BuildingName, FloorName, "
+            "LocalityName, PriorityName, RMStageName, RMCategoryName, RMCategorySubName, "
+            "FrequencyName, ContractName, SpotName, IsRMWithdraw, IsRMRework, IsActive."
+        ),
+    )
     aggregate_function: Optional[str] = Field(default=None, description="The mathematical function to apply when grouping data. Use COUNT, SUM, or AVG for grouped distributions. Do not use this field for a simple total count.")
  
  

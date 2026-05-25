@@ -27,6 +27,21 @@ ch.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(me
 if not logger.handlers:
     logger.addHandler(ch)
 
+# UI already renders tables for multi-tool and most list flows — strip model boilerplate.
+_RE_TABLE_OFFER_PHRASE = _re.compile(
+    r"\s*(?:"
+    r"would you like to view (?:this )?data as a markdown table(?: for better understanding)?|"
+    r"would you like (?:to see )?(?:this )?(?:data )?(?:as |in )?a (?:markdown )?table(?: for better understanding)?"
+    r")\s*\??\s*",
+    _re.I,
+)
+
+
+def _strip_redundant_table_offer(text: str) -> str:
+    if not text or not isinstance(text, str):
+        return text or ""
+    cleaned = _RE_TABLE_OFFER_PHRASE.sub(" ", text)
+    return _re.sub(r"\s+", " ", cleaned).strip()
 
 
 def extract_date_from_query(query: str):
@@ -68,6 +83,57 @@ def extract_date_from_query(query: str):
     return None, None
 
 
+def _complaint_query_is_clear(query: str, messages: list | None = None) -> bool:
+    """
+    True when the user named FA and/or BDM (or answered a prior clarification).
+    Generic "complaints" alone stays ambiguous.
+    """
+    q = (query or "").lower()
+    if _re.search(
+        r"\b(fa|bdm|facility audit|breakdown maintenance|breakdown)\b",
+        q,
+    ):
+        return True
+    # "BDM and FA" / "FA and BDM" in one question → always fetch both, never clarify
+    if _re.search(r"\bbd[m]?\b", q) and _re.search(r"\bfa\b", q):
+        return True
+    if _re.search(r"\b(fa|bdm)\s+and\s+(fa|bdm)\b", q):
+        return True
+    if _re.search(r"\bboth\b", q) and _re.search(
+        r"\b(fa|bdm|complaints?|facility audit|breakdown)\b", q
+    ):
+        return True
+    # User replied after clarification in the same session
+    if messages:
+        prior_human = [
+            (m.content or "").lower()
+            for m in messages
+            if isinstance(m, HumanMessage) and isinstance(m.content, str)
+        ]
+        if len(prior_human) >= 2:
+            prev = prior_human[-2]
+            if _re.search(
+                r"\bdo you mean facility audit|breakdown maintenance\b", prev
+            ) or any(
+                marker in prev
+                for marker in ("please clarify", "fa) complaints or breakdown")
+            ):
+                return True
+    return False
+
+
+def _query_wants_list_display(query: str) -> bool:
+    """User asked to see data (tables), not only a numeric count."""
+    q = (query or "").lower()
+    return bool(
+        _re.search(
+            r"\b(show\s+me|show\s+all|show\s+the|list\b|display\b|give\s+me\s+(the\s+)?|retrieve\b|fetch\b)",
+            q,
+        )
+        or q.strip().startswith("show ")
+    )
+
+
 def _infer_intent_from_query(query: str) -> str | None:
     """Fast intent detection for common phrasing (avoids extra model call)."""
     q = (query or "").lower()
@@ -79,14 +145,23 @@ def _infer_intent_from_query(query: str) -> str | None:
         q,
     ):
         return "aggregate"
+    # "show me how many …" → list (preview tables + counts), not count-only text
     if _re.search(
         r"\b(how many|total count|number of|count of|how many total|get the count|show total)\b",
         q,
     ):
+        if _query_wants_list_display(q):
+            return "list"
         return "count"
     if _re.search(r"\b(show|list|get |fetch |display|give me|retrieve|provide)\b", q):
         return "list"
     return None
+
+
+# Max rows per dataset in multi-tool UI when user also asked to "show" data
+MULTI_DATASET_PREVIEW_LIMIT = 30
+# For "how many" only: still show tables when each dataset has at most this many rows
+MULTI_COUNT_AUTO_TABLE_MAX = 30
 
 
 def _append_explicit_today(text: str, query: str) -> str:
@@ -274,15 +349,15 @@ class LangChainService:
             ) -> str:
                 """
                 Build the prompt for final model call.
-                - count  → one sentence answer, no table ever
-                - aggregate/list → context/summary ONLY, no table
-                                followed by a question asking if user wants the table
+                - count  → one sentence answer, no table in text
+                - aggregate/list → context/summary ONLY (UI shows tables when applicable)
                 """
                 if is_count_query:
                     match_hint = search_context_prompt_block(search_context)
                     return (
                         "Use the above tool results. Reply in one crisp, friendly sentence using total_count. "
-                        "Do not render a table."
+                        "Do not render a table. "
+                        "Do NOT ask if the user wants details, a breakdown, or to see a table — the app shows tables automatically."
                         + (match_hint if match_hint else "")
                     )
 
@@ -298,11 +373,8 @@ class LangChainService:
                         "STRICT RULES:\n"
                         "1. Do NOT get distracted by unrelated data (such as unassigned, null, or other categories) if the user's query targets specific items.\n"
                         "2. Do NOT mention internal database IDs or technical tool names.\n"
-                        "3. Do NOT render any table. Do NOT include any markdown table.\n" + (
-                            "\nEnd your response with exactly this line:\n"
-                            "**Would you like to see the detailed breakdown table for a better understanding?**"
-                            if display_count > 0 else ""
-                        )
+                        "3. Do NOT render any table natively.\n"
+                        "4. You MUST ask the user: 'Would you like to view this data as a markdown table for better understanding?'\n"
                     )
 
                 else:
@@ -322,13 +394,10 @@ class LangChainService:
                         "1. Do NOT start with 'Here are' or 'Here is'.\n"
                         "2. Start with 'I found...', 'I've retrieved...', or 'Your search returned...'.\n"
                         "3. Use NO markdown (no bold, no italics) in the summary text.\n"
-                        "4. Do NOT include a table.\n"
+                        "4. Do NOT include a table natively.\n"
                         "5. Use clear, active-voice grammar.\n"
-                        "6. If the displayed records are fewer than the total found, explicitly mention that this is a partial view of the total data.\n\n" + (
-                            "FINAL LINE (MUST BE EXACT):\n"
-                            "**Would you like to see the full table for a better understanding?**"
-                            if display_count > 0 else ""
-                        )
+                        "6. If the displayed records are fewer than the total found, explicitly mention that this is a partial view of the total data.\n"
+                        "7. You MUST ask the user: 'Would you like to view this data as a markdown table for better understanding?'\n"
                     )
 
 
@@ -360,9 +429,9 @@ class LangChainService:
             # ── AMBIGUITY PRE-CHECK (runs before model, before lc_memory influence) ──
             _q = current_user_query.lower()
 
-            # complaint ambiguity check
+            # complaint ambiguity check — only when type (FA vs BDM) is not named
             _complaint_ambiguous = bool(_re.search(r'\bcomplaints?\b', _q))
-            _complaint_clear     = bool(_re.search(r'\b(fa|bdm|facility audit|breakdown)\b', _q))
+            _complaint_clear = _complaint_query_is_clear(current_user_query, messages)
 
             # work order ambiguity check
             _workorder_ambiguous = bool(_re.search(r'\b(work\s*orders?|scheduled|compliance|work\s*order)\b', _q))
@@ -441,10 +510,19 @@ class LangChainService:
 
                     # Detect if a common limit is requested across datasets
                     _has_number = bool(_re.search(r'\b\d+\b', user_query))
+                    _count_pats_multi = (
+                        "how many", "total", "number of", "count of", "count ",
+                    )
+                    _is_multi_count_query = (
+                        any(p in user_query.lower() for p in _count_pats_multi)
+                        and not _has_number
+                        and not _query_wants_list_display(user_query)
+                    )
                     common_limit = next((int(tc["args"]["limit"]) for tc in ai_msg.tool_calls if tc.get("args") and isinstance(tc["args"].get("limit"), (int, str)) and str(tc["args"]["limit"]).isdigit()), None)
                     if common_limit is None and _has_number:
-                        num_match = _re.search(r'\b(\d+)\b', user_query)
-                        common_limit = int(num_match.group(1)) if num_match else None
+                        # Removed buggy logic: Do not scrape the raw user query for numbers, 
+                        # because names like "Building 1" will mistakenly set limit=1
+                        pass
 
                     for tool_call in ai_msg.tool_calls:
                         tool_name = tool_call["name"]
@@ -509,6 +587,7 @@ class LangChainService:
                                 entity=self._entity_label_from_tool(tool_name),
                             )
 
+                        p_count = parsed.get("p_count", len(p_list)) if isinstance(parsed, dict) else len(p_list)
                         display_count = len(p_list)
                         if p_list and isinstance(p_list[0], dict):
                             for key in ("total_count", "total_count_over", "full_count", "overall_count"):
@@ -516,6 +595,8 @@ class LangChainService:
                                 if isinstance(val, (int, float)) and val >= 0:
                                     display_count = int(val)
                                     break
+                        if isinstance(p_count, (int, float)) and p_count >= 0:
+                            display_count = max(display_count, int(p_count))
 
                         friendly_name = _friendly(tool_name)
                         if args.get("is_aggregate") and args.get("group_by_columns"):
@@ -526,10 +607,24 @@ class LangChainService:
                             ]
                             friendly_name = f"{friendly_name} by {', '.join(formatted_cols)}"
 
+                        _hide_tables_for_large_count = (
+                            _is_multi_count_query
+                            and display_count > MULTI_COUNT_AUTO_TABLE_MAX
+                        )
+                        if _hide_tables_for_large_count:
+                            _ui_p_list: list = []
+                        elif len(p_list) > MULTI_DATASET_PREVIEW_LIMIT:
+                            _ui_p_list = p_list[:MULTI_DATASET_PREVIEW_LIMIT]
+                        elif len(p_list) <= 30:
+                            _ui_p_list = p_list
+                        else:
+                            _ui_p_list = p_list[:25] + p_list[-10:]
+                        _records_for_ui = _ui_p_list
                         _tm_payload: dict = {
                             "dataset_name": friendly_name,
                             "message": f"{display_count} records found",
-                            "records": p_list if len(p_list) <= 30 else p_list[:25] + p_list[-10:],
+                            "records": _records_for_ui,
+                            "total_count": display_count,
                         }
                         if ds_search_context:
                             _tm_payload["search_context"] = ds_search_context
@@ -542,27 +637,55 @@ class LangChainService:
                         executed_tools.append({
                             "tool_name": tool_name,
                             "friendly_name": friendly_name,
-                            "p_list": p_list,
+                            "p_list": [] if _hide_tables_for_large_count else _ui_p_list,
                             "display_count": display_count,
                             "search_context": ds_search_context,
                         })
 
-                    # No data at all → short-circuit
-                    if not executed_tools or all(len(t["p_list"]) == 0 for t in executed_tools):
+                    # No data at all → short-circuit (count queries may keep p_list empty on purpose)
+                    if not executed_tools:
                         msg = "No records were found for your request."
                         return msg, msg, messages
+                    if not _is_multi_count_query and all(
+                        len(t["p_list"]) == 0 and t.get("display_count", 0) == 0
+                        for t in executed_tools
+                    ):
+                        msg = "No records were found for your request."
+                        return msg, msg, messages
+
+                    def _plain_count_only_multi(tools: list) -> bool:
+                        """Pure count answer (no tables) when every dataset is a large total."""
+                        if not _is_multi_count_query:
+                            return False
+                        for t in tools:
+                            c = t.get("display_count", 0)
+                            if 0 < c <= MULTI_COUNT_AUTO_TABLE_MAX:
+                                return False
+                        return True
 
                     # ── MULTI-TABLE SYSTEM PROMPT ─────────────────────────────────
                     # Injected ONLY for multi-table responses so the LLM knows the
                     # frontend will render the tables separately — it must write only
                     # a concise plain-text summary, never reproduce table markup.
-                    multi_table_system_prompt = SystemMessage(content=(
+                    _multi_table_instructions = (
                         "Summarise multi-dataset tool results in 2-3 friendly sentences. "
                         "Name each dataset and its record count. "
                         "If match context is given, one short phrase per dataset with field names and counts. "
                         "IMPORTANT: If the user asks for 'highest', 'lowest', 'top', or 'bottom', you MUST explicitly name the specific item(s) and their count in your summary. If there is a massive tie (e.g. 20 items with 1 count), just name 1 or 2 examples.\n"
-                        "No tables, HTML, bullets, or raw rows."
-                    ))
+                    )
+                    if _plain_count_only_multi(executed_tools):
+                        _multi_table_instructions += (
+                            "No tables, HTML, bullets, or raw rows. "
+                            "Do NOT ask about markdown tables, details, or viewing data — counts only."
+                        )
+                    else:
+                        _multi_table_instructions += (
+                            "The UI already shows interactive data tables for each dataset below your summary. "
+                            "Do NOT ask 'Would you like to view this data as a markdown table?' or similar — "
+                            "that is redundant. Give counts and match context only (e.g. Spot Name). "
+                            "If only a preview of rows is shown, state total counts clearly."
+                        )
+                    multi_table_system_prompt = SystemMessage(content=_multi_table_instructions)
 
                     summary_messages = [multi_table_system_prompt] + messages[:]
                     _multi_sc_lines = []
@@ -581,7 +704,14 @@ class LangChainService:
 
                     summary_ai_msg = self.model.invoke(summary_messages)
                     self._accumulate_tokens(summary_ai_msg)
-                    context_summary = self._get_content_str(summary_ai_msg) or "Here are the results of your query."
+                    context_summary = _strip_redundant_table_offer(
+                        self._get_content_str(summary_ai_msg) or "Here are the results of your query."
+                    )
+
+                    # Large count-only (e.g. 623+5) → plain text; small counts → show tables below
+                    if _plain_count_only_multi(executed_tools):
+                        self._log_query_summary(current_user_query)
+                        return context_summary, context_summary, messages
 
                     # Build the structured multi-dataset JSON the frontend expects
                     multiple_datasets_response = json.dumps({
@@ -591,9 +721,11 @@ class LangChainService:
                             {
                                 "name": t["friendly_name"],
                                 "records": t["p_list"],
+                                "total_count": t.get("display_count", 0),
                                 "search_context": t.get("search_context"),
                             }
-                            for t in executed_tools if len(t["p_list"]) > 0
+                            for t in executed_tools
+                            if len(t["p_list"]) > 0 or t.get("display_count", 0) > 0
                         ]
                     })
 
@@ -818,6 +950,8 @@ class LangChainService:
                         logger.info("📋 Intent=LIST — sending full records to model | query='%s'", user_query)
 
                     MAX_DISPLAY = 25
+                    if is_aggregate_query:
+                        MAX_DISPLAY = 200
                     p_list_for_model = p_list if len(p_list) <= MAX_DISPLAY else p_list[:MAX_DISPLAY]
                     is_large_result = len(p_list) > MAX_DISPLAY
 

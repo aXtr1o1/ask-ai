@@ -102,6 +102,52 @@ YES_WORDS = {
     "do it", "let's go", "lets go"
 }
 
+_TABLE_OFFER_MARKERS = (
+    "would you like",
+    "see the details",
+    "see the full table",
+    "see the detailed",
+    "want to see",
+    "show you the",
+)
+
+
+def _expand_affirmative_from_history(user_query: str, session_data: dict) -> str:
+    """
+    When MAX_HISTORY=0 the model only sees the current message. If the user replies
+    'yes' after a data answer, replay the previous question as 'show me …'.
+    """
+    reply = (user_query or "").strip().lower()
+    if reply not in YES_WORDS:
+        return user_query
+    history = session_data.get("history") or []
+    if not history:
+        return user_query
+    last = history[-1]
+    prev_query = (last.get("query") or "").strip()
+    if not prev_query:
+        return user_query
+    prev_assistant = last.get("assistant") or last.get("context") or ""
+    prev_text = (
+        prev_assistant if isinstance(prev_assistant, str) else str(prev_assistant)
+    ).lower()
+    offered_more = any(m in prev_text for m in _TABLE_OFFER_MARKERS)
+    prev_lower = prev_query.lower()
+    was_facility_query = any(
+        w in prev_lower
+        for w in (
+            "bdm", "fa", "complaint", "ppm", "sb", "asset",
+            "how many", "show", "give", "list", "registered",
+        )
+    )
+    if offered_more or was_facility_query:
+        if not prev_lower.startswith(("show ", "give ", "list ", "display ")):
+            expanded = f"show me {prev_query}"
+            logger.info("🔁 Expanded '%s' → '%s' (from history; MAX_HISTORY may be 0)", user_query, expanded)
+            return expanded
+    return user_query
+
+
 NO_WORDS = {
     "no", "nope", "nah", "n",
     "wrong", "incorrect", "not correct", "not right",
@@ -637,9 +683,14 @@ async def ws_chat_endpoint(websocket: WebSocket):
                     user_query = f"{pending_original_query} {user_query}".strip()
                     memory_store[session_id]["pending_original_query"] = None
                     logger.info(f"🔁 Reconstructed query: '{user_query}'")
-                
-                # ✅ CHECK IF USER IS REPLYING TO QUOTA MENU
+
                 session_data = memory_store.get(session_id, {})
+                # Do not expand before pending_table yes/no handling
+                if not session_data.get("pending_table"):
+                    user_query = _expand_affirmative_from_history(user_query, session_data)
+                query_to_store = user_query
+
+                # ✅ CHECK IF USER IS REPLYING TO QUOTA MENU
                 waiting_for_choice = session_data.get("waiting_for_table_choice", False)
                 
                 # ── QUOTA FALLBACK: user is choosing which table to query ──
