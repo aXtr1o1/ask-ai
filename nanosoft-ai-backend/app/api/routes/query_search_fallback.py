@@ -59,6 +59,33 @@ def pick_text_filter(req: Any, fields: tuple[str, ...]) -> tuple[str, str] | Non
     return None
 
 
+BDM_CLASSIFICATION_FIELDS = (
+    "complaint_type",
+    "complaint_header",
+    "stage",
+    "complaint_mode",
+    "complaint_nature",
+)
+
+
+def pick_keyword_fallback(req: Any, fields: tuple[str, ...]) -> tuple[str, str] | None:
+    """
+    Prefer a single keyword retry when multiple BDM classification filters were set
+  and the structured query returned no rows.
+    Returns (keyword, from_field_label).
+    """
+    if getattr(req, "keyword", None):
+        return None
+    class_vals: list[str] = []
+    for field in BDM_CLASSIFICATION_FIELDS:
+        val = getattr(req, field, None)
+        if val is not None and str(val).strip():
+            class_vals.append(str(val).strip())
+    if len(class_vals) >= 2:
+        return " ".join(class_vals), "complaint_classification"
+    return pick_text_filter(req, fields)
+
+
 def merge_format_response(data: dict | list) -> dict[str, Any]:
     """Standard p_list / p_count shape plus optional SP metadata."""
     if isinstance(data, dict):
@@ -103,7 +130,7 @@ def enrich_with_search_fallback(
     - Success + text filter (no keyword) → attach field_filter metadata.
     """
     if is_empty_query_result(formatted):
-        fallback = pick_text_filter(req, text_filter_fields)
+        fallback = pick_keyword_fallback(req, text_filter_fields)
         if fallback:
             keyword_val, from_field = fallback
             logger.info(
@@ -112,7 +139,12 @@ def enrich_with_search_fallback(
                 from_field,
                 keyword_val,
             )
-            retry_req = req.model_copy(update={from_field: None, "keyword": keyword_val})
+            if from_field == "complaint_classification":
+                clear = {f: None for f in BDM_CLASSIFICATION_FIELDS}
+                clear["keyword"] = keyword_val
+                retry_req = req.model_copy(update=clear)
+            else:
+                retry_req = req.model_copy(update={from_field: None, "keyword": keyword_val})
             logger.info(
                 "%s Keyword fallback — 2nd %s payload:\n%s",
                 log_prefix,

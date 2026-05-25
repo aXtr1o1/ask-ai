@@ -527,8 +527,12 @@ ROUTING RULE: Trigger this tool only if the user explicitly mentions breakdowns,
 failures, reactive maintenance, or breakdown SLA compliance. Do not use for general equipment lists.
 
 MAPPING DIRECTIVES:
-- division: Map if user mentions "Division", "Division Name", or "DivisionName".
-- discipline: Map if user mentions "Discipline", "Discipline Name", or "DisciplineName".
+- service_type vs division (CRITICAL): "... Services" (e.g. Electrical Services, Housekeeping Services)
+  → service_type. "... System" or explicit "division" → division. Never map "Housekeeping Services"
+  to division Housekeeping. Compare two Services types → is_aggregate=True, group_by_columns=['ServiceTypeName'].
+- service_type: Map for "Service Type" or any "<trade> Services" phrase.
+- division: Map ONLY when the user explicitly uses the word "Division" or explicitly names a building system like "Fire System" or "Cooling System". NEVER map entire sentences or conversational phrases like "in the system".
+- discipline: Map only for "Discipline" or short trade names — not full Services/System names.
 - status: Map if user mentions "Status" or "Status Name".
 - spot_name: Map if user mentions "Spot", "Spot Name", or "Location Spot".
 - keyword: General text search when a value does not map cleanly to another field.
@@ -537,7 +541,10 @@ FULL PARAMETER CAPABILITIES:
 - user_name: Required for user isolation and ownership.
 - complaint_no: Filter by specific complaint number.
 - status, stage, priority: Filter by complaint lifecycle and urgency.
-- complaint_type, complaint_mode, complaint_nature: Filter by classification.
+- complaint_type: e.g. "Service Request", "Corrective Maintenance" — NOT workflow stage text.
+- complaint_header: e.g. "ANA Approval Flow", "Without Approval Flow" — map "under ANA Approval Flow" here, NOT stage.
+- complaint_mode, complaint_nature: Filter by classification.
+- Do NOT set stage, complaint_type, complaint_header, and keyword together for one phrase — use the single best field.
 - wo_type, service_type: Filter by work order or service category.
 - division, discipline: Filter by organizational structure.
 - locality, building, floor, spot_name: Filter by location hierarchy.
@@ -578,7 +585,7 @@ For all normal filter and list queries:
 Columns you can use in group_by_columns for BDM:
 DivisionName, DisciplineName, BuildingName, FloorName,
 LocalityName, WoStatus, PriorityName, StageName,
-ComplaintTypeName, ComplaintModeName, SpotName, ContractName
+ComplaintTypeName, ComplaintModeName, ServiceTypeName, SpotName, ContractName
 
 
 """,
@@ -740,7 +747,7 @@ PARAMETERS:
 - user_name: Always required (from authenticated session)
 - complaint_no: FA complaint number
 - priority: e.g. "P2 High"
-- stage: e.g. "Facility Audit Request Raised"
+- stage: RMStageName only (no status field). User 'Closed'/'Open' → stage='Closed' or 'Open' (not category)
 - category: e.g. "Pest Control Checks"
 - category_sub: e.g. "RODENT ACTIVITY"
 - division: e.g. "Housekeeping"
@@ -756,7 +763,9 @@ PARAMETERS:
 - limit, offset: Pagination
  
 AGGREGATE / GROUP BY:
-- is_aggregate=True for "how many FA per division", "breakdown by category", "BuildingName" counts
+- is_aggregate=True for "how many FA per division", "breakdown by audit category", "BuildingName" counts
+- "BuildingName Category" / "building categories" → group_by_columns=['BuildingName'] — NOT category/RMCategoryName
+- "audit category" / "Pest Control" → group_by_columns=['RMCategoryName'] or category filter
 - "low count" / "lowest" = smallest counts — do NOT set priority unless user says P4 / low priority
 - group_by_columns: DivisionName, BuildingName, FloorName, LocalityName,
                     PriorityName, RMStageName, RMCategoryName, RMCategorySubName,

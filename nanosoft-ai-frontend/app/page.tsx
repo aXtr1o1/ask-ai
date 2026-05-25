@@ -29,6 +29,13 @@ import {
   IconDotsVertical, IconCopy, IconCheck, IconBulb, IconFolder
 } from "@tabler/icons-react";
 // ─── Types ───────────────────────────────────────────────────────────────────
+type MultiDatasetView = {
+  name: string;
+  rows: TableWithTileRow[];
+  html: string;
+  totalCount?: number;
+};
+
 interface Message {
   role: "user" | "ai" | "error";
   text: string;
@@ -45,9 +52,10 @@ interface Message {
   tableTitle?: string;        // ← Title for the table
   tableViewMode?: 'table' | 'tile';  // ← Toggle between table and tile views
   // ← Multiple datasets (type="multiple_datasets" from backend)
-  multipleDatasets?: { name: string; rows: TableWithTileRow[]; html: string }[];
+  multipleDatasets?: MultiDatasetView[];
   multiSummary?: string;  // ← context_summary from the backend
 }
+
 interface ChatSession { id: string; title: string; createdAt: number; updatedAt?: number; isPinned?: boolean; isArchived?: boolean; group_name?: string; }
 interface Group {
   id: string;
@@ -2217,7 +2225,7 @@ export default function Home() {
             isGraphResponse = true;
           } else {
             // 🔑 SECOND: Check if this is a MULTIPLE_DATASETS response
-            let multipleDatasets: { name: string; rows: TableWithTileRow[]; html: string }[] | undefined;
+            let multipleDatasets: MultiDatasetView[] = [];
             let multiSummary: string | undefined;
             try {
               const outerParsed = JSON.parse(finalText);
@@ -2226,20 +2234,29 @@ export default function Home() {
               if (inner?.type === "multiple_datasets" && Array.isArray(inner?.datasets)) {
                 console.log("📋 [DONE] Multiple datasets response detected — rendering", inner.datasets.length, "tables");
                 multiSummary = inner.context_summary || "Here are the results of your query.";
-                multipleDatasets = inner.datasets.map((ds: { name: string; records: any[]; search_context?: SearchContext }) => {
-                  // Build JSON that renderLargeDataset understands — same pipeline as single table
+                const parsedMulti: MultiDatasetView[] = (inner.datasets as Array<{
+                  name: string;
+                  records?: Record<string, unknown>[];
+                  total_count?: number;
+                  search_context?: SearchContext;
+                }>).map((ds) => {
                   const dsJsonStr = JSON.stringify({
                     context_summary: ds.name,
                     search_context: ds.search_context,
-                    records: (ds.records || []).filter((rec: Record<string, any>) => {
-                      // Remove records where all values are null/empty (defensive)
-                      return Object.values(rec).some(v => v !== null && v !== undefined && v !== "");
-                    })
+                    records: (ds.records || []).filter((rec: Record<string, unknown>) =>
+                      Object.values(rec).some(v => v !== null && v !== undefined && v !== "")
+                    ),
                   });
                   const html = renderLargeDataset(dsJsonStr) || "";
                   const rows = extractTableRows(html);
-                  return { name: ds.name, rows, html };
+                  return {
+                    name: ds.name,
+                    rows,
+                    html,
+                    totalCount: typeof ds.total_count === "number" ? ds.total_count : rows.length,
+                  };
                 });
+                multipleDatasets = parsedMulti.filter((ds) => ds.rows.length > 0);
                 processedText = multiSummary || "Here are the results of your query.";
                 setMessages(prev => {
                   const u = [...prev];
@@ -2250,8 +2267,7 @@ export default function Home() {
                       text: multiSummary!,
                       streaming: false,
                       originalText: finalText,
-                      multipleDatasets,
-                      multiSummary,
+                      ...(multipleDatasets.length > 0 ? { multipleDatasets, multiSummary } : {}),
                     };
                   }
                   const activeSid = sessionIdRef.current;
@@ -2675,24 +2691,34 @@ export default function Home() {
           if (inner?.type === "multiple_datasets" && Array.isArray(inner?.datasets)) {
             console.log("📋 [HISTORY] Multiple datasets response detected — rendering tables");
             const multiSummary = inner.context_summary || "Here are the results of your query.";
-            const multipleDatasets = inner.datasets.map((ds: { name: string; records: any[]; search_context?: SearchContext }) => {
+            const parsedMulti: MultiDatasetView[] = (inner.datasets as Array<{
+              name: string;
+              records?: Record<string, unknown>[];
+              total_count?: number;
+              search_context?: SearchContext;
+            }>).map((ds) => {
               const dsJsonStr = JSON.stringify({
                 context_summary: ds.name,
                 search_context: ds.search_context,
-                records: (ds.records || []).filter((rec: Record<string, any>) => {
-                  return Object.values(rec).some(v => v !== null && v !== undefined && v !== "");
-                })
+                records: (ds.records || []).filter((rec: Record<string, unknown>) =>
+                  Object.values(rec).some(v => v !== null && v !== undefined && v !== "")
+                ),
               });
               const html = renderLargeDataset(dsJsonStr) || "";
               const rows = extractTableRows(html);
-              return { name: ds.name, rows, html };
+              return {
+                name: ds.name,
+                rows,
+                html,
+                totalCount: typeof ds.total_count === "number" ? ds.total_count : rows.length,
+              };
             });
+            const multipleDatasets = parsedMulti.filter((ds) => ds.rows.length > 0);
             return {
               ...m,
               text: multiSummary,
               originalText: text,
-              multipleDatasets,
-              multiSummary
+              ...(multipleDatasets.length > 0 ? { multipleDatasets, multiSummary } : {}),
             };
           }
         }
@@ -4298,6 +4324,7 @@ export default function Home() {
                                   rows={ds.rows}
                                   title={ds.name}
                                   htmlTableContent={ds.html}
+                                  totalCount={ds.totalCount}
                                 />
                               </div>
                             ))}

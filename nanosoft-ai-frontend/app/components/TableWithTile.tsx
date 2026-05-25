@@ -12,6 +12,8 @@ interface TableWithTileProps {
   columns?: string[];
   title?: string;
   htmlTableContent?: string; // Old HTML table format
+  /** When set, pagination shows "Showing X of totalCount" (preview of a larger result set). */
+  totalCount?: number;
 }
 
 const TableWithTile = React.memo(function TableWithTile({
@@ -19,6 +21,7 @@ const TableWithTile = React.memo(function TableWithTile({
   columns,
   title = "Data",
   htmlTableContent,
+  totalCount,
 }: TableWithTileProps) {
   const responsive = useResponsive();
   const tableConfig = getResponsiveTable(responsive.screen);
@@ -65,6 +68,9 @@ const TableWithTile = React.memo(function TableWithTile({
 
   // Pagination: compute the slice of rows to display
   const totalPages = Math.max(1, Math.ceil(rows.length / LIMIT));
+  const displayTotal =
+    totalCount != null && totalCount > rows.length ? totalCount : rows.length;
+  const visibleCount = Math.min((page + 1) * LIMIT, rows.length);
   // Reset to first page when data set changes
   useEffect(() => {
     setPage(0);
@@ -616,7 +622,8 @@ const TableWithTile = React.memo(function TableWithTile({
                     </button>
 
                     <div style={{ fontSize: responsive.isMobile ? 11 : 12, color: tileTextMuted, padding: responsive.isMobile ? '0 6px' : undefined }}>
-                      Page {page + 1} / {totalPages} — Showing {Math.min((page + 1) * LIMIT, rows.length)} of {rows.length}
+                      Page {page + 1} / {totalPages} — Showing {visibleCount} of {displayTotal}
+                      {displayTotal > rows.length ? " (preview)" : ""}
                     </div>
 
                     <button
