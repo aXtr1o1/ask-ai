@@ -196,7 +196,7 @@ _DIMENSION_SEMANTIC_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\bhow\s+many\s+complaint\s+modes\b", re.I), "complaint_mode"),
     (re.compile(r"\bhow\s+many\s+(?:audit\s+)?categories\b", re.I), "category"),
     (re.compile(r"\bhow\s+many\s+contracts\b", re.I), "contract"),
-    (re.compile(r"\bhow\s+many\s+spots\b", re.I), "spot"),
+    (re.compile(r"\bhow\s+many\s+(?:spots|spot\s*names?)\b", re.I), "spot"),
     (re.compile(r"\bhow\s+many\s+equipments?\b", re.I), "equipment"),
     (re.compile(r"\bhow\s+many\s+makes\b", re.I), "make"),
     (re.compile(r"\bhow\s+many\s+models\b", re.I), "model"),

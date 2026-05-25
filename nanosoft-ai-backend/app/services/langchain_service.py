@@ -228,7 +228,8 @@ class LangChainService:
         try:
             self.model = ChatGoogleGenerativeAI(
                 model=settings.GOOGLE_AI_MODEL,
-                google_api_key=settings.GOOGLE_API_KEY
+                google_api_key=settings.GOOGLE_API_KEY,
+                temperature=0.0
             ).bind_tools([ASSETS, PPM, BDM, FA, SB])
 
             self.tool_map = {
@@ -368,6 +369,7 @@ class LangChainService:
                         "TASK:\n"
                         "Act as a technical building analyst. Write ONLY a 2-4 sentence insight summary.\n"
                         "PRIMARY GOAL: You MUST directly and specifically answer the user's query or specific comparison/question using the tool results. For example, if the user asks to compare specific elements, categories, or floors (e.g., 'compare Ground Floor and First Floor BDM'), you MUST focus directly on those elements, compare their exact counts/values from the data, and explicitly address the comparison.\n"
+                        "CRITICAL INTENT RULE: If the user asks 'how many' of the grouped category exist (e.g. 'how many floors', 'how many buildings'), your VERY FIRST sentence MUST directly state the total number of unique categories found in the data (which equals the number of grouped summary rows). Only summarize highest/lowest values AFTER directly answering the exact 'how many' question.\n"
                         "FALLBACK GOAL: If the user's query is general or does not specify items to compare, summarize the overall distribution, highlighting the highest/most significant values and key trends.\n"
                         "IMPORTANT: If the user asks for 'highest', 'lowest', 'top', or 'bottom', you MUST explicitly name the specific item(s) and their count in your summary. If there is a massive tie (e.g. 20 items with 1 count), just name 1 or 2 examples.\n"
                         "STRICT RULES:\n"
