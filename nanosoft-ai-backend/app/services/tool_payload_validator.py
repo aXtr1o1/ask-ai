@@ -939,6 +939,13 @@ def _fix_fa_closed_open_stage(tool: str, query: str, args: dict[str, Any]) -> No
         logger.info("🔧 FA: mapped 'Open' → stage='Open' (RMStageName)")
 
 
+def _fix_ppm_execution_completed_stage(tool: str, query: str, args: dict[str, Any]) -> None:
+    if tool == "PPM" and "execution completed" in (query or "").lower():
+        args.update({"stage": "Execution Completed"})
+        args.pop("status", None); args.pop("keyword", None)
+        logger.info("🔧 PPM: mapped 'Execution Completed' -> stage='Execution Completed' and cleared status")
+
+
 def _fix_fa_building_name_vs_audit_category(tool: str, query: str, args: dict[str, Any]) -> None:
     """
     FA: 'BuildingName Category' / building categories → group by BuildingName,
@@ -1153,6 +1160,7 @@ def normalize_tool_args(tool_name: str, user_query: str, args: dict[str, Any]) -
     _fix_bdm_complaint_type_header_stage(tool, query, out)
     _fix_fa_building_name_vs_audit_category(tool, query, out)
     _fix_fa_closed_open_stage(tool, query, out)
+    _fix_ppm_execution_completed_stage(tool, query, out)
     _normalize_location_fields(out)
     _fix_redundant_keyword_with_structured_filters(tool, out)
 
