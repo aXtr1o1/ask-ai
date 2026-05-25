@@ -401,7 +401,8 @@ def _normalize_group_by_value(raw: str, tool_name: str) -> str | None:
     for col in TOOL_GROUP_BY_COLUMNS.get(tool_name, ()):
         if col.lower() == key:
             return col
-    return None
+    
+    raise ValueError(f"The grouping field '{raw}' is not applicable for {tool_name}. Please stop and inform the user that this field is not supported for {tool_name}.")
 
 
 def _infer_group_by_from_query(query: str, tool_name: str) -> list[str]:
@@ -465,16 +466,18 @@ def _clear_structured_filters(tool: str, args: dict[str, Any], *, except_keys: f
 
 
 def _fix_bogus_dimension_location_filters(tool: str, query: str, args: dict[str, Any]) -> None:
-    """Drop building='floors in the' even when the model invented a location filter."""
-    if _infer_dimension_count_column(query, tool):
-        return
-    for field in _LOCATION_FILTER_FIELDS:
+    """Drop building='floors in the' or status words like 'open' mapped to location."""
+    for field in _LOCATION_TEXT_FIELDS:
         val = args.get(field)
         if val is None:
             continue
+        sval = str(val).strip().lower()
         if _is_dimension_count_location_label(str(val)):
             args.pop(field, None)
             logger.info("🔧 %s: cleared bogus %s=%r (dimension phrase, not a place name)", tool, field, val)
+        elif sval in ("open", "closed", "wip", "assigned", "resolved", "completed", "pending", "quarterly", "monthly", "weekly"):
+            args.pop(field, None)
+            logger.info("🔧 %s: cleared bogus %s=%r (status/frequency word mapped to location)", tool, field, val)
 
 
 def _query_implies_aggregate(query: str, tool: str = "") -> bool:
@@ -785,6 +788,10 @@ def _fix_division_to_building_for_location_count(
         return
     if str(place).lower().endswith(" system"):
         return
+    if str(place).lower().strip() in ("open", "closed", "wip", "assigned", "resolved", "completed", "pending", "quarterly", "monthly", "weekly"):
+        return
+    if str(place).lower().strip().startswith(("floor ", "level ")):
+        return
 
     existing = args.get("building")
     if existing:
@@ -1092,7 +1099,8 @@ def normalize_tool_args(tool_name: str, user_query: str, args: dict[str, Any]) -
     _fix_dimension_count_aggregate(tool, query, out)
     _fix_bogus_dimension_location_filters(tool, query, out)
     _fix_mistaken_group_by_on_simple_count(tool, query, out)
-    _fix_division_to_building_for_location_count(tool, query, out)
+    # Disabled by user request: _fix_division_to_building_for_location_count was too aggressive
+    # _fix_division_to_building_for_location_count(tool, query, out)
 
     wants_aggregate = _query_implies_aggregate(query, tool)
     has_group_by = bool(out.get("group_by_columns"))
