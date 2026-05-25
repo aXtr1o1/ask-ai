@@ -3,8 +3,7 @@ Pydantic Schemas for LangChain Tools and API Requests
 """
 from pydantic import BaseModel, Field
 from typing import Optional, List
-
-
+from app.models.column_validation import AllColumns
 # ==========================================
 # ✅ LANGCHAIN TOOL INPUT SCHEMAS
 # ==========================================
@@ -48,7 +47,7 @@ class AssetsInput(BaseModel):
     limit: Optional[int] = Field(default=None, description="Max number of results. Only set if user asks for a specific number. For count queries MUST omit.")
     offset: Optional[int] = Field(default=None, description="Pagination offset. Omit unless requested.")
     is_aggregate: Optional[bool] = Field(default=False, description="Set True ONLY when the user explicitly asks for a distribution or breakdown across a category (e.g., 'breakdown by building', 'complaints per division'). Leave False for simple filtering or total counts.")
-    group_by_columns: Optional[List[str]] = Field(default=None, description="List of columns to group by. Only fill when is_aggregate=True. CRITICAL: Do NOT map generic English words to column names. Valid columns: DivisionName, DisciplineName, BuildingName, FloorName, LocalityName, StatusName, ConditionName, PriorityName, AssetTypeName, EquipmentName, MakeName, ModelName, SpotName, TradeGroupName, ServiceAreaName, OnHold, IsSnagged, IsScraped, IsEnablePPM, IsEnableBDM.")
+    group_by_columns: Optional[List[AllColumns]] = Field(default=None, description="List of columns to group by. Only fill when is_aggregate=True. CRITICAL: If the user asks to group by a specific field like Frequency or Category, pass exactly that column name (e.g. FrequencyName) even if it's not strictly listed here, so the tool can validate it. Valid columns: DivisionName, DisciplineName, BuildingName, FloorName, LocalityName, StatusName, ConditionName, PriorityName, AssetTypeName, EquipmentName, MakeName, ModelName, SpotName, TradeGroupName, ServiceAreaName, OnHold, IsSnagged, IsScraped, IsEnablePPM, IsEnableBDM.")
     aggregate_function: Optional[str] = Field(default=None, description="The mathematical function to apply when grouping data. Use COUNT, SUM, or AVG for grouped distributions. Do not use this field for a simple total count.")
     
 
@@ -83,7 +82,7 @@ class PPMInput(BaseModel):
     limit: Optional[int] = Field(default=None, description="Max number of results. Only set if user asks for a specific number. For count queries MUST omit.")
     offset: Optional[int] = Field(default=None, description="Pagination offset. Omit unless requested.")
     is_aggregate: Optional[bool] = Field(default=False, description="Set True ONLY when the user explicitly asks for a distribution or breakdown across a category (e.g., 'breakdown by frequency', 'PPM per division'). Leave False for simple filtering or total counts.")
-    group_by_columns: Optional[List[str]] = Field(default=None, description="List of columns to group by. Only fill when is_aggregate=True. CRITICAL: Do NOT map generic English words to column names. Valid columns: DivisionName, DisciplineName, BuildingName, FloorName, LocalityName, FrequencyName, PPMStatus, PPMStageName, ContractName, SpotName.")
+    group_by_columns: Optional[List[AllColumns]] = Field(default=None, description="List of columns to group by. Only fill when is_aggregate=True. CRITICAL: If the user asks to group by a specific field like Category or Complainer, pass exactly that column name even if it's not strictly listed here, so the tool can validate it. Valid columns: DivisionName, DisciplineName, BuildingName, FloorName, LocalityName, FrequencyName, PPMStatus, PPMStageName, ContractName, SpotName.")
     aggregate_function: Optional[str] = Field(default=None, description="The mathematical function to apply when grouping data. Use COUNT, SUM, or AVG for grouped distributions. Do not use this field for a simple total count.")
     
 
@@ -153,11 +152,13 @@ class BDMInput(BaseModel):
     limit: Optional[int] = Field(default=None, description="Max number of results. Only set if user asks for a specific number. For count queries MUST omit.")
     offset: Optional[int] = Field(default=None, description="Pagination offset. Omit unless requested.")
     is_aggregate: Optional[bool] = Field(default=False, description="Set True ONLY when the user explicitly asks for a distribution or breakdown across a category (e.g., 'breakdown by status', 'complaints per division'). Leave False for simple filtering or total counts.")
-    group_by_columns: Optional[List[str]] = Field(
+    group_by_columns: Optional[List[AllColumns]] = Field(
         default=None,
         description=(
             "Columns to group by when is_aggregate=True. Compare two '... Services' types "
             "(e.g. Electrical Services vs Housekeeping Services) → ['ServiceTypeName'] only. "
+            "CRITICAL: If the user asks to group by a specific field like FrequencyName or RMCategoryName, "
+            "pass exactly that column name even if it's not strictly listed here, so the tool can validate it. "
             "Valid: DivisionName, DisciplineName, BuildingName, FloorName, LocalityName, "
             "WoStatus, PriorityName, StageName, ComplaintTypeName, ComplaintModeName, "
             "ServiceTypeName, SpotName, ContractName."
@@ -215,12 +216,15 @@ class FAInput(BaseModel):
     limit: Optional[int] = Field(default=None, description="Max records to return. Only set if user asks for a specific number. Omit for count queries.")
     offset: Optional[int] = Field(default=None, description="Pagination offset. Omit unless requested.")
     is_aggregate: Optional[bool] = Field(default=False, description="Set True ONLY when the user explicitly asks for a distribution or breakdown across a category (e.g., 'breakdown by category', 'FA per division'). Leave False for simple filtering or total counts.")
-    group_by_columns: Optional[List[str]] = Field(
+    group_by_columns: Optional[List[AllColumns]] = Field(
         default=None,
         description=(
             "Columns to group by when is_aggregate=True. 'BuildingName Category' or "
             "'building categories' → ['BuildingName'] only. RMCategoryName only for explicit "
-            "audit/inspection category. Valid: DivisionName, BuildingName, FloorName, "
+            "audit/inspection category. "
+            "CRITICAL: If the user asks to group by a specific field like WoStatus or ServiceTypeName, "
+            "pass exactly that column name even if it's not strictly listed here, so the tool can validate it. "
+            "Valid: DivisionName, BuildingName, FloorName, "
             "LocalityName, PriorityName, RMStageName, RMCategoryName, RMCategorySubName, "
             "FrequencyName, ContractName, SpotName, IsRMWithdraw, IsRMRework, IsActive."
         ),
@@ -259,7 +263,7 @@ class SBInput(BaseModel):
     limit: Optional[int] = Field(default=None, description="Max records to return. Only set if user asks for a specific number. Omit for count queries.")
     offset: Optional[int] = Field(default=None, description="Pagination offset. Omit unless requested.")
     is_aggregate: Optional[bool] = Field(default=False, description="Set True ONLY when the user explicitly asks for a distribution or breakdown across a category (e.g., 'breakdown by frequency', 'SB per division'). Leave False for simple filtering or total counts.")
-    group_by_columns: Optional[List[str]] = Field(default=None, description="Columns to group by when is_aggregate=True. CRITICAL: Do NOT map generic English words to column names. Valid values: DivisionName, DisciplineName, BuildingName, FloorName, LocalityName, PPMStageName, FrequencyName, ServiceTypeName, ContractName, SpotName.")
+    group_by_columns: Optional[List[AllColumns]] = Field(default=None, description="Columns to group by when is_aggregate=True. CRITICAL: If the user asks to group by a specific field, pass exactly that column name even if it's not strictly listed here. Valid values: DivisionName, DisciplineName, BuildingName, FloorName, LocalityName, PPMStageName, FrequencyName, ServiceTypeName, ContractName, SpotName.")
     aggregate_function: Optional[str] = Field(default=None, description="The mathematical function to apply when grouping data. Use COUNT, SUM, or AVG for grouped distributions. Do not use this field for a simple total count.")
 
 

@@ -556,15 +556,14 @@ class LangChainService:
                         if args.get("date_to") is None and inferred_to is not None:
                             args["date_to"] = inferred_to
 
-                        args = normalize_tool_args(tool_name, user_query, args)
-                        tool_call["args"] = args
-
                         try:
+                            args = normalize_tool_args(tool_name, user_query, args)
+                            tool_call["args"] = args
                             tool_result = tool_fn.invoke(dict(args))
                             logger.info("✅ Multi-tool call succeeded: %s", tool_name)
                         except Exception as e:
                             logger.error("❌ Multi-tool call failed for %s: %s", tool_name, e)
-                            continue
+                            tool_result = f"Error: {str(e)}"
 
                         parsed = tool_result
                         if isinstance(tool_result, str):
@@ -572,6 +571,16 @@ class LangChainService:
                                 parsed = json.loads(tool_result)
                             except json.JSONDecodeError:
                                 logger.warning("Multi-tool %s returned non-JSON: %s", tool_name, tool_result[:100])
+                                messages.append(
+                                    ToolMessage(content=tool_result, tool_call_id=tool_call["id"])
+                                )
+                                executed_tools.append({
+                                    "tool_name": tool_name,
+                                    "friendly_name": _friendly(tool_name),
+                                    "p_list": [],
+                                    "display_count": 0,
+                                    "search_context": {"summary_line": tool_result},
+                                })
                                 continue
 
                         if isinstance(parsed, dict):
@@ -784,18 +793,17 @@ class LangChainService:
                     if args.get("date_to") is None and inferred_to is not None:
                         args["date_to"] = inferred_to
 
-                    args = normalize_tool_args(tool_name, user_query, args)
-                    tool_call["args"] = args
-
                     search_context = None
 
                     try:
+                        args = normalize_tool_args(tool_name, user_query, args)
+                        tool_call["args"] = args
                         tool_result = tool_fn.invoke(dict(args))
                         logger.info(f"✅ Tool call succeeded on first try | {tool_name}")
 
                     except Exception as e:
                         logger.error(f"❌ Tool call failed: {e}")
-                        raise e
+                        tool_result = f"Error: {str(e)}"
 
                     # Parse tool result — tools return JSON string, not dict
 
@@ -808,7 +816,11 @@ class LangChainService:
                             messages.append(
                                 ToolMessage(content=tool_result, tool_call_id=tool_call["id"])
                             )
-                            continue
+                            # Let the LLM handle the error gracefully!
+                            error_msg = self.model.invoke(messages)
+                            self._accumulate_tokens(error_msg)
+                            ans = self._get_content_str(error_msg)
+                            return ans, ans, messages
 
                     # Extract p_list and p_count from API response shape
                     if isinstance(parsed, dict):
