@@ -288,6 +288,10 @@ def normalize_tool_args(tool_name: str, user_query: str, args: dict[str, Any]) -
         if inferred:
             out["group_by_columns"] = inferred
             logger.info("🔧 Inferred group_by_columns=%s from query", inferred)
+        else:
+            # Fall back to standard query mode since no group_by columns are defined or could be inferred
+            logger.info("🔧 No group_by columns provided or inferred; resetting is_aggregate to False")
+            out["is_aggregate"] = False
 
     if out.get("group_by_columns") and not out.get("is_aggregate"):
         out["is_aggregate"] = True

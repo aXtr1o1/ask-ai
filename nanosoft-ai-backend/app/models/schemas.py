@@ -98,13 +98,8 @@ class BDMInput(BaseModel):
     asset_barcode: Optional[str] = Field(None, description="Barcode of the asset linked to this complaint. Map if user mentions 'Barcode'. Example values: 1731251675376, 1731251675374. Null if no asset is associated.")
     client_wo_no: Optional[str] = Field(None, description="Client work order number. Map if user mentions 'Client WO' or 'ClientWoNo'.")
     status: Optional[str] = Field(None, description="Current status of the BDM complaint or work order. Map if user mentions 'Status' or 'Status Name'. Example values: Open, Closed.")
-<<<<<<< HEAD
-    priority: Optional[str] = Field(None, description="Priority level assigned to the complaint. Map if user mentions 'Priority' or 'Urgency Level'. Example values: P1 Critical, P2 High, P3 Medium, P4 Low.")
-    stage: Optional[str] = Field(None, description="Current workflow stage of the complaint. Map if user mentions 'Stage' or 'Complaint Stage'. Example values: Staff Yet to be Allocated, Technician Assigned, Preliminary Confirmed & Open, Execution Completed & Closed.")
-=======
     priority: Optional[str] = Field(None, description="Priority level assigned to the complaint. Map ONLY for P1–P4 or explicit priority/urgency (e.g. P4 Low, low priority). NEVER map 'low count', 'lowest', or 'fewest' to this field. Example values: P1 Critical, P2 High, P3 Medium, P4 Low.")
     stage: Optional[str] = Field(None, description="Current workflow stage of the complaint. Map if user mentions 'Stage' or 'Complaint Stage'. Example values: Complaint / Service Request Raised, Staff Assigned for Analysis / Job Estimation, Staff Assigned for Work Execution, Complaint / Service Request - Closed.")
->>>>>>> 6c9cd928f5988e78bbe98f1c6a7e86792845b2d1
     complaint_type: Optional[str] = Field(None, description="Type of complaint raised. Map if user mentions 'Complaint Type' or 'Category'. Example values: Corrective Maintenance, Service Request.")
     complaint_header: Optional[str] = Field(None, description="Complaint header name. Map if user mentions 'Complaint Header' or 'ComplaintHeaderName'.")
     complaint_mode: Optional[str] = Field(None, description="Channel through which the complaint was submitted. Map if user mentions 'Complaint Mode' or 'Reporting Mode'. Example values: By Call, By Community Portal.")
