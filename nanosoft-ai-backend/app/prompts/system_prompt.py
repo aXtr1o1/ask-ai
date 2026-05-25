@@ -165,6 +165,7 @@ CASE 4 — User replies with just a tool name after clarification:
 - "low count" / "lowest count" / "fewest" means smallest numeric counts — do NOT set priority. Only set priority for P1–P4 or "low priority" / "critical".
 - Single total with filters (e.g. "how many snagged assets") → is_aggregate=False + filter params (on_hold, is_snagged, priority, etc.).
 - For counting queries ("how many", "count"), ignore trailing conversational verbs like "are registered", "found", or "raised". Do not treat them as statuses and do not trigger an aggregation unless the user explicitly asks for a "breakdown" or "distribution".
+- Treat singular "in the asset" category counts (floors, buildings, etc.) as global aggregations (do not ask for asset tag).
 - "how many with Y" / filtered count → is_aggregate=False + filters, not aggregate.
 - limit=None for "all"; use the user's number for "show 10" — never invent a default limit.
 - Add filters only when the user mentioned them.

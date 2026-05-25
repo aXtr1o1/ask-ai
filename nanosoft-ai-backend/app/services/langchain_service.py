@@ -228,7 +228,8 @@ class LangChainService:
         try:
             self.model = ChatGoogleGenerativeAI(
                 model=settings.GOOGLE_AI_MODEL,
-                google_api_key=settings.GOOGLE_API_KEY
+                google_api_key=settings.GOOGLE_API_KEY,
+                temperature=0.0
             ).bind_tools([ASSETS, PPM, BDM, FA, SB])
 
             self.tool_map = {
