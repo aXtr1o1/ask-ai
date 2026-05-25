@@ -1078,6 +1078,21 @@ def normalize_tool_args(tool_name: str, user_query: str, args: dict[str, Any]) -
     tool = (tool_name or "").upper()
     query = user_query or ""
 
+    # Normalize frequency value (e.g., ANNUALLY -> ANNUAL) to match database values
+    freq = out.get("frequency")
+    if freq and isinstance(freq, str):
+        freq_upper = freq.upper().strip()
+        if freq_upper in ("ANNUALLY", "ANNUAL"):
+            out["frequency"] = "ANNUAL"
+        elif freq_upper in ("MONTHLY", "MONTH"):
+            out["frequency"] = "MONTHLY"
+        elif freq_upper in ("QUARTERLY", "QUARTER"):
+            out["frequency"] = "QUARTERLY"
+        elif freq_upper in ("WEEKLY", "WEEK"):
+            out["frequency"] = "WEEKLY"
+        elif freq_upper in ("DAILY", "DAY"):
+            out["frequency"] = "DAILY"
+
     # Coerce aggregate flag
     if "is_aggregate" in out:
         out["is_aggregate"] = _coerce_bool(out["is_aggregate"])
@@ -1113,6 +1128,10 @@ def normalize_tool_args(tool_name: str, user_query: str, args: dict[str, Any]) -
         if inferred:
             out["group_by_columns"] = inferred
             logger.info("🔧 Inferred group_by_columns=%s from query", inferred)
+        else:
+            # Fall back to standard query mode since no group_by columns are defined or could be inferred
+            logger.info("🔧 No group_by columns provided or inferred; resetting is_aggregate to False")
+            out["is_aggregate"] = False
 
     if out.get("group_by_columns") and not out.get("is_aggregate"):
         out["is_aggregate"] = True
