@@ -157,8 +157,11 @@ CASE 4 — User replies with just a tool name after clarification:
 ═══════════════════════════════════════
  Field mapping & query types
 ═══════════════════════════════════════
-- Map terms to the best tool field (division, discipline, building, floor, status, etc.). Map recognized entities to their explicit parameters even if the user does not use connecting prepositions like "in" or "for". Only use the generic keyword search for unstructured text.
-- BDM/SB service_type vs division: "... Services" (Electrical Services, Housekeeping Services) → service_type; "... System" or explicit division → division. Never map "Housekeeping Services" to division. Compare two Services types → is_aggregate=True, group_by_columns=['ServiceTypeName'].
+- Map terms to the best tool field (division, discipline, building, floor, status, etc.). Map recognized entities to their explicit parameters even if the user does not use connecting prepositions like "in" or "for". 
+- CRITICAL: If the user searches for a specific proper noun or term and you do not know which exact field it belongs to, you MUST pass it in the `keyword` parameter! Do NOT ignore it!
+- CRITICAL: Never map vague words (like "apartment", "house", "room") to specific example values provided in the schema descriptions (like "Building 1 - Residential High Rise"). Only use a specific schema example value if the user explicitly typed that exact name in their query!
+- BDM/SB service_type vs division: "... Services" (Electrical Services, Housekeeping Services) → service_type; "... System" or explicit division → division. Never map "Housekeeping Services" to division.
+- CRITICAL: When the user asks to "compare" two specific locations, categories, or items (e.g. "compare Main Store Section and Beverage Section"), do NOT use is_aggregate=True. You MUST use is_aggregate=False and make multiple separate normal tool calls (one for each item). You MUST OMIT the `limit` parameter entirely so the database returns all matching records for the fallback to work properly!
 - FA BuildingName vs audit category: "BuildingName Category" or "building categories" → group_by_columns=['BuildingName']; do not set category (RMCategoryName). Use category only for audit/inspection category (e.g. Pest Control Checks).
 - BDM status vs FA closed: BDM 'Open'/'Closed' → status (WoStatus). FA has no status — use stage (RMStageName) with value 'Closed' or 'Open'.
 - Remove ALL dashes from parameter values (-, –, —) → spaces only (e.g. "P2 – High" → "P2 High").

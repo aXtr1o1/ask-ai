@@ -541,14 +541,14 @@ class LangChainService:
                         if args.get("limit") is None and common_limit is not None:
                             args["limit"] = common_limit
 
-                        # Respect specific count; clear limit only if no number mentioned
-                        list_pats = ("list", "show me", "get ", "fetch ", "display",
-                                     "give me", "provide", "retrieve", "show ")
-                        count_pats = ("how many", "total", "number of", "count of", "count ")
-                        if any(p in user_query.lower() for p in count_pats) and not _has_number and args.get("limit") is not None:
-                            args["limit"] = None
-                        elif any(p in user_query.lower() for p in list_pats) and not _has_number:
-                            args["limit"] = None
+                        # Bulletproof limit clearing (Multi-Tool Path):
+                        if args.get("limit") is not None:
+                            explicit_limit_pattern = r'\b(top|limit|show|first|last|only|get|fetch)\s+(\d+)\b'
+                            if not _re.search(explicit_limit_pattern, user_query.lower()):
+                                logger.info("🚫 Multi-Tool: Clearing hallucinated limit=%s because user didn't explicitly ask for 'top N' or 'limit N'.", args.get("limit"))
+                                args["limit"] = None
+                            else:
+                                logger.info("✅ Multi-Tool: Keeping limit=%s because user explicitly asked for a specific number of items.", args.get("limit"))
                         # else: keep the limit (which was either parsed by LLM or propagated from common_limit)
 
                         # Infer dates
@@ -767,26 +767,17 @@ class LangChainService:
                             user_query = (m.content or "") if isinstance(m.content, str) else ""
                             break
 
-                    
-                    count_patterns = ("how many", "total", "number of", "count of", "count ", "how many ")
-                    if any(p in user_query.lower() for p in count_patterns) and args.get("limit") is not None:
-                        logger.info("📊 Count query detected — clearing limit=%s", args.get("limit"))
-                        args["limit"] = None
-
-                    #previously limit was only cleared for count queries now i cleared for the list queries also. 
-
-                    
-                    list_patterns = ("list", "show me", "get ", "fetch ", "display",
-                                    "give me", "provide", "retrieve", "show ",
-                                    "all assets", "all complaints", "all bdm", "all ppm",
-                                    "all fa", "all sb")
-                    _has_number = bool(_re.search(r'\b\d+\b', user_query))
-                    if any(p in user_query.lower() for p in list_patterns) and not _has_number:
-                        old_limit = args.get("limit")
-                        args["limit"] = None
-                        logger.info("📋 List query detected — clearing limit=%s", old_limit)
-                    elif _has_number:
-                        logger.info("📋 List query with specific number detected — keeping limit as-is | limit=%s", args.get("limit"))
+                    # Bulletproof limit clearing:
+                    # We ONLY respect the AI's limit if the user explicitly asked for a number of items 
+                    # using words like "top 5", "limit 10", "show 3", "first 5". 
+                    # Just having a number in the query (like "Appartement-1509") is NOT enough to keep the limit!
+                    if args.get("limit") is not None:
+                        explicit_limit_pattern = r'\b(top|limit|show|first|last|only|get|fetch)\s+(\d+)\b'
+                        if not _re.search(explicit_limit_pattern, user_query.lower()):
+                            logger.info("🚫 Clearing hallucinated limit=%s because user didn't explicitly ask for 'top N' or 'limit N'.", args.get("limit"))
+                            args["limit"] = None
+                        else:
+                            logger.info("✅ Keeping limit=%s because user explicitly asked for a specific number of items.", args.get("limit"))
 
                     # If model omitted dates, infer from query keywords (e.g., present => today)
                     inferred_from, inferred_to = extract_date_from_query(user_query)
@@ -965,7 +956,7 @@ class LangChainService:
 
                     MAX_DISPLAY = 25
                     if is_aggregate_query:
-                        MAX_DISPLAY = 200
+                        MAX_DISPLAY = 500
                     p_list_for_model = p_list if len(p_list) <= MAX_DISPLAY else p_list[:MAX_DISPLAY]
                     is_large_result = len(p_list) > MAX_DISPLAY
 

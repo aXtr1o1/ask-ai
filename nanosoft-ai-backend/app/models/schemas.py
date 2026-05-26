@@ -1,15 +1,19 @@
 """
 Pydantic Schemas for LangChain Tools and API Requests
 """
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 from typing import Optional, List
+import re
 from app.models.column_validation import AllColumns
 # ==========================================
 # ✅ LANGCHAIN TOOL INPUT SCHEMAS
 # ==========================================
 
 class AssetsInput(BaseModel):
-    """Schema for ASSETS tool. Covers physical equipment and master records."""
+    """
+    Schema for ASSETS tool. Covers physical equipment and master records.
+    CRITICAL RULE FOR ALL FIELDS: NEVER auto-correct, modify, or truncate the user's text to match 'Example values'. Always extract the EXACT wording and spacing typed by the user.
+    """
     user_id: Optional[str] = Field(None, description="Internal system-set ID; strictly mandatory for all queries. Never request this from the user.")
     user_name: Optional[str] = Field(None, description="Internal system-set user name; strictly mandatory for all queries. Never request this from the user.")
     asset_tag_no: Optional[str] = Field(None, description="Unique tag number that identifies the asset. Format is always alphanumeric with dashes — NEVER a plain number. Map ONLY when user explicitly mentions a tag number in this format. Example values: L1-HVAC-CHL-3827, AJ-DV-DV-3826, T-A1-DV-DV-3825, DM-FF&AS-FE-13802. Do NOT use for pure numeric values — map those to asset_barcode instead.")
@@ -21,7 +25,7 @@ class AssetsInput(BaseModel):
     condition: Optional[str] = Field(None, description="Physical condition of the asset as assessed. Map if user mentions 'Condition' or 'State'. Example values: Good, Bad, Fair, Under Repair.")
     priority: Optional[str] = Field(None, description="Maintenance priority level assigned to the asset. Map if user mentions 'Priority' or 'Urgency'. Example values: P1 Critical, P2 High, P3 Medium, P4 Low.")
     asset_type: Optional[str] = Field(None, description="Category or type of the asset. Map if user mentions 'Asset Type', 'Type', or 'AssetTypeName'.")
-    division: Optional[str] = Field(None, description="Division or system category the asset belongs to. Map if user mentions 'Division', 'Division Name', or 'DivisionName'. Example values: HVAC System, Duty Vehicles, Electrical System, Plumbing System, Fire Fighting and Alarm system, HVAC & PLUMBING SYSTEMS, Kitchen Handling Equipments.")
+    division: Optional[str] = Field(None, description="Division or system category the asset belongs to. Map if user mentions 'Division', 'Division Name', or 'DivisionName'. Example values: HVAC System, Duty Vehicles, Electrical System, Plumbing System, Fire Fighting and Alarm system, HVAC & PLUMBING SYSTEMS.")
     discipline: Optional[str] = Field(None, description="Technical discipline or trade the asset belongs to. Map if user mentions 'Discipline', 'Discipline Name', or 'DisciplineName'. Example values: CHILLER, Duty Vehicles, Fire Extinguisher, Plumbing, Electrical.")
     locality: Optional[str] = Field(None, description="Physical location zone or geographic area (e.g. district, complex, community, airside zone). Do NOT map indoor rooms or common areas here — map those to 'spot_name'. Example values: Al Jurf, Terminal A1, Terminal - A2, Ajman, Doha, Airside Area.")
     building: Optional[str] = Field(None, description="Name of the building where the asset is installed. Map if user mentions 'Building' or 'Building Name'. Example values: Camp, Villa 4, Passenger Terminal Building T1 (Demo), Old Airport Terminal, VIP Terminal, Building 1 - Residential High Rise, Airfield Fire Fighting Station Building.")
@@ -54,7 +58,10 @@ class AssetsInput(BaseModel):
 
 
 class PPMInput(BaseModel):
-    """Schema for PPM tool. Covers planned preventive maintenance schedules."""
+    """
+    Schema for PPM tool. Covers planned preventive maintenance schedules.
+    CRITICAL RULE FOR ALL FIELDS: NEVER auto-correct, modify, or truncate the user's text to match 'Example values'. Always extract the EXACT wording and spacing typed by the user.
+    """
     user_id: Optional[str] = Field(None, description="Internal system-set ID; strictly mandatory for all queries. Never request this from the user.")
     user_name: Optional[str] = Field(None, description="Internal system-set user name; strictly mandatory for all queries. Never request this from the user.")
     work_order: Optional[str] = Field(None, description="Unique work order number for the PPM task. Map if user mentions 'Work Order' or 'WO Number'. Example values: 50010-DM-14264-2026, 50010-DM-14262-2026.")
@@ -63,16 +70,16 @@ class PPMInput(BaseModel):
     status: Optional[str] = Field(None, description="Current status of the PPM work order. Map if user mentions 'PPM Status' or 'Status Name'. Example values: Open, Closed.")
     stage: Optional[str] = Field(None, description="Current workflow stage of the PPM work order. Map if user mentions 'Stage' or 'Workflow Step'. Example values: Staff Yet to be Allocated, Technician Assigned, Work In Progress, Completed.")
     frequency: Optional[str] = Field(None, description="Maintenance frequency schedule for the PPM work order. Map if user mentions 'Frequency', 'Daily', 'Weekly', or 'Monthly'. Example values: QUARTERLY, MONTHLY, ANNUALLY, WEEKLY, BI-MONTHLY.")
-    division: Optional[str] = Field(None, description="Division or system category the PPM asset belongs to. Map if user mentions 'Division', 'Division Name', or 'DivisionName'. Example values: Fire Fighting and Alarm system, HVAC System, Electrical System, Plumbing System.")
+    division: Optional[str] = Field(None, description="Division or system category the PPM asset belongs to. Map if user mentions 'Division'. Example values: Fire Fighting and Alarm system, HVAC System, BHS - Maintenance. CRITICAL: Do NOT include the word 'PPM' inside this field (e.g., use 'BHS - Maintenance' NOT 'BHS - Maintenance PPM').")
     discipline: Optional[str] = Field(None, description="Technical discipline of the asset the PPM is for. Map if user mentions 'Discipline', 'Discipline Name', or 'DisciplineName'. Example values: Fire Extinguisher, CHILLER, Plumbing, Electrical, Duty Vehicles.")
     locality: Optional[str] = Field(None, description="Physical location zone or geographic area of the PPM asset. Do NOT map indoor rooms here — map those to 'spot_name'. Example values: Doha, Terminal A1, Terminal - A2, Ajman, Al Jurf.")
     building: Optional[str] = Field(None, description="Name of the building where the PPM asset is installed. Map if user mentions 'Building' or 'PPM Building'. Example values: Building 1 - Residential High Rise, Building 2 - Residential High Rise, Passenger Terminal Building T1 (Demo).")
     floor: Optional[str] = Field(None, description="Floor within the building where the PPM asset is located. Map if user mentions 'Floor' or 'PPM Floor'. CRITICAL: NEVER translate ordinal words to numbers. If the user types 'first floor' or 'second floor', you MUST pass 'first floor' or 'second floor' exactly as typed. Do NOT translate it to 'Floor 1' or 'Floor 2'. Example values: Ground Floor, Roof Level.")
-    spot_name: Optional[str] = Field(None, description="Specific spot or room within the floor where the PPM work order is raised for. Map if user mentions a specific room or interior area. Example values: Electrical Room, Telephone room, AHU_R1201, Common Area.")
+    spot_name: Optional[str] = Field(None, description="Specific spot or room. CRITICAL: Extract EXACT spacing as typed by user (e.g. if user types 'Appartement-1801', do NOT add spaces like 'Appartement - 1801'). Example values: Electrical Room, AHU_R1201.")
     equipment: Optional[str] = Field(None, description="Name of the equipment or asset the PPM work order is for. Map if user mentions specific equipment. Example values: Fire Extinguisher, Chiller 1, AHU, Pump, Generator.")
     contract: Optional[str] = Field(None, description="Name of the maintenance contract under which the PPM is raised. Map if user mentions 'Contract' or 'Agreement'. Example values: Facility Management Residential Area.")
     tech: Optional[str] = Field(None, description="Name of the technician assigned to carry out this PPM work order. Map if user mentions 'Technician' or 'Assigned Staff'. Example values: Technician, John Smith.")
-    keyword: Optional[str] = Field(None, description="General text search when the term does not map cleanly to another field.")
+    keyword: Optional[str] = Field(None, description="General text search. CRITICAL: NEVER include the words 'PPM', 'BDM', 'work order' or 'complaint' in the keyword itself. CRITICAL: Extract exact spacing as provided by the user (e.g. if user types 'BHS - Maintenance', keep the spaces!).")
     date_from: Optional[str] = Field(None, description="Start range. Use YYYY-MM-DD.")
     date_to: Optional[str] = Field(None, description="End range. Use YYYY-MM-DD.")
     comp_from: Optional[str] = Field(None, description="Completion start range (WoCompletedDate). Use YYYY-MM-DD.")
@@ -89,7 +96,10 @@ class PPMInput(BaseModel):
 
 
 class BDMInput(BaseModel):
-    """Schema for BDM tool. Covers breakdown complaints and reactive work orders."""
+    """
+    Schema for BDM tool. Covers breakdown complaints and reactive work orders.
+    CRITICAL RULE FOR ALL FIELDS: NEVER auto-correct, modify, or truncate the user's text to match 'Example values'. Always extract the EXACT wording and spacing typed by the user.
+    """
     user_id: Optional[str] = Field(None, description="Internal system-set ID; strictly mandatory for all queries. Never request this from the user.")
     user_name: Optional[str] = Field(None, description="Internal system-set user name; strictly mandatory for all queries. Never request this from the user.")
     complaint_no: Optional[str] = Field(None, description="Unique complaint number identifying the BDM work order. Map if user mentions a specific complaint number. Example values: 1261, 1260, 1255, 1252.")
@@ -121,7 +131,7 @@ class BDMInput(BaseModel):
             "NEVER map entire sentences or conversational phrases like 'in the system'. "
             "If the user says '... Services', use service_type instead — NOT this field. "
             "Example values: Plumbing System, Electrical System, HVAC System, "
-            "Fire Fighting and Alarm system, Kitchen Handling Equipments. "
+            "Fire Fighting and Alarm system. "
             "Bare 'Housekeeping' without 'Services' may be division — 'Housekeeping Services' "
             "is always service_type, never division."
         ),
@@ -167,7 +177,10 @@ class BDMInput(BaseModel):
     aggregate_function: Optional[str] = Field(default=None, description="The mathematical function to apply when grouping data. Use COUNT, SUM, or AVG for grouped distributions. Do not use this field for a simple total count.")
     
 class FAInput(BaseModel):
-    """Schema for FA tool. Covers Facility Audit scheduled inspection complaints (FacilityAudit table)."""
+    """
+    Schema for FA tool. Covers Facility Audit scheduled inspection complaints (FacilityAudit table).
+    CRITICAL RULE FOR ALL FIELDS: NEVER auto-correct, modify, or truncate the user's text to match 'Example values'. Always extract the EXACT wording and spacing typed by the user.
+    """
     user_id: Optional[str] = Field(None, description="Internal system-set ID. Never request from user.")
     user_name: Optional[str] = Field(None, description="Internal system-set user name. Never request from user.")
     complaint_no: Optional[str] = Field(None, description="Unique numeric complaint number that identifies this FA record. Map if user mentions a specific complaint number. Example values: 55, 56, 57, 58, 59, 60, 61, 62, 63.")
@@ -233,7 +246,10 @@ class FAInput(BaseModel):
  
  
 class SBInput(BaseModel):
-    """Schema for SB tool. Covers Schedule-Based maintenance work orders (ScheduleBased table)."""
+    """
+    Schema for SB tool. Covers Schedule-Based maintenance work orders (ScheduleBased table).
+    CRITICAL RULE FOR ALL FIELDS: NEVER auto-correct, modify, or truncate the user's text to match 'Example values'. Always extract the EXACT wording and spacing typed by the user.
+    """
     user_id: Optional[str] = Field(None, description="Internal system-set ID. Never request from user.")
     user_name: Optional[str] = Field(None, description="Internal system-set user name. Never request from user.")
     work_order: Optional[str] = Field(None, description="Unique work order number identifying this SB record. Map if user mentions 'Work Order' or 'WO Number'. Example values: AA-1-2026, AA-2-2026.")
