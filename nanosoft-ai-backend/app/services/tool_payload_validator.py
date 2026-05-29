@@ -16,6 +16,26 @@ logger = logging.getLogger("tool_payload_validator")
 # Unicode dash/minus variants → ASCII hyphen (DB locality/building names use " - ")
 _UNICODE_DASHES = re.compile(r"[\u002d\u2010-\u2015\u2212\uFE58\uFE63\uFF0d]")
 _LOCATION_TEXT_FIELDS = frozenset({"locality", "building", "floor", "spot_name"})
+_SMART_PUNCTUATION_TRANSLATION = str.maketrans({
+    "\u2018": "'",
+    "\u2019": "'",
+    "\u201A": "'",
+    "\u201B": "'",
+    "\u201C": '"',
+    "\u201D": '"',
+    "\u201E": '"',
+    "\u201F": '"',
+})
+
+
+def _normalize_smart_punctuation(value: Any) -> Any:
+    if isinstance(value, str):
+        return value.translate(_SMART_PUNCTUATION_TRANSLATION)
+    if isinstance(value, list):
+        return [_normalize_smart_punctuation(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _normalize_smart_punctuation(item) for key, item in value.items()}
+    return value
 
 # Canonical group-by columns allowed per tool (must match DB / stored procedures)
 TOOL_GROUP_BY_COLUMNS: dict[str, frozenset[str]] = {
@@ -32,7 +52,7 @@ TOOL_GROUP_BY_COLUMNS: dict[str, frozenset[str]] = {
     "BDM": frozenset({
         "DivisionName", "DisciplineName", "BuildingName", "FloorName", "LocalityName",
         "WoStatus", "PriorityName", "StageName", "ComplaintTypeName", "ComplaintModeName",
-        "ServiceTypeName", "SpotName", "ContractName",
+        "ComplaintHeaderName", "ServiceTypeName", "SpotName", "ContractName",
     }),
     "FA": frozenset({
         "DivisionName", "BuildingName", "FloorName", "LocalityName", "PriorityName",
@@ -70,6 +90,8 @@ GROUP_BY_ALIASES: dict[str, str] = {
     "rmstagename": "RMStageName",
     "complainttype": "ComplaintTypeName",
     "complainttypename": "ComplaintTypeName",
+    "complaintheader": "ComplaintHeaderName",
+    "complaintheadername": "ComplaintHeaderName",
     "complaintmode": "ComplaintModeName",
     "complaintmodename": "ComplaintModeName",
     "frequency": "FrequencyName",
@@ -89,10 +111,20 @@ GROUP_BY_ALIASES: dict[str, str] = {
     "rmcategory": "RMCategoryName",
     "rmcategoryname": "RMCategoryName",
     "onhold": "OnHold",
+    "onholds": "OnHold",
+    "onheld": "OnHold",
     "issnagged": "IsSnagged",
+    "snagged": "IsSnagged",
+    "snags": "IsSnagged",
     "isscraped": "IsScraped",
+    "scraped": "IsScraped",
+    "scrapped": "IsScraped",
     "isenableppm": "IsEnablePPM",
+    "enableppm": "IsEnablePPM",
+    "ppmenabled": "IsEnablePPM",
     "isenablebdm": "IsEnableBDM",
+    "enablebdm": "IsEnableBDM",
+    "bdmenabled": "IsEnableBDM",
 }
 
 # Query phrase fragment → group_by column (when inferring from user text)
@@ -118,12 +150,7 @@ AGGREGATE_STRIP_FIELDS: dict[str, frozenset[str]] = {
         "work_order", "asset_tag_no", "equipment_ref_no", "equipment", "contract", "tech",
         "keyword", "comp_from", "comp_to", "sla_min", "sla_max", "limit",
     }),
-    "BDM": frozenset({
-        "complaint_no", "asset_tag_no", "asset_barcode", "client_wo_no", "complaint_type",
-        "complaint_header", "complaint_mode", "complaint_nature", "wo_type", "service_type",
-        "spot_name", "contract", "complainer", "register_by", "analysis_tech",
-        "execution_tech", "keyword", "completed_from", "completed_to", "limit",
-    }),
+    "BDM": frozenset({"limit"}),
     "FA": frozenset({
         "complaint_no", "complaint_code", "x_complaint_no", "category_sub", "spot_name",
         "contract", "tech", "request_desc", "is_withdraw", "is_rework", "is_bms",
@@ -191,7 +218,7 @@ _DIMENSION_SEMANTIC_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\bhow\s+many\s+conditions\b", re.I), "condition"),
     (re.compile(r"\bhow\s+many\s+stages\b", re.I), "stage"),
     (re.compile(r"\bhow\s+many\s+frequenc(?:y|ies)\b", re.I), "frequency"),
-    (re.compile(r"\bhow\s+many\s+service\s+types\b", re.I), "service_type"),
+    (re.compile(r"\bhow\s+many\s+service\s+(?:types|categor(?:y|ies))\b", re.I), "service_type"),
     (re.compile(r"\bhow\s+many\s+complaint\s+types\b", re.I), "complaint_type"),
     (re.compile(r"\bhow\s+many\s+complaint\s+modes\b", re.I), "complaint_mode"),
     (re.compile(r"\bhow\s+many\s+(?:audit\s+)?categories\b", re.I), "category"),
@@ -200,6 +227,11 @@ _DIMENSION_SEMANTIC_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\bhow\s+many\s+equipments?\b", re.I), "equipment"),
     (re.compile(r"\bhow\s+many\s+makes\b", re.I), "make"),
     (re.compile(r"\bhow\s+many\s+models\b", re.I), "model"),
+    (re.compile(r"\bhow\s+many\s+on\s*holds?\b|\bhow\s+many\s+onholds?\b", re.I), "OnHold"),
+    (re.compile(r"\bhow\s+many\s+snagged\b|\bhow\s+many\s+snags?\b", re.I), "IsSnagged"),
+    (re.compile(r"\bhow\s+many\s+scrap(?:ed|ped)\b", re.I), "IsScraped"),
+    (re.compile(r"\bhow\s+many\s+ppm\s+enabled\b|\bhow\s+many\s+enable\s*ppm\b", re.I), "IsEnablePPM"),
+    (re.compile(r"\bhow\s+many\s+bdm\s+enabled\b|\bhow\s+many\s+enable\s*bdm\b", re.I), "IsEnableBDM"),
 ]
 _TOOL_DIMENSION_COLUMNS: dict[str, dict[str, str]] = {
     "ASSETS": {
@@ -239,6 +271,7 @@ _TOOL_DIMENSION_COLUMNS: dict[str, dict[str, str]] = {
         "priority": "PriorityName",
         "stage": "StageName",
         "complaint_type": "ComplaintTypeName",
+        "complaint_header": "ComplaintHeaderName",
         "complaint_mode": "ComplaintModeName",
         "service_type": "ServiceTypeName",
         "contract": "ContractName",
@@ -482,6 +515,8 @@ def _fix_bogus_dimension_location_filters(tool: str, query: str, args: dict[str,
 
 def _query_implies_aggregate(query: str, tool: str = "") -> bool:
     q = query or ""
+    if tool and _infer_group_by_from_query(q, tool):
+        return True
     if tool and _infer_dimension_count_column(q, tool):
         return True
     if _RE_AGGREGATE_INTENT.search(q):
@@ -840,9 +875,23 @@ def _is_placeholder_category_value(value: Any) -> bool:
 
 
 _RE_ANA_APPROVAL_FLOW = re.compile(r"\bana\s+approval\s+flow\b", re.I)
+_RE_WITHOUT_APPROVAL_FLOW = re.compile(
+    r"\b(?:non\s*[- ]?\s*approval|without\s+approval|no\s+approval)\s+"
+    r"(?:work\s*)?flows?\b",
+    re.I,
+)
+_RE_APPROVAL_FLOW = re.compile(
+    r"\b(?:ana\s+)?approval\s+(?:work\s*)?flows?\b",
+    re.I,
+)
 _RE_SERVICE_REQUEST_COMPLAINTS = re.compile(
     r"\bservice\s+requests?\b.*\bcomplaints?\b|\bcomplaints?\b.*\bservice\s+requests?\b",
     re.I,
+)
+_BDM_COMPLAINT_TYPE_VALUES = (
+    "Service Request",
+    "Corrective Maintenance",
+    "Reactive Maintenance",
 )
 _BDM_CLASSIFICATION_FILTER_FIELDS = (
     "complaint_type",
@@ -858,6 +907,24 @@ def _bdm_stage_is_header_not_workflow(stage_val: str) -> bool:
     return ("approval" in s and "flow" in s) or s in ("ana approval flow", "ana approval")
 
 
+def _bdm_complaint_type_from_query(query: str) -> str | None:
+    q = query or ""
+    for value in _BDM_COMPLAINT_TYPE_VALUES:
+        pattern = r"\b" + r"\s+".join(map(re.escape, value.split())) + r"\b"
+        if re.search(pattern, q, re.I):
+            return value
+    return None
+
+
+def _bdm_complaint_header_from_query(query: str) -> str | None:
+    q = query or ""
+    if _RE_WITHOUT_APPROVAL_FLOW.search(q):
+        return "Without Approval Flow"
+    if _RE_ANA_APPROVAL_FLOW.search(q) or _RE_APPROVAL_FLOW.search(q) or re.search(r"\bunder\s+ana\b", q, re.I):
+        return "ANA Approval Flow"
+    return None
+
+
 def _fix_bdm_complaint_type_header_stage(tool: str, query: str, args: dict[str, Any]) -> None:
     """
     BDM: 'Service Request' → complaint_type; 'ANA Approval Flow' / 'under … flow' → complaint_header.
@@ -870,15 +937,31 @@ def _fix_bdm_complaint_type_header_stage(tool: str, query: str, args: dict[str, 
         _RE_SERVICE_REQUEST_COMPLAINTS.search(q)
         or re.search(r"\bservice\s+requests?\b", q, re.I)
     )
-    wants_ana_header = bool(
-        _RE_ANA_APPROVAL_FLOW.search(q)
-        or re.search(r"\bunder\s+ana\b", q, re.I)
-    )
+    explicit_complaint_type = _bdm_complaint_type_from_query(q)
+    explicit_complaint_header = _bdm_complaint_header_from_query(q)
+    wants_ana_header = explicit_complaint_header == "ANA Approval Flow"
+
+    if explicit_complaint_type:
+        if args.get("complaint_type") != explicit_complaint_type:
+            logger.info(
+                "🔧 BDM: corrected complaint_type=%r from query",
+                explicit_complaint_type,
+            )
+        args["complaint_type"] = explicit_complaint_type
+    elif args.get("complaint_type") in _BDM_COMPLAINT_TYPE_VALUES:
+        if not re.search(rf"\b{re.escape(str(args['complaint_type']))}\b", q, re.I):
+            args.pop("complaint_type", None)
+            logger.info("🔧 BDM: cleared guessed complaint_type not present in query")
 
     if wants_sr_type:
         args["complaint_type"] = "Service Request"
-    if wants_ana_header:
-        args["complaint_header"] = "ANA Approval Flow"
+    if explicit_complaint_header:
+        if args.get("complaint_header") != explicit_complaint_header:
+            logger.info(
+                "🔧 BDM: corrected complaint_header=%r from query",
+                explicit_complaint_header,
+            )
+        args["complaint_header"] = explicit_complaint_header
 
     stage_val = args.get("stage")
     if stage_val:
@@ -1066,14 +1149,24 @@ def _normalize_priority_value(value: Any) -> str | None:
     s = re.sub(r"[\-–—]+", " ", s)
     s = re.sub(r"\s+", " ", s).strip()
     low = s.lower()
-    if low in ("p4", "p4 low", "low"):
+    if low == "p4 low":
         return "P4 Low"
-    if low in ("p1", "p1 critical", "critical"):
+    if low == "p1 critical":
         return "P1 Critical"
-    if low in ("p2", "p2 high", "high"):
+    if low == "p2 high":
         return "P2 High"
-    if low in ("p3", "p3 medium", "medium"):
+    if low == "p3 medium":
         return "P3 Medium"
+    
+    if low == "low":
+        return "Low"
+    if low == "critical":
+        return "Critical"
+    if low == "high":
+        return "High"
+    if low == "medium":
+        return "Medium"
+    
     return s
 
 
@@ -1081,9 +1174,9 @@ def normalize_tool_args(tool_name: str, user_query: str, args: dict[str, Any]) -
     """
     Return a copy of tool args normalized for DB routes.
     """
-    out = dict(args or {})
+    out = _normalize_smart_punctuation(dict(args or {}))
     tool = (tool_name or "").upper()
-    query = user_query or ""
+    query = _normalize_smart_punctuation(user_query or "")
 
     # Normalize frequency value (e.g., ANNUALLY -> ANNUAL) to match database values
     freq = out.get("frequency")

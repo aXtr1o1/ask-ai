@@ -11,7 +11,7 @@ AllColumns = Literal[
     "SpotName", "TradeGroupName", "ServiceAreaName", 
     "OnHold", "IsSnagged", "IsScraped", "IsEnablePPM", "IsEnableBDM",
     "FrequencyName", "PPMStatus", "PPMStageName", "ContractName",
-    "WoStatus", "StageName", "ComplaintTypeName", "ComplaintModeName", 
+    "WoStatus", "StageName", "ComplaintTypeName", "ComplaintHeaderName", "ComplaintModeName", 
     "ServiceTypeName", "RMStageName", "RMCategoryName", "RMCategorySubName", 
     "IsRMWithdraw", "IsRMRework", "IsActive"
 ]

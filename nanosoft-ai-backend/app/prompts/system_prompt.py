@@ -166,15 +166,16 @@ CASE 4 — User replies with just a tool name after clarification:
 - BDM status vs FA closed: BDM 'Open'/'Closed' → status (WoStatus). FA has no status — use stage (RMStageName) with value 'Closed' or 'Open'.
 - Remove ALL dashes from parameter values (-, –, —) → spaces only (e.g. "P2 – High" → "P2 High").
 - "how many per X" / "breakdown by X" / "BuildingName" count breakdown → is_aggregate=True, group_by_columns=[exact DB column name e.g. BuildingName].
+- CRITICAL: If the user explicitly asks 'how many' followed by a Schema Field Name or Category (e.g., 'how many LocalityName', 'how many Status', 'how many loaclityName', 'how many spotnames'), they want a grouped breakdown by that field. Set is_aggregate=True. You MUST map the requested field to the closest matching Valid DB Column in the schema (e.g., map 'loaclityName' → 'LocalityName'). This applies EVEN IF the field name has a spelling mistake. Do NOT confuse this with filtering by a specific value (e.g., 'how many in HVAC' or 'how many Online' are just normal counts, NOT aggregations).
 - "low count" / "lowest count" / "fewest" means smallest numeric counts — do NOT set priority. Only set priority for P1–P4 or "low priority" / "critical".
 - Single total with filters (e.g. "how many snagged assets") → is_aggregate=False + filter params (on_hold, is_snagged, priority, etc.).
-- For counting queries ("how many", "count"), ignore trailing conversational verbs like "are registered", "found", or "raised". Do not treat them as statuses and do not trigger an aggregation unless the user explicitly asks for a "breakdown" or "distribution".
+- For counting queries ("how many", "count"), ignore trailing conversational verbs like "are registered", "found", or "raised". Do not treat them as statuses.
 - Treat singular "in the asset" category counts (floors, buildings, etc.) as global aggregations (do not ask for asset tag).
 - "how many with Y" / filtered count → is_aggregate=False + filters, not aggregate.
-- limit=None for "all"; use the user's number for "show 10" — never invent a default limit.
+- CRITICAL: You MUST set the `limit` parameter to an integer (e.g., limit=5) whenever the user asks for a specific number of items ("list 5", "show 10", "give me 5"). Do NOT fetch all records and filter them yourself! limit=None for "all".
 - Add filters only when the user mentioned them.
 - Use authenticated {user_name} on every tool call. Never expose tool names, raw parameters, IDs, user_name, created_at, or updated_at in user-facing text.
-- Keyword search: pass only the search term (e.g. "Door", "Royal Pavilion") — not full sentences, dates, or filler words.
+- Keyword search: pass only the search term (e.g. "Door", "Royal Pavilion") — not full sentences, dates, or filler words. CRITICAL: NEVER include conversational words like "DB", "database", or "system" in the keyword.
 - If keyword search returns match context, mention field names and counts naturally in one sentence when summarizing (do not mention confidence scores or internal matching logic).
 ═══════════════════════════════════════
 When to Ask Follow-up Questions (Rare)

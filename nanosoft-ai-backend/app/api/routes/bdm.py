@@ -4,6 +4,7 @@ BDM Route (Breakdown Maintenance / Complaints)
 from fastapi import APIRouter, HTTPException
 import logging
 import json
+from collections import Counter
 
 from app.api.models.schemas import BDMRequest
 from app.api.database.postgres_client import get_pool
@@ -23,6 +24,35 @@ ch = logging.StreamHandler()
 ch.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 if not logger.handlers:
     logger.addHandler(ch)
+
+BDM_SP_AGGREGATE_GROUP_COLUMNS = {
+    "DivisionName",
+    "DisciplineName",
+    "BuildingName",
+    "FloorName",
+    "LocalityName",
+    "WoStatus",
+    "PriorityName",
+    "StageName",
+    "ComplaintTypeName",
+    "ComplaintModeName",
+    "ServiceTypeName",
+    "SpotName",
+    "ContractName",
+}
+
+BDM_SP_AGGREGATE_FILTER_FIELDS = {
+    "division",
+    "discipline",
+    "building",
+    "floor",
+    "locality",
+    "status",
+    "priority",
+    "stage",
+    "date_from",
+    "date_to",
+}
 
 
 def format_response(data):
@@ -79,6 +109,52 @@ def _call_sp_bdm_query(req: BDMRequest) -> dict:
     return format_response(raw)
 
 
+def _bdm_requires_local_aggregate(req: BDMRequest) -> bool:
+    group_cols = set(req.group_by_columns or [])
+    if group_cols - BDM_SP_AGGREGATE_GROUP_COLUMNS:
+        return True
+    for field, value in req.model_dump().items():
+        if field in BDM_SP_AGGREGATE_FILTER_FIELDS:
+            continue
+        if field in {"user_id", "user_name", "is_aggregate", "group_by_columns", "aggregate_function", "offset"}:
+            continue
+        if value is not None:
+            return True
+    return False
+
+
+def _format_local_bdm_aggregate(rows: list[dict], group_by_columns: list[str]) -> dict:
+    counts: Counter[tuple] = Counter()
+    for row in rows:
+        key = tuple(row.get(col) for col in group_by_columns)
+        counts[key] += 1
+
+    p_list = []
+    for key, count in counts.items():
+        item = {col: key[idx] for idx, col in enumerate(group_by_columns)}
+        item["result"] = count
+        p_list.append(item)
+
+    p_list.sort(
+        key=lambda item: (
+            -int(item.get("result") or 0),
+            tuple("" if item.get(col) is None else str(item.get(col)) for col in group_by_columns),
+        )
+    )
+    return {"p_list": p_list, "p_count": len(p_list), "local_aggregate": True}
+
+
+def _call_local_bdm_aggregate(req: BDMRequest) -> dict:
+    query_req = req.model_copy(update={
+        "is_aggregate": False,
+        "group_by_columns": None,
+        "aggregate_function": None,
+    })
+    formatted = _call_sp_bdm_query(query_req)
+    rows = formatted.get("p_list") or []
+    return _format_local_bdm_aggregate(rows, req.group_by_columns or [])
+
+
 @router.post("/get-bdm")
 def get_bdm(req: BDMRequest):
     logger.info(
@@ -93,6 +169,19 @@ def get_bdm(req: BDMRequest):
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
         logger.info("📊 [GET-BDM] AGGREGATE MODE detected → calling sp_bdm_aggregate")
+        if _bdm_requires_local_aggregate(req):
+            logger.info(
+                "[GET-BDM] Local aggregate fallback | group_by=%s",
+                req.group_by_columns,
+            )
+            try:
+                formatted = _call_local_bdm_aggregate(req)
+                logger.info("[GET-BDM] Local aggregate result | count=%s", formatted["p_count"])
+                return formatted
+            except Exception as e:
+                err_msg = str(e)
+                logger.error("[GET-BDM] Local aggregate failed | error=%s", err_msg, exc_info=True)
+                raise HTTPException(status_code=500, detail=err_msg)
         try:
             conn = get_pool()
             cursor = conn.cursor()

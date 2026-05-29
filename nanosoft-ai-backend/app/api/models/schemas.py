@@ -1,11 +1,29 @@
 from __future__ import annotations
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 from typing import Optional, List
 
 # ==========================================
 # ✅ REQUEST MODELS
 # ==========================================
+
+_SMART_PUNCTUATION_TRANSLATION = str.maketrans({
+    "\u2018": "'",
+    "\u2019": "'",
+    "\u201A": "'",
+    "\u201B": "'",
+    "\u201C": '"',
+    "\u201D": '"',
+    "\u201E": '"',
+    "\u201F": '"',
+})
+
+
+def _normalize_smart_punctuation(value):
+    if isinstance(value, str):
+        return value.translate(_SMART_PUNCTUATION_TRANSLATION)
+    return value
+
 
 class AssetRequest(BaseModel):
     """Request schema for assets endpoint"""
@@ -121,6 +139,10 @@ class BDMRequest(BaseModel):
     is_aggregate: Optional[bool] = Field(default=False)
     group_by_columns: Optional[List[str]] = Field(default=None)
     aggregate_function: Optional[str] = Field(default=None)
+
+    @validator("*", pre=True)
+    def normalize_text_fields(cls, value):
+        return _normalize_smart_punctuation(value)
     
     
 class FARequest(BaseModel):

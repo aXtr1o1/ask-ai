@@ -541,16 +541,8 @@ class LangChainService:
                         if args.get("limit") is None and common_limit is not None:
                             args["limit"] = common_limit
 
-                        # Bulletproof limit clearing (Multi-Tool Path):
                         if args.get("limit") is not None:
-                            explicit_limit_pattern = r'\b(top|limit|show|first|last|only|get|fetch)\s+(\d+)\b'
-                            if not _re.search(explicit_limit_pattern, user_query.lower()):
-                                logger.info("🚫 Multi-Tool: Clearing hallucinated limit=%s because user didn't explicitly ask for 'top N' or 'limit N'.", args.get("limit"))
-                                args["limit"] = None
-                            else:
-                                logger.info("✅ Multi-Tool: Keeping limit=%s because user explicitly asked for a specific number of items.", args.get("limit"))
-                        # else: keep the limit (which was either parsed by LLM or propagated from common_limit)
-
+                            logger.info("✅ Multi-Tool: Trusting limit=%s from AI payload.", args.get("limit")) 
                         # Infer dates
                         inferred_from, inferred_to = extract_date_from_query(user_query)
                         if args.get("date_from") is None and inferred_from is not None:
@@ -767,17 +759,8 @@ class LangChainService:
                             user_query = (m.content or "") if isinstance(m.content, str) else ""
                             break
 
-                    # Bulletproof limit clearing:
-                    # We ONLY respect the AI's limit if the user explicitly asked for a number of items 
-                    # using words like "top 5", "limit 10", "show 3", "first 5". 
-                    # Just having a number in the query (like "Appartement-1509") is NOT enough to keep the limit!
                     if args.get("limit") is not None:
-                        explicit_limit_pattern = r'\b(top|limit|show|first|last|only|get|fetch)\s+(\d+)\b'
-                        if not _re.search(explicit_limit_pattern, user_query.lower()):
-                            logger.info("🚫 Clearing hallucinated limit=%s because user didn't explicitly ask for 'top N' or 'limit N'.", args.get("limit"))
-                            args["limit"] = None
-                        else:
-                            logger.info("✅ Keeping limit=%s because user explicitly asked for a specific number of items.", args.get("limit"))
+                        logger.info("✅ Trusting limit=%s from AI payload.", args.get("limit"))
 
                     # If model omitted dates, infer from query keywords (e.g., present => today)
                     inferred_from, inferred_to = extract_date_from_query(user_query)

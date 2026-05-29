@@ -338,7 +338,7 @@ def ASSETS(
         logger.info("📊 AGGREGATE MODE | group_by=%s | function=%s", group_by_columns, aggregate_function)
     
 
-    logger.info("📋 [ASSETS PAYLOAD FROM AI]:\n%s", json.dumps(clean_payload, indent=2, default=str))
+    logger.info("📋 [ASSETS PAYLOAD FROM AI]:\n%s", json.dumps(clean_payload, indent=2, default=str, ensure_ascii=False))
 
     try:
         logger.info("🚀 Calling get_assets directly")
@@ -500,7 +500,7 @@ def PPM(
     if is_aggregate:
         logger.info("📊 AGGREGATE MODE | group_by=%s | function=%s", group_by_columns, aggregate_function)
 
-    logger.info("📋 [PPM PAYLOAD FROM AI]:\n%s", json.dumps(clean_payload, indent=2, default=str))
+    logger.info("📋 [PPM PAYLOAD FROM AI]:\n%s", json.dumps(clean_payload, indent=2, default=str, ensure_ascii=False))
 
     try:
         logger.info("🚀 Calling get_ppm directly")
@@ -586,6 +586,7 @@ Columns you can use in group_by_columns for BDM:
 DivisionName, DisciplineName, BuildingName, FloorName,
 LocalityName, WoStatus, PriorityName, StageName,
 ComplaintTypeName, ComplaintModeName, ServiceTypeName, SpotName, ContractName
+ComplaintHeaderName
 
 
 """,
@@ -683,7 +684,7 @@ def BDM(
     if is_aggregate:
         logger.info("📊 AGGREGATE MODE | group_by=%s | function=%s", group_by_columns, aggregate_function)
 
-    logger.info("📋 [BDM PAYLOAD FROM AI]:\n%s", json.dumps(clean_payload, indent=2, default=str))
+    logger.info("📋 [BDM PAYLOAD FROM AI]:\n%s", json.dumps(clean_payload, indent=2, default=str, ensure_ascii=False))
 
     try:
         logger.info("🚀 Calling get_bdm directly")
@@ -863,7 +864,7 @@ def FA(
     if is_aggregate:
         logger.info("📊 FA AGGREGATE MODE | group_by=%s | function=%s", group_by_columns, aggregate_function)
  
-    logger.info("📋 [FA PAYLOAD FROM AI]:\n%s", json.dumps(clean_payload, indent=2, default=str))
+    logger.info("📋 [FA PAYLOAD FROM AI]:\n%s", json.dumps(clean_payload, indent=2, default=str, ensure_ascii=False))
  
     try:
         req    = FARequest(**clean_payload)
@@ -1033,7 +1034,7 @@ def SB(
     if is_aggregate:
         logger.info("📊 SB AGGREGATE MODE | group_by=%s | function=%s", group_by_columns, aggregate_function)
  
-    logger.info("📋 [SB PAYLOAD FROM AI]:\n%s", json.dumps(clean_payload, indent=2, default=str))
+    logger.info("📋 [SB PAYLOAD FROM AI]:\n%s", json.dumps(clean_payload, indent=2, default=str, ensure_ascii=False))
  
     try:
         req    = SBRequest(**clean_payload)

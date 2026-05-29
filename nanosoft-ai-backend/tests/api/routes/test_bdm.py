@@ -60,6 +60,38 @@ def test_get_bdm_aggregate():
     assert called_proc == "sp_bdm_aggregate"
 
 
+def test_get_bdm_local_aggregate_for_complaint_header_with_type_filter():
+    mock_cursor = MagicMock()
+    mock_cursor.fetchone.return_value = [
+        json.dumps({
+            "p_list": [
+                {"ComplaintTypeName": "Service Request", "ComplaintHeaderName": "ANA Approval Flow"},
+                {"ComplaintTypeName": "Service Request", "ComplaintHeaderName": "ANA Approval Flow"},
+                {"ComplaintTypeName": "Service Request", "ComplaintHeaderName": "Without Approval Flow"},
+            ],
+            "p_count": 3,
+        })
+    ]
+    mock_conn = MagicMock()
+    mock_conn.cursor.return_value = mock_cursor
+
+    with patch("app.api.routes.bdm.get_pool", return_value=mock_conn):
+        req = BDMRequest(
+            user_name="testuser",
+            complaint_type="Service Request",
+            is_aggregate=True,
+            group_by_columns=["ComplaintHeaderName"],
+            aggregate_function="COUNT",
+        )
+        result = get_bdm(req)
+
+    called_proc = mock_cursor.callproc.call_args[0][0]
+    assert called_proc == "sp_bdm_query"
+    assert result["local_aggregate"] is True
+    assert result["p_count"] == 2
+    assert result["p_list"][0] == {"ComplaintHeaderName": "ANA Approval Flow", "result": 2}
+
+
 # Test 3: Aggregate without group_by returns 400
 def test_get_bdm_aggregate_missing_group_by():
     from fastapi import HTTPException

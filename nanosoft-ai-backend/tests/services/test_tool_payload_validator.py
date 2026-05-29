@@ -30,6 +30,45 @@ def test_group_by_columns_forces_aggregate():
     assert out["group_by_columns"] == ["BuildingName"]
 
 
+def test_bdm_complaint_header_name_is_valid_group_by_with_service_request_filter():
+    query = "list all ComplaintHeaderName categories for Service Request BDM complaints"
+    out = normalize_tool_args(
+        "BDM",
+        query,
+        {
+            "user_name": "poc",
+            "complaint_type": "Service Request",
+            "is_aggregate": True,
+            "group_by_columns": ["ComplaintHeaderName"],
+            "aggregate_function": "COUNT",
+        },
+    )
+    assert out["is_aggregate"] is True
+    assert out["group_by_columns"] == ["ComplaintHeaderName"]
+    assert out["complaint_type"] == "Service Request"
+
+
+@pytest.mark.parametrize(
+    "tool,query,expected_col",
+    [
+        ("ASSETS", "How many AssetTypeName assets are registered", "AssetTypeName"),
+        ("BDM", "How many DivisionName BDM complaints are registered", "DivisionName"),
+        ("PPM", "How many FrequencyName PPM work orders are registered", "FrequencyName"),
+        ("FA", "How many RMCategoryName FA complaints are registered", "RMCategoryName"),
+        ("SB", "How many ServiceTypeName SB work orders are registered", "ServiceTypeName"),
+    ],
+)
+def test_literal_group_by_column_in_query_forces_aggregate(tool, query, expected_col):
+    out = normalize_tool_args(
+        tool,
+        query,
+        {"user_name": "poc", "is_aggregate": False},
+    )
+    assert out["is_aggregate"] is True
+    assert out["group_by_columns"] == [expected_col]
+    assert out["aggregate_function"] == "COUNT"
+
+
 def test_p4_low_per_building_keeps_priority():
     query = "P4 Low BDM complaints per building"
     args = {"user_name": "poc"}
@@ -150,6 +189,27 @@ def test_how_many_floors_in_assets_uses_floorname_aggregate():
 
 
 @pytest.mark.parametrize(
+    "query,expected_col",
+    [
+        ("how many OnHolds are assets there?", "OnHold"),
+        ("how many snagged assets are there?", "IsSnagged"),
+        ("how many scraped assets are there?", "IsScraped"),
+        ("how many PPM enabled assets are there?", "IsEnablePPM"),
+        ("how many BDM enabled assets are there?", "IsEnableBDM"),
+    ],
+)
+def test_asset_boolean_dimension_aliases_force_aggregate(query, expected_col):
+    out = normalize_tool_args(
+        "ASSETS",
+        query,
+        {"user_name": "poc", "is_aggregate": False},
+    )
+    assert out.get("is_aggregate") is True
+    assert out.get("group_by_columns") == [expected_col]
+    assert out.get("aggregate_function") == "COUNT"
+
+
+@pytest.mark.parametrize(
     "tool,query,wrong,expected_col",
     [
         ("BDM", "how many floors in BDM complaints", {"building": "floors in the"}, "FloorName"),
@@ -158,6 +218,7 @@ def test_how_many_floors_in_assets_uses_floorname_aggregate():
         ("BDM", "how many statuses in BDM complaints", {"status": "statuses in"}, "WoStatus"),
         ("FA", "how many categories in FA audits", {"category": "categories in"}, "RMCategoryName"),
         ("SB", "how many service types in SB work orders", {"service_type": "service types in"}, "ServiceTypeName"),
+        ("BDM", "how many service categories are present in BDM complaints", {}, "ServiceTypeName"),
     ],
 )
 def test_dimension_count_aggregate_all_tools(tool, query, wrong, expected_col):
@@ -278,6 +339,46 @@ def test_bdm_corrective_maintenance_in_the_system_clears_bogus_division():
     assert out.get("is_aggregate") is False
 
 
+def test_bdm_reactive_maintenance_overrides_model_guess():
+    query = "how many Reactive Maintenance BDM complaints are registered"
+    out = normalize_tool_args(
+        "BDM",
+        query,
+        {
+            "user_name": "poc",
+            "complaint_type": "Corrective Maintenance",
+            "is_aggregate": False,
+        },
+    )
+    assert out.get("complaint_type") == "Reactive Maintenance"
+    assert out.get("is_aggregate") is False
+
+
+def test_bdm_reactive_maintenance_with_newline_is_detected():
+    query = "how many Reactive\nMaintenance BDM complaints are registered"
+    out = normalize_tool_args(
+        "BDM",
+        query,
+        {"user_name": "poc", "is_aggregate": False},
+    )
+    assert out.get("complaint_type") == "Reactive Maintenance"
+    assert out.get("is_aggregate") is False
+
+
+def test_bdm_clears_guessed_complaint_type_not_in_query():
+    query = "how many BDM complaints are registered"
+    out = normalize_tool_args(
+        "BDM",
+        query,
+        {
+            "user_name": "poc",
+            "complaint_type": "Corrective Maintenance",
+            "is_aggregate": False,
+        },
+    )
+    assert "complaint_type" not in out
+
+
 def test_bdm_service_request_and_ana_approval_flow_filters():
     query = "how many Service Request BDM complaints are under ANA Approval Flow"
     out = normalize_tool_args(
@@ -297,6 +398,28 @@ def test_bdm_service_request_and_ana_approval_flow_filters():
     assert "stage" not in out
     assert "keyword" not in out
     assert "complaint_mode" not in out
+
+
+def test_bdm_approval_workflows_maps_to_complaint_header():
+    query = "how many BDM complaints are mapped to approval workflows"
+    out = normalize_tool_args(
+        "BDM",
+        query,
+        {"user_name": "poc", "is_aggregate": False},
+    )
+    assert out.get("complaint_header") == "ANA Approval Flow"
+    assert out.get("is_aggregate") is False
+
+
+def test_bdm_non_approval_workflows_maps_to_without_approval_header():
+    query = "how many BDM complaints are mapped to non-approval workflows"
+    out = normalize_tool_args(
+        "BDM",
+        query,
+        {"user_name": "poc", "is_aggregate": False},
+    )
+    assert out.get("complaint_header") == "Without Approval Flow"
+    assert out.get("is_aggregate") is False
 
 
 def test_aggregate_without_group_by_falls_back_to_normal_query():
