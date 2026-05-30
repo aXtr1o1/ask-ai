@@ -90,6 +90,7 @@ _FACILITY_KEYWORDS = re.compile(
 _FOLLOWUP_PRONOUNS = re.compile(
     r"\b(them|those|these|it\b|the\s+ones|of\s+them|among\s+them|"
     r"from\s+those|from\s+them|the\s+above|same\s+ones|"
+    r"what\s+about|how\s+about|in\s+that|for\s+that|from\s+that|what\s+if|"
     r"show\s+me\s+(more|them|those)|give\s+me\s+(more|them|those))\b",
     re.IGNORECASE,
 )

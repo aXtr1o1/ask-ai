@@ -117,29 +117,124 @@ def _extract_prev_keyword(messages: list) -> "str | None":
                 if hit:
                     return hit.group(1).strip()
     return None
+
+
+# ── Patterns: detect when a prior AI answer already named the tool ────────────
+_RE_ESTAB_FA  = _re.compile(
+    r"\bfacility audit\b|\bfa\b.*\bcomplaints?\b|\bcomplaints?\b.*\bfa\b",
+    _re.IGNORECASE,
+)
+_RE_ESTAB_BDM = _re.compile(
+    r"\bbreakdown\b.*\bcomplaints?\b|\bcomplaints?\b.*\bbreakdown\b"
+    r"|\bbdm\b.*\bcomplaints?\b|\bcomplaints?\b.*\bbdm\b",
+    _re.IGNORECASE,
+)
+_RE_ESTAB_PPM = _re.compile(r"\bppm\b|\bpreventive maintenance\b", _re.IGNORECASE)
+_RE_ESTAB_SB  = _re.compile(
+    r"\bschedule.based\b|\bsb\b.*\bwork\s*orders?\b|\bwork\s*orders?\b.*\bsb\b",
+    _re.IGNORECASE,
+)
+_RE_ESTAB_ASSETS = _re.compile(r"\bassets?\b|\bequipments?\b", _re.IGNORECASE)
+
+
+def _extract_established_tool_context(messages: list | None) -> "str | None":
+    """
+    Detect if the bot already answered an FA/BDM/PPM/SB/ASSETS query in previous_context.
+
+    Architecture note: messages = [SystemMessage(system_prompt),
+                                   SystemMessage(memory_json),
+                                   HumanMessage(query)]
+    There are NO AIMessage objects in the list. Previous context is packed as JSON
+    inside the second SystemMessage under the key "previous_context", each item
+    having "previous_assistant_response".
+
+    Returns: 'fa', 'bdm', 'ppm', 'sb', 'assets', or None.
+    """
+    if not messages:
+        return None
+
+    import json as _json
+
+    for m in messages:
+        if not isinstance(m, SystemMessage):
+            continue
+        content = (m.content or "") if isinstance(m.content, str) else ""
+        if "previous_context" not in content:
+            continue
+        # Extract the JSON blob from the memory SystemMessage
+        # The JSON starts after "Memory JSON:\n"
+        try:
+            json_start = content.find("{")
+            if json_start == -1:
+                continue
+            payload = _json.loads(content[json_start:])
+            prev_turns = payload.get("previous_context") or []
+            # Check most recent turns first
+            for turn in reversed(prev_turns):
+                resp = (turn.get("previous_assistant_response") or "").lower()
+                if not resp:
+                    continue
+                if _RE_ESTAB_FA.search(resp):
+                    return "fa"
+                if _RE_ESTAB_BDM.search(resp):
+                    return "bdm"
+                if _RE_ESTAB_PPM.search(resp):
+                    return "ppm"
+                if _RE_ESTAB_SB.search(resp):
+                    return "sb"
+                if _RE_ESTAB_ASSETS.search(resp):
+                    return "assets"
+        except Exception:
+            pass
+    return None
+
 def _is_after_clarification(messages: list | None) -> bool:
-    """True if the last AI message in history asked for clarification."""
+    """
+    True if the last assistant turn asked for clarification.
+    Reads the SystemMessage JSON memory blob (previous_context[-1].previous_assistant_response)
+    since no AIMessage objects exist in the messages list.
+    """
     if not messages:
         return False
-    prior_ai = [
-        (m.content or "").lower()
-        for m in messages
-        if isinstance(m, AIMessage) and isinstance(m.content, str)
-    ]
-    if prior_ai:
-        prev = prior_ai[-1]
-        is_complaint_clar = ("do you mean facility audit" in prev or 
-                             "fa complaints or bdm" in prev or 
-                             "fa) complaints or breakdown" in prev or
-                             "please clarify so i can fetch the correct data" in prev)
-        is_workorder_clar = ("do you mean ppm (preventive maintenance)" in prev or 
-                             "ppm (preventive maintenance) work orders or sb" in prev or
-                             "ppm or sb" in prev)
-        is_table_clar = ("please clarify which kind of data" in prev or
-                         "assets, ppm, bdm, fa, or sb" in prev)
-        if is_complaint_clar or is_workorder_clar:
-            return True
+
+    import json as _json
+
+    for m in messages:
+        if not isinstance(m, SystemMessage):
+            continue
+        content = (m.content or "") if isinstance(m.content, str) else ""
+        if "previous_context" not in content:
+            continue
+        try:
+            json_start = content.find("{")
+            if json_start == -1:
+                continue
+            payload = _json.loads(content[json_start:])
+            prev_turns = payload.get("previous_context") or []
+            if not prev_turns:
+                return False
+            # Only check the LAST assistant turn
+            prev = (prev_turns[-1].get("previous_assistant_response") or "").lower()
+            is_complaint_clar = (
+                "do you mean facility audit" in prev
+                or "fa complaints or bdm" in prev
+                or "fa) complaints or breakdown" in prev
+                or "please clarify so i can fetch the correct data" in prev
+            )
+            is_workorder_clar = (
+                "do you mean ppm (preventive maintenance)" in prev
+                or "ppm (preventive maintenance) work orders or sb" in prev
+                or "ppm or sb" in prev
+            )
+            is_table_clar = (
+                "please clarify which kind of data" in prev
+                or "assets, ppm, bdm, fa, or sb" in prev
+            )
+            return is_complaint_clar or is_workorder_clar or is_table_clar
+        except Exception:
+            pass
     return False
+
 
 
 def _complaint_query_is_clear(query: str, messages: list | None = None) -> bool:
@@ -494,7 +589,9 @@ class LangChainService:
                 r"\b(asset|assets|equipment|equipments|device|devices|ppm|sb|preventive|schedule[\s\-]based|fa|facility\s+audit|audit|bdm|breakdown|breakdowns)\b",
                 _q,
             ))
-            _table_clear = _has_table_keyword or _is_after_clarification(messages)
+            # Also clear if: last AI message was a clarification OR context already established
+            _established_ctx = _extract_established_tool_context(messages)
+            _table_clear = _has_table_keyword or _is_after_clarification(messages) or (_established_ctx is not None)
 
             if _generic_db_query and not _table_clear:
                 logger.info("🔀 Generic query without dataset intercepted | query='%s'", current_user_query)
@@ -510,7 +607,11 @@ class LangChainService:
 
             # work order ambiguity check
             _workorder_ambiguous = bool(_re.search(r'\b(work\s*orders?|scheduled|compliance|work\s*order)\b', _q))
-            _workorder_clear     = bool(_re.search(r'\b(ppm|sb|preventive|schedule[\s\-]based|fa|bdm|facility audit|breakdown maintenance|breakdown|asset|assets)\b', _q)) or _is_after_clarification(messages)
+            _workorder_clear = (
+                bool(_re.search(r'\b(ppm|sb|preventive|schedule[\s\-]based|fa|bdm|facility audit|breakdown maintenance|breakdown|asset|assets)\b', _q))
+                or _is_after_clarification(messages)
+                or (_established_ctx in ("ppm", "sb"))
+            )
 
             # if _complaint_ambiguous and not _complaint_clear:
             #     logger.info("🔀 Ambiguous complaint query intercepted before model | query='%s'", current_user_query)
