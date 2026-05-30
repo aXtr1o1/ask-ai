@@ -83,6 +83,31 @@ def extract_date_from_query(query: str):
     return None, None
 
 
+def _is_after_clarification(messages: list | None) -> bool:
+    """True if the last AI message in history asked for clarification."""
+    if not messages:
+        return False
+    prior_ai = [
+        (m.content or "").lower()
+        for m in messages
+        if isinstance(m, AIMessage) and isinstance(m.content, str)
+    ]
+    if prior_ai:
+        prev = prior_ai[-1]
+        is_complaint_clar = ("do you mean facility audit" in prev or 
+                             "fa complaints or bdm" in prev or 
+                             "fa) complaints or breakdown" in prev or
+                             "please clarify so i can fetch the correct data" in prev)
+        is_workorder_clar = ("do you mean ppm (preventive maintenance)" in prev or 
+                             "ppm (preventive maintenance) work orders or sb" in prev or
+                             "ppm or sb" in prev)
+        is_table_clar = ("please clarify which kind of data" in prev or
+                         "assets, ppm, bdm, fa, or sb" in prev)
+        if is_complaint_clar or is_workorder_clar:
+            return True
+    return False
+
+
 def _complaint_query_is_clear(query: str, messages: list | None = None) -> bool:
     """
     True when the user named FA and/or BDM (or answered a prior clarification).
@@ -90,7 +115,7 @@ def _complaint_query_is_clear(query: str, messages: list | None = None) -> bool:
     """
     q = (query or "").lower()
     if _re.search(
-        r"\b(fa|bdm|facility audit|breakdown maintenance|breakdown)\b",
+        r"\b(fa|bdm|facility audit|breakdown maintenance|breakdown|ppm|sb|preventive|schedule[\s\-]based|asset|assets)\b",
         q,
     ):
         return True
@@ -104,21 +129,8 @@ def _complaint_query_is_clear(query: str, messages: list | None = None) -> bool:
     ):
         return True
     # User replied after clarification in the same session
-    if messages:
-        prior_human = [
-            (m.content or "").lower()
-            for m in messages
-            if isinstance(m, HumanMessage) and isinstance(m.content, str)
-        ]
-        if len(prior_human) >= 2:
-            prev = prior_human[-2]
-            if _re.search(
-                r"\bdo you mean facility audit|breakdown maintenance\b", prev
-            ) or any(
-                marker in prev
-                for marker in ("please clarify", "fa) complaints or breakdown")
-            ):
-                return True
+    if messages and _is_after_clarification(messages):
+        return True
     return False
 
 
@@ -158,10 +170,10 @@ def _infer_intent_from_query(query: str) -> str | None:
     return None
 
 
-# Max rows per dataset in multi-tool UI when user also asked to "show" data
-MULTI_DATASET_PREVIEW_LIMIT = 30
-# For "how many" only: still show tables when each dataset has at most this many rows
-MULTI_COUNT_AUTO_TABLE_MAX = 30
+# # Max rows per dataset in multi-tool UI when user also asked to "show" data
+# MULTI_DATASET_PREVIEW_LIMIT = 30
+# # For "how many" only: still show tables when each dataset has at most this many rows
+# MULTI_COUNT_AUTO_TABLE_MAX = 30
 
 
 def _append_explicit_today(text: str, query: str) -> str:
@@ -431,21 +443,37 @@ class LangChainService:
             # ── AMBIGUITY PRE-CHECK (runs before model, before lc_memory influence) ──
             _q = current_user_query.lower()
 
+            # Generic table ambiguity check — when query is database-like but names no dataset
+            _generic_db_query = bool(_re.search(r'\b(show|list|how\s+many|count|total|get|search|find|view|fetch)\b', _q))
+            _has_table_keyword = bool(_re.search(
+                r"\b(asset|assets|equipment|equipments|device|devices|ppm|sb|preventive|schedule[\s\-]based|fa|facility\s+audit|audit|bdm|breakdown|breakdowns)\b",
+                _q,
+            ))
+            _table_clear = _has_table_keyword or _is_after_clarification(messages)
+
+            if _generic_db_query and not _table_clear:
+                logger.info("🔀 Generic query without dataset intercepted | query='%s'", current_user_query)
+                clarification = (
+                    "Please clarify which kind of data you want to search?\n"
+                    "Assets, PPM, BDM, FA, or SB."
+                )
+                return clarification, clarification, messages
+
             # complaint ambiguity check — only when type (FA vs BDM) is not named
             _complaint_ambiguous = bool(_re.search(r'\bcomplaints?\b', _q))
             _complaint_clear = _complaint_query_is_clear(current_user_query, messages)
 
             # work order ambiguity check
             _workorder_ambiguous = bool(_re.search(r'\b(work\s*orders?|scheduled|compliance|work\s*order)\b', _q))
-            _workorder_clear     = bool(_re.search(r'\b(ppm|sb|preventive|schedule[\s\-]based)\b', _q))
+            _workorder_clear     = bool(_re.search(r'\b(ppm|sb|preventive|schedule[\s\-]based|fa|bdm|facility audit|breakdown maintenance|breakdown|asset|assets)\b', _q)) or _is_after_clarification(messages)
 
-            if _complaint_ambiguous and not _complaint_clear:
-                logger.info("🔀 Ambiguous complaint query intercepted before model | query='%s'", current_user_query)
-                clarification = (
-                    "Do you mean Facility Audit (FA) complaints or Breakdown Maintenance (BDM) complaints?\n"
-                    "Please clarify so I can fetch the correct data."
-                )
-                return clarification, clarification, messages
+            # if _complaint_ambiguous and not _complaint_clear:
+            #     logger.info("🔀 Ambiguous complaint query intercepted before model | query='%s'", current_user_query)
+            #     clarification = (
+            #         "Do you mean Facility Audit (FA) complaints or Breakdown Maintenance (BDM) complaints?\n"
+            #         "Please clarify so I can fetch the correct data."
+            #     )
+            #     return clarification, clarification, messages
 
             if _workorder_ambiguous and not _workorder_clear:
                 logger.info("🔀 Ambiguous work order query intercepted before model | query='%s'", current_user_query)
@@ -469,17 +497,37 @@ class LangChainService:
 
             if ai_msg.tool_calls:
                 logger.info(f"🛠 Tool calls: {[tc['name'] for tc in ai_msg.tool_calls]}")
+                
+                # If there are keywords in the tool call arguments, log them separately
+                keywords = [
+                    tc.get("args", {}).get("keyword")
+                    for tc in ai_msg.tool_calls
+                    if tc.get("args") and tc["args"].get("keyword")
+                ]
+                if keywords:
+                    logger.info("🔑 Search Keywords: %s", keywords)
 
-                # Deduplicate tool calls with identical names and arguments
+                # Deduplicate tool calls with identical names and arguments (case-insensitive for string arguments)
                 unique_tool_calls = []
                 seen_keys = set()
                 for tc in ai_msg.tool_calls:
-                    call_key = (tc["name"], json.dumps(tc.get("args") or {}, sort_keys=True))
+                    tc_args = tc.get("args") or {}
+                    # Normalize string values for comparison (strip & lowercase)
+                    norm_args = {}
+                    for k, v in tc_args.items():
+                        if isinstance(v, str):
+                            norm_args[k] = v.strip().lower()
+                        elif isinstance(v, list):
+                            norm_args[k] = [x.strip().lower() if isinstance(x, str) else x for x in v]
+                        else:
+                            norm_args[k] = v
+                    
+                    call_key = (tc["name"], json.dumps(norm_args, sort_keys=True))
                     if call_key not in seen_keys:
                         seen_keys.add(call_key)
                         unique_tool_calls.append(tc)
                     else:
-                        logger.info("♻️ Discarding duplicate tool call: %s", tc["name"])
+                        logger.info("♻️ Discarding duplicate tool call: %s with args %s", tc["name"], tc_args)
                 ai_msg.tool_calls = unique_tool_calls
 
                 messages.append(ai_msg)
@@ -610,19 +658,8 @@ class LangChainService:
                             ]
                             friendly_name = f"{friendly_name} by {', '.join(formatted_cols)}"
 
-                        _hide_tables_for_large_count = (
-                            _is_multi_count_query
-                            and display_count > MULTI_COUNT_AUTO_TABLE_MAX
-                        )
-                        if _hide_tables_for_large_count:
-                            _ui_p_list: list = []
-                        elif len(p_list) > MULTI_DATASET_PREVIEW_LIMIT:
-                            _ui_p_list = p_list[:MULTI_DATASET_PREVIEW_LIMIT]
-                        elif len(p_list) <= 30:
-                            _ui_p_list = p_list
-                        else:
-                            _ui_p_list = p_list[:25] + p_list[-10:]
-                        _records_for_ui = _ui_p_list
+                        # Always send all records to the UI, with no limit or hiding
+                        _records_for_ui = p_list
                         _tm_payload: dict = {
                             "dataset_name": friendly_name,
                             "message": f"{display_count} records found",
@@ -640,7 +677,7 @@ class LangChainService:
                         executed_tools.append({
                             "tool_name": tool_name,
                             "friendly_name": friendly_name,
-                            "p_list": [] if _hide_tables_for_large_count else _ui_p_list,
+                            "p_list": p_list,
                             "display_count": display_count,
                             "search_context": ds_search_context,
                         })
@@ -657,14 +694,7 @@ class LangChainService:
                         return msg, msg, messages
 
                     def _plain_count_only_multi(tools: list) -> bool:
-                        """Pure count answer (no tables) when every dataset is a large total."""
-                        if not _is_multi_count_query:
-                            return False
-                        for t in tools:
-                            c = t.get("display_count", 0)
-                            if 0 < c <= MULTI_COUNT_AUTO_TABLE_MAX:
-                                return False
-                        return True
+                        return False
 
                     # ── MULTI-TABLE SYSTEM PROMPT ─────────────────────────────────
                     # Injected ONLY for multi-table responses so the LLM knows the

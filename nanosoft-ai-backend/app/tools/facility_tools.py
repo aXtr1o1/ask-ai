@@ -159,9 +159,7 @@ def getTime(date_from, date_to):
     description="""
 Use this tool for queries regarding physical equipment, master asset records, or metadata.
 
-DEFAULT ROUTING RULE: Trigger this tool for any general request to list, show, or search
-categories of equipment or locations. Do not use PPM or BDM tools unless the user
-explicitly mentions maintenance schedules, service complaints, or breakdowns.
+ROUTING RULE: Trigger this tool only for queries regarding physical equipment, master asset records, or equipment categories/locations. Do not use this tool for generic requests to list, show, or search general data unless the user explicitly mentions assets or equipment.
 
 MAPPING DIRECTIVES:
 - division: Map if user mentions "Division", "Division Name", or "DivisionName".
@@ -734,13 +732,13 @@ KEY DIFFERENTIATORS vs BDM:
   FA = System-generated audit | No human complainer | Has category/sub-category
   BDM = Human-reported breakdown | Has complainer | Has complaint type/mode
  
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-AMBIGUOUS QUERIES — DO NOT GUESS:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-If user asks a generic complaint question with NO FA/BDM keyword:
-  e.g. "how many complaints are raised?" or "show all complaints"
-→ DO NOT call this tool. Ask the user:
-  "Do you mean Facility Audit (FA) complaints or Breakdown Maintenance (BDM) complaints?"
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# AMBIGUOUS QUERIES — DO NOT GUESS:
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# If user asks a generic complaint question with NO FA/BDM keyword:
+#   e.g. "how many complaints are raised?" or "show all complaints"
+# → DO NOT call this tool. Ask the user:
+#   "Do you mean Facility Audit (FA) complaints or Breakdown Maintenance (BDM) complaints?"
  
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 PARAMETERS:
@@ -913,13 +911,13 @@ KEY DIFFERENTIATORS vs PPM:
   PPM = Preventive maintenance | Has AssetTagNo | Has equipment name
         Work order format: AMC-2023-0002-RAE-19366-2025
  
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-AMBIGUOUS QUERIES — DO NOT GUESS:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-If user asks a generic maintenance query with NO SB/PPM keyword:
-  e.g. "how many scheduled tasks?" or "show maintenance work orders"
-→ DO NOT call this tool. Ask the user:
-  "Do you mean PPM (Preventive Maintenance) work orders or SB (Schedule Based) work orders?"
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# AMBIGUOUS QUERIES — DO NOT GUESS:
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# If user asks a generic maintenance query with NO SB/PPM keyword:
+#   e.g. "how many scheduled tasks?" or "show maintenance work orders"
+# → DO NOT call this tool. Ask the user:
+#   "Do you mean PPM (Preventive Maintenance) work orders or SB (Schedule Based) work orders?"
  
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 PARAMETERS:

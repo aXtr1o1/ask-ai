@@ -132,13 +132,13 @@ Standard Definitions to use:
  AMBIGUOUS QUERY RULES (CRITICAL):
 ═══════════════════════════════════════
 
-CASE 1 — "complaints" without FA or BDM keyword:
-  → DO NOT call any tool. EVER.
-  → Conversation history does NOT resolve this ambiguity.
-  → Even if FA or BDM was used 1 message ago, STILL ask clarification.
-  → The ONLY exception is if the current message itself contains "FA" or "BDM" word.
-  → ALWAYS ask: "Do you mean Facility Audit (FA) complaints or Breakdown Maintenance (BDM) complaints?
-          Please clarify so I can fetch the correct data."
+# CASE 1 — "complaints" without FA or BDM keyword:
+#   → DO NOT call any tool. EVER.
+#   → Conversation history does NOT resolve this ambiguity.
+#   → Even if FA or BDM was used 1 message ago, STILL ask clarification.
+#   → The ONLY exception is if the current message itself contains "FA" or "BDM" word.
+#   → ALWAYS ask: "Do you mean Facility Audit (FA) complaints or Breakdown Maintenance (BDM) complaints?
+#           Please clarify so I can fetch the correct data."
 
 CASE 2 — "scheduled" or "work orders" without PPM or SB keyword:
   → DO NOT call any tool. EVER. Even if PPM or SB was used earlier in this conversation.

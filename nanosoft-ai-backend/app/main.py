@@ -181,6 +181,42 @@ def _has_date_keyword(text: str) -> bool:
     return bool(re.search(r"\b\d{4}-\d{2}-\d{2}\b", q))
 
 
+def _should_break_pending(user_query: str) -> bool:
+    """
+    Dynamically decide whether to break the pending clarification loop.
+    We break it if the user is asking a new question or giving a command,
+    rather than choosing one of the clarification options.
+    This works dynamically for all queries without hardcoding question words.
+    """
+    if not user_query:
+        return False
+        
+    import re
+    # Extract all alphanumeric words
+    words = re.findall(r'\b\w+\b', user_query.lower())
+    if not words:
+        return False
+        
+    # Set of words representing a valid choice/clarification selection
+    selection_words = {
+        "asset", "assets", "ppm", "bdm", "fa", "sb",
+        "preventive", "breakdown", "breakdowns", "maintenance", "facility", "audit", "audits", "schedule", "scheduled", "based",
+        "work", "order", "orders", "complaint", "complaints",
+        "equipment", "equipments", "device", "devices",
+        "both", "all", "none", "first", "second", "one", "two", "the",
+        "option", "options", "choice", "choices", "and", "or",
+        "1", "2", "3", "4", "5"
+    }
+    
+    # If the user's message contains any word that is NOT in the selection words,
+    # it is a new topic or question, so we break the loop.
+    for word in words:
+        if word not in selection_words:
+            return True
+            
+    return False
+
+
 def _build_table_context(context_summary: str, user_query: str) -> str:
     # """Keep the table context short, and default to last 7 days when no date is mentioned."""
     """Keep the table context short."""
@@ -680,9 +716,12 @@ async def ws_chat_endpoint(websocket: WebSocket):
                 session_data_check = memory_store.get(session_id, {})
                 pending_original_query = session_data_check.get("pending_original_query")
                 if pending_original_query:
-                    user_query = f"{pending_original_query} {user_query}".strip()
+                    if _should_break_pending(user_query):
+                        logger.info("🚫 Breaking pending clarification loop — user query contains dataset keyword")
+                    else:
+                        user_query = f"{pending_original_query} {user_query}".strip()
+                        logger.info(f"🔁 Reconstructed query: '{user_query}'")
                     memory_store[session_id]["pending_original_query"] = None
-                    logger.info(f"🔁 Reconstructed query: '{user_query}'")
 
                 session_data = memory_store.get(session_id, {})
                 # Do not expand before pending_table yes/no handling
@@ -1027,7 +1066,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
 
             # ── If model asked clarification (no tool ran) → save original query ──
             # Detected by checking if response contains clarification keywords
-            clarification_keywords = ["do you mean", "please clarify", "fa complaints or bdm", "ppm.*or.*sb", "could you clarify"]
+            clarification_keywords = ["do you mean", "please clarify", "fa complaints or bdm", "ppm.*or.*sb", "could you clarify", "please clarify which kind of data", "which kind of data you want to search", "which data to search", "assets, ppm, bdm, fa, or sb"]
             import re as _re
             is_clarification = any(_re.search(kw, final_response_text.lower()) for kw in clarification_keywords)
             if is_clarification:
