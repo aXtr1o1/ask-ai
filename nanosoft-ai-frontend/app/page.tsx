@@ -431,11 +431,21 @@ function renderLargeDataset(text: string): string | null {
     return null;
   }
 
-  const context = parsed.context_summary || `Dataset contains ${records.length} records`;
-  const searchBanner = buildSearchContextBanner(parsed.search_context as SearchContext);
+  let context = parsed.context_summary || `Dataset contains ${records.length} records`;
+  const searchBanner = parsed.is_multi_dataset
+    ? ""
+    : buildSearchContextBanner(parsed.search_context as SearchContext);
+
+  if (parsed.search_context?.summary_line) {
+    const summaryLine = parsed.search_context.summary_line.trim();
+    if (context.includes(summaryLine)) {
+      context = context.replace(summaryLine, "").trim();
+    }
+  }
 
   if (!records.length) {
-    return `${searchBanner}<div class="large-dataset-context">${escapeHTML(context)}</div>`;
+    const contextDiv = context.trim() ? `<div class="large-dataset-context">${escapeHTML(context)}</div>` : "";
+    return `${searchBanner}${contextDiv}`;
   }
 
   // ─────────────────────────────────────────
@@ -514,11 +524,10 @@ function renderLargeDataset(text: string): string | null {
   // ─────────────────────────────────────────
   // Final HTML
   // ─────────────────────────────────────────
+  const contextDiv = context.trim() ? `<div class="large-dataset-context">${escapeHTML(context)}</div>` : "";
   const table = `
   ${searchBanner}
-  <div class="large-dataset-context">
-    ${escapeHTML(context)}
-  </div>
+  ${contextDiv}
   <div class="large-dataset-wrapper">
     <table class="large-dataset-table">
       ${head}
@@ -2247,6 +2256,7 @@ export default function Home() {
                   const dsJsonStr = JSON.stringify({
                     context_summary: ds.name,
                     search_context: ds.search_context,
+                    is_multi_dataset: true,
                     records: (ds.records || []).filter((rec: Record<string, unknown>) =>
                       Object.values(rec).some(v => v !== null && v !== undefined && v !== "")
                     ),
@@ -2704,6 +2714,7 @@ export default function Home() {
               const dsJsonStr = JSON.stringify({
                 context_summary: ds.name,
                 search_context: ds.search_context,
+                is_multi_dataset: true,
                 records: (ds.records || []).filter((rec: Record<string, unknown>) =>
                   Object.values(rec).some(v => v !== null && v !== undefined && v !== "")
                 ),
@@ -3098,6 +3109,68 @@ export default function Home() {
         setAudioPlayingIndex(null);
       });
     }
+  };
+
+  // Helper to programmatically send a message text directly over WS (e.g. for pills)
+  const sendTextDirectly = (text: string) => {
+    if (isLoading) return;
+    clearGhostCompletion();
+    const userText = text.trim();
+    const ws = wsRef.current;
+
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      console.warn("Socket not ready for session:", sessionId);
+      setMessages(prev => [...prev, { role: "error", text: "Still connecting. Please wait." }]);
+      return;
+    }
+
+    recordPromptForGhostHistory(ghostPromptHistoryStorageKey(loggedInUser), userText);
+
+    const now = Date.now();
+    setChatSessions(prev => {
+      const existing = prev.find(s => s.id === sessionId);
+      const rest = prev.filter(s => s.id !== sessionId);
+      if (existing) {
+        return [{ ...existing, updatedAt: now }, ...rest];
+      }
+      const newCapsule: ChatSession = {
+        id: sessionId,
+        title: "New Chat",
+        createdAt: now,
+        updatedAt: now,
+      };
+      return [newCapsule, ...rest];
+    });
+
+    setShowFeaturePlaceholder(false);
+    setMessages(prev => {
+      const updated = [...prev, {
+        role: "user" as const,
+        text: userText
+      }];
+      sessionMessagesRef.current.set(sessionId, updated);
+      return updated;
+    });
+
+    setIsLoading(true);
+    accRef.current = "";
+
+    ws.send(JSON.stringify({
+      type: "message",
+      messageType: "text",
+      isAudio: false,
+      isText: true,
+      isGraph: isGraphMode,
+      query: userText,
+      userName: loggedInUser,
+      subUserName: userIdFromUrl ?? loggedInUser,
+      userId: userIdInt !== null ? String(userIdInt) : undefined,
+      sessionId,
+      group_name: selectedGroupName,
+      timestamp: Date.now()
+    }));
+
+    setIsLoading(true);
   };
 
   // ── Send message over the persistent WebSocket ────────────────────────────
@@ -4422,12 +4495,14 @@ export default function Home() {
                           </>
                         )}
 
+
+
                       </div>
                     </div>
                   );
                 })}
 
-                {isLoading && (() => {
+                {isLoading && !(messages[messages.length - 1]?.role === "ai" && messages[messages.length - 1]?.streaming) && (() => {
                   const isDarkTheme = typeof window !== 'undefined' ? document.documentElement.getAttribute('data-theme') === 'dark' : (theme === 'dark');
                   return (
                     <div className="loading-indicator" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
