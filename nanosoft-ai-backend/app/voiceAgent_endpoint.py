@@ -4,9 +4,9 @@ from fastapi import APIRouter, HTTPException
 from langchain_core.messages import HumanMessage, AIMessage
 
 from app.models.schemas import ChatRequest
-from app.prompts.system_prompt import get_system_prompt
 from app.services.langchain_service import langchain_service
-from app.state import memory_store, MAX_HISTORY, lc_memory_for_model, trim_session
+from app.services.scoped_memory_service import build_scoped_messages
+from app.state import memory_store, MAX_HISTORY, trim_session
 
 logger = logging.getLogger("chatbot_app")
 voice_agent_router = APIRouter(tags=["voice-agent"])
@@ -37,9 +37,12 @@ async def http_chat_endpoint(request: ChatRequest):
             "pending_transcription": None,
         }
 
-    lc_memory = lc_memory_for_model(memory_store[session_id]["lc_memory"], MAX_HISTORY)
-    messages = [get_system_prompt(user_name)] + lc_memory
-    messages.append(HumanMessage(content=user_query))
+    messages = build_scoped_messages(
+        user_name=user_name,
+        current_query=user_query,
+        session_data=memory_store[session_id],
+        max_previous_turns=MAX_HISTORY,
+    )
 
     try:
         final_response_text, context_summary, _ = await langchain_service.process_query(

@@ -100,6 +100,30 @@ def build_field_filter_explanation_sentence(
     )
 
 
+def build_multi_field_filter_explanation_sentence(
+    *,
+    total_records: int,
+    filters: list[dict],  # [{"field": ..., "value": ...}, ...]
+    entity: str = "assets",
+) -> str:
+    """Build a human-readable sentence for multiple active field filters."""
+    label = entity.strip() or "records"
+    if not filters:
+        return f"There are {total_records} {label} in our records."
+    # Build: field1=value1, field2=value2 ...
+    parts = []
+    for f in filters:
+        fl = filter_field_label(f.get("field", ""))
+        val = (f.get("value") or "").strip()
+        if fl and val:
+            parts.append(f"{fl}: {val}")
+    filter_desc = "; ".join(parts)
+    return (
+        f"There are {total_records} {label} in our records matching the applied filters "
+        f"({filter_desc})."
+    )
+
+
 def build_match_explanation_sentence(
     *,
     total_records: int,
@@ -189,6 +213,26 @@ def build_field_filter_context(
     }
 
 
+def build_multi_field_filter_context(
+    *,
+    filters: list[dict],
+    total_records: int = 0,
+    entity: str = "assets",
+) -> dict[str, Any]:
+    """Build search_context for multiple simultaneous field filters."""
+    summary = build_multi_field_filter_explanation_sentence(
+        total_records=total_records,
+        filters=filters,
+        entity=entity,
+    )
+    return {
+        "search_mode": "multi_field_filter",
+        "filters": filters,
+        "total_records": total_records,
+        "summary_line": summary,
+    }
+
+
 def extract_from_tool_response(
     parsed: dict[str, Any],
     *,
@@ -208,6 +252,15 @@ def extract_from_tool_response(
         return build_search_context(
             p_list=parsed.get("p_list") or [],
             keyword_used=kw,
+            entity=entity,
+        )
+
+    # Multi-filter path (division + status, etc.)
+    mff = parsed.get("multi_field_filter")
+    if isinstance(mff, list) and len(mff) > 1:
+        return build_multi_field_filter_context(
+            filters=mff,
+            total_records=int(parsed.get("p_count") or len(parsed.get("p_list") or [])),
             entity=entity,
         )
 
@@ -237,6 +290,12 @@ def format_keyword_count_reply(
     entity: str = "assets",
 ) -> str:
     """Polished count sentence for keyword or field-filter search."""
+    if search_context.get("search_mode") == "multi_field_filter":
+        return build_multi_field_filter_explanation_sentence(
+            total_records=int(search_context.get("total_records") or 0),
+            filters=search_context.get("filters") or [],
+            entity=entity,
+        )
     if search_context.get("search_mode") == "field_filter":
         return build_field_filter_explanation_sentence(
             total_records=int(search_context.get("total_records") or 0),

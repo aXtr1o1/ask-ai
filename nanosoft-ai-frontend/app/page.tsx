@@ -906,9 +906,13 @@ function formatOutput(text: string): string {
           } else {
             // Single record: ≥3 keys → wide table, else 2-col KV table
             const keys = Object.keys(records[0]);
-            html += keys.length >= 3
-              ? buildTable(records)
-              : renderKVVertical(keys.map(k => ({ key: k, val: records![0][k] })));
+            if (keys.length >= 3) {
+              html += buildTable(records);
+            } else if (keys.length >= 2) {
+              html += renderKVVertical(keys.map(k => ({ key: k, val: records![0][k] })));
+            } else {
+              html += block.map(l => `<div style="line-height:1.75;margin:2px 0;color:#F3F4F6">${md(l.trim())}</div>`).join("");
+            }
           }
           i = j; continue;
         }

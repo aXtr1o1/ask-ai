@@ -59,6 +59,18 @@ def pick_text_filter(req: Any, fields: tuple[str, ...]) -> tuple[str, str] | Non
     return None
 
 
+def pick_all_text_filters(req: Any, fields: tuple[str, ...]) -> list[tuple[str, str]]:
+    """Return ALL active (value, field_name) pairs when keyword is unset."""
+    if getattr(req, "keyword", None):
+        return []
+    result = []
+    for field in fields:
+        val = getattr(req, field, None)
+        if val is not None and str(val).strip():
+            result.append((str(val).strip(), field))
+    return result
+
+
 BDM_CLASSIFICATION_FIELDS = (
     "complaint_type",
     "complaint_header",
@@ -164,14 +176,25 @@ def enrich_with_search_fallback(
                 keyword_val,
             )
     elif not getattr(req, "keyword", None):
-        applied = pick_text_filter(req, text_filter_fields)
-        if applied:
-            filter_val, filter_field = applied
-            formatted["field_filter"] = {"field": filter_field, "value": filter_val}
+        all_filters = pick_all_text_filters(req, text_filter_fields)
+        if all_filters:
+            # Always set the primary field_filter for backward compatibility
+            primary_val, primary_field = all_filters[0]
+            formatted["field_filter"] = {"field": primary_field, "value": primary_val}
             logger.info(
                 "%s Field filter applied | field=%s | value=%s",
                 log_prefix,
-                filter_field,
-                filter_val,
+                primary_field,
+                primary_val,
             )
+            # Also attach ALL active filters for richer context summaries
+            if len(all_filters) > 1:
+                formatted["multi_field_filter"] = [
+                    {"field": f, "value": v} for v, f in all_filters
+                ]
+                logger.info(
+                    "%s Multi-field filters | %s",
+                    log_prefix,
+                    [(f, v) for v, f in all_filters],
+                )
     return formatted

@@ -23,7 +23,6 @@ from app.services.user_profile_service import (
     get_user_usage_stats,      
     update_daily_history,      
 )
-from app.prompts.system_prompt import get_system_prompt
 from app.services.postgres_service import save_session_to_postgres_service
 from app.api.database.postgres_client import get_pool
 
@@ -31,6 +30,7 @@ from app.services.session_service import get_sessions_for_user, get_chat_history
 from app.models.schemas import SessionRequest, ClientInsertionRequest
 from app.services.audio_service import convert_audio_to_text, get_audio_duration_seconds
 from app.services.quota_service import quota_fallback_service
+from app.services.scoped_memory_service import build_scoped_messages
 from app.voiceAgent_endpoint import voice_agent_router
 from app.state import (
     memory_store,
@@ -631,15 +631,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
                         memory_store[session_id]["pending_audio_seconds"] = audio_seconds_effective
                         logger.info(f"💾 Saved pending_transcription: '{user_query}'")
 
-                        memory_store[session_id]["history"].append({
-                            "query":                 query_to_store,
-                            "assistant":             clarification_question,
-                            "context":               f"Confirmation asked for: {user_query}",
-                            "is_audio":              True,
-                            "pending_transcription": user_query
-                        })
-
-                        # ── Stop here — user reply comes as next message ──────
+                    # ── Stop here — user reply comes as next message ──────
                         continue
 
                     else:
@@ -659,10 +651,6 @@ async def ws_chat_endpoint(websocket: WebSocket):
                     continue
 
 
-                
-            # ==================================================================
-            # ── NORMAL TEXT PATH — isAudio = false
-            # ==================================================================
             # ==================================================================
             # ── NORMAL TEXT PATH — isAudio = false
             # ==================================================================
@@ -676,19 +664,72 @@ async def ws_chat_endpoint(websocket: WebSocket):
                     await websocket.send_text(json.dumps({"error": "Empty query"}))
                     continue
 
-                # ── Reconstruct full query if user is replying to a clarification ──
-                session_data_check = memory_store.get(session_id, {})
-                pending_original_query = session_data_check.get("pending_original_query")
-                if pending_original_query:
-                    user_query = f"{pending_original_query} {user_query}".strip()
-                    memory_store[session_id]["pending_original_query"] = None
-                    logger.info(f"🔁 Reconstructed query: '{user_query}'")
+                # All follow-up resolution (pronouns, bare affirmations, etc.) is handled
+                # by the model via scoped_memory_service instructions — no Python interception.
 
                 session_data = memory_store.get(session_id, {})
                 # Do not expand before pending_table yes/no handling
                 if not session_data.get("pending_table"):
                     user_query = _expand_affirmative_from_history(user_query, session_data)
                 query_to_store = user_query
+
+                # ✅ CHECK IF USER IS REPLYING TO QUOTA MENU
+                waiting_for_choice = session_data.get("waiting_for_table_choice", False)
+                
+                # ── QUOTA FALLBACK: user is choosing which table to query ──
+                if waiting_for_choice:
+                    logger.info(f"🔄 User replying to quota menu | reply: '{user_query}'")
+                    
+                    # Clear the flag immediately
+                    memory_store[session_id]["waiting_for_table_choice"] = False
+                    
+                    # Handle the user's table choice
+                    final_response_text, context_summary = quota_fallback_service.handle_user_table_choice(
+                        user_reply=user_query,
+                        user_name=user_name
+                    )
+                    
+                    if final_response_text is None:
+                        # Could not parse table type — ask again
+                        error_msg = (
+                            "I couldn't determine which table you want. "
+                            "Please reply with one of: **assets**, **ppm**, **bdm**, **fa**, or **sb**."
+                        )
+                        await websocket.send_text(json.dumps({
+                            "session_id": session_id,
+                            "response": error_msg
+                        }))
+                        await websocket.send_text("[DONE]")
+                        
+                        memory_store[session_id]["history"].append({
+                            "query": query_to_store,
+                            "assistant": error_msg,
+                            "context": error_msg,
+                            "is_audio": is_audio
+                        })
+                        logger.info("⚠️ Could not parse table choice — asked user again")
+                        continue
+                    
+                    # Successfully retrieved data — send to user
+                    await websocket.send_text(json.dumps({
+                        "session_id": session_id,
+                        "response": final_response_text
+                    }))
+                    await websocket.send_text("[DONE]")
+                    
+                    memory_store[session_id]["lc_memory"].append(HumanMessage(content=user_query))
+                    memory_store[session_id]["lc_memory"].append(AIMessage(content=context_summary))
+                    memory_store[session_id]["history"].append({
+                        "query": query_to_store,
+                        "assistant": final_response_text,
+                        "context": context_summary,
+                        "is_audio": is_audio
+                    })
+                    
+                    logger.info(f"✅ Quota fallback response sent | context: {context_summary}")
+                    trim_session(memory_store[session_id], MAX_HISTORY)
+                    print_memory(session_id)
+                    continue
 
                 # ✅ CHECK IF USER IS REPLYING TO QUOTA MENU
                 waiting_for_choice = session_data.get("waiting_for_table_choice", False)
@@ -837,9 +878,12 @@ async def ws_chat_endpoint(websocket: WebSocket):
                 if group_name:
                     memory_store[session_id]["group_name"] = group_name
 
-            lc_memory = lc_memory_for_model(memory_store[session_id]["lc_memory"], MAX_HISTORY)
-            messages  = [get_system_prompt(user_name)] + lc_memory
-            messages.append(HumanMessage(content=user_query))
+            messages = build_scoped_messages(
+                user_name=user_name,
+                current_query=user_query,
+                session_data=memory_store[session_id],
+                max_previous_turns=MAX_HISTORY,
+            )
 
 # Changes done by sanjeevan
             try:
@@ -1029,7 +1073,13 @@ async def ws_chat_endpoint(websocket: WebSocket):
             # Detected by checking if response contains clarification keywords
             clarification_keywords = ["do you mean", "please clarify", "fa complaints or bdm", "ppm.*or.*sb", "could you clarify"]
             import re as _re
-            is_clarification = any(_re.search(kw, final_response_text.lower()) for kw in clarification_keywords)
+            is_large_dataset_response = final_response_text.strip().startswith('{"type": "large_dataset"')
+            is_table_offer = "would you like" in final_response_text.lower()
+            is_clarification = (
+                not is_large_dataset_response
+                and not is_table_offer
+                and any(_re.search(kw, final_response_text.lower()) for kw in clarification_keywords)
+            )
             if is_clarification:
                 memory_store[session_id]["pending_original_query"] = query_to_store
                 logger.info(f"💾 Saved pending_original_query: '{query_to_store}'")
@@ -1045,6 +1095,8 @@ async def ws_chat_endpoint(websocket: WebSocket):
                 langchain_service._last_pending_table = None  # clear after stashing
                 langchain_service._last_search_context = None
                 logger.info(f"📋 Stashed pending_table | records={len(pending_table)} | context_saved=True")
+
+
 
             memory_store[session_id]["history"].append({
                 "query":     query_to_store,

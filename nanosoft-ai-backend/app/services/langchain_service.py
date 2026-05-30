@@ -17,6 +17,7 @@ from app.services.keyword_match_context import (
     search_context_prompt_block,
 )
 from app.services.tool_payload_validator import normalize_tool_args
+from app.services.query_classifier import needs_facility_tools
 
 import json
 
@@ -81,6 +82,41 @@ def extract_date_from_query(query: str):
         return found_month, found_month
 
     return None, None
+
+
+# ── Follow-up keyword extractor ──────────────────────────────────────────────
+# Reads the last AI response from the messages list.
+# Our context_summary always says: '...matching "Keyword" in our records...'
+# This pattern is produced by format_keyword_count_reply() in keyword_match_context.py
+_RE_PREV_KEYWORD = _re.compile(
+    r'matching\s+["\u2018\u2019\u201c\u201d\'](.*?)["\u2018\u2019\u201c\u201d\']',
+    _re.IGNORECASE,
+)
+
+def _extract_prev_keyword(messages: list) -> "str | None":
+    """
+    Scan the messages list (reversed) for the previous assistant keyword.
+    Two sources are checked:
+      1. AIMessage content — used when real AIMessage objects exist in the list.
+      2. SystemMessage content — scoped_memory_service packs previous_context as
+         JSON inside a SystemMessage (format: {"previous_assistant_response": "...matching 'X'..."}).
+    Returns the keyword string or None if not found.
+    """
+    for m in reversed(messages):
+        # Source 1: real AIMessage (e.g. after multi-turn with tool history)
+        if isinstance(m, AIMessage):
+            content = (m.content or "") if isinstance(m.content, str) else ""
+            hit = _RE_PREV_KEYWORD.search(content)
+            if hit:
+                return hit.group(1).strip()
+        # Source 2: SystemMessage containing the scoped memory JSON blob
+        if isinstance(m, SystemMessage):
+            content = (m.content or "") if isinstance(m.content, str) else ""
+            if "previous_assistant_response" in content:
+                hit = _RE_PREV_KEYWORD.search(content)
+                if hit:
+                    return hit.group(1).strip()
+    return None
 
 
 def _complaint_query_is_clear(query: str, messages: list | None = None) -> bool:
@@ -226,11 +262,15 @@ def _enrich_entity_from_args(entity: str, args: dict) -> str:
 class LangChainService:
     def __init__(self):
         try:
-            self.model = ChatGoogleGenerativeAI(
+            _base_model = ChatGoogleGenerativeAI(
                 model=settings.GOOGLE_AI_MODEL,
                 google_api_key=settings.GOOGLE_API_KEY,
                 temperature=0.0
-            ).bind_tools([ASSETS, PPM, BDM, FA, SB])
+            )
+            # Model WITH tools — for facility data queries
+            self.model = _base_model.bind_tools([ASSETS, PPM, BDM, FA, SB])
+            # Model WITHOUT tools — for conversational / general queries
+            self.plain_model = _base_model
 
             self.tool_map = {
                 "ASSETS": ASSETS,
@@ -240,6 +280,13 @@ class LangChainService:
                 "SB":     SB,
             }
             self._last_search_context = None
+            # Stores the last successful tool payload per tool (filter fields only).
+            # Used to carry over filters for follow-up queries (e.g. 'among them...').
+            # Keyed by tool name so ASSETS history never bleeds into PPM/BDM/FA/SB.
+            self._last_tool_payload: dict = {}  # {tool_name: {field: value}}
+            # Tracks the SINGLE most recently called tool — used to redirect
+            # follow-up queries ("give me 8 among them") to the correct tool.
+            self._last_used_tool: str | None = None
             logger.info("🚀 LangChainService initialized with ASSETS, PPM, BDM, FA, SB tools")
         except Exception as e:
             logger.error(f"❌ LangChainService init failed: {e}", exc_info=True)
@@ -460,10 +507,32 @@ class LangChainService:
             # The original user query is passed directly to the model.
             logger.info(f"💬 Direct Query (No Rewriter): '{current_user_query}'")
 
+            # ── PRE-CLASSIFICATION: decide which model to invoke ──────────────
+            # Extract the last assistant response as context for follow-up detection
+            _prev_assistant = ""
+            for m in reversed(messages):
+                from langchain_core.messages import AIMessage as _AIMsg
+                if isinstance(m, _AIMsg):
+                    _prev_assistant = (m.content or "") if isinstance(m.content, str) else ""
+                    break
 
-            # CALL 1 — First model call
+            _use_tools = needs_facility_tools(current_user_query, _prev_assistant)
+            logger.info(
+                "🔀 QueryClassifier | use_tools=%s | query='%s'",
+                _use_tools, current_user_query[:80]
+            )
+
+            # CALL 1 — First model call (with or without tools)
+            if not _use_tools:
+                # Conversational query — invoke plain model (no tools available)
+                ai_msg = self.plain_model.invoke(messages)
+                self._accumulate_tokens(ai_msg)
+                logger.info("🤖 First model call (no tools) | conversational")
+                conv_text = _strip_redundant_table_offer(self._get_content_str(ai_msg))
+                self._log_query_summary(current_user_query)
+                return conv_text, conv_text, messages
+
             ai_msg = self.model.invoke(messages)
-            
             self._accumulate_tokens(ai_msg)
             logger.info("🤖 First model call | tool_calls=%s", bool(ai_msg.tool_calls))
 
@@ -483,6 +552,8 @@ class LangChainService:
                 ai_msg.tool_calls = unique_tool_calls
 
                 messages.append(ai_msg)
+
+
 
                 # ── MULTI-TOOL PATH: 2+ tool calls → render multiple tables ──────────────
                 if len(ai_msg.tool_calls) > 1:
@@ -769,13 +840,84 @@ class LangChainService:
                     if args.get("date_to") is None and inferred_to is not None:
                         args["date_to"] = inferred_to
 
+                    # ── FOLLOW-UP PAYLOAD MERGE ─────────────────────────────────
+                    # Problem: for follow-up queries like "among them how many are online",
+                    # the model adds the NEW filter (status=Online) but DROPS ALL filters
+                    # from the previous payload (e.g. division='HVAC System', keyword='FCU').
+                    #
+                    # Fix: if the query is a follow-up (pronoun detected) AND we have a
+                    # stored previous payload, merge the stored fields into the current args.
+                    # The model's new fields always win (override previous); missing fields
+                    # are filled in from the previous payload.
+                    #
+                    # Independent queries: model already sends a fresh keyword/filter.
+                    # Python does NOT inject anything for those — the model handles them.
+                    # ────────────────────────────────────────────────
+                    # Fields that are always rebuilt per-query — never carry over
+                    _NO_CARRY = {"user_name", "user_id", "offset", "limit",
+                                 "is_aggregate", "group_by_columns"}
+                    from app.services.query_classifier import _FOLLOWUP_PRONOUNS as _FUP_RE
+                    _is_followup = bool(_FUP_RE.search(user_query))
+
+                    # ── FOLLOW-UP TOOL CORRECTION ──────────────────────────────────────────
+                    # Problem: "give me 8 among them" after PPM MONTHLY query picks BDM
+                    # because BDM still has an old Catering Services payload.
+                    #
+                    # Fix: for follow-up queries, ALWAYS use _last_used_tool (the single
+                    # most recently called tool). If the model picks a DIFFERENT tool,
+                    # redirect to _last_used_tool.
+                    if _is_followup and self._last_used_tool and self._last_used_tool != tool_name:
+                        _redirect_tool = self._last_used_tool
+                        logger.info(
+                            "🔀 Follow-up tool correction | model picked %s → "
+                            "redirecting to last-used %s | query='%s'",
+                            tool_name, _redirect_tool, user_query[:70],
+                        )
+                        tool_name = _redirect_tool
+                        if _redirect_tool in self.tool_map:
+                            tool_fn = self.tool_map[_redirect_tool]
+
+                    # ── END FOLLOW-UP TOOL CORRECTION ─────────────────────────────────────
+
+                    # Retrieve the stored payload for THIS tool only
+                    _prev_payload = self._last_tool_payload.get(tool_name, {})
+
+                    if _is_followup and _prev_payload:
+                        _injected = []
+                        for _k, _v in _prev_payload.items():
+                            if _k in _NO_CARRY:
+                                continue
+                            # Only inject if model did NOT already set this field
+                            if _k not in args or args[_k] is None:
+                                args[_k] = _v
+                                _injected.append(f"{_k}={_v!r}")
+                        if _injected:
+                            logger.info(
+                                "🔗 Follow-up payload merge | tool=%s | injected=%s | query='%s'",
+                                tool_name, ", ".join(_injected), user_query[:70],
+                            )
+                    # ── END FOLLOW-UP PAYLOAD MERGE ──────────────────────────────────
+
                     search_context = None
+
 
                     try:
                         args = normalize_tool_args(tool_name, user_query, args)
                         tool_call["args"] = args
                         tool_result = tool_fn.invoke(dict(args))
                         logger.info(f"✅ Tool call succeeded on first try | {tool_name}")
+                        # ── Save payload per-tool for next follow-up query ──────────────────────────
+                        _SKIP_SAVE = {"user_name", "user_id", "offset", "limit",
+                                      "is_aggregate", "group_by_columns"}
+                        _saved = {k: v for k, v in args.items()
+                                  if k not in _SKIP_SAVE and v is not None}
+                        self._last_tool_payload[tool_name] = _saved
+                        self._last_used_tool = tool_name  # Track most recent tool
+                        logger.info(
+                            "💾 Saved %s payload for follow-up | %s",
+                            tool_name, _saved,
+                        )
+                        # ────────────────────────────────────────────────────────
 
                     except Exception as e:
                         logger.error(f"❌ Tool call failed: {e}")
@@ -1019,6 +1161,7 @@ class LangChainService:
                     and (
                         search_context.get("keyword")
                         or search_context.get("search_mode") == "field_filter"
+                        or search_context.get("search_mode") == "multi_field_filter"
                     )
                 )
 
@@ -1166,13 +1309,89 @@ class LangChainService:
                 return final_content, context_summary, messages
 
             else:
-                # Model skipped tool — direct response
+                # Model skipped tool — direct response.
+                # BUT: if this is a follow-up pronoun query ("give me 9 of them",
+                # "give me 10 among them") and we have a stored payload,
+                # force-invoke the most recent tool instead of going conversational.
+                from app.services.query_classifier import _FOLLOWUP_PRONOUNS as _FUP_RE2
+                _user_q2 = ""
+                for _m2 in reversed(messages):
+                    if isinstance(_m2, HumanMessage):
+                        _user_q2 = (_m2.content or "") if isinstance(_m2.content, str) else ""
+                        break
+
+                _is_fup2 = bool(_FUP_RE2.search(_user_q2))
+                # Extract requested count from "give me 9 of them" / "show 5 of them"
+                import re as _re2
+                _limit_match = _re2.search(r'\b(\d+)\b', _user_q2)
+                _requested_limit = int(_limit_match.group(1)) if _limit_match else None
+
+                # Find the most recently used tool (last key in _last_tool_payload)
+                _redirect_tool2 = None
+                _redirect_payload2 = {}
+                if _is_fup2 and _requested_limit and self._last_tool_payload:
+                    # Use the tool that was most recently saved
+                    for _t2, _p2 in reversed(list(self._last_tool_payload.items())):
+                        if _p2:
+                            _redirect_tool2 = _t2
+                            _redirect_payload2 = _p2
+                            break
+
+                if _redirect_tool2 and _redirect_tool2 in self.tool_map:
+                    logger.info(
+                        "🔀 Follow-up force-invoke | model skipped tools | redirecting to %s "
+                        "with payload=%s + limit=%s | query='%s'",
+                        _redirect_tool2, _redirect_payload2, _requested_limit, _user_q2[:70],
+                    )
+                    _fup_args: dict = {
+                        "user_name": user_name,
+                        "user_id": str(user_id) if user_id is not None else None,
+                        "limit": _requested_limit,
+                        "offset": 0,
+                        "is_aggregate": False,
+                    }
+                    # Inject stored filters
+                    for _fk, _fv in _redirect_payload2.items():
+                        if _fk not in ("user_name", "user_id", "offset", "limit", "is_aggregate"):
+                            _fup_args[_fk] = _fv
+
+                    try:
+                        _fup_args = normalize_tool_args(_redirect_tool2, _user_q2, _fup_args)
+                        _fup_result = self.tool_map[_redirect_tool2].invoke(dict(_fup_args))
+                        _fup_parsed = json.loads(_fup_result) if isinstance(_fup_result, str) else _fup_result
+                        _fup_p_list = _fup_parsed.get("p_list", []) if isinstance(_fup_parsed, dict) else []
+                        _fup_p_count = _fup_parsed.get("p_count", len(_fup_p_list)) if isinstance(_fup_parsed, dict) else len(_fup_p_list)
+
+                        # Build response the same way the normal single-tool list path does
+                        _fup_entity = self._entity_label_from_tool(_redirect_tool2)
+                        _fup_context_summary = (
+                            f"I've retrieved {len(_fup_p_list)} {_fup_entity} records for you."
+                        )
+                        _fup_response = json.dumps({
+                            "type": "large_dataset",
+                            "context_summary": _fup_context_summary,
+                            "records": _fup_p_list,
+                        })
+                        self._last_tool_payload[_redirect_tool2] = {
+                            k: v for k, v in _fup_args.items()
+                            if k not in ("user_name", "user_id", "offset", "limit", "is_aggregate") and v is not None
+                        }
+                        self._last_used_tool = _redirect_tool2  # Keep tracking most recent tool
+
+                        self._log_query_summary(current_user_query)
+                        return _fup_response, _fup_context_summary, messages
+                    except Exception as _fup_err:
+                        logger.error("❌ Follow-up force-invoke failed: %s", _fup_err)
+                        # Fall through to conversational response below
+
+                # Normal no-tool path
                 logger.info("✅ No tool call — direct response")
                 content = self._get_content_str(ai_msg)
                 if not content or str(content).strip() == "":
                     content = "No matching records were found for the requested data."
                 self._log_query_summary(current_user_query)
                 return content, content, messages
+
 
         except Exception as e:
             logger.error(f"❌ Query processing error: {e}", exc_info=True)

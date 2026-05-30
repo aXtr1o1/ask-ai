@@ -541,8 +541,20 @@ def _strip_priority_for_low_count(query: str, args: dict[str, Any]) -> None:
         logger.info("🔧 Stripped priority (user meant low count, not P4 Low)")
 
 
+_KNOWN_ACRONYMS: frozenset[str] = frozenset({
+    "HVAC", "BMS", "AC", "MEP", "CCTV", "IT", "AV", "ELV", "ICT", "LV", "HV",
+})
+
 def _title_words(phrase: str) -> str:
-    return " ".join(part.capitalize() for part in phrase.split())
+    result = []
+    for part in phrase.split():
+        upper = part.upper()
+        if upper in _KNOWN_ACRONYMS:
+            result.append(upper)          # HVAC / BMS stays all-caps
+        else:
+            result.append(part.capitalize())
+    return " ".join(result)
+
 
 
 def _strip_trade_prefix(trade: str) -> str:
@@ -614,6 +626,8 @@ def _extract_division_from_query(query: str) -> str | None:
         candidates = _RE_SYSTEM_PHRASE.findall(q)
         for trade in reversed(candidates):
             trade = _strip_trade_prefix(trade.strip())
+            # Strip leading prepositions (e.g. "in hvac" → "hvac" from "are in hvac system")
+            trade = _RE_LEADING_PREPOSITION.sub("", trade).strip()
             if trade and _is_plausible_division_trade(trade):
                 return f"{_title_words(trade)} System"
     # Explicit "Electrical System" / "HVAC System" without leading garbage
@@ -624,6 +638,7 @@ def _extract_division_from_query(query: str) -> str | None:
         re.I,
     ):
         trade = _strip_trade_prefix(m.group(1).strip())
+        trade = _RE_LEADING_PREPOSITION.sub("", trade).strip()
         if trade and _is_plausible_division_trade(trade):
             return f"{_title_words(trade)} System"
     return None
@@ -851,8 +866,38 @@ def _fix_division_to_building_for_location_count(
     )
 
 
+_RE_LEADING_PREPOSITION = re.compile(
+    r"^(?:in|at|of|for|from|within|the|a|an)\s+",
+    re.IGNORECASE,
+)
+_FIELDS_WITH_LEADING_PREPOSITION = ("division", "discipline", "locality", "building", "floor", "spot_name")
+
+
+def _strip_leading_prepositions(args: dict[str, Any]) -> None:
+    """
+    Strip query prepositions the model accidentally includes in field values.
+    Examples:
+      division="In Hvac System"  → "Hvac System"  (model included 'in' from 'are in hvac system')
+      locality="at Terminal A"   → "Terminal A"
+      building="the main tower"  → "main tower"
+    """
+    for field in _FIELDS_WITH_LEADING_PREPOSITION:
+        val = args.get(field)
+        if val is None or not isinstance(val, str):
+            continue
+        cleaned = _RE_LEADING_PREPOSITION.sub("", val.strip()).strip()
+        if cleaned != val.strip():
+            logger.info("🔧 Stripped leading preposition from %s: %r → %r", field, val, cleaned)
+            args[field] = cleaned if cleaned else None
+            if args[field] is None:
+                args.pop(field, None)
+
+
 def _fix_bogus_division(tool: str, query: str, args: dict[str, Any]) -> None:
     """Drop division values that are query noise or conversational 'in the system'."""
+    # First strip any leading prepositions the model accidentally included
+    _strip_leading_prepositions(args)
+
     if tool not in _TOOLS_WITH_SERVICE_TYPE:
         return
     div = args.get("division")
@@ -1001,6 +1046,57 @@ def _fix_bdm_complaint_type_header_stage(tool: str, query: str, args: dict[str, 
     for field in _BDM_CLASSIFICATION_FILTER_FIELDS:
         if field not in keep and args.pop(field, None) is not None:
             logger.info("🔧 BDM: dropped extra classification filter %s", field)
+
+
+# Words that describe the act of creating/submitting a record — NOT a status value.
+# The model often maps "are registered" → status="Open" which is wrong.
+_CONVERSATIONAL_VERBS_NOT_STATUS = re.compile(
+    r"\b(registered|raised|found|created|submitted|logged|entered|added|done|reported|placed)\b",
+    re.IGNORECASE,
+)
+# Explicit status words that confirm the user really wants a status filter.
+_EXPLICIT_STATUS_WORDS = re.compile(
+    r"\b(open|closed|pending|resolved|assigned|cancelled|canceled|completed|in\s+progress|"
+    r"preliminary\s+confirmed|snagged|scraped|on\s+hold|online|offline|active|inactive)\b",
+    re.IGNORECASE,
+)
+
+
+def _strip_implicit_status_for_conversational_verbs(
+    tool: str, query: str, args: dict[str, Any]
+) -> None:
+    """
+    Strip status/stage injected by the model when the query ends with a conversational
+    verb ('are registered', 'are raised', 'are found') but contains NO explicit status word.
+
+    Example: 'How many Electrical BDM complaints are registered'
+      => model sends status='Open'  (WRONG - user didn't ask for Open)
+      => this function clears it
+
+    Example: 'How many Open BDM complaints are registered'
+      => explicit 'Open' present => status kept as-is
+    """
+    if tool not in ("BDM", "PPM", "SB", "ASSETS", "FA"):
+        return
+    q = query or ""
+    if not _CONVERSATIONAL_VERBS_NOT_STATUS.search(q):
+        return
+    if _EXPLICIT_STATUS_WORDS.search(q):
+        return
+    # No explicit status word but model injected one — strip it
+    if args.get("status") is not None:
+        logger.info(
+            "🔧 %s: stripped implicit status=%r — query uses conversational verb, no explicit status word",
+            tool, args["status"],
+        )
+        args.pop("status", None)
+    # For FA/PPM: also strip implicitly-injected 'stage'
+    if args.get("stage") is not None and tool in ("FA", "PPM"):
+        logger.info(
+            "🔧 %s: stripped implicit stage=%r — query uses conversational verb, no explicit status word",
+            tool, args["stage"],
+        )
+        args.pop("stage", None)
 
 
 def _fix_fa_closed_open_stage(tool: str, query: str, args: dict[str, Any]) -> None:
@@ -1254,6 +1350,7 @@ def normalize_tool_args(tool_name: str, user_query: str, args: dict[str, Any]) -
     _fix_fa_building_name_vs_audit_category(tool, query, out)
     _fix_fa_closed_open_stage(tool, query, out)
     _fix_ppm_execution_completed_stage(tool, query, out)
+    _strip_implicit_status_for_conversational_verbs(tool, query, out)
     _normalize_location_fields(out)
     _fix_redundant_keyword_with_structured_filters(tool, out)
 
