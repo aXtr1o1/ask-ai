@@ -130,13 +130,16 @@ GROUP_BY_ALIASES: dict[str, str] = {
 # Query phrase fragment → group_by column (when inferring from user text)
 _QUERY_GROUP_BY_HINTS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\bbuilding\s*name\b", re.I), "BuildingName"),
-    (re.compile(r"\b(?:per|by|each)\s+building\b", re.I), "BuildingName"),
-    (re.compile(r"\b(?:per|by|each)\s+division\b", re.I), "DivisionName"),
-    (re.compile(r"\b(?:per|by|each)\s+floor\b", re.I), "FloorName"),
-    (re.compile(r"\b(?:per|by|each)\s+priority\b", re.I), "PriorityName"),
-    (re.compile(r"\b(?:per|by|each)\s+stage\b", re.I), "StageName"),
-    (re.compile(r"\b(?:per|by|each)\s+frequency\b", re.I), "FrequencyName"),
+    (re.compile(r"\b(?:per|by|each|based)\s+locality\b|\blocality\s+(?:based|wise)\b", re.I), "LocalityName"),
+    (re.compile(r"\b(?:per|by|each|based)\s+building\b|\bbuilding\s+(?:based|wise)\b", re.I), "BuildingName"),
+    (re.compile(r"\b(?:per|by|each|based)\s+division\b|\bdivision\s+(?:based|wise)\b", re.I), "DivisionName"),
+    (re.compile(r"\b(?:per|by|each|based)\s+floor\b|\bfloor\s+(?:based|wise)\b", re.I), "FloorName"),
+    (re.compile(r"\b(?:per|by|each|based)\s+priority\b|\bpriority\s+(?:based|wise)\b", re.I), "PriorityName"),
+    (re.compile(r"\b(?:per|by|each|based)\s+stage\b|\bstage\s+(?:based|wise)\b", re.I), "StageName"),
+    (re.compile(r"\b(?:per|by|each|based)\s+frequency\b|\bfrequency\s+(?:based|wise)\b", re.I), "FrequencyName"),
+    (re.compile(r"\b(?:per|by|each|based)\s+contract\b|\bcontract\s+(?:based|wise)\b", re.I), "ContractName"),
 ]
+
 
 # Fields ignored by aggregate stored procedures — strip so payload matches DB contract
 AGGREGATE_STRIP_FIELDS: dict[str, frozenset[str]] = {
@@ -508,9 +511,16 @@ def _fix_bogus_dimension_location_filters(tool: str, query: str, args: dict[str,
         if _is_dimension_count_location_label(str(val)):
             args.pop(field, None)
             logger.info("🔧 %s: cleared bogus %s=%r (dimension phrase, not a place name)", tool, field, val)
-        elif sval in ("open", "closed", "wip", "assigned", "resolved", "completed", "pending", "quarterly", "monthly", "weekly"):
+        elif sval in ("open", "closed", "wip", "assigned", "resolved", "completed", "pending", "quarterly", "monthly", "weekly", "operational", "active"):
             args.pop(field, None)
-            logger.info("🔧 %s: cleared bogus %s=%r (status/frequency word mapped to location)", tool, field, val)
+            if not args.get("status"):
+                if sval in ("open", "operational", "active"):
+                    args["status"] = "Open"
+                elif sval in ("closed", "completed", "resolved"):
+                    args["status"] = "Closed"
+                else:
+                    args["status"] = val
+            logger.info("🔧 %s: cleared bogus %s=%r and inferred status=%r", tool, field, val, args.get("status"))
 
 
 def _query_implies_aggregate(query: str, tool: str = "") -> bool:
@@ -1057,7 +1067,8 @@ _CONVERSATIONAL_VERBS_NOT_STATUS = re.compile(
 # Explicit status words that confirm the user really wants a status filter.
 _EXPLICIT_STATUS_WORDS = re.compile(
     r"\b(open|closed|pending|resolved|assigned|cancelled|canceled|completed|in\s+progress|"
-    r"preliminary\s+confirmed|snagged|scraped|on\s+hold|online|offline|active|inactive)\b",
+    r"preliminary\s+confirmed|snagged|scraped|on\s+hold|online|offline|active|inactive|"
+    r"standby|allocated|allocation|allocating)\b",
     re.IGNORECASE,
 )
 
@@ -1083,7 +1094,18 @@ def _strip_implicit_status_for_conversational_verbs(
         return
     if _EXPLICIT_STATUS_WORDS.search(q):
         return
-    # No explicit status word but model injected one — strip it
+
+    # Check if the extracted status or stage is actually explicitly mentioned in the query
+    status_val = args.get("status")
+    if status_val and isinstance(status_val, str):
+        if status_val.lower().strip() in q.lower():
+            return
+    stage_val = args.get("stage")
+    if stage_val and isinstance(stage_val, str):
+        if stage_val.lower().strip() in q.lower():
+            return
+
+    # No explicit status/stage found in query — strip them
     if args.get("status") is not None:
         logger.info(
             "🔧 %s: stripped implicit status=%r — query uses conversational verb, no explicit status word",
@@ -1118,11 +1140,31 @@ def _fix_fa_closed_open_stage(tool: str, query: str, args: dict[str, Any]) -> No
         logger.info("🔧 FA: mapped 'Open' → stage='Open' (RMStageName)")
 
 
-def _fix_ppm_execution_completed_stage(tool: str, query: str, args: dict[str, Any]) -> None:
-    if tool == "PPM" and "execution completed" in (query or "").lower():
-        args.update({"stage": "Execution Completed"})
-        args.pop("status", None); args.pop("keyword", None)
-        logger.info("🔧 PPM: mapped 'Execution Completed' -> stage='Execution Completed' and cleared status")
+def _fix_ppm_stages_from_query(tool: str, query: str, args: dict[str, Any]) -> None:
+    if tool != "PPM":
+        return
+    q = (query or "").lower()
+    
+    stage_mapped = None
+    if "technician assigned" in q:
+        stage_mapped = "Technician Assigned"
+    elif "standby" in q:
+        stage_mapped = "Standby"
+    elif "yet to be allocated" in q or "yet to allocated" in q:
+        stage_mapped = "Staff Yet to be Allocated"
+    elif "execution completed" in q:
+        stage_mapped = "Execution Completed"
+    elif "preliminary confirmed" in q:
+        stage_mapped = "Preliminary Confirmed & Open"
+        
+    if stage_mapped:
+        if args.get("stage") != stage_mapped:
+            args["stage"] = stage_mapped
+            logger.info("🔧 PPM: mapped stage -> %r based on query", stage_mapped)
+        # Clear conflicting/redundant filters
+        args.pop("keyword", None)
+        if stage_mapped == "Execution Completed":
+            args.pop("status", None)
 
 
 def _fix_fa_building_name_vs_audit_category(tool: str, query: str, args: dict[str, Any]) -> None:
@@ -1201,6 +1243,28 @@ def _normalize_location_fields(args: dict[str, Any]) -> None:
         args[key] = normalized
 
 
+def _fix_hyphen_spacing_from_query(query: str, args: dict[str, Any]) -> None:
+    if not query:
+        return
+    q_lower = query.lower()
+    for key, val in list(args.items()):
+        if isinstance(val, str) and "-" in val:
+            # Try collapsed (no spaces around hyphen)
+            collapsed = re.sub(r'\s*-\s*', '-', val)
+            # Try expanded (spaces around hyphen)
+            expanded = re.sub(r'\s*-\s*', ' - ', val)
+            
+            # Match case-insensitively in the query
+            if collapsed.lower() in q_lower and val.lower() != collapsed.lower():
+                m = re.search(re.escape(collapsed), query, re.I)
+                args[key] = m.group(0) if m else collapsed
+                logger.info("🔧 Normalized %s spacing to match query: %r -> %r", key, val, args[key])
+            elif expanded.lower() in q_lower and val.lower() != expanded.lower():
+                m = re.search(re.escape(expanded), query, re.I)
+                args[key] = m.group(0) if m else expanded
+                logger.info("🔧 Normalized %s spacing to match query: %r -> %r", key, val, args[key])
+
+
 def _fix_redundant_keyword_with_structured_filters(
     tool: str, args: dict[str, Any]
 ) -> None:
@@ -1271,7 +1335,15 @@ def _normalize_priority_value(value: Any) -> str | None:
 
     return s
 
-
+def _fix_ppm_technician_assigned_tech(tool: str, query: str, args: dict[str, Any]) -> None:
+    if tool not in ("PPM", "SB", "FA"):
+        return
+    tech_val = args.get("tech")
+    stage_val = args.get("stage")
+    if tech_val and isinstance(tech_val, str) and tech_val.strip().lower() == "technician":
+        if (stage_val and "technician" in str(stage_val).lower()) or "technician assigned" in (query or "").lower():
+            args.pop("tech", None)
+            logger.info("🔧 %s: cleared tech='Technician' to prevent conflict with 'Technician Assigned' stage", tool)
 def normalize_tool_args(tool_name: str, user_query: str, args: dict[str, Any]) -> dict[str, Any]:
     """
     Return a copy of tool args normalized for DB routes.
@@ -1355,9 +1427,11 @@ def normalize_tool_args(tool_name: str, user_query: str, args: dict[str, Any]) -
     _fix_bdm_complaint_type_header_stage(tool, query, out)
     _fix_fa_building_name_vs_audit_category(tool, query, out)
     _fix_fa_closed_open_stage(tool, query, out)
-    _fix_ppm_execution_completed_stage(tool, query, out)
+    _fix_ppm_stages_from_query(tool, query, out)
+    _fix_ppm_technician_assigned_tech(tool, query, out)
     _strip_implicit_status_for_conversational_verbs(tool, query, out)
     _normalize_location_fields(out)
+    _fix_hyphen_spacing_from_query(query, out)
     _fix_redundant_keyword_with_structured_filters(tool, out)
 
     if _RE_PRIORITY_INTENT.search(query) and out.get("priority") is None:
