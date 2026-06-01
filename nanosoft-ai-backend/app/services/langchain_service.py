@@ -299,7 +299,7 @@ class LangChainService:
                     # Action verb + data noun together → ambiguous
                     r'\b(show|list|how\s+many|count|total|get|search|find|view|fetch)\b'
                     r'[^.!?]{0,60}'
-                    r'\b(record|data|result|report|entry|entries|item|items)\b'
+                    r'\b(records?|data|results?|reports?|entry|entries|items?)\b'
                     r'|\bcomplaints?\b'               # always ambiguous: FA or BDM?
                     # ── Work-order variants (including common typos) ──────────
                     r'|\bwork[\s\-]?orders?\b'        # work order, work-order, workorder
@@ -313,10 +313,26 @@ class LangChainService:
                     r"|fa|facility\s+audit|audit|bdm|breakdown|breakdowns)\b",
                     _q,
                 ))
-                # Also clear if: last AI message was a clarification OR context already established
-                # OR caller explicitly flagged this as a reply to a clarification.
+                # Also clear if: last AI message was a clarification OR caller explicitly flagged
+                # this as a reply to a clarification.
+                # IMPORTANT — established context alone is NOT enough to clear the gate.
+                # It only clears when the current query also has a follow-up pronoun
+                # (them/those/these/the ones/…), meaning the user is genuinely continuing
+                # the previous data conversation.
+                # Without this guard, a fresh generic query like "how many data we have"
+                # would bypass clarification just because ASSETS was used turns ago.
                 _established_ctx = _extract_established_tool_context(messages)
-                _table_clear = _has_table_keyword or is_after_clarification or _is_after_clarification(messages) or (_established_ctx is not None)
+                _has_followup_pronoun = bool(_re.search(
+                    r"\b(them|those|these|it\b|the\s+ones|of\s+them|among\s+them|"
+                    r"from\s+those|from\s+them|the\s+above|same\s+ones|"
+                    r"what\s+about|how\s+about|in\s+that|for\s+that|from\s+that|"
+                    r"show\s+me\s+(more|them|those)|give\s+me\s+(more|them|those))\b",
+                    _q,
+                    _re.IGNORECASE,
+                ))
+                # Established context only clears IF a follow-up pronoun is also present
+                _ctx_clears = (_established_ctx is not None) and _has_followup_pronoun
+                _table_clear = _has_table_keyword or is_after_clarification or _is_after_clarification(messages) or _ctx_clears
                 if is_after_clarification:
                     logger.info("✅ Clarification bypass active — skipping ambiguity pre-check | query='%s'", current_user_query[:80])
 
