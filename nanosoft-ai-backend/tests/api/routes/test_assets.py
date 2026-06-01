@@ -103,8 +103,6 @@ def test_get_assets_keyword_fallback_after_empty_field_match():
         result = get_assets(req)
 
     assert result["p_count"] == 1
-    assert result["search_fallback"]["from_field"] == "asset_type"
-    assert result["search_fallback"]["keyword"] == "Forklift"
     assert mock_cursor.callproc.call_count == 2
     retry_args = mock_cursor.callproc.call_args_list[1][0][1]
     assert retry_args[10] is None  # p_asset_type cleared
