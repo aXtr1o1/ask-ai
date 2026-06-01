@@ -145,9 +145,12 @@ async def test_multi_tool_count_query_does_not_report_no_records():
 
     assert "No records were found" not in result
     assert "No records were found" not in context_summary
-    assert "623" in result or "12" in result or "BDM" in result or "closed" in result.lower()
-    assert result == context_summary
-    assert not result.strip().startswith("{")
+    assert "12" in result or "BDM" in result or "closed" in result.lower()
+    
+    parsed_result = json.loads(result)
+    assert parsed_result["type"] == "multiple_datasets"
+    assert parsed_result["context_summary"] == context_summary
+    assert len(parsed_result["datasets"]) == 2
 
 
 @pytest.mark.asyncio
