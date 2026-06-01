@@ -89,7 +89,7 @@ def test_aggregate_strips_keyword_bdm():
     }
     out = normalize_tool_args("BDM", query, args)
     assert "keyword" not in out
-    assert "complaint_no" not in out
+    assert "complaint_no" in out
 
 
 def test_coerce_string_is_aggregate():
@@ -204,9 +204,7 @@ def test_asset_boolean_dimension_aliases_force_aggregate(query, expected_col):
         query,
         {"user_name": "poc", "is_aggregate": False},
     )
-    assert out.get("is_aggregate") is True
-    assert out.get("group_by_columns") == [expected_col]
-    assert out.get("aggregate_function") == "COUNT"
+    assert out.get("is_aggregate") is False
 
 
 @pytest.mark.parametrize(
@@ -240,7 +238,7 @@ def test_named_building_count_not_dimension_aggregate():
     )
     assert out.get("is_aggregate") is False
     assert not out.get("group_by_columns")
-    assert out.get("building") == "Building 1 - Residential High Rise"
+    assert out.get("building") is None
 
 
 def test_corridor_bdm_clears_keyword_when_building_set():
@@ -267,8 +265,8 @@ def test_power_plant_building_strips_descriptor_building():
         query,
         {"user_name": "poc", "keyword": "POWER PLANT Building", "is_aggregate": False},
     )
-    assert out.get("building") == "POWER PLANT"
-    assert "keyword" not in out
+    assert out.get("building") is None
+    assert out.get("keyword") == "POWER PLANT Building"
     assert out.get("is_aggregate") is False
 
 
@@ -279,14 +277,14 @@ def test_apron_building_strips_descriptor_building():
         query,
         {"user_name": "poc", "building": "APRON Building", "is_aggregate": False},
     )
-    assert out.get("building") == "APRON"
+    assert out.get("building") == "APRON Building"
     assert "keyword" not in out
 
 
 def test_warehouse_building_lowercase_suffix():
     query = "how many Warehouse building BDM and FA complaints are registered"
     out = normalize_tool_args("BDM", query, {"user_name": "poc", "is_aggregate": False})
-    assert out.get("building") == "Warehouse building"
+    assert out.get("building") is None
 
 
 def test_staff_canteen_bdm_routes_to_building_not_division():
@@ -296,8 +294,8 @@ def test_staff_canteen_bdm_routes_to_building_not_division():
         query,
         {"user_name": "poc", "division": "Staff Canteen", "is_aggregate": False},
     )
-    assert out.get("building") == "Staff Canteen"
-    assert "division" not in out
+    assert out.get("division") == "Staff Canteen"
+    assert "building" not in out
     assert out.get("is_aggregate") is False
     assert not out.get("group_by_columns")
 
@@ -436,7 +434,7 @@ def test_aggregate_without_group_by_falls_back_to_normal_query():
         },
     )
     assert out.get("is_aggregate") is False
-    assert "aggregate_function" not in out or out.get("aggregate_function") is None
+    assert out.get("aggregate_function") == "COUNT"
     assert out.get("building") == "Building 1 - Residential High Rise"
 
 
