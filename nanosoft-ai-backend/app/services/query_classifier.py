@@ -82,7 +82,6 @@ _FACILITY_KEYWORDS = re.compile(
     """,
     re.VERBOSE | re.IGNORECASE,
 )
-
 # ─────────────────────────────────────────────────────────────────────────────
 # 3. FOLLOW-UP CONTEXT KEYWORDS — pronouns that refer to a previous data result.
 #    We check BOTH the query and the previous assistant context.

@@ -1237,32 +1237,38 @@ def _fix_redundant_keyword_with_structured_filters(
 
 
 def _normalize_priority_value(value: Any) -> str | None:
+    """Normalize priority to one of the two valid DB formats:
+       With prefix:    'P1 Critical', 'P2 High', 'P3 Medium', 'P4 Low'
+       Without prefix: 'Critical',    'High',    'Medium',    'Low'
+    Returns the value as-is (title-cased) if unrecognised.
+    """
     if value is None:
         return None
     s = str(value).strip()
     if not s:
         return None
-    s = re.sub(r"[\-–—]+", " ", s)
+    s = re.sub(r"[\-\u2013\u2014]+", " ", s)  # dashes to spaces
     s = re.sub(r"\s+", " ", s).strip()
     low = s.lower()
-    if low == "p4 low":
-        return "P4 Low"
-    if low == "p1 critical":
-        return "P1 Critical"
-    if low == "p2 high":
-        return "P2 High"
-    if low == "p3 medium":
-        return "P3 Medium"
-    
-    if low == "low":
-        return "Low"
-    if low == "critical":
-        return "Critical"
-    if low == "high":
-        return "High"
-    if low == "medium":
-        return "Medium"
-    
+
+    # ── Full P-prefix format ──────────────────────────────────────────
+    if low == "p1 critical":  return "P1 Critical"
+    if low == "p2 high":      return "P2 High"
+    if low == "p3 medium":    return "P3 Medium"
+    if low == "p4 low":       return "P4 Low"
+
+    # ── Bare P-number only (model sends just "P3", "P2", etc.) ───────
+    if low == "p1":  return "P1 Critical"
+    if low == "p2":  return "P2 High"
+    if low == "p3":  return "P3 Medium"
+    if low == "p4":  return "P4 Low"
+
+    # ── Short format (no P-prefix) ───────────────────────────────────
+    if low == "critical":  return "Critical"
+    if low == "high":      return "High"
+    if low == "medium":    return "Medium"
+    if low == "low":       return "Low"
+
     return s
 
 
@@ -1362,6 +1368,24 @@ def normalize_tool_args(tool_name: str, user_query: str, args: dict[str, Any]) -
             out["priority"] = mapping.get(level)
     if out.get("priority") is not None:
         out["priority"] = _normalize_priority_value(out["priority"])
+        # ── P-prefix recovery ──────────────────────────────────────────────────
+        # The model sometimes strips the P-number prefix when the user said
+        # e.g. "P3 medium priority" and the model sends priority="Medium".
+        # Rule:
+        #   - If query has a P-number AND model sent a short form → upgrade to full form.
+        #   - If query has NO P-number → leave the short form as-is (DB accepts both).
+        # The P-number in the query is the canonical truth because the user said it.
+        _P_TO_FULL = {1: "P1 Critical", 2: "P2 High", 3: "P3 Medium", 4: "P4 Low"}
+        _SHORT_NAMES = {"low", "medium", "high", "critical"}
+        _p_match = re.search(r"\bp([1-4])\b", query, re.I)
+        if _p_match and out.get("priority", "").lower() in _SHORT_NAMES:
+            _level = int(_p_match.group(1))
+            _full  = _P_TO_FULL[_level]
+            logger.info(
+                "🔧 Priority P-prefix restored: '%s' → '%s' (query mentioned P%s)",
+                out["priority"], _full, _level,
+            )
+            out["priority"] = _full
 
     # Group-by building: drop mistaken `building` filter when user asked per-building counts
     if (

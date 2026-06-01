@@ -1,9 +1,13 @@
 """
-LangChain Service — AI model with tool support
+LangChain Service — AI model with tool support.
+
+This file contains only the LangChainService class.
+All stateless helper functions and regex constants live in langchain_helpers.py.
 """
 import logging
-from typing import Any
 import re as _re
+import json
+
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage
 
@@ -19,7 +23,28 @@ from app.services.keyword_match_context import (
 from app.services.tool_payload_validator import normalize_tool_args
 from app.services.query_classifier import needs_facility_tools
 
-import json
+# ── Import all helpers from the companion module ──────────────────────────────
+# Re-exported at module level so existing callers (tests, main.py) keep working:
+#   from app.services.langchain_service import _complaint_query_is_clear  ← still works
+from app.services.langchain_helpers import (
+    _strip_redundant_table_offer,
+    extract_date_from_query,
+    _extract_prev_keyword,
+    _extract_established_tool_context,
+    _is_after_clarification,
+    _complaint_query_is_clear,
+    _query_wants_list_display,
+    _infer_intent_from_query,
+    _append_explicit_today,
+    _enrich_entity_from_args,
+    _RE_TABLE_OFFER_PHRASE,
+    _RE_PREV_KEYWORD,
+    _RE_ESTAB_FA,
+    _RE_ESTAB_BDM,
+    _RE_ESTAB_PPM,
+    _RE_ESTAB_SB,
+    _RE_ESTAB_ASSETS,
+)
 
 logger = logging.getLogger("langchain_service")
 logger.setLevel(logging.INFO)
@@ -27,341 +52,6 @@ ch = logging.StreamHandler()
 ch.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 if not logger.handlers:
     logger.addHandler(ch)
-
-# UI already renders tables for multi-tool and most list flows — strip model boilerplate.
-_RE_TABLE_OFFER_PHRASE = _re.compile(
-    r"\s*(?:"
-    r"would you like to view (?:this )?data as a markdown table(?: for better understanding)?|"
-    r"would you like (?:to see )?(?:this )?(?:data )?(?:as |in )?a (?:markdown )?table(?: for better understanding)?"
-    r")\s*\??\s*",
-    _re.I,
-)
-
-
-def _strip_redundant_table_offer(text: str) -> str:
-    if not text or not isinstance(text, str):
-        return text or ""
-    cleaned = _RE_TABLE_OFFER_PHRASE.sub(" ", text)
-    return _re.sub(r"\s+", " ", cleaned).strip()
-
-
-def extract_date_from_query(query: str):
-    """Extract date keyword from user query for forced tool calls."""
-    q = query.lower()
-    # ORDER MATTERS — check longer phrases first
-    if "last week" in q:
-        return "last week", "last week"
-    elif "this week" in q:
-        return "this week", "today"
-    elif "last month" in q:
-        return "last month", "last month"
-    elif "this month" in q:
-        return "this month", "today"
-    elif "this year" in q:
-        return "this year", "today"
-    elif "last year" in q:
-        return "last year", "last year"
-    elif "yesterday" in q:
-        return "yesterday", "yesterday"
-    elif "today" in q:
-        return "today", "today"
-    elif "current" in q or "now" in q:
-        # Treat current/now wording as today's data
-        return "today", "today"
-    
-    # ── Dynamic pattern: X days/weeks/months/years ago/before ──
-    match = _re.search(r"(\d+)\s*(day|week|month|year)s?\s*(ago|before)", q)
-    if match:
-        found_phrase = match.group(0)
-        return found_phrase, found_phrase
-
-    # ── Match explicit month names (e.g. "March", "April 2026") ──
-    month_match = _re.search(r"\b(january|february|march|april|may|june|july|august|september|october|november|december)(?:\s+\d{4})?\b", q)
-    if month_match:
-        found_month = month_match.group(0).title()
-        return found_month, found_month
-
-    return None, None
-
-
-# ── Follow-up keyword extractor ──────────────────────────────────────────────
-# Reads the last AI response from the messages list.
-# Our context_summary always says: '...matching "Keyword" in our records...'
-# This pattern is produced by format_keyword_count_reply() in keyword_match_context.py
-_RE_PREV_KEYWORD = _re.compile(
-    r'matching\s+["\u2018\u2019\u201c\u201d\'](.*?)["\u2018\u2019\u201c\u201d\']',
-    _re.IGNORECASE,
-)
-
-def _extract_prev_keyword(messages: list) -> "str | None":
-    """
-    Scan the messages list (reversed) for the previous assistant keyword.
-    Two sources are checked:
-      1. AIMessage content — used when real AIMessage objects exist in the list.
-      2. SystemMessage content — scoped_memory_service packs previous_context as
-         JSON inside a SystemMessage (format: {"previous_assistant_response": "...matching 'X'..."}).
-    Returns the keyword string or None if not found.
-    """
-    for m in reversed(messages):
-        # Source 1: real AIMessage (e.g. after multi-turn with tool history)
-        if isinstance(m, AIMessage):
-            content = (m.content or "") if isinstance(m.content, str) else ""
-            hit = _RE_PREV_KEYWORD.search(content)
-            if hit:
-                return hit.group(1).strip()
-        # Source 2: SystemMessage containing the scoped memory JSON blob
-        if isinstance(m, SystemMessage):
-            content = (m.content or "") if isinstance(m.content, str) else ""
-            if "previous_assistant_response" in content:
-                hit = _RE_PREV_KEYWORD.search(content)
-                if hit:
-                    return hit.group(1).strip()
-    return None
-
-
-# ── Patterns: detect when a prior AI answer already named the tool ────────────
-_RE_ESTAB_FA  = _re.compile(
-    r"\bfacility audit\b|\bfa\b.*\bcomplaints?\b|\bcomplaints?\b.*\bfa\b",
-    _re.IGNORECASE,
-)
-_RE_ESTAB_BDM = _re.compile(
-    r"\bbreakdown\b.*\bcomplaints?\b|\bcomplaints?\b.*\bbreakdown\b"
-    r"|\bbdm\b.*\bcomplaints?\b|\bcomplaints?\b.*\bbdm\b",
-    _re.IGNORECASE,
-)
-_RE_ESTAB_PPM = _re.compile(r"\bppm\b|\bpreventive maintenance\b", _re.IGNORECASE)
-_RE_ESTAB_SB  = _re.compile(
-    r"\bschedule.based\b|\bsb\b.*\bwork\s*orders?\b|\bwork\s*orders?\b.*\bsb\b",
-    _re.IGNORECASE,
-)
-_RE_ESTAB_ASSETS = _re.compile(r"\bassets?\b|\bequipments?\b", _re.IGNORECASE)
-
-
-def _extract_established_tool_context(messages: list | None) -> "str | None":
-    """
-    Detect if the bot already answered an FA/BDM/PPM/SB/ASSETS query in previous_context.
-
-    Architecture note: messages = [SystemMessage(system_prompt),
-                                   SystemMessage(memory_json),
-                                   HumanMessage(query)]
-    There are NO AIMessage objects in the list. Previous context is packed as JSON
-    inside the second SystemMessage under the key "previous_context", each item
-    having "previous_assistant_response".
-
-    Returns: 'fa', 'bdm', 'ppm', 'sb', 'assets', or None.
-    """
-    if not messages:
-        return None
-
-    import json as _json
-
-    for m in messages:
-        if not isinstance(m, SystemMessage):
-            continue
-        content = (m.content or "") if isinstance(m.content, str) else ""
-        if "previous_context" not in content:
-            continue
-        # Extract the JSON blob from the memory SystemMessage
-        # The JSON starts after "Memory JSON:\n"
-        try:
-            json_start = content.find("{")
-            if json_start == -1:
-                continue
-            payload = _json.loads(content[json_start:])
-            prev_turns = payload.get("previous_context") or []
-            # Check most recent turns first
-            for turn in reversed(prev_turns):
-                resp = (turn.get("previous_assistant_response") or "").lower()
-                if not resp:
-                    continue
-                if _RE_ESTAB_FA.search(resp):
-                    return "fa"
-                if _RE_ESTAB_BDM.search(resp):
-                    return "bdm"
-                if _RE_ESTAB_PPM.search(resp):
-                    return "ppm"
-                if _RE_ESTAB_SB.search(resp):
-                    return "sb"
-                if _RE_ESTAB_ASSETS.search(resp):
-                    return "assets"
-        except Exception:
-            pass
-    return None
-
-def _is_after_clarification(messages: list | None) -> bool:
-    """
-    True if the last assistant turn asked for clarification.
-    Reads the SystemMessage JSON memory blob (previous_context[-1].previous_assistant_response)
-    since no AIMessage objects exist in the messages list.
-    """
-    if not messages:
-        return False
-
-    import json as _json
-
-    for m in messages:
-        if not isinstance(m, SystemMessage):
-            continue
-        content = (m.content or "") if isinstance(m.content, str) else ""
-        if "previous_context" not in content:
-            continue
-        try:
-            json_start = content.find("{")
-            if json_start == -1:
-                continue
-            payload = _json.loads(content[json_start:])
-            prev_turns = payload.get("previous_context") or []
-            if not prev_turns:
-                return False
-            # Only check the LAST assistant turn
-            prev = (prev_turns[-1].get("previous_assistant_response") or "").lower()
-            is_complaint_clar = (
-                "do you mean facility audit" in prev
-                or "fa complaints or bdm" in prev
-                or "fa) complaints or breakdown" in prev
-                or "please clarify so i can fetch the correct data" in prev
-            )
-            is_workorder_clar = (
-                "do you mean ppm (preventive maintenance)" in prev
-                or "ppm (preventive maintenance) work orders or sb" in prev
-                or "ppm or sb" in prev
-            )
-            is_table_clar = (
-                "please clarify which kind of data" in prev
-                or "assets, ppm, bdm, fa, or sb" in prev
-            )
-            return is_complaint_clar or is_workorder_clar or is_table_clar
-        except Exception:
-            pass
-    return False
-
-
-
-def _complaint_query_is_clear(query: str, messages: list | None = None) -> bool:
-    """
-    True when the user named FA and/or BDM (or answered a prior clarification).
-    Generic "complaints" alone stays ambiguous.
-    """
-    q = (query or "").lower()
-    if _re.search(
-        r"\b(fa|bdm|facility audit|breakdown maintenance|breakdown|ppm|sb|preventive|schedule[\s\-]based|asset|assets)\b",
-        q,
-    ):
-        return True
-    # "BDM and FA" / "FA and BDM" in one question → always fetch both, never clarify
-    if _re.search(r"\bbd[m]?\b", q) and _re.search(r"\bfa\b", q):
-        return True
-    if _re.search(r"\b(fa|bdm)\s+and\s+(fa|bdm)\b", q):
-        return True
-    if _re.search(r"\bboth\b", q) and _re.search(
-        r"\b(fa|bdm|complaints?|facility audit|breakdown)\b", q
-    ):
-        return True
-    # User replied after clarification in the same session
-    if messages and _is_after_clarification(messages):
-        return True
-    return False
-
-
-def _query_wants_list_display(query: str) -> bool:
-    """User asked to see data (tables), not only a numeric count."""
-    q = (query or "").lower()
-    return bool(
-        _re.search(
-            r"\b(show\s+me|show\s+all|show\s+the|list\b|display\b|give\s+me\s+(the\s+)?|retrieve\b|fetch\b)",
-            q,
-        )
-        or q.strip().startswith("show ")
-    )
-
-
-def _infer_intent_from_query(query: str) -> str | None:
-    """Fast intent detection for common phrasing (avoids extra model call)."""
-    q = (query or "").lower()
-    if _re.search(
-        r"\b(how many|count of|number of)\s+.+\s+(per|by|each|wise)\b"
-        r"|\b(breakdown|grouped by|distribution)\b"
-        r"|\bhow many per\b|\bcount by\b"
-        r"|\bwise\b.*\bcounts?\b|\bcounts?\b.*\b(per|by|wise)\b",
-        q,
-    ):
-        return "aggregate"
-    # "show me how many …" → list (preview tables + counts), not count-only text
-    if _re.search(
-        r"\b(how many|total count|number of|count of|how many total|get the count|show total)\b",
-        q,
-    ):
-        if _query_wants_list_display(q):
-            return "list"
-        return "count"
-    if _re.search(r"\b(show|list|get |fetch |display|give me|retrieve|provide)\b", q):
-        return "list"
-    return None
-
-
-# # Max rows per dataset in multi-tool UI when user also asked to "show" data
-# MULTI_DATASET_PREVIEW_LIMIT = 30
-# # For "how many" only: still show tables when each dataset has at most this many rows
-# MULTI_COUNT_AUTO_TABLE_MAX = 30
-
-
-def _append_explicit_today(text: str, query: str) -> str:
-    """Ensure responses mention the same time wording user asked for."""
-    q = (query or "").lower()
-    if not any(k in q for k in ("today", "current", "now")):
-        return (text or "").strip()
-
-    base = (text or "").strip()
-
-    if "current" in q:
-        if "current" not in base.lower():
-            return f"{base} This is for current data.".strip()
-        return base
-
-    if "now" in q:
-        if "now" not in base.lower() and "today" not in base.lower():
-            return f"{base} This is for now.".strip()
-        return base
-
-    if "today" not in base.lower():
-        return f"{base} This is for today.".strip()
-    return base
-
-
-def _enrich_entity_from_args(entity: str, args: dict) -> str:
-    """Append filter context to entity label for empty-result messages."""
-    if not args:
-        return entity
-    if args.get("keyword"):
-        entity = f"{entity} matching '{args.get('keyword')}'"
-    for key, label in (
-        ("complaint_no", "complaint"),
-        ("asset_tag_no", "asset tag"),
-        ("work_order", "work order"),
-        ("asset_type", "type"),
-        ("building", "building"),
-        ("floor", "floor"),
-        ("locality", "locality"),
-        ("division", "division"),
-        ("discipline", "discipline"),
-        ("trade_group", "trade group"),
-        ("status", "status"),
-        ("priority", "priority"),
-        ("condition", "condition"),
-        ("tech", "technician"),
-        ("category", "category"),
-        ("contract", "contract"),
-        ("make", "make"),
-        ("model", "model"),
-        ("serial_no", "serial number"),
-    ):
-        if args.get(key):
-            entity = f"{entity} ({label} '{args.get(key)}')"
-    if args.get("is_snagged"):
-        entity = f"snagged {entity}"
-    if args.get("is_scraped"):
-        entity = f"scraped {entity}"
-    return entity
 
 
 class LangChainService:
@@ -559,7 +249,7 @@ class LangChainService:
     # ── (final_response_text, context_summary, messages)
     # ── context_summary = short sentence for ALL query types → used by main.py for lc_memory
     # ── final_response_text = full data response → used by main.py for history (DB)
-    async def process_query(self, messages: list, user_name: str = None, user_id: str = None, session_id: str = None, is_graph: bool = False) -> tuple[str, str, list]:
+    async def process_query(self, messages: list, user_name: str = None, user_id: str = None, session_id: str = None, is_graph: bool = False, is_after_clarification: bool = False, is_all_datasets: bool = False) -> tuple[str, str, list]:
         try:
             
             # user_name is always from the frontend request; use it for all tool calls
@@ -583,51 +273,64 @@ class LangChainService:
             # ── AMBIGUITY PRE-CHECK (runs before model, before lc_memory influence) ──
             _q = current_user_query.lower()
 
-            # Generic table ambiguity check — when query is database-like but names no dataset
-            _generic_db_query = bool(_re.search(r'\b(show|list|how\s+many|count|total|get|search|find|view|fetch)\b', _q))
-            _has_table_keyword = bool(_re.search(
-                r"\b(asset|assets|equipment|equipments|device|devices|ppm|sb|preventive|schedule[\s\-]based|fa|facility\s+audit|audit|bdm|breakdown|breakdowns)\b",
-                _q,
-            ))
-            # Also clear if: last AI message was a clarification OR context already established
-            _established_ctx = _extract_established_tool_context(messages)
-            _table_clear = _has_table_keyword or _is_after_clarification(messages) or (_established_ctx is not None)
+            # ── STEP 0: Extract previous assistant context for follow-up detection ──
+            # (Needed here so needs_facility_tools can evaluate follow-up pronouns)
+            _prev_assistant_for_clf = ""
+            for _m in reversed(messages):
+                from langchain_core.messages import AIMessage as _AIMsg2
+                if isinstance(_m, _AIMsg2):
+                    _prev_assistant_for_clf = (_m.content or "") if isinstance(_m.content, str) else ""
+                    break
 
-            if _generic_db_query and not _table_clear:
-                logger.info("🔀 Generic query without dataset intercepted | query='%s'", current_user_query)
-                clarification = (
-                    "Please clarify which kind of data you want to search?\n"
-                    "Assets, PPM, BDM, FA, or SB."
-                )
-                return clarification, clarification, messages
+            # ── STEP 1: Conversational shortcut — bypass ambiguity gate entirely ──
+            # If the query has NO facility signal at all (greetings, general questions,
+            # "show me how AI works", "how many people are in the team"), skip straight
+            # past the ambiguity check so we never show a false clarification prompt.
+            _is_facility_query = needs_facility_tools(current_user_query, _prev_assistant_for_clf)
+            if not _is_facility_query:
+                logger.info("🗣️ [AmbiguityGate] Non-facility query — skipping ambiguity check | query='%s'", current_user_query[:80])
+            else:
+                # ── STEP 2: Generic table ambiguity check ─────────────────────────
+                # Narrow trigger: bare action verbs (show/list/find/get…) alone are NOT
+                # enough — they must appear with a data noun, OR the query explicitly
+                # mentions the ambiguous terms "complaints" / "work orders".
+                # This prevents "show me how AI works" → false clarification.
+                _generic_db_query = bool(_re.search(
+                    # Action verb + data noun together → ambiguous
+                    r'\b(show|list|how\s+many|count|total|get|search|find|view|fetch)\b'
+                    r'[^.!?]{0,60}'
+                    r'\b(record|data|result|report|entry|entries|item|items)\b'
+                    r'|\bcomplaints?\b'               # always ambiguous: FA or BDM?
+                    # ── Work-order variants (including common typos) ──────────
+                    r'|\bwork[\s\-]?orders?\b'        # work order, work-order, workorder
+                    r'|\bworko[rd]ers?\b'             # workoders, workoers (typos)
+                    r'|\bscheduled\s+work\b',         # always ambiguous: PPM or SB?
+                    _q,
+                ))
 
-            # complaint ambiguity check — only when type (FA vs BDM) is not named
-            _complaint_ambiguous = bool(_re.search(r'\bcomplaints?\b', _q))
-            _complaint_clear = _complaint_query_is_clear(current_user_query, messages)
+                _has_table_keyword = bool(_re.search(
+                    r"\b(asset|assets|equipment|equipments|device|devices|ppm|sb|preventive|schedule[\s\-]based"
+                    r"|fa|facility\s+audit|audit|bdm|breakdown|breakdowns)\b",
+                    _q,
+                ))
+                # Also clear if: last AI message was a clarification OR context already established
+                # OR caller explicitly flagged this as a reply to a clarification.
+                _established_ctx = _extract_established_tool_context(messages)
+                _table_clear = _has_table_keyword or is_after_clarification or _is_after_clarification(messages) or (_established_ctx is not None)
+                if is_after_clarification:
+                    logger.info("✅ Clarification bypass active — skipping ambiguity pre-check | query='%s'", current_user_query[:80])
 
-            # work order ambiguity check
-            _workorder_ambiguous = bool(_re.search(r'\b(work\s*orders?|scheduled|compliance|work\s*order)\b', _q))
-            _workorder_clear = (
-                bool(_re.search(r'\b(ppm|sb|preventive|schedule[\s\-]based|fa|bdm|facility audit|breakdown maintenance|breakdown|asset|assets)\b', _q))
-                or _is_after_clarification(messages)
-                or (_established_ctx in ("ppm", "sb"))
-            )
+                if _generic_db_query and not _table_clear:
+                    logger.info("🔀 Generic query without dataset intercepted | query='%s'", current_user_query)
+                    clarification = (
+                        "Please clarify which kind of data you want to search?\n"
+                        "Assets, PPM, BDM, FA, or SB."
+                    )
+                    return clarification, clarification, messages
 
-            # if _complaint_ambiguous and not _complaint_clear:
-            #     logger.info("🔀 Ambiguous complaint query intercepted before model | query='%s'", current_user_query)
-            #     clarification = (
-            #         "Do you mean Facility Audit (FA) complaints or Breakdown Maintenance (BDM) complaints?\n"
-            #         "Please clarify so I can fetch the correct data."
-            #     )
-            #     return clarification, clarification, messages
-
-            if _workorder_ambiguous and not _workorder_clear:
-                logger.info("🔀 Ambiguous work order query intercepted before model | query='%s'", current_user_query)
-                clarification = (
-                    "Do you mean PPM (Preventive Maintenance) work orders or SB (Schedule Based) work orders?\n"
-                    "Please clarify so I can fetch the correct data."
-                )
-                return clarification, clarification, messages
+            # Sub-clarifications for FA-vs-BDM complaints and PPM-vs-SB work orders are
+            # intentionally removed. The single general clarification above handles all
+            # ambiguous queries uniformly — users select from Assets/PPM/BDM/FA/SB.
 
 
             # ── QUERY REWRITING STEP REMOVED ──
@@ -643,14 +346,103 @@ class LangChainService:
                     _prev_assistant = (m.content or "") if isinstance(m.content, str) else ""
                     break
 
+            # ── CLARIFICATION OVERRIDE INJECTION ─────────────────────────────
+            # When the user replied to a clarification (e.g. "sb" after being asked
+            # which dataset), inject a strong SystemMessage that forces the model
+            # to call the correct tool immediately — bypassing its own clarification
+            # rules from the system prompt.
+            if is_after_clarification:
+                _dataset_map = {
+                    "assets": ("ASSETS", "Assets"),
+                    "asset":  ("ASSETS", "Assets"),
+                    "ppm":    ("PPM",    "PPM (Preventive Maintenance)"),
+                    "bdm":    ("BDM",    "BDM (Breakdown Maintenance)"),
+                    "fa":     ("FA",     "FA (Facility Audit)"),
+                    "sb":     ("SB",     "SB (Schedule Based)"),
+                }
+                _chosen_tool = None
+                _chosen_label = None
+
+                if is_all_datasets:
+                    # ── ALL DATASETS: user replied "all" or "many" ──────────────────────
+                    # Strip the "all: " prefix to recover the original question
+                    _actual_q = _re.sub(r"^\s*all\s*[:\s]+", "", current_user_query, flags=_re.IGNORECASE).strip()
+                    if not _actual_q:
+                        _actual_q = current_user_query
+                    _override_msg = SystemMessage(content=(
+                        f"OVERRIDE: The user was asked to clarify which dataset to search. "
+                        f"They replied 'all' — meaning they want data from EVERY dataset. "
+                        f"You MUST call ALL 5 tools simultaneously right now: ASSETS, PPM, BDM, FA, and SB. "
+                        f"Apply the same query logic to each tool to answer: '{_actual_q}'. "
+                        f"Do NOT ask for clarification. Do NOT skip any tool. Call all 5 tools now."
+                    ))
+                    messages = [_override_msg] + list(messages)
+                    logger.info(
+                        "🌐 All-datasets override injected | actual_q='%s'",
+                        _actual_q[:80],
+                    )
+                else:
+                    # ── SINGLE DATASET: user replied with a specific tool name ───────────
+                    # Check the original user reply (first word(s) before any colon or space)
+                    _reply_lower = current_user_query.lower()
+                    for _kw, (_tool_name, _label) in _dataset_map.items():
+                        if _re.search(rf"\b{_re.escape(_kw)}\b", _reply_lower):
+                            _chosen_tool = _tool_name
+                            _chosen_label = _label
+                            break
+
+                    if _chosen_tool:
+                        # Extract the actual question part (strip dataset prefix if present)
+                        _actual_q = _re.sub(rf"^\s*{_re.escape(_chosen_tool.lower())}\s*[:\s]+", "", _reply_lower, flags=_re.IGNORECASE).strip()
+                        if not _actual_q:
+                            _actual_q = current_user_query
+                        _override_msg = SystemMessage(content=(
+                            f"OVERRIDE: The user was asked to clarify which dataset to search. "
+                            f"They have now chosen: {_chosen_label}. "
+                            f"You MUST call the {_chosen_tool} tool immediately to answer: '{_actual_q}'. "
+                            f"Do NOT ask for clarification again. Do NOT explain anything. Just call the {_chosen_tool} tool now."
+                        ))
+                        messages = [_override_msg] + list(messages)
+                        logger.info(
+                            "💉 Clarification override injected | chosen_tool=%s | actual_q='%s'",
+                            _chosen_tool, _actual_q[:80],
+                        )
+
             _use_tools = needs_facility_tools(current_user_query, _prev_assistant)
+            # When clarification was just resolved, always use tools
+            if is_after_clarification:
+                _use_tools = True
             logger.info(
                 "🔀 QueryClassifier | use_tools=%s | query='%s'",
                 _use_tools, current_user_query[:80]
             )
 
-            # CALL 1 — First model call (with or without tools)
-            if not _use_tools:
+            # ── ALL-DATASETS SHORTCUT ─────────────────────────────────────────────
+            # When user replied "all" / "every" / etc. after the general clarification,
+            # bypass the first model call entirely (the model keeps looping on clarification
+            # because of lc_memory context). Instead, directly build the 5 tool calls and
+            # skip straight to multi-tool execution. The model is still used to summarize.
+            if is_all_datasets and is_after_clarification:
+                _actual_q_all = _re.sub(r"^\s*all\s*[:\s]+", "", current_user_query, flags=_re.IGNORECASE).strip() or current_user_query
+                logger.info("🌐 All-datasets DIRECT EXECUTION — bypassing model decision | actual_q='%s'", _actual_q_all[:80])
+                _ALL_TOOLS = ["ASSETS", "PPM", "BDM", "FA", "SB"]
+                _direct_tool_calls = [
+                    {
+                        "name": tool_name,
+                        "id": f"direct_all_{tool_name.lower()}",
+                        "args": {"user_name": user_name, "user_id": str(user_id or ""), "offset": 0, "is_aggregate": False},
+                        "type": "tool_call",
+                    }
+                    for tool_name in _ALL_TOOLS
+                ]
+                # Build a synthetic AIMessage that looks like the model chose all 5 tools
+                from langchain_core.messages import AIMessage as _AIMsg
+                ai_msg = _AIMsg(content="", tool_calls=_direct_tool_calls)
+                messages.append(ai_msg)
+                logger.info("🛠 Tool calls (direct): %s", _ALL_TOOLS)
+                # Fall through to the multi-tool execution block below (ai_msg.tool_calls is set)
+
+            elif not _use_tools:
                 # Conversational query — invoke plain model (no tools available)
                 ai_msg = self.plain_model.invoke(messages)
                 self._accumulate_tokens(ai_msg)
@@ -659,11 +451,28 @@ class LangChainService:
                 self._log_query_summary(current_user_query)
                 return conv_text, conv_text, messages
 
-            ai_msg = self.model.invoke(messages)
-            self._accumulate_tokens(ai_msg)
-            logger.info("🤖 First model call | tool_calls=%s", bool(ai_msg.tool_calls))
+            else:
+                # CALL 1 — Normal first model call (model decides which tool(s) to use)
+                # ── AMBIGUITY GUARD: prevent LLM from calling all 5 tools as a fallback ──
+                # When the model cannot determine a single specific tool from the user query,
+                # it MUST respond with a plain-text clarification — never call multiple tools.
+                _ambiguity_guard = SystemMessage(content=(
+                    "IMPORTANT ROUTING RULE: You have 5 tools — ASSETS, PPM, BDM, FA, SB. "
+                    "Each tool serves a DISTINCT dataset. "
+                    "If the user's query does NOT clearly identify ONE specific dataset, "
+                    "do NOT call multiple tools as a fallback. "
+                    "Instead, respond with a plain text message asking the user to specify "
+                    "which dataset they want: Assets, PPM, BDM, FA, or SB. "
+                    "Only call ALL tools simultaneously when the user explicitly says "
+                    "'all', 'every dataset', 'all modules', or similar all-inclusive intent."
+                ))
+                _guarded_messages = [_ambiguity_guard] + list(messages)
+                ai_msg = self.model.invoke(_guarded_messages)
+                self._accumulate_tokens(ai_msg)
+                logger.info("🤖 First model call | tool_calls=%s", bool(ai_msg.tool_calls))
 
             if ai_msg.tool_calls:
+
                 logger.info(f"🛠 Tool calls: {[tc['name'] for tc in ai_msg.tool_calls]}")
                 
                 # If there are keywords in the tool call arguments, log them separately
@@ -828,12 +637,22 @@ class LangChainService:
                             ]
                             friendly_name = f"{friendly_name} by {', '.join(formatted_cols)}"
 
-                        # Always send all records to the UI, with no limit or hiding
-                        _records_for_ui = p_list
+                        # Cap records sent to the MODEL (ToolMessage) to avoid token overflow.
+                        # The full p_list is stored in executed_tools for the frontend response.
+                        # Aggregate queries use a higher cap since grouped rows are always small.
+                        _is_multi_agg = args.get("is_aggregate") and args.get("group_by_columns")
+                        _MULTI_MAX_DISPLAY = 500 if _is_multi_agg else 25
+                        _records_for_model = p_list if len(p_list) <= _MULTI_MAX_DISPLAY else p_list[:_MULTI_MAX_DISPLAY]
+                        if len(p_list) > _MULTI_MAX_DISPLAY:
+                            logger.info(
+                                "📌 Multi-tool: capping ToolMessage records %d → %d for %s (token safety)",
+                                len(p_list), _MULTI_MAX_DISPLAY, tool_name,
+                            )
+
                         _tm_payload: dict = {
                             "dataset_name": friendly_name,
                             "message": f"{display_count} records found",
-                            "records": _records_for_ui,
+                            "records": _records_for_model,   # capped — safe for model context
                             "total_count": display_count,
                         }
                         if ds_search_context:
@@ -847,7 +666,7 @@ class LangChainService:
                         executed_tools.append({
                             "tool_name": tool_name,
                             "friendly_name": friendly_name,
-                            "p_list": p_list,
+                            "p_list": p_list,               # full list — sent to frontend
                             "display_count": display_count,
                             "search_context": ds_search_context,
                         })

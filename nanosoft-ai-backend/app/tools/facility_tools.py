@@ -733,12 +733,13 @@ KEY DIFFERENTIATORS vs BDM:
   BDM = Human-reported breakdown | Has complainer | Has complaint type/mode
  
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# AMBIGUOUS QUERIES — DO NOT GUESS:
+# AMBIGUOUS QUERIES — DO NOT ASK QUESTIONS:
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # If user asks a generic complaint question with NO FA/BDM keyword:
 #   e.g. "how many complaints are raised?" or "show all complaints"
-# → DO NOT call this tool. Ask the user:
-#   "Do you mean Facility Audit (FA) complaints or Breakdown Maintenance (BDM) complaints?"
+# → DO NOT call this tool. DO NOT ask the user any question.
+#   The upstream routing system handles all clarification automatically.
+#   Simply do NOT invoke any tool — return no tool call.
  
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 PARAMETERS:
@@ -912,12 +913,13 @@ KEY DIFFERENTIATORS vs PPM:
         Work order format: AMC-2023-0002-RAE-19366-2025
  
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# AMBIGUOUS QUERIES — DO NOT GUESS:
+# AMBIGUOUS QUERIES — DO NOT ASK QUESTIONS:
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # If user asks a generic maintenance query with NO SB/PPM keyword:
 #   e.g. "how many scheduled tasks?" or "show maintenance work orders"
-# → DO NOT call this tool. Ask the user:
-#   "Do you mean PPM (Preventive Maintenance) work orders or SB (Schedule Based) work orders?"
+# → DO NOT call this tool. DO NOT ask the user any question.
+#   The upstream routing system handles all clarification automatically.
+#   Simply do NOT invoke any tool — return no tool call.
  
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 PARAMETERS:

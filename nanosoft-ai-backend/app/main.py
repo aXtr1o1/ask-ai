@@ -181,40 +181,83 @@ def _has_date_keyword(text: str) -> bool:
     return bool(re.search(r"\b\d{4}-\d{2}-\d{2}\b", q))
 
 
+# ── Single words that signal "user chose a specific dataset" ──────────────────
+_DATASET_SIGNAL_WORDS: set = {
+    "assets", "asset", "ppm", "bdm", "fa", "sb",
+    "preventive", "breakdown", "breakdowns", "facility",
+    "schedule", "scheduled", "based", "maintenance",
+    "audit", "audits", "equipment", "equipments",
+    "device", "devices", "complaints", "complaint",
+    "work", "orders", "order",
+}
+
+# ── STRONG all-meaning words — always signal "give me ALL datasets" ───────────
+# These are unambiguous regardless of sentence length.
+_ALL_MEANING_STRONG: set = {
+    "all", "every", "everything", "each", "entire", "both",
+}
+
+# ── WEAK all-meaning words — only count when reply is SHORT (≤3 words) ────────
+# "many" / "full" / "complete" are common in NEW questions ("how many X are there")
+# so they only count as all-datasets when the user typed them as a SHORT reply.
+_ALL_MEANING_WEAK: set = {
+    "many", "complete", "full", "total",
+}
+
+# ── Multi-word phrases meaning "give me ALL datasets" ─────────────────────────
+_ALL_PHRASE_RE = re.compile(
+    r"all\s+of\s+(them|it|the)"
+    r"|all\s+(five|5|data|datasets?|records?)"
+    r"|(show|give|fetch|get|retrieve|want|need)\s+(me\s+)?all"
+    r"|i\s+want\s+all|entire\s+data|full\s+data|complete\s+data",
+    re.IGNORECASE,
+)
+
+
+def _is_all_datasets_reply(reply: str) -> bool:
+    """
+    True if user's reply means they want ALL datasets.
+
+    STRONG words (all/every/everything/each/entire/both) → always all-datasets.
+    WEAK words (many/full/complete/total) → only when reply is ≤3 words.
+      e.g. "many"          (1 word)  → all-datasets ✅
+           "how many X Y"  (5 words) → NOT all-datasets ✅ (new question)
+    """
+    words = re.findall(r"\b\w+\b", (reply or "").lower())
+    word_set = set(words)
+    if word_set & _ALL_MEANING_STRONG:
+        return True
+    if word_set & _ALL_MEANING_WEAK and len(words) <= 3:
+        return True
+    return bool(_ALL_PHRASE_RE.search(reply or ""))
+
+
+def _is_dataset_reply(reply: str) -> bool:
+    """
+    True if reply contains ANY dataset-selection signal
+    (specific dataset name OR all-meaning word/phrase).
+    Uses the same length-gating for weak all-meaning words.
+    """
+    words = re.findall(r"\b\w+\b", (reply or "").lower())
+    word_set = set(words)
+    if word_set & (_DATASET_SIGNAL_WORDS | _ALL_MEANING_STRONG):
+        return True
+    if word_set & _ALL_MEANING_WEAK and len(words) <= 3:
+        return True
+    return bool(_ALL_PHRASE_RE.search(reply or ""))
+
+
 def _should_break_pending(user_query: str) -> bool:
     """
-    Dynamically decide whether to break the pending clarification loop.
-    We break it if the user is asking a new question or giving a command,
-    rather than choosing one of the clarification options.
-    This works dynamically for all queries without hardcoding question words.
+    Return True  -> new question: forget the pending clarification.
+    Return False -> clarification answer: keep it (merge and process).
+    Uses positive detection with length-gating for weak all-meaning words.
     """
     if not user_query:
         return False
-        
-    import re
-    # Extract all alphanumeric words
-    words = re.findall(r'\b\w+\b', user_query.lower())
-    if not words:
+    if _is_dataset_reply(user_query):
         return False
-        
-    # Set of words representing a valid choice/clarification selection
-    selection_words = {
-        "asset", "assets", "ppm", "bdm", "fa", "sb",
-        "preventive", "breakdown", "breakdowns", "maintenance", "facility", "audit", "audits", "schedule", "scheduled", "based",
-        "work", "order", "orders", "complaint", "complaints",
-        "equipment", "equipments", "device", "devices",
-        "both", "all", "none", "first", "second", "one", "two", "the",
-        "option", "options", "choice", "choices", "and", "or",
-        "1", "2", "3", "4", "5"
-    }
-    
-    # If the user's message contains any word that is NOT in the selection words,
-    # it is a new topic or question, so we break the loop.
-    for word in words:
-        if word not in selection_words:
-            return True
-            
-    return False
+    return True
 
 
 def _build_table_context(context_summary: str, user_query: str) -> str:
@@ -706,11 +749,30 @@ async def ws_chat_endpoint(websocket: WebSocket):
                 session_data_check = memory_store.get(session_id, {})
                 pending_original_query = session_data_check.get("pending_original_query")
                 if pending_original_query:
+                    # If user's reply already contains a dataset keyword (sb/fa/assets/ppm/bdm)
+                    # it IS the answer to the clarification — merge so the service gets full context.
+                    # _should_break_pending returns True for unrelated new questions (words NOT in
+                    # the selection list), so we break only for those.
                     if _should_break_pending(user_query):
-                        logger.info("🚫 Breaking pending clarification loop — user query contains dataset keyword")
+                        # User asked a completely new question — forget the old pending query
+                        logger.info("🚫 Breaking pending clarification loop — user asked a new question")
                     else:
-                        user_query = f"{pending_original_query} {user_query}".strip()
-                        logger.info(f"🔁 Reconstructed query: '{user_query}'")
+                        # Use set-based detection (immune to regex alternation-ordering bugs)
+                        # Catches: "all", "many", "every", "everything", "each", "entire",
+                        # "complete", "full", "give me all", "show everything", etc.
+                        if _is_all_datasets_reply(user_query):
+                            # User wants ALL datasets — reconstruct as "all: <original question>"
+                            user_query = f"all: {pending_original_query}".strip()
+                            logger.info(f"🌐 All-datasets clarification reply: '{user_query}'")
+                            memory_store[session_id]["is_after_clarification"] = True
+                            memory_store[session_id]["is_all_datasets"] = True
+                        else:
+                            # User replied with a specific dataset keyword
+                            user_query = f"{user_query}: {pending_original_query}".strip()
+                            logger.info(f"🔁 Reconstructed clarification reply: '{user_query}'")
+                            memory_store[session_id]["is_after_clarification"] = True
+                            memory_store[session_id]["is_all_datasets"] = False
+                    # Always clear after one use — never carry it to a third turn
                     memory_store[session_id]["pending_original_query"] = None
 
                 session_data = memory_store.get(session_id, {})
@@ -975,6 +1037,8 @@ async def ws_chat_endpoint(websocket: WebSocket):
                             user_id=user_id,
                             session_id=session_id,
                             is_graph=is_graph,
+                            is_after_clarification=memory_store[session_id].get("is_after_clarification", False),
+                            is_all_datasets=memory_store[session_id].get("is_all_datasets", False),
                         )
                     else:
                         final_response_text, context_summary, _ = await langchain_service.process_query(
@@ -983,6 +1047,8 @@ async def ws_chat_endpoint(websocket: WebSocket):
                             user_id=user_id,
                             session_id=session_id,
                             is_graph=is_graph,
+                            is_after_clarification=memory_store[session_id].get("is_after_clarification", False),
+                            is_all_datasets=memory_store[session_id].get("is_all_datasets", False),
                         )
 
                     logger.info(f"✅ Response generated for session_id: {session_id}")
@@ -1116,19 +1182,38 @@ async def ws_chat_endpoint(websocket: WebSocket):
             logger.info(f"🧠 lc_memory updated with context_summary | session={session_id}")
 
             # ── If model asked clarification (no tool ran) → save original query ──
-            # Detected by checking if response contains clarification keywords
-            clarification_keywords = ["do you mean", "please clarify", "fa complaints or bdm", "ppm.*or.*sb", "could you clarify", "please clarify which kind of data", "which kind of data you want to search", "which data to search", "assets, ppm, bdm, fa, or sb"]
+            # Only set when the response is a genuine clarification question:
+            # BOTH a clarification phrase AND a dataset list must be present.
+            # This prevents data responses that mention dataset names (e.g. "SB Work Orders")
+            # from accidentally re-triggering the pending loop.
             import re as _re
-            is_large_dataset_response = final_response_text.strip().startswith('{"type": "large_dataset"')
-            is_table_offer = "would you like" in final_response_text.lower()
+            _resp_lower = final_response_text.lower()
+            is_large_dataset_response = (
+                final_response_text.strip().startswith('{"type": "large_dataset"')
+                or final_response_text.strip().startswith('{"type": "multiple_datasets"')
+                or final_response_text.strip().startswith('{"type": "graph"')
+            )
+            is_table_offer = "would you like" in _resp_lower
+            _has_clar_phrase = bool(_re.search(
+                r"please clarify|do you mean|could you clarify|which kind of data",
+                _resp_lower,
+            ))
+            _has_dataset_list = bool(_re.search(
+                r"assets,\s*ppm|ppm,\s*bdm|bdm,\s*fa|fa,\s*or\s*sb",
+                _resp_lower,
+            ))
             is_clarification = (
                 not is_large_dataset_response
                 and not is_table_offer
-                and any(_re.search(kw, final_response_text.lower()) for kw in clarification_keywords)
+                and _has_clar_phrase
+                and _has_dataset_list
             )
             if is_clarification:
                 memory_store[session_id]["pending_original_query"] = query_to_store
                 logger.info(f"💾 Saved pending_original_query: '{query_to_store}'")
+            # ── Always clear the clarification flags after each processed turn ──
+            memory_store[session_id]["is_after_clarification"] = False
+            memory_store[session_id]["is_all_datasets"] = False
             # ── Stash pending table data if response ends with table question
             # ── langchain_service stores p_list_for_model on self for this purpose
             pending_table = getattr(langchain_service, "_last_pending_table", None)
