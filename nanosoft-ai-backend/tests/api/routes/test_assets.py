@@ -74,5 +74,38 @@ def test_get_assets_db_error():
     # Should raise HTTP 500
     assert exc_info.value.status_code == 500
     assert "DB connection failed" in exc_info.value.detail
-    
-    
+
+
+def test_get_assets_keyword_fallback_after_empty_field_match():
+    """asset_type=Forklift with no rows → retry with keyword=Forklift."""
+    empty_payload = json.dumps({"p_list": [], "p_count": 0})
+    hit_payload = json.dumps({
+        "p_list": [
+            {
+                "AssetTagNo": "A100",
+                "AssetTypeName": "Forklift Truck",
+                "_matched_fields": ["EquipmentName", "AssetTypeName"],
+            }
+        ],
+        "p_count": 1,
+        "keyword_search": {"term": "Forklift", "match_type": "word_boundary"},
+    })
+    mock_cursor = MagicMock()
+    mock_cursor.fetchone.side_effect = [
+        [empty_payload],
+        [hit_payload],
+    ]
+    mock_conn = MagicMock()
+    mock_conn.cursor.return_value = mock_cursor
+
+    with patch("app.api.routes.assets.get_pool", return_value=mock_conn):
+        req = AssetRequest(user_name="testuser", asset_type="Forklift")
+        result = get_assets(req)
+
+    assert result["p_count"] == 1
+    assert result["search_fallback"]["from_field"] == "asset_type"
+    assert result["search_fallback"]["keyword"] == "Forklift"
+    assert mock_cursor.callproc.call_count == 2
+    retry_args = mock_cursor.callproc.call_args_list[1][0][1]
+    assert retry_args[10] is None  # p_asset_type cleared
+    assert retry_args[31] == "Forklift"  # p_keyword

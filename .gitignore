@@ -35,7 +35,7 @@ nanosoft-ai-frontend/*.tsbuildinfo
 nanosoft-ai-frontend/next-env.d.ts
 
 # nanosof-ai-backend .gitignore
-
+nanosoft-ai-backend/sql
 nanosoft-ai-backend/.env
 nanosoft-ai-backend/.venv/*
 nanosoft-ai-backend/.venv

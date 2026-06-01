@@ -29,6 +29,13 @@ import {
   IconDotsVertical, IconCopy, IconCheck, IconBulb, IconFolder
 } from "@tabler/icons-react";
 // ─── Types ───────────────────────────────────────────────────────────────────
+type MultiDatasetView = {
+  name: string;
+  rows: TableWithTileRow[];
+  html: string;
+  totalCount?: number;
+};
+
 interface Message {
   role: "user" | "ai" | "error";
   text: string;
@@ -44,7 +51,11 @@ interface Message {
   tableData?: TableWithTileRow[];  // ← Store table rows for TableWithTile component
   tableTitle?: string;        // ← Title for the table
   tableViewMode?: 'table' | 'tile';  // ← Toggle between table and tile views
+  // ← Multiple datasets (type="multiple_datasets" from backend)
+  multipleDatasets?: MultiDatasetView[];
+  multiSummary?: string;  // ← context_summary from the backend
 }
+
 interface ChatSession { id: string; title: string; createdAt: number; updatedAt?: number; isPinned?: boolean; isArchived?: boolean; group_name?: string; }
 interface Group {
   id: string;
@@ -203,10 +214,34 @@ const HIDDEN_COLUMNS = new Set([
   'updatedby',
   'rmccmcomplaintidpk',
   'filepath',
+  '_matched_fields',
+  'matchedfields',
 ]);
 
 function isHiddenColumn(col: string): boolean {
   return HIDDEN_COLUMNS.has(col.toLowerCase().replace(/[\s_]/g, ""));
+}
+
+type SearchContext = {
+  summary_line?: string;
+  total_records?: number;
+  field_match_counts_friendly?: Record<string, number>;
+};
+
+function buildSearchContextBanner(sc: SearchContext | null | undefined): string {
+  if (!sc) return "";
+
+  if (sc.summary_line) {
+    return `<div class="keyword-search-banner" role="status">${esc(sc.summary_line)}</div>`;
+  }
+
+  const counts = sc.field_match_counts_friendly;
+  if (!counts || Object.keys(counts).length === 0) return "";
+
+  const total = sc.total_records ?? 0;
+  const parts = Object.entries(counts).map(([field, n]) => `${esc(field)}: ${n}`);
+  const line = `Found ${total} record${total !== 1 ? "s" : ""} from ${parts.join(", ")}.`;
+  return `<div class="keyword-search-banner" role="status">${line}</div>`;
 }
 
 // ── Status badge renderer ─────────────────────────────────────────────────────
@@ -314,6 +349,8 @@ function renderLargeDataset(text: string): string | null {
     "createdby",
     "updatedby",
     "filepath",
+    "_matched_fields",
+    "matchedfields",
   ]);
 
   function isHiddenColumn(col: string) {
@@ -394,10 +431,21 @@ function renderLargeDataset(text: string): string | null {
     return null;
   }
 
-  const context = parsed.context_summary || `Dataset contains ${records.length} records`;
+  let context = parsed.context_summary || `Dataset contains ${records.length} records`;
+  const searchBanner = parsed.is_multi_dataset
+    ? ""
+    : buildSearchContextBanner(parsed.search_context as SearchContext);
+
+  if (parsed.search_context?.summary_line) {
+    const summaryLine = parsed.search_context.summary_line.trim();
+    if (context.includes(summaryLine)) {
+      context = context.replace(summaryLine, "").trim();
+    }
+  }
 
   if (!records.length) {
-    return `<div class="large-dataset-context">${escapeHTML(context)}</div>`;
+    const contextDiv = context.trim() ? `<div class="large-dataset-context">${escapeHTML(context)}</div>` : "";
+    return `${searchBanner}${contextDiv}`;
   }
 
   // ─────────────────────────────────────────
@@ -437,9 +485,7 @@ function renderLargeDataset(text: string): string | null {
       if (val === null || val === undefined) {
         cell = "—";
       } else if (typeof val === "boolean") {
-        cell = `<span style="font-weight:600;color:${val ? "#22c55e" : "#ef44440"}">
-                ${val ? "✓" : "✗"}
-                </span>`;
+        cell = escapeHTML(val ? "True" : "False");
       } else if (typeof val === "object") {
         const str = JSON.stringify(val);
         cell = escapeHTML(str.length > 50 ? str.slice(0, 50) + "…" : str);
@@ -478,10 +524,10 @@ function renderLargeDataset(text: string): string | null {
   // ─────────────────────────────────────────
   // Final HTML
   // ─────────────────────────────────────────
+  const contextDiv = context.trim() ? `<div class="large-dataset-context">${escapeHTML(context)}</div>` : "";
   const table = `
-  <div class="large-dataset-context">
-    ${escapeHTML(context)}
-  </div>
+  ${searchBanner}
+  ${contextDiv}
   <div class="large-dataset-wrapper">
     <table class="large-dataset-table">
       ${head}
@@ -497,6 +543,7 @@ function renderLargeDataset(text: string): string | null {
 function formatLargeDatasetTable(largeDataData: any): string {
   let records = largeDataData.records || [];
   const context = largeDataData.context_summary || "";
+  const searchBanner = buildSearchContextBanner(largeDataData.search_context as SearchContext);
 
   // Handle case where records might not be an array
   if (!Array.isArray(records)) {
@@ -569,7 +616,7 @@ function formatLargeDatasetTable(largeDataData: any): string {
       if (val === null || val === undefined) {
         cellContent = "—";
       } else if (typeof val === "boolean") {
-        cellContent = `<span style="font-weight:600;color:${val ? '#22c55e' : '#ef4444'};">${val ? '✓' : '✗'}</span>`;
+        cellContent = esc(val ? "True" : "False");
       } else if (typeof val === "object") {
         const str = JSON.stringify(val);
         cellContent = esc(str.length > 50 ? str.substring(0, 50) + "…" : str);
@@ -618,7 +665,7 @@ function formatLargeDatasetTable(largeDataData: any): string {
     : "";
 
 
-  const fullHTML = contextHTML + tableHTML;
+  const fullHTML = searchBanner + contextHTML + tableHTML;
   console.log(` HTML generated - length: ${fullHTML.length}, has table-wrapper: ${fullHTML.includes('large-dataset-wrapper')}`);
   return fullHTML;
 }
@@ -868,9 +915,13 @@ function formatOutput(text: string): string {
           } else {
             // Single record: ≥3 keys → wide table, else 2-col KV table
             const keys = Object.keys(records[0]);
-            html += keys.length >= 3
-              ? buildTable(records)
-              : renderKVVertical(keys.map(k => ({ key: k, val: records![0][k] })));
+            if (keys.length >= 3) {
+              html += buildTable(records);
+            } else if (keys.length >= 2) {
+              html += renderKVVertical(keys.map(k => ({ key: k, val: records![0][k] })));
+            } else {
+              html += block.map(l => `<div style="line-height:1.75;margin:2px 0;color:#F3F4F6">${md(l.trim())}</div>`).join("");
+            }
           }
           i = j; continue;
         }
@@ -2186,17 +2237,70 @@ export default function Home() {
             processedText = cleanedForGraph // ← Keep raw JSON for parseGraphData() in render
             isGraphResponse = true;
           } else {
-            // Not a graph → continue with normal processing
-            // 🔑 SECOND: Extract response content (removes session_id wrapper)
-            const cleanedText = extractResponseContent(finalText);
+            // 🔑 SECOND: Check if this is a MULTIPLE_DATASETS response
+            let multipleDatasets: MultiDatasetView[] = [];
+            let multiSummary: string | undefined;
+            try {
+              const outerParsed = JSON.parse(finalText);
+              const innerStr = outerParsed?.response ?? finalText;
+              const inner = typeof innerStr === "string" ? JSON.parse(innerStr) : innerStr;
+              if (inner?.type === "multiple_datasets" && Array.isArray(inner?.datasets)) {
+                console.log("📋 [DONE] Multiple datasets response detected — rendering", inner.datasets.length, "tables");
+                multiSummary = inner.context_summary || "Here are the results of your query.";
+                const parsedMulti: MultiDatasetView[] = (inner.datasets as Array<{
+                  name: string;
+                  records?: Record<string, unknown>[];
+                  total_count?: number;
+                  search_context?: SearchContext;
+                }>).map((ds) => {
+                  const dsJsonStr = JSON.stringify({
+                    context_summary: ds.name,
+                    search_context: ds.search_context,
+                    is_multi_dataset: true,
+                    records: (ds.records || []).filter((rec: Record<string, unknown>) =>
+                      Object.values(rec).some(v => v !== null && v !== undefined && v !== "")
+                    ),
+                  });
+                  const html = renderLargeDataset(dsJsonStr) || "";
+                  const rows = extractTableRows(html);
+                  return {
+                    name: ds.name,
+                    rows,
+                    html,
+                    totalCount: typeof ds.total_count === "number" ? ds.total_count : rows.length,
+                  };
+                });
+                multipleDatasets = parsedMulti.filter((ds) => ds.rows.length > 0);
+                processedText = multiSummary || "Here are the results of your query.";
+                setMessages(prev => {
+                  const u = [...prev];
+                  const l = u.length - 1;
+                  if (u[l]?.role === "ai") {
+                    u[l] = {
+                      role: "ai",
+                      text: multiSummary!,
+                      streaming: false,
+                      originalText: finalText,
+                      ...(multipleDatasets.length > 0 ? { multipleDatasets, multiSummary } : {}),
+                    };
+                  }
+                  const activeSid = sessionIdRef.current;
+                  sessionMessagesRef.current.set(activeSid, u);
+                  return u;
+                });
+                accRef.current = "";
+                setIsLoading(false);
+                setTimeout(() => inputRef.current?.focus(), 50);
+                return;
+              }
+            } catch { /* not a multiple_datasets JSON */ }
 
-            // 🔑 THIRD: ALWAYS TRY RENDERING AS TABLE STRUCTURE FIRST (ALL SIZES, NO LIMITS)
+            // Not a graph, not multiple_datasets → continue with normal processing
+            const cleanedText = extractResponseContent(finalText);
             const largeDatasetHTML = renderLargeDataset(cleanedText);
 
             if (largeDatasetHTML) {
-              // Successfully rendered as unified table structure (any size)
               processedText = largeDatasetHTML;
-              // Always extract table rows for TableWithTile component
               const rows = extractTableRows(largeDatasetHTML);
               if (rows.length > 0) {
                 tableData = rows;
@@ -2204,7 +2308,6 @@ export default function Home() {
                 console.log("✅ [DONE] Rendered as unified table structure (" + rows.length + " rows)");
               }
             } else {
-              // Not tabular data → format as text output only
               try {
                 processedText = formatOutput(cleanedText);
                 console.log("📝 [DONE] Formatted as text");
@@ -2431,11 +2534,11 @@ export default function Home() {
   const showWarningToast = (message: string) => {
     if (typeof document === "undefined") return;
     const isDark = document.documentElement.getAttribute("data-theme") !== "light";
-    const bg       = isDark ? "rgba(28, 28, 30, 0.97)"  : "rgba(255, 255, 255, 0.97)";
-    const border    = isDark ? "rgba(212, 175, 55, 0.5)" : "rgba(180, 140, 30, 0.4)";
-    const textColor = isDark ? "#ffffff"                  : "#1a1a1a";
-    const accent    = isDark ? "#D4AF37"                  : "#9A7B20";
-    const shadow    = isDark ? "0 8px 32px rgba(0,0,0,0.5)" : "0 8px 32px rgba(0,0,0,0.15)";
+    const bg = isDark ? "rgba(28, 28, 30, 0.97)" : "rgba(255, 255, 255, 0.97)";
+    const border = isDark ? "rgba(212, 175, 55, 0.5)" : "rgba(180, 140, 30, 0.4)";
+    const textColor = isDark ? "#ffffff" : "#1a1a1a";
+    const accent = isDark ? "#D4AF37" : "#9A7B20";
+    const shadow = isDark ? "0 8px 32px rgba(0,0,0,0.5)" : "0 8px 32px rgba(0,0,0,0.15)";
 
     const toast = document.createElement("div");
     toast.style.cssText = `
@@ -2461,7 +2564,7 @@ export default function Home() {
       white-space: nowrap;
       backdrop-filter: blur(8px);
     `;
-    
+
     toast.innerHTML = `<span style="color:${accent};font-size:18px;">⚠️</span> <span>${message}</span>`;
 
     document.body.appendChild(toast);
@@ -2591,6 +2694,51 @@ export default function Home() {
       if (graphData) {
         console.log("📊 [HISTORY] Graph response detected — keeping as raw JSON for chart");
         return { ...m, text, originalText: text, isGraphResponse: true };
+      }
+
+      // 🔑 Check if this is a MULTIPLE_DATASETS response
+      try {
+        if (text.trim().startsWith('{')) {
+          const parsed = JSON.parse(text);
+          const innerStr = parsed?.response ?? text;
+          const inner = typeof innerStr === "string" ? JSON.parse(innerStr) : innerStr;
+          if (inner?.type === "multiple_datasets" && Array.isArray(inner?.datasets)) {
+            console.log("📋 [HISTORY] Multiple datasets response detected — rendering tables");
+            const multiSummary = inner.context_summary || "Here are the results of your query.";
+            const parsedMulti: MultiDatasetView[] = (inner.datasets as Array<{
+              name: string;
+              records?: Record<string, unknown>[];
+              total_count?: number;
+              search_context?: SearchContext;
+            }>).map((ds) => {
+              const dsJsonStr = JSON.stringify({
+                context_summary: ds.name,
+                search_context: ds.search_context,
+                is_multi_dataset: true,
+                records: (ds.records || []).filter((rec: Record<string, unknown>) =>
+                  Object.values(rec).some(v => v !== null && v !== undefined && v !== "")
+                ),
+              });
+              const html = renderLargeDataset(dsJsonStr) || "";
+              const rows = extractTableRows(html);
+              return {
+                name: ds.name,
+                rows,
+                html,
+                totalCount: typeof ds.total_count === "number" ? ds.total_count : rows.length,
+              };
+            });
+            const multipleDatasets = parsedMulti.filter((ds) => ds.rows.length > 0);
+            return {
+              ...m,
+              text: multiSummary,
+              originalText: text,
+              ...(multipleDatasets.length > 0 ? { multipleDatasets, multiSummary } : {}),
+            };
+          }
+        }
+      } catch (e) {
+        /* Not JSON, ignore */
       }
 
       // 🔑 Detect if the history text is a Table JSON (records/data/columns key)
@@ -2961,6 +3109,68 @@ export default function Home() {
         setAudioPlayingIndex(null);
       });
     }
+  };
+
+  // Helper to programmatically send a message text directly over WS (e.g. for pills)
+  const sendTextDirectly = (text: string) => {
+    if (isLoading) return;
+    clearGhostCompletion();
+    const userText = text.trim();
+    const ws = wsRef.current;
+
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      console.warn("Socket not ready for session:", sessionId);
+      setMessages(prev => [...prev, { role: "error", text: "Still connecting. Please wait." }]);
+      return;
+    }
+
+    recordPromptForGhostHistory(ghostPromptHistoryStorageKey(loggedInUser), userText);
+
+    const now = Date.now();
+    setChatSessions(prev => {
+      const existing = prev.find(s => s.id === sessionId);
+      const rest = prev.filter(s => s.id !== sessionId);
+      if (existing) {
+        return [{ ...existing, updatedAt: now }, ...rest];
+      }
+      const newCapsule: ChatSession = {
+        id: sessionId,
+        title: "New Chat",
+        createdAt: now,
+        updatedAt: now,
+      };
+      return [newCapsule, ...rest];
+    });
+
+    setShowFeaturePlaceholder(false);
+    setMessages(prev => {
+      const updated = [...prev, {
+        role: "user" as const,
+        text: userText
+      }];
+      sessionMessagesRef.current.set(sessionId, updated);
+      return updated;
+    });
+
+    setIsLoading(true);
+    accRef.current = "";
+
+    ws.send(JSON.stringify({
+      type: "message",
+      messageType: "text",
+      isAudio: false,
+      isText: true,
+      isGraph: isGraphMode,
+      query: userText,
+      userName: loggedInUser,
+      subUserName: userIdFromUrl ?? loggedInUser,
+      userId: userIdInt !== null ? String(userIdInt) : undefined,
+      sessionId,
+      group_name: selectedGroupName,
+      timestamp: Date.now()
+    }));
+
+    setIsLoading(true);
   };
 
   // ── Send message over the persistent WebSocket ────────────────────────────
@@ -4053,7 +4263,7 @@ export default function Home() {
                       )}
 
                       <div
-                        className={`message-bubble ${msg.role}${isGraphMsg ? ' graph-message' : ''}${msg.tableData && msg.tableData.length > 0 ? ' table-message' : ''}`}
+                        className={`message-bubble ${msg.role}${isGraphMsg ? ' graph-message' : ''}${(msg.tableData && msg.tableData.length > 0) || (msg.multipleDatasets && msg.multipleDatasets.length > 0) ? ' table-message' : ''}`}
                         style={{ position: 'relative' }}
                       >
 
@@ -4168,6 +4378,35 @@ export default function Home() {
                             );
                           })()
 
+                        ) : msg.multipleDatasets && msg.multipleDatasets.length > 0 ? (
+                          /* ── Multiple Tables: render summary + one TableWithTile per dataset ── */
+                          <div style={{ width: '100%' }}>
+                            {msg.multiSummary && (
+                              <div style={{
+                                marginBottom: '16px',
+                                fontSize: responsive.isMobile ? '13px' : '14px',
+                                lineHeight: 1.6,
+                                color: 'var(--color-text)',
+                                padding: '10px 14px',
+                                background: 'var(--color-surface-2, rgba(255,255,255,0.05))',
+                                borderRadius: '8px',
+                                borderLeft: '3px solid var(--color-accent, #D4AF37)',
+                              }}>
+                                {msg.multiSummary}
+                              </div>
+                            )}
+                            {msg.multipleDatasets.map((ds, dsIdx) => (
+                              <div key={dsIdx} style={{ marginBottom: dsIdx < msg.multipleDatasets!.length - 1 ? '24px' : 0 }}>
+                                <TableWithTile
+                                  rows={ds.rows}
+                                  title={ds.name}
+                                  htmlTableContent={ds.html}
+                                  totalCount={ds.totalCount}
+                                />
+                              </div>
+                            ))}
+                          </div>
+
                         ) : msg.tableData && msg.tableData.length > 0 ? (
                           /* ── Table: Render with TableWithTile component with toggle buttons for table/tile views ── */
                           <TableWithTile
@@ -4194,7 +4433,7 @@ export default function Home() {
                         )}
 
                         {/* Copy button for text bubbles only */}
-                        {!isAudio && !isGraphMsg && !(msg.tableData && msg.tableData.length > 0) && (
+                        {!isAudio && !isGraphMsg && !(msg.tableData && msg.tableData.length > 0) && !(msg.multipleDatasets && msg.multipleDatasets.length > 0) && (
                           <>
                             <button
                               className="copy-bubble-btn"
@@ -4256,12 +4495,14 @@ export default function Home() {
                           </>
                         )}
 
+
+
                       </div>
                     </div>
                   );
                 })}
 
-                {isLoading && (() => {
+                {isLoading && !(messages[messages.length - 1]?.role === "ai" && messages[messages.length - 1]?.streaming) && (() => {
                   const isDarkTheme = typeof window !== 'undefined' ? document.documentElement.getAttribute('data-theme') === 'dark' : (theme === 'dark');
                   return (
                     <div className="loading-indicator" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>

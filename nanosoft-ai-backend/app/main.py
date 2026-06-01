@@ -23,7 +23,6 @@ from app.services.user_profile_service import (
     get_user_usage_stats,      
     update_daily_history,      
 )
-from app.prompts.system_prompt import get_system_prompt
 from app.services.postgres_service import save_session_to_postgres_service
 from app.api.database.postgres_client import get_pool
 
@@ -31,8 +30,15 @@ from app.services.session_service import get_sessions_for_user, get_chat_history
 from app.models.schemas import SessionRequest, ClientInsertionRequest
 from app.services.audio_service import convert_audio_to_text, get_audio_duration_seconds
 from app.services.quota_service import quota_fallback_service
+from app.services.scoped_memory_service import build_scoped_messages
 from app.voiceAgent_endpoint import voice_agent_router
-from app.state import memory_store, MAX_HISTORY, frontend_saved_sessions
+from app.state import (
+    memory_store,
+    MAX_HISTORY,
+    frontend_saved_sessions,
+    lc_memory_for_model,
+    trim_session,
+)
 
 logger = logging.getLogger("chatbot_app")
 logger.setLevel(logging.INFO)
@@ -67,8 +73,8 @@ api_router = APIRouter(prefix="/api", tags=["api"])
 # Structure:
 # {
 #   "session-abc-123": {
-#     "lc_memory": [HumanMessage, AIMessage, ...],
-#     "history": [...],
+#     "lc_memory": [HumanMessage, AIMessage, ...],  # trimmed by MAX_HISTORY (model only)
+#     "history": [...],  # full transcript for DB / reload (not capped by MAX_HISTORY)
 #     "user_name": "v4demo"
 #   }
 # }
@@ -95,6 +101,52 @@ YES_WORDS = {
     "affirmative", "roger", "approved",
     "do it", "let's go", "lets go"
 }
+
+_TABLE_OFFER_MARKERS = (
+    "would you like",
+    "see the details",
+    "see the full table",
+    "see the detailed",
+    "want to see",
+    "show you the",
+)
+
+
+def _expand_affirmative_from_history(user_query: str, session_data: dict) -> str:
+    """
+    When MAX_HISTORY=0 the model only sees the current message. If the user replies
+    'yes' after a data answer, replay the previous question as 'show me …'.
+    """
+    reply = (user_query or "").strip().lower()
+    if reply not in YES_WORDS:
+        return user_query
+    history = session_data.get("history") or []
+    if not history:
+        return user_query
+    last = history[-1]
+    prev_query = (last.get("query") or "").strip()
+    if not prev_query:
+        return user_query
+    prev_assistant = last.get("assistant") or last.get("context") or ""
+    prev_text = (
+        prev_assistant if isinstance(prev_assistant, str) else str(prev_assistant)
+    ).lower()
+    offered_more = any(m in prev_text for m in _TABLE_OFFER_MARKERS)
+    prev_lower = prev_query.lower()
+    was_facility_query = any(
+        w in prev_lower
+        for w in (
+            "bdm", "fa", "complaint", "ppm", "sb", "asset",
+            "how many", "show", "give", "list", "registered",
+        )
+    )
+    if offered_more or was_facility_query:
+        if not prev_lower.startswith(("show ", "give ", "list ", "display ")):
+            expanded = f"show me {prev_query}"
+            logger.info("🔁 Expanded '%s' → '%s' (from history; MAX_HISTORY may be 0)", user_query, expanded)
+            return expanded
+    return user_query
+
 
 NO_WORDS = {
     "no", "nope", "nah", "n",
@@ -127,6 +179,85 @@ def _has_date_keyword(text: str) -> bool:
     if any(keyword in q for keyword in keywords):
         return True
     return bool(re.search(r"\b\d{4}-\d{2}-\d{2}\b", q))
+
+
+# ── Single words that signal "user chose a specific dataset" ──────────────────
+_DATASET_SIGNAL_WORDS: set = {
+    "assets", "asset", "ppm", "bdm", "fa", "sb",
+    "preventive", "breakdown", "breakdowns", "facility",
+    "schedule", "scheduled", "based", "maintenance",
+    "audit", "audits", "equipment", "equipments",
+    "device", "devices", "complaints", "complaint",
+    "work", "orders", "order",
+}
+
+# ── STRONG all-meaning words — always signal "give me ALL datasets" ───────────
+# These are unambiguous regardless of sentence length.
+_ALL_MEANING_STRONG: set = {
+    "all", "every", "everything", "each", "entire", "both",
+}
+
+# ── WEAK all-meaning words — only count when reply is SHORT (≤3 words) ────────
+# "many" / "full" / "complete" are common in NEW questions ("how many X are there")
+# so they only count as all-datasets when the user typed them as a SHORT reply.
+_ALL_MEANING_WEAK: set = {
+    "many", "complete", "full", "total",
+}
+
+# ── Multi-word phrases meaning "give me ALL datasets" ─────────────────────────
+_ALL_PHRASE_RE = re.compile(
+    r"all\s+of\s+(them|it|the)"
+    r"|all\s+(five|5|data|datasets?|records?)"
+    r"|(show|give|fetch|get|retrieve|want|need)\s+(me\s+)?all"
+    r"|i\s+want\s+all|entire\s+data|full\s+data|complete\s+data",
+    re.IGNORECASE,
+)
+
+
+def _is_all_datasets_reply(reply: str) -> bool:
+    """
+    True if user's reply means they want ALL datasets.
+
+    STRONG words (all/every/everything/each/entire/both) → always all-datasets.
+    WEAK words (many/full/complete/total) → only when reply is ≤3 words.
+      e.g. "many"          (1 word)  → all-datasets ✅
+           "how many X Y"  (5 words) → NOT all-datasets ✅ (new question)
+    """
+    words = re.findall(r"\b\w+\b", (reply or "").lower())
+    word_set = set(words)
+    if word_set & _ALL_MEANING_STRONG:
+        return True
+    if word_set & _ALL_MEANING_WEAK and len(words) <= 3:
+        return True
+    return bool(_ALL_PHRASE_RE.search(reply or ""))
+
+
+def _is_dataset_reply(reply: str) -> bool:
+    """
+    True if reply contains ANY dataset-selection signal
+    (specific dataset name OR all-meaning word/phrase).
+    Uses the same length-gating for weak all-meaning words.
+    """
+    words = re.findall(r"\b\w+\b", (reply or "").lower())
+    word_set = set(words)
+    if word_set & (_DATASET_SIGNAL_WORDS | _ALL_MEANING_STRONG):
+        return True
+    if word_set & _ALL_MEANING_WEAK and len(words) <= 3:
+        return True
+    return bool(_ALL_PHRASE_RE.search(reply or ""))
+
+
+def _should_break_pending(user_query: str) -> bool:
+    """
+    Return True  -> new question: forget the pending clarification.
+    Return False -> clarification answer: keep it (merge and process).
+    Uses positive detection with length-gating for weak all-meaning words.
+    """
+    if not user_query:
+        return False
+    if _is_dataset_reply(user_query):
+        return False
+    return True
 
 
 def _build_table_context(context_summary: str, user_query: str) -> str:
@@ -175,8 +306,12 @@ def print_memory(session_id: str):
         print(f"  [{i}] Query:     {display_query}")
         print(f"       Assistant: {item['assistant'][:100]}{'...' if len(item['assistant']) > 100 else ''}")
  
-    print(f"\n🤖 LC_MEMORY ({len(lc_memory) // 2} pairs | last {settings.MAX_HISTORY} sent to model)")
-    pairs = list(zip(lc_memory[0::2], lc_memory[1::2]))
+    sent_to_model = lc_memory_for_model(lc_memory, settings.MAX_HISTORY)
+    print(
+        f"\n🤖 LC_MEMORY ({len(lc_memory) // 2} stored | "
+        f"{len(sent_to_model) // 2} sent to model | MAX_HISTORY={settings.MAX_HISTORY})"
+    )
+    pairs = list(zip(sent_to_model[0::2], sent_to_model[1::2]))
     for i, (h, a) in enumerate(pairs, 1):
         h_content = (h.content or "")
         # ── lc_memory stores the transcribed text not base64
@@ -400,12 +535,16 @@ async def ws_chat_endpoint(websocket: WebSocket):
 
                         if reply_table in YES_WORDS:
                             pending_ctx = session_data_audio.get("pending_table_context") or _build_table_context("", pending_transcription)
+                            pending_search_context = session_data_audio.get("pending_search_context")
                             table_response = json.dumps({
+                                "type": "large_dataset",
                                 "context_summary": pending_ctx,
-                                "records": pending_table_audio
+                                "records": pending_table_audio,
+                                "search_context": pending_search_context,
                             })
                             memory_store[session_id]["pending_table"] = None
                             memory_store[session_id]["pending_table_context"] = None
+                            memory_store[session_id]["pending_search_context"] = None
 
                             await websocket.send_text(json.dumps({
                                 "session_id": session_id,
@@ -422,6 +561,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
                                 "is_audio":  True
                             })
                             logger.info("✅ Table sent on user audio YES | records=%d", len(pending_table_audio))
+                            trim_session(memory_store[session_id], MAX_HISTORY)
                             print_memory(session_id)
                             continue
 
@@ -445,6 +585,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
                                 "is_audio":  True
                             })
                             logger.info("✅ User declined table via audio")
+                            trim_session(memory_store[session_id], MAX_HISTORY)
                             print_memory(session_id)
                             continue
 
@@ -569,15 +710,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
                         memory_store[session_id]["pending_audio_seconds"] = audio_seconds_effective
                         logger.info(f"💾 Saved pending_transcription: '{user_query}'")
 
-                        memory_store[session_id]["history"].append({
-                            "query":                 query_to_store,
-                            "assistant":             clarification_question,
-                            "context":               f"Confirmation asked for: {user_query}",
-                            "is_audio":              True,
-                            "pending_transcription": user_query
-                        })
-
-                        # ── Stop here — user reply comes as next message ──────
+                    # ── Stop here — user reply comes as next message ──────
                         continue
 
                     else:
@@ -597,10 +730,6 @@ async def ws_chat_endpoint(websocket: WebSocket):
                     continue
 
 
-                
-            # ==================================================================
-            # ── NORMAL TEXT PATH — isAudio = false
-            # ==================================================================
             # ==================================================================
             # ── NORMAL TEXT PATH — isAudio = false
             # ==================================================================
@@ -614,16 +743,45 @@ async def ws_chat_endpoint(websocket: WebSocket):
                     await websocket.send_text(json.dumps({"error": "Empty query"}))
                     continue
 
+                # All follow-up resolution (pronouns, bare affirmations, etc.) is handled
+                # by the model via scoped_memory_service instructions — no Python interception.
                 # ── Reconstruct full query if user is replying to a clarification ──
                 session_data_check = memory_store.get(session_id, {})
                 pending_original_query = session_data_check.get("pending_original_query")
                 if pending_original_query:
-                    user_query = f"{pending_original_query} {user_query}".strip()
+                    # If user's reply already contains a dataset keyword (sb/fa/assets/ppm/bdm)
+                    # it IS the answer to the clarification — merge so the service gets full context.
+                    # _should_break_pending returns True for unrelated new questions (words NOT in
+                    # the selection list), so we break only for those.
+                    if _should_break_pending(user_query):
+                        # User asked a completely new question — forget the old pending query
+                        logger.info("🚫 Breaking pending clarification loop — user asked a new question")
+                    else:
+                        # Use set-based detection (immune to regex alternation-ordering bugs)
+                        # Catches: "all", "many", "every", "everything", "each", "entire",
+                        # "complete", "full", "give me all", "show everything", etc.
+                        if _is_all_datasets_reply(user_query):
+                            # User wants ALL datasets — reconstruct as "all: <original question>"
+                            user_query = f"all: {pending_original_query}".strip()
+                            logger.info(f"🌐 All-datasets clarification reply: '{user_query}'")
+                            memory_store[session_id]["is_after_clarification"] = True
+                            memory_store[session_id]["is_all_datasets"] = True
+                        else:
+                            # User replied with a specific dataset keyword
+                            user_query = f"{user_query}: {pending_original_query}".strip()
+                            logger.info(f"🔁 Reconstructed clarification reply: '{user_query}'")
+                            memory_store[session_id]["is_after_clarification"] = True
+                            memory_store[session_id]["is_all_datasets"] = False
+                    # Always clear after one use — never carry it to a third turn
                     memory_store[session_id]["pending_original_query"] = None
-                    logger.info(f"🔁 Reconstructed query: '{user_query}'")
-                
-                # ✅ CHECK IF USER IS REPLYING TO QUOTA MENU
+
                 session_data = memory_store.get(session_id, {})
+                # Do not expand before pending_table yes/no handling
+                if not session_data.get("pending_table"):
+                    user_query = _expand_affirmative_from_history(user_query, session_data)
+                query_to_store = user_query
+
+                # ✅ CHECK IF USER IS REPLYING TO QUOTA MENU
                 waiting_for_choice = session_data.get("waiting_for_table_choice", False)
                 
                 # ── QUOTA FALLBACK: user is choosing which table to query ──
@@ -677,6 +835,65 @@ async def ws_chat_endpoint(websocket: WebSocket):
                     })
                     
                     logger.info(f"✅ Quota fallback response sent | context: {context_summary}")
+                    trim_session(memory_store[session_id], MAX_HISTORY)
+                    print_memory(session_id)
+                    continue
+
+                # ✅ CHECK IF USER IS REPLYING TO QUOTA MENU
+                waiting_for_choice = session_data.get("waiting_for_table_choice", False)
+                
+                # ── QUOTA FALLBACK: user is choosing which table to query ──
+                if waiting_for_choice:
+                    logger.info(f"🔄 User replying to quota menu | reply: '{user_query}'")
+                    
+                    # Clear the flag immediately
+                    memory_store[session_id]["waiting_for_table_choice"] = False
+                    
+                    # Handle the user's table choice
+                    final_response_text, context_summary = quota_fallback_service.handle_user_table_choice(
+                        user_reply=user_query,
+                        user_name=user_name
+                    )
+                    
+                    if final_response_text is None:
+                        # Could not parse table type — ask again
+                        error_msg = (
+                            "I couldn't determine which table you want. "
+                            "Please reply with one of: **assets**, **ppm**, **bdm**, **fa**, or **sb**."
+                        )
+                        await websocket.send_text(json.dumps({
+                            "session_id": session_id,
+                            "response": error_msg
+                        }))
+                        await websocket.send_text("[DONE]")
+                        
+                        memory_store[session_id]["history"].append({
+                            "query": query_to_store,
+                            "assistant": error_msg,
+                            "context": error_msg,
+                            "is_audio": is_audio
+                        })
+                        logger.info("⚠️ Could not parse table choice — asked user again")
+                        continue
+                    
+                    # Successfully retrieved data — send to user
+                    await websocket.send_text(json.dumps({
+                        "session_id": session_id,
+                        "response": final_response_text
+                    }))
+                    await websocket.send_text("[DONE]")
+                    
+                    memory_store[session_id]["lc_memory"].append(HumanMessage(content=user_query))
+                    memory_store[session_id]["lc_memory"].append(AIMessage(content=context_summary))
+                    memory_store[session_id]["history"].append({
+                        "query": query_to_store,
+                        "assistant": final_response_text,
+                        "context": context_summary,
+                        "is_audio": is_audio
+                    })
+                    
+                    logger.info(f"✅ Quota fallback response sent | context: {context_summary}")
+                    trim_session(memory_store[session_id], MAX_HISTORY)
                     print_memory(session_id)
                     continue  # ← CRITICAL: Skip process_query completely
                 
@@ -689,12 +906,16 @@ async def ws_chat_endpoint(websocket: WebSocket):
 
                     if reply in YES_WORDS:
                         pending_ctx = session_data.get("pending_table_context") or _build_table_context("", user_query)
+                        pending_search_context = session_data.get("pending_search_context")
                         table_response = json.dumps({
+                            "type": "large_dataset",
                             "context_summary": pending_ctx,
-                            "records": pending_table
+                            "records": pending_table,
+                            "search_context": pending_search_context,
                         })
                         memory_store[session_id]["pending_table"] = None
                         memory_store[session_id]["pending_table_context"] = None
+                        memory_store[session_id]["pending_search_context"] = None
 
                         await websocket.send_text(json.dumps({
                             "session_id": session_id,
@@ -711,6 +932,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
                             "is_audio":  is_audio
                         })
                         logger.info("✅ Table sent on user YES | records=%d", len(pending_table))
+                        trim_session(memory_store[session_id], MAX_HISTORY)
                         print_memory(session_id)
                         continue
 
@@ -734,6 +956,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
                             "is_audio":  is_audio
                         })
                         logger.info("✅ User declined table")
+                        trim_session(memory_store[session_id], MAX_HISTORY)
                         print_memory(session_id)
                         continue
 
@@ -763,9 +986,12 @@ async def ws_chat_endpoint(websocket: WebSocket):
                 if group_name:
                     memory_store[session_id]["group_name"] = group_name
 
-            lc_memory = list(memory_store[session_id]["lc_memory"])
-            messages  = [get_system_prompt(user_name)] + lc_memory
-            messages.append(HumanMessage(content=user_query))
+            messages = build_scoped_messages(
+                user_name=user_name,
+                current_query=user_query,
+                session_data=memory_store[session_id],
+                max_previous_turns=MAX_HISTORY,
+            )
 
 # Changes done by sanjeevan
             try:
@@ -811,6 +1037,8 @@ async def ws_chat_endpoint(websocket: WebSocket):
                             user_id=user_id,
                             session_id=session_id,
                             is_graph=is_graph,
+                            is_after_clarification=memory_store[session_id].get("is_after_clarification", False),
+                            is_all_datasets=memory_store[session_id].get("is_all_datasets", False),
                         )
                     else:
                         final_response_text, context_summary, _ = await langchain_service.process_query(
@@ -819,6 +1047,8 @@ async def ws_chat_endpoint(websocket: WebSocket):
                             user_id=user_id,
                             session_id=session_id,
                             is_graph=is_graph,
+                            is_after_clarification=memory_store[session_id].get("is_after_clarification", False),
+                            is_all_datasets=memory_store[session_id].get("is_all_datasets", False),
                         )
 
                     logger.info(f"✅ Response generated for session_id: {session_id}")
@@ -942,31 +1172,62 @@ async def ws_chat_endpoint(websocket: WebSocket):
             final_response_text = final_text_str
             context_summary = context_sum_str
 
-            # ── CHANGED: TWO SEPARATE MEMORIES
-            # ── lc_memory → stores context_summary ONLY (sent to model as past context)
-            # ──             prevents token limit errors for large datasets / markdown tables
-            # ── history   → stores final_response_text (full data: markdown table / large JSON)
-            # ──             saved to DB on session end, loaded by frontend for display
+            # ── TWO SEPARATE MEMORIES
+            # ── lc_memory → context_summary pairs; only last MAX_HISTORY turns are kept
+            # ──             (sent to model). MAX_HISTORY=0 → no prior turns in prompt.
+            # ── history   → full transcript (final_response_text); never trimmed by MAX_HISTORY;
+            # ──             saved to DB on session end / used when frontend POSTs session.
             memory_store[session_id]["lc_memory"].append(HumanMessage(content=user_query))
             memory_store[session_id]["lc_memory"].append(AIMessage(content=context_summary))
             logger.info(f"🧠 lc_memory updated with context_summary | session={session_id}")
 
             # ── If model asked clarification (no tool ran) → save original query ──
-            # Detected by checking if response contains clarification keywords
-            clarification_keywords = ["do you mean", "please clarify", "fa complaints or bdm", "ppm.*or.*sb", "could you clarify"]
+            # Only set when the response is a genuine clarification question:
+            # BOTH a clarification phrase AND a dataset list must be present.
+            # This prevents data responses that mention dataset names (e.g. "SB Work Orders")
+            # from accidentally re-triggering the pending loop.
             import re as _re
-            is_clarification = any(_re.search(kw, final_response_text.lower()) for kw in clarification_keywords)
+            _resp_lower = final_response_text.lower()
+            is_large_dataset_response = (
+                final_response_text.strip().startswith('{"type": "large_dataset"')
+                or final_response_text.strip().startswith('{"type": "multiple_datasets"')
+                or final_response_text.strip().startswith('{"type": "graph"')
+            )
+            is_table_offer = "would you like" in _resp_lower
+            _has_clar_phrase = bool(_re.search(
+                r"please clarify|do you mean|could you clarify|which kind of data",
+                _resp_lower,
+            ))
+            _has_dataset_list = bool(_re.search(
+                r"assets,\s*ppm|ppm,\s*bdm|bdm,\s*fa|fa,\s*or\s*sb",
+                _resp_lower,
+            ))
+            is_clarification = (
+                not is_large_dataset_response
+                and not is_table_offer
+                and _has_clar_phrase
+                and _has_dataset_list
+            )
             if is_clarification:
                 memory_store[session_id]["pending_original_query"] = query_to_store
                 logger.info(f"💾 Saved pending_original_query: '{query_to_store}'")
+            # ── Always clear the clarification flags after each processed turn ──
+            memory_store[session_id]["is_after_clarification"] = False
+            memory_store[session_id]["is_all_datasets"] = False
             # ── Stash pending table data if response ends with table question
             # ── langchain_service stores p_list_for_model on self for this purpose
             pending_table = getattr(langchain_service, "_last_pending_table", None)
             if pending_table:
                 memory_store[session_id]["pending_table"] = pending_table
                 memory_store[session_id]["pending_table_context"] = _build_table_context(context_summary, query_to_store)
+                memory_store[session_id]["pending_search_context"] = getattr(
+                    langchain_service, "_last_search_context", None
+                )
                 langchain_service._last_pending_table = None  # clear after stashing
+                langchain_service._last_search_context = None
                 logger.info(f"📋 Stashed pending_table | records={len(pending_table)} | context_saved=True")
+
+
 
             memory_store[session_id]["history"].append({
                 "query":     query_to_store,
@@ -977,9 +1238,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
             })
             logger.info(f"💾 history updated with full response | session={session_id}")
 
-            if len(memory_store[session_id]["history"]) > MAX_HISTORY:
-                memory_store[session_id]["history"]   = memory_store[session_id]["history"][-MAX_HISTORY:]
-                memory_store[session_id]["lc_memory"] = memory_store[session_id]["lc_memory"][-(MAX_HISTORY * 2):]
+            trim_session(memory_store[session_id], MAX_HISTORY)
 
             print_memory(session_id)
 
