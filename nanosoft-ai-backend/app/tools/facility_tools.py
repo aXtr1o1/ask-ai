@@ -224,7 +224,7 @@ For all normal filter and list queries:
 
 Columns you can use in group_by_columns for ASSETS:
 DivisionName, DisciplineName, BuildingName, FloorName,
-LocalityName, StatusName, ConditionName, PriorityName,
+LocalityName, LocalityCode, StatusName, ConditionName, PriorityName,
 AssetTypeName, EquipmentName, MakeName, ModelName, SpotName,
 TradeGroupName, ServiceAreaName, YearOfManuf,
 OnHold, IsSnagged, IsScraped, EnablePPM, EnableBDM
@@ -248,6 +248,7 @@ def ASSETS(
     division=None,
     discipline=None,
     locality=None,
+    locality_code=None,
     building=None,
     floor=None,
     spot_name=None,
@@ -299,6 +300,7 @@ def ASSETS(
         "division":     division,
         "discipline":   discipline,
         "locality":     locality,
+        "locality_code":    locality_code,
         "building":     building,
         "floor":        floor,
         "spot_name":    spot_name,
@@ -411,7 +413,7 @@ For all normal filter and list queries:
 
 Columns you can use in group_by_columns for PPM:
 DivisionName, DisciplineName, BuildingName, FloorName,
-LocalityName, FrequencyName, PPMStatus, PPMStageName,
+LocalityName, LocalityCode, FrequencyName, PPMStatus, PPMStageName,
 ContractName, SpotName
 
 """,
@@ -429,6 +431,7 @@ def PPM(
     division=None,
     discipline=None,
     locality=None,
+    locality_code=None,
     building=None,
     floor=None,
     spot_name=None,
@@ -470,6 +473,7 @@ def PPM(
         "division":     division,
         "discipline":   discipline,
         "locality":     locality,
+        "locality_code":    locality_code,
         "building":     building,
         "floor":        floor,
         "spot_name":    spot_name,
@@ -582,7 +586,7 @@ For all normal filter and list queries:
 
 Columns you can use in group_by_columns for BDM:
 DivisionName, DisciplineName, BuildingName, FloorName,
-LocalityName, WoStatus, PriorityName, StageName,
+LocalityName, LocalityCode, WoStatus, PriorityName, StageName,
 ComplaintTypeName, ComplaintModeName, ServiceTypeName, SpotName, ContractName
 ComplaintHeaderName
 
@@ -609,6 +613,7 @@ def BDM(
     division=None,
     discipline=None,
     locality=None,
+    locality_code=None,
     building=None,
     floor=None,
     spot_name=None,
@@ -654,6 +659,7 @@ def BDM(
         "division":         division,
         "discipline":       discipline,
         "locality":         locality,
+        "locality_code":    locality_code,
         "building":         building,
         "floor":            floor,
         "spot_name":        spot_name,
@@ -767,7 +773,7 @@ AGGREGATE / GROUP BY:
 - "BuildingName Category" / "building categories" → group_by_columns=['BuildingName'] — NOT category/RMCategoryName
 - "audit category" / "Pest Control" → group_by_columns=['RMCategoryName'] or category filter
 - "low count" / "lowest" = smallest counts — do NOT set priority unless user says P4 / low priority
-- group_by_columns: DivisionName, BuildingName, FloorName, LocalityName,
+- group_by_columns: DivisionName, BuildingName, FloorName, LocalityName, LocalityCode,
                     PriorityName, RMStageName, RMCategoryName, RMCategorySubName,
                     FrequencyName, ContractName, SpotName,
                     IsWithdraw, IsRework, IsActive
@@ -788,6 +794,7 @@ def FA(
     category_sub=None,
     division=None,
     locality=None,
+    locality_code=None,
     building=None,
     floor=None,
     spot_name=None,
@@ -832,6 +839,7 @@ def FA(
         "category_sub":       category_sub,
         "division":           division,
         "locality":           locality,
+        "locality_code":    locality_code,
         "building":           building,
         "floor":              floor,
         "spot_name":          spot_name,
@@ -945,7 +953,7 @@ PARAMETERS:
 AGGREGATE / GROUP BY:
 - is_aggregate=True for "how many SB per division", "breakdown by frequency"
 - group_by_columns: DivisionName, DisciplineName, BuildingName, FloorName,
-                    LocalityName, PPMStageName, FrequencyName, ContractName, SpotName
+                    LocalityName, LocalityCode, PPMStageName, FrequencyName, ContractName, SpotName
 - aggregate_function: COUNT / SUM / AVG
 - COLUMN VALUE BREAKDOWN: "how many [columnName]?" → is_aggregate=True, group_by_columns=[column], do NOT set filter
 """,
@@ -961,6 +969,7 @@ def SB(
     division=None,
     discipline=None,
     locality=None,
+    locality_code=None,
     building=None,
     floor=None,
     spot_name=None,
@@ -1003,6 +1012,7 @@ def SB(
         "division":           division,
         "discipline":         discipline,
         "locality":           locality,
+        "locality_code":    locality_code,
         "building":           building,
         "floor":              floor,
         "spot_name":          spot_name,

@@ -81,6 +81,7 @@ class PPMRequest(BaseModel):
     division: Optional[str] = None
     discipline: Optional[str] = None
     locality: Optional[str] = None
+    locality_code: Optional[str] = None
     building: Optional[str] = None
     floor: Optional[str] = None
     spot_name: Optional[str] = None
@@ -121,6 +122,7 @@ class BDMRequest(BaseModel):
     division: Optional[str] = None
     discipline: Optional[str] = None
     locality: Optional[str] = None
+    locality_code: Optional[str] = None
     building: Optional[str] = None
     floor: Optional[str] = None
     spot_name: Optional[str] = None
@@ -158,6 +160,7 @@ class FARequest(BaseModel):
     category_sub: Optional[str] = None        # maps to RMCategorySubName
     division: Optional[str] = None
     locality: Optional[str] = None
+    locality_code: Optional[str] = None
     building: Optional[str] = None
     floor: Optional[str] = None
     spot_name: Optional[str] = None
@@ -193,6 +196,7 @@ class SBRequest(BaseModel):
     division: Optional[str] = None
     discipline: Optional[str] = None
     locality: Optional[str] = None
+    locality_code: Optional[str] = None
     building: Optional[str] = None
     floor: Optional[str] = None
     spot_name: Optional[str] = None

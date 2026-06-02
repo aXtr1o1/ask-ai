@@ -40,27 +40,27 @@ def _normalize_smart_punctuation(value: Any) -> Any:
 # Canonical group-by columns allowed per tool (must match DB / stored procedures)
 TOOL_GROUP_BY_COLUMNS: dict[str, frozenset[str]] = {
     "ASSETS": frozenset({
-        "DivisionName", "DisciplineName", "BuildingName", "FloorName", "LocalityName",
+        "DivisionName", "DisciplineName", "BuildingName", "FloorName", "LocalityName", "LocalityCode",
         "StatusName", "ConditionName", "PriorityName", "AssetTypeName", "EquipmentName",
         "MakeName", "ModelName", "SpotName", "TradeGroupName", "ServiceAreaName",
         "OnHold", "IsSnagged", "IsScraped", "IsEnablePPM", "IsEnableBDM",
     }),
     "PPM": frozenset({
-        "DivisionName", "DisciplineName", "BuildingName", "FloorName", "LocalityName",
+        "DivisionName", "DisciplineName", "BuildingName", "FloorName", "LocalityName", "LocalityCode",
         "FrequencyName", "PPMStatus", "PPMStageName", "ContractName", "SpotName",
     }),
     "BDM": frozenset({
-        "DivisionName", "DisciplineName", "BuildingName", "FloorName", "LocalityName",
+        "DivisionName", "DisciplineName", "BuildingName", "FloorName", "LocalityName", "LocalityCode",
         "WoStatus", "PriorityName", "StageName", "ComplaintTypeName", "ComplaintModeName",
         "ComplaintHeaderName", "ServiceTypeName", "SpotName", "ContractName",
     }),
     "FA": frozenset({
-        "DivisionName", "BuildingName", "FloorName", "LocalityName", "PriorityName",
+        "DivisionName", "BuildingName", "FloorName", "LocalityName", "LocalityCode", "PriorityName",
         "RMStageName", "RMCategoryName", "RMCategorySubName", "FrequencyName",
         "ContractName", "SpotName", "IsRMWithdraw", "IsRMRework", "IsActive",
     }),
     "SB": frozenset({
-        "DivisionName", "DisciplineName", "BuildingName", "FloorName", "LocalityName",
+        "DivisionName", "DisciplineName", "BuildingName", "FloorName", "LocalityName", "LocalityCode",
         "PPMStageName", "FrequencyName", "ServiceTypeName", "ContractName", "SpotName",
     }),
 }
@@ -77,6 +77,8 @@ GROUP_BY_ALIASES: dict[str, str] = {
     "floorname": "FloorName",
     "locality": "LocalityName",
     "localityname": "LocalityName",
+    "localitycode": "LocalityCode",
+    "locality_code": "LocalityCode",
     "status": "StatusName",
     "statusname": "StatusName",
     "wostatus": "WoStatus",

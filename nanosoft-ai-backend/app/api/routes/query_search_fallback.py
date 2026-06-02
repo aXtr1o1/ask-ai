@@ -14,24 +14,24 @@ ASSET_TEXT_FILTER_FIELDS = (
 )
 PPM_TEXT_FILTER_FIELDS = (
     "work_order", "asset_tag_no", "equipment_ref_no", "status", "stage", "frequency",
-    "division", "discipline", "locality", "building", "floor", "spot_name",
+    "division", "discipline", "locality", "locality_code", "building", "floor", "spot_name",
     "equipment", "contract", "tech",
 )
 BDM_TEXT_FILTER_FIELDS = (
     "complaint_no", "asset_tag_no", "asset_barcode", "client_wo_no", "status",
     "priority", "stage", "complaint_type", "complaint_header", "complaint_mode",
     "complaint_nature", "wo_type", "service_type", "division", "discipline",
-    "locality", "building", "floor", "spot_name", "contract", "complainer",
+    "locality", "locality_code", "building", "floor", "spot_name", "contract", "complainer",
     "register_by", "analysis_tech", "execution_tech",
 )
 FA_TEXT_FILTER_FIELDS = (
     "complaint_no", "complaint_code", "x_complaint_no", "priority", "stage",
-    "category", "category_sub", "division", "locality", "building", "floor",
+    "category", "category_sub", "division", "locality", "locality_code", "building", "floor",
     "spot_name", "contract", "tech", "frequency", "request_desc",
 )
 SB_TEXT_FILTER_FIELDS = (
     "work_order", "stage", "frequency", "service_type", "division", "discipline",
-    "locality", "building", "floor", "spot_name", "contract", "tech",
+    "locality", "locality_code", "building", "floor", "spot_name", "contract", "tech",
 )
 
 
