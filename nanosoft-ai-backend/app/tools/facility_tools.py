@@ -159,9 +159,7 @@ def getTime(date_from, date_to):
     description="""
 Use this tool for queries regarding physical equipment, master asset records, or metadata.
 
-DEFAULT ROUTING RULE: Trigger this tool for any general request to list, show, or search
-categories of equipment or locations. Do not use PPM or BDM tools unless the user
-explicitly mentions maintenance schedules, service complaints, or breakdowns.
+ROUTING RULE: Trigger this tool only for queries regarding physical equipment, master asset records, or equipment categories/locations. Do not use this tool for generic requests to list, show, or search general data unless the user explicitly mentions assets or equipment.
 
 MAPPING DIRECTIVES:
 - division: Map if user mentions "Division", "Division Name", or "DivisionName".
@@ -169,7 +167,7 @@ MAPPING DIRECTIVES:
 - status: Map if user mentions "Status" or "Status Name".
 - spot_name: Map if user mentions "Spot", "Spot Name", or "Location Spot".
 - serial_no: Map if user mentions "Serial", "Serial No", "Serial Number", or "S/N".
-- keyword: Mandatory fallback for any terms not labeled as a field.
+- keyword: General text search when a value does not map cleanly to another field.
 
 FULL PARAMETER CAPABILITIES:
 - user_name: Required for user isolation and ownership.
@@ -177,7 +175,7 @@ FULL PARAMETER CAPABILITIES:
 - asset_type, division, discipline, trade_group: Filter by asset classification.
 - locality, building, floor, service_area: Filter by physical location hierarchy.
 - spot_name, serial_no: Filter by spot or serial number.
-- on_hold, is_snagged, is_scraped: Filter by asset lifecycle flags.
+- on_hold, is_snagged, is_scraped: FILTER by specific boolean value. For "how many OnHolds" breakdown use is_aggregate=True with group_by_columns=['OnHold'] instead.
 - enable_ppm, enable_bdm: Filter by maintenance eligibility configuration.
 - asset_tag_no, keyword: Filter by specific identification or search terms. DO NOT include conversational stop-words, prepositions, articles, or time/date references as keywords.
 - date_from, date_to: Filter by timestamps. Supports relative keywords: 'today', 'yesterday', 'this week', 'last week', 'this month', 'last month', 'this year', 'last year', or 'X days ago' (e.g., '3 days ago').
@@ -193,16 +191,31 @@ When the user asks questions like:
 - "how many assets are in each status?"
 - "compare assets by make or model?"
 - "group assets by building and floor"
+- "how many OnHolds are there?" / "how many on hold?" / "OnHold breakdown"
+- "how many snagged assets?" / "how many scraped?" / "PPM enabled count"
 
 → Set is_aggregate = True
 → Fill group_by_columns with the columns the user mentioned
-   for example ["DivisionName"] or ["BuildingName", "FloorName"]
+   for example ["DivisionName"] or ["BuildingName", "FloorName"] or ["OnHold"]
 → Set aggregate_function based on what user wants
    COUNT for how many, SUM for total of a value, AVG for average
 
+COLUMN VALUE BREAKDOWN (CRITICAL):
+When user asks "how many [ColumnName]?" or "how many [column] are there?" about a
+data column — especially boolean columns (OnHold, IsSnagged, IsScraped, EnablePPM,
+EnableBDM) or categorical columns (StatusName, ConditionName, etc.) — treat it as
+aggregate: is_aggregate=True, group_by_columns=[exact DB column name], aggregate_function="COUNT".
+Do NOT set the corresponding filter parameter (e.g., do NOT set on_hold=true).
+The result should show count per distinct value (true/false for booleans).
+
+Use FILTER (not aggregate) only when user specifies ONE value:
+- "how many assets on hold" → on_hold=true, is_aggregate=False
+- "show snagged assets" → is_snagged=true, is_aggregate=False
+
 IMPORTANT: Only set is_aggregate=True when user mentions a grouping column
-like "per division", "by building", "each status". If user asks "how many total"
-or "how many assets exist" with NO grouping column → set is_aggregate=False.
+like "per division", "by building", "each status", or asks "how many [columnName]".
+If user asks "how many total" or "how many assets exist" with NO grouping column
+→ set is_aggregate=False.
 
 For all normal filter and list queries:
 → is_aggregate = False (default — do not set)
@@ -211,9 +224,10 @@ For all normal filter and list queries:
 
 Columns you can use in group_by_columns for ASSETS:
 DivisionName, DisciplineName, BuildingName, FloorName,
-LocalityName, StatusName, ConditionName, PriorityName,
-AssetTypeName, MakeName, ModelName, SpotName,
-TradeGroupName, ServiceAreaName, YearOfManuf
+LocalityName, LocalityCode, StatusName, ConditionName, PriorityName,
+AssetTypeName, EquipmentName, MakeName, ModelName, SpotName,
+TradeGroupName, ServiceAreaName, YearOfManuf,
+OnHold, IsSnagged, IsScraped, EnablePPM, EnableBDM
 
 
 """,
@@ -223,6 +237,10 @@ def ASSETS(
     user_name=None,
     user_id=None,
     asset_tag_no=None,
+    asset_barcode=None,
+    equipment_name=None,
+    equipment_ref_no=None,
+    serial_no=None,
     status=None,
     condition=None,
     priority=None,
@@ -230,20 +248,24 @@ def ASSETS(
     division=None,
     discipline=None,
     locality=None,
+    locality_code=None,
     building=None,
     floor=None,
+    spot_name=None,
     owner=None,
     make=None,
     model=None,
     service_area=None,
     trade_group=None,
-    spot_name=None,
-    serial_no=None,
+    drawing_no=None,
+    remarks=None,
     on_hold=None,
     is_snagged=None,
     is_scraped=None,
     enable_ppm=None,
     enable_bdm=None,
+    enable_bms=None,
+    enable_dsm=None,
     keyword=None,
     date_from=None,
     date_to=None,
@@ -267,6 +289,10 @@ def ASSETS(
         "user_name":    user_name,
         "user_id":      user_id,
         "asset_tag_no": asset_tag_no,
+        "asset_barcode": asset_barcode,
+        "equipment_name": equipment_name,
+        "equipment_ref_no": equipment_ref_no,
+        "serial_no":    serial_no,
         "status":       status,
         "condition":    condition,
         "priority":     priority,
@@ -274,20 +300,24 @@ def ASSETS(
         "division":     division,
         "discipline":   discipline,
         "locality":     locality,
+        "locality_code":    locality_code,
         "building":     building,
         "floor":        floor,
+        "spot_name":    spot_name,
         "owner":        owner,
         "make":         make,
         "model":        model,
         "service_area": service_area,
         "trade_group":  trade_group,
-        "spot_name":    spot_name,
-        "serial_no":    serial_no,
+        "drawing_no":   drawing_no,
+        "remarks":      remarks,
         "on_hold":      on_hold,
         "is_snagged":   is_snagged,
         "is_scraped":   is_scraped,
         "enable_ppm":   enable_ppm,
         "enable_bdm":   enable_bdm,
+        "enable_bms":   enable_bms,
+        "enable_dsm":   enable_dsm,
         "keyword":      keyword,
         "date_from":    resolved_date_from,
         "date_to":      resolved_date_to,
@@ -308,7 +338,7 @@ def ASSETS(
         logger.info("📊 AGGREGATE MODE | group_by=%s | function=%s", group_by_columns, aggregate_function)
     
 
-    logger.info("📋 [ASSETS PAYLOAD FROM AI]:\n%s", json.dumps(clean_payload, indent=2, default=str))
+    logger.info("📋 [ASSETS PAYLOAD FROM AI]:\n%s", json.dumps(clean_payload, indent=2, default=str, ensure_ascii=False))
 
     try:
         logger.info("🚀 Calling get_assets directly")
@@ -339,7 +369,7 @@ MAPPING DIRECTIVES:
 - discipline: Map if user mentions "Discipline", "Discipline Name", or "DisciplineName".
 - status: Map if user mentions "Status" or "Status Name".
 - spot_name: Map if user mentions "Spot", "Spot Name", or "Location Spot".
-- keyword: Mandatory fallback for any terms not labeled as a field.
+- keyword: General text search when a value does not map cleanly to another field.
 
 FULL PARAMETER CAPABILITIES:
 - user_name: Required for user isolation and ownership.
@@ -368,7 +398,10 @@ When the user asks questions like:
 → Fill group_by_columns with the columns the user mentioned
 → Set aggregate_function based on what user wants
    COUNT for how many, SUM for total, AVG for average
-   
+
+COLUMN VALUE BREAKDOWN: "how many [ColumnName]?" → is_aggregate=True,
+group_by_columns=[column], do NOT set the filter parameter.
+
 IMPORTANT: Only set is_aggregate=True when user mentions a grouping column
 like "per division", "by frequency", "each stage". If user asks "how many total"
 or "how many PPM tasks exist" with NO grouping column → set is_aggregate=False
@@ -380,7 +413,7 @@ For all normal filter and list queries:
 
 Columns you can use in group_by_columns for PPM:
 DivisionName, DisciplineName, BuildingName, FloorName,
-LocalityName, FrequencyName, PPMStatus, PPMStageName,
+LocalityName, LocalityCode, FrequencyName, PPMStatus, PPMStageName,
 ContractName, SpotName
 
 """,
@@ -391,18 +424,20 @@ def PPM(
     user_id=None,
     work_order=None,
     asset_tag_no=None,
+    equipment_ref_no=None,
     status=None,
     stage=None,
     frequency=None,
     division=None,
     discipline=None,
     locality=None,
+    locality_code=None,
     building=None,
     floor=None,
+    spot_name=None,
+    equipment=None,
     contract=None,
     tech=None,
-    equipment=None,
-    spot_name=None,
     keyword=None,
     date_from=None,
     date_to=None,
@@ -423,6 +458,7 @@ def PPM(
         return "Error: user_name is required. It is set from the authenticated request."
 
     logger.info(f"🛠️ PPM TOOL TRIGGERED for user_name: {user_name}")
+    
     resolved_date_from, resolved_date_to = getTime(date_from, date_to)
 
     payload = {
@@ -430,18 +466,20 @@ def PPM(
         "user_id":      user_id,
         "work_order":   work_order,
         "asset_tag_no": asset_tag_no,
+        "equipment_ref_no": equipment_ref_no,
         "status":       status,
         "stage":        stage,
         "frequency":    frequency,
         "division":     division,
         "discipline":   discipline,
         "locality":     locality,
+        "locality_code":    locality_code,
         "building":     building,
         "floor":        floor,
+        "spot_name":    spot_name,
+        "equipment":    equipment,
         "contract":     contract,
         "tech":         tech,
-        "equipment":    equipment,
-        "spot_name":    spot_name,
         "keyword":      keyword,
         "date_from":    resolved_date_from,
         "date_to":      resolved_date_to,
@@ -464,7 +502,7 @@ def PPM(
     if is_aggregate:
         logger.info("📊 AGGREGATE MODE | group_by=%s | function=%s", group_by_columns, aggregate_function)
 
-    logger.info("📋 [PPM PAYLOAD FROM AI]:\n%s", json.dumps(clean_payload, indent=2, default=str))
+    logger.info("📋 [PPM PAYLOAD FROM AI]:\n%s", json.dumps(clean_payload, indent=2, default=str, ensure_ascii=False))
 
     try:
         logger.info("🚀 Calling get_ppm directly")
@@ -491,17 +529,24 @@ ROUTING RULE: Trigger this tool only if the user explicitly mentions breakdowns,
 failures, reactive maintenance, or breakdown SLA compliance. Do not use for general equipment lists.
 
 MAPPING DIRECTIVES:
-- division: Map if user mentions "Division", "Division Name", or "DivisionName".
-- discipline: Map if user mentions "Discipline", "Discipline Name", or "DisciplineName".
+- service_type vs division (CRITICAL): "... Services" (e.g. Electrical Services, Housekeeping Services)
+  → service_type. "... System" or explicit "division" → division. Never map "Housekeeping Services"
+  to division Housekeeping. Compare two Services types → is_aggregate=True, group_by_columns=['ServiceTypeName'].
+- service_type: Map for "Service Type" or any "<trade> Services" phrase.
+- division: Map ONLY when the user explicitly uses the word "Division" or explicitly names a building system like "Fire System" or "Cooling System". NEVER map entire sentences or conversational phrases like "in the system".
+- discipline: Map only for "Discipline" or short trade names — not full Services/System names.
 - status: Map if user mentions "Status" or "Status Name".
 - spot_name: Map if user mentions "Spot", "Spot Name", or "Location Spot".
-- keyword: Mandatory fallback for any terms not labeled as a field.
+- keyword: General text search when a value does not map cleanly to another field.
 
 FULL PARAMETER CAPABILITIES:
 - user_name: Required for user isolation and ownership.
 - complaint_no: Filter by specific complaint number.
 - status, stage, priority: Filter by complaint lifecycle and urgency.
-- complaint_type, complaint_mode, complaint_nature: Filter by classification.
+- complaint_type: e.g. "Service Request", "Corrective Maintenance" — NOT workflow stage text.
+- complaint_header: e.g. "ANA Approval Flow", "Without Approval Flow" — map "under ANA Approval Flow" here, NOT stage.
+- complaint_mode, complaint_nature: Filter by classification.
+- Do NOT set stage, complaint_type, complaint_header, and keyword together for one phrase — use the single best field.
 - wo_type, service_type: Filter by work order or service category.
 - division, discipline: Filter by organizational structure.
 - locality, building, floor, spot_name: Filter by location hierarchy.
@@ -524,10 +569,15 @@ When the user asks questions like:
 → Fill group_by_columns with the columns the user mentioned
 → Set aggregate_function based on what user wants
    COUNT for how many, SUM for total, AVG for average
-   
+
+COLUMN VALUE BREAKDOWN: "how many [ColumnName]?" → is_aggregate=True,
+group_by_columns=[column], do NOT set the filter parameter.
+
 IMPORTANT: Only set is_aggregate=True when user mentions a grouping column
-like "per division", "by priority", "each status". If user asks "how many total"
-or "how many complaints exist" with NO grouping column → set is_aggregate=False.
+like "per division", "by priority", "each status", or "BuildingName" breakdown.
+"low count" / "lowest count" = smallest numeric counts — do NOT set priority.
+Only set priority for P1–P4 or explicit "low priority" / "critical".
+If user asks "how many total" with NO grouping column → set is_aggregate=False.
 
 For all normal filter and list queries:
 → is_aggregate = False (default — do not set)
@@ -536,8 +586,9 @@ For all normal filter and list queries:
 
 Columns you can use in group_by_columns for BDM:
 DivisionName, DisciplineName, BuildingName, FloorName,
-LocalityName, WoStatus, PriorityName, StageName,
-ComplaintTypeName, ComplaintModeName, SpotName, ContractName
+LocalityName, LocalityCode, WoStatus, PriorityName, StageName,
+ComplaintTypeName, ComplaintModeName, ServiceTypeName, SpotName, ContractName
+ComplaintHeaderName
 
 
 """,
@@ -547,10 +598,14 @@ def BDM(
     user_name=None,
     user_id=None,
     complaint_no=None,
+    asset_tag_no=None,
+    asset_barcode=None,
+    client_wo_no=None,
     status=None,
     priority=None,
     stage=None,
     complaint_type=None,
+    complaint_header=None,
     complaint_mode=None,
     complaint_nature=None,
     wo_type=None,
@@ -558,13 +613,15 @@ def BDM(
     division=None,
     discipline=None,
     locality=None,
+    locality_code=None,
     building=None,
     floor=None,
+    spot_name=None,
     contract=None,
+    complainer=None,
+    register_by=None,
     analysis_tech=None,
     execution_tech=None,
-    complainer=None,
-    spot_name=None,
     keyword=None,
     date_from=None,
     date_to=None,
@@ -587,10 +644,14 @@ def BDM(
         "user_name":        user_name,
         "user_id":      user_id,
         "complaint_no":     complaint_no,
+        "asset_tag_no":     asset_tag_no,
+        "asset_barcode":    asset_barcode,
+        "client_wo_no":     client_wo_no,
         "status":           status,
         "priority":         priority,
         "stage":            stage,
         "complaint_type":   complaint_type,
+        "complaint_header": complaint_header,
         "complaint_mode":   complaint_mode,
         "complaint_nature": complaint_nature,
         "wo_type":          wo_type,
@@ -598,13 +659,15 @@ def BDM(
         "division":         division,
         "discipline":       discipline,
         "locality":         locality,
+        "locality_code":    locality_code,
         "building":         building,
         "floor":            floor,
+        "spot_name":        spot_name,
         "contract":         contract,
+        "complainer":       complainer,
+        "register_by":      register_by,
         "analysis_tech":    analysis_tech,
         "execution_tech":   execution_tech,
-        "complainer":       complainer,
-        "spot_name":        spot_name,
         "keyword":          keyword,
         "date_from":        resolved_date_from,
         "date_to":          resolved_date_to,
@@ -625,7 +688,7 @@ def BDM(
     if is_aggregate:
         logger.info("📊 AGGREGATE MODE | group_by=%s | function=%s", group_by_columns, aggregate_function)
 
-    logger.info("📋 [BDM PAYLOAD FROM AI]:\n%s", json.dumps(clean_payload, indent=2, default=str))
+    logger.info("📋 [BDM PAYLOAD FROM AI]:\n%s", json.dumps(clean_payload, indent=2, default=str, ensure_ascii=False))
 
     try:
         logger.info("🚀 Calling get_bdm directly")
@@ -675,13 +738,14 @@ KEY DIFFERENTIATORS vs BDM:
   FA = System-generated audit | No human complainer | Has category/sub-category
   BDM = Human-reported breakdown | Has complainer | Has complaint type/mode
  
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-AMBIGUOUS QUERIES — DO NOT GUESS:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-If user asks a generic complaint question with NO FA/BDM keyword:
-  e.g. "how many complaints are raised?" or "show all complaints"
-→ DO NOT call this tool. Ask the user:
-  "Do you mean Facility Audit (FA) complaints or Breakdown Maintenance (BDM) complaints?"
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# AMBIGUOUS QUERIES — DO NOT ASK QUESTIONS:
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# If user asks a generic complaint question with NO FA/BDM keyword:
+#   e.g. "how many complaints are raised?" or "show all complaints"
+# → DO NOT call this tool. DO NOT ask the user any question.
+#   The upstream routing system handles all clarification automatically.
+#   Simply do NOT invoke any tool — return no tool call.
  
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 PARAMETERS:
@@ -689,7 +753,7 @@ PARAMETERS:
 - user_name: Always required (from authenticated session)
 - complaint_no: FA complaint number
 - priority: e.g. "P2 High"
-- stage: e.g. "Facility Audit Request Raised"
+- stage: RMStageName only (no status field). User 'Closed'/'Open' → stage='Closed' or 'Open' (not category)
 - category: e.g. "Pest Control Checks"
 - category_sub: e.g. "RODENT ACTIVITY"
 - division: e.g. "Housekeeping"
@@ -705,11 +769,16 @@ PARAMETERS:
 - limit, offset: Pagination
  
 AGGREGATE / GROUP BY:
-- is_aggregate=True for "how many FA per division", "breakdown by category"
-- group_by_columns: DivisionName, BuildingName, FloorName, LocalityName,
+- is_aggregate=True for "how many FA per division", "breakdown by audit category", "BuildingName" counts
+- "BuildingName Category" / "building categories" → group_by_columns=['BuildingName'] — NOT category/RMCategoryName
+- "audit category" / "Pest Control" → group_by_columns=['RMCategoryName'] or category filter
+- "low count" / "lowest" = smallest counts — do NOT set priority unless user says P4 / low priority
+- group_by_columns: DivisionName, BuildingName, FloorName, LocalityName, LocalityCode,
                     PriorityName, RMStageName, RMCategoryName, RMCategorySubName,
-                    FrequencyName, ContractName, SpotName
+                    FrequencyName, ContractName, SpotName,
+                    IsWithdraw, IsRework, IsActive
 - aggregate_function: COUNT / SUM / AVG
+- COLUMN VALUE BREAKDOWN: "how many [columnName]?" → is_aggregate=True, group_by_columns=[column], do NOT set filter
 """,
     args_schema=FAInput
 )
@@ -717,12 +786,15 @@ def FA(
     user_name=None,
     user_id=None,
     complaint_no=None,
+    complaint_code=None,
+    x_complaint_no=None,
     priority=None,
     stage=None,
     category=None,
     category_sub=None,
     division=None,
     locality=None,
+    locality_code=None,
     building=None,
     floor=None,
     spot_name=None,
@@ -732,7 +804,9 @@ def FA(
     request_desc=None,
     is_withdraw=None,
     is_rework=None,
+    is_bms=None,
     is_active=None,
+    is_draft=None,
     keyword=None,
     date_from=None,
     date_to=None,
@@ -757,12 +831,15 @@ def FA(
         "user_name":          user_name,
         "user_id":            user_id,
         "complaint_no":       complaint_no,
+        "complaint_code":     complaint_code,
+        "x_complaint_no":     x_complaint_no,
         "priority":           priority,
         "stage":              stage,
         "category":           category,
         "category_sub":       category_sub,
         "division":           division,
         "locality":           locality,
+        "locality_code":    locality_code,
         "building":           building,
         "floor":              floor,
         "spot_name":          spot_name,
@@ -772,7 +849,9 @@ def FA(
         "request_desc":       request_desc,
         "is_withdraw":        is_withdraw,
         "is_rework":          is_rework,
+        "is_bms":             is_bms,
         "is_active":          is_active,
+        "is_draft":           is_draft,
         "keyword":            keyword,
         "date_from":          resolved_date_from,
         "date_to":            resolved_date_to,
@@ -792,7 +871,7 @@ def FA(
     if is_aggregate:
         logger.info("📊 FA AGGREGATE MODE | group_by=%s | function=%s", group_by_columns, aggregate_function)
  
-    logger.info("📋 [FA PAYLOAD FROM AI]:\n%s", json.dumps(clean_payload, indent=2, default=str))
+    logger.info("📋 [FA PAYLOAD FROM AI]:\n%s", json.dumps(clean_payload, indent=2, default=str, ensure_ascii=False))
  
     try:
         req    = FARequest(**clean_payload)
@@ -841,28 +920,31 @@ KEY DIFFERENTIATORS vs PPM:
   PPM = Preventive maintenance | Has AssetTagNo | Has equipment name
         Work order format: AMC-2023-0002-RAE-19366-2025
  
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-AMBIGUOUS QUERIES — DO NOT GUESS:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-If user asks a generic maintenance query with NO SB/PPM keyword:
-  e.g. "how many scheduled tasks?" or "show maintenance work orders"
-→ DO NOT call this tool. Ask the user:
-  "Do you mean PPM (Preventive Maintenance) work orders or SB (Schedule Based) work orders?"
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# AMBIGUOUS QUERIES — DO NOT ASK QUESTIONS:
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# If user asks a generic maintenance query with NO SB/PPM keyword:
+#   e.g. "how many scheduled tasks?" or "show maintenance work orders"
+# → DO NOT call this tool. DO NOT ask the user any question.
+#   The upstream routing system handles all clarification automatically.
+#   Simply do NOT invoke any tool — return no tool call.
  
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 PARAMETERS:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 - user_name: Always required (from authenticated session)
 - work_order: Work order number e.g. "AA-1-2026"
-- stage: e.g. "Staff Yet to be Allocated"
+- asset_tag_no: Asset tag number if linked to an asset
+- status: SB work order status e.g. "Completed", "Pending"
+- stage: Workflow stage e.g. "Staff Yet to be Allocated"
+- frequency: Schedule frequency e.g. "MONTHLY"
 - division: e.g. "Environmental Services"
 - discipline: e.g. "Landscaping"
 - locality, building, floor, spot_name: Location filters
 - contract: Contract name
-- frequency: e.g. "MONTHLY"
-- service_type: e.g. "Environmental Services"
 - tech: Technician name
-- is_withdraw, is_reschedule, is_rework, is_active: Boolean flags
+- equipment: Equipment name
+- sla_min, sla_max: SLA duration range in minutes
 - keyword: General search. DO NOT include conversational stop-words, prepositions, articles, or time/date references as keywords.
 - date_from, date_to: Filter by timestamps. Supports relative keywords: 'today', 'yesterday', 'this week', 'last week', 'this month', 'last month', 'this year', 'last year', or 'X days ago' (e.g., '3 days ago').
 - comp_from, comp_to: Completion date range
@@ -871,8 +953,9 @@ PARAMETERS:
 AGGREGATE / GROUP BY:
 - is_aggregate=True for "how many SB per division", "breakdown by frequency"
 - group_by_columns: DivisionName, DisciplineName, BuildingName, FloorName,
-                    LocalityName, PPMStageName, FrequencyName, ServiceTypeName, ContractName
+                    LocalityName, LocalityCode, PPMStageName, FrequencyName, ContractName, SpotName
 - aggregate_function: COUNT / SUM / AVG
+- COLUMN VALUE BREAKDOWN: "how many [columnName]?" → is_aggregate=True, group_by_columns=[column], do NOT set filter
 """,
     args_schema=SBInput
 )
@@ -881,25 +964,29 @@ def SB(
     user_id=None,
     work_order=None,
     stage=None,
+    frequency=None,
+    service_type=None,
     division=None,
     discipline=None,
     locality=None,
+    locality_code=None,
     building=None,
     floor=None,
     spot_name=None,
     contract=None,
-    frequency=None,
-    service_type=None,
     tech=None,
     is_withdraw=None,
     is_reschedule=None,
     is_rework=None,
     is_active=None,
+    is_draft=None,
     keyword=None,
     date_from=None,
     date_to=None,
     comp_from=None,
     comp_to=None,
+    sla_min=None,
+    sla_max=None,
     limit=None,
     offset=None,
     is_aggregate=False,
@@ -920,25 +1007,29 @@ def SB(
         "user_id":            user_id,
         "work_order":         work_order,
         "stage":              stage,
+        "frequency":          frequency,
+        "service_type":       service_type,
         "division":           division,
         "discipline":         discipline,
         "locality":           locality,
+        "locality_code":    locality_code,
         "building":           building,
         "floor":              floor,
         "spot_name":          spot_name,
         "contract":           contract,
-        "frequency":          frequency,
-        "service_type":       service_type,
         "tech":               tech,
         "is_withdraw":        is_withdraw,
         "is_reschedule":      is_reschedule,
         "is_rework":          is_rework,
         "is_active":          is_active,
+        "is_draft":           is_draft,
         "keyword":            keyword,
         "date_from":          resolved_date_from,
         "date_to":            resolved_date_to,
         "comp_from":          comp_from,
         "comp_to":            comp_to,
+        "sla_min":            sla_min,
+        "sla_max":            sla_max,
         "limit":              limit,
         "offset":             0,
         "is_aggregate":       is_aggregate,
@@ -953,7 +1044,7 @@ def SB(
     if is_aggregate:
         logger.info("📊 SB AGGREGATE MODE | group_by=%s | function=%s", group_by_columns, aggregate_function)
  
-    logger.info("📋 [SB PAYLOAD FROM AI]:\n%s", json.dumps(clean_payload, indent=2, default=str))
+    logger.info("📋 [SB PAYLOAD FROM AI]:\n%s", json.dumps(clean_payload, indent=2, default=str, ensure_ascii=False))
  
     try:
         req    = SBRequest(**clean_payload)

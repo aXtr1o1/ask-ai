@@ -20,7 +20,8 @@ interface ManageAccountProps {
   currentPlan?: string;
   profileName?: string;
   subUserName?: string;
-  externalUserId?: string;  
+  externalUserId?: string;
+  email?: string;
   // When the mobile sidebar (inside ManageAccount) is opened/closed,
   // inform the parent so it can hide unrelated UI (e.g. the overlay close X).
   onMobileSidebarOpenChange?: (open: boolean) => void;
@@ -33,7 +34,8 @@ export default function ManageAccount({
   currentPlan = "Pro",
   profileName = "My Account",
   subUserName, // ← NEW prop received
-  externalUserId,           
+  externalUserId,
+  email,
   onMobileSidebarOpenChange,
 }: ManageAccountProps) {
   const router = useRouter();
@@ -75,14 +77,14 @@ export default function ManageAccount({
   };
 
   const dashboardMenuItems = [
-    { id: "usage"      as DashboardView, label: "Usage"      },
+    { id: "usage" as DashboardView, label: "Usage" },
     { id: "rate-limit" as DashboardView, label: "Rate Limit" },
   ];
 
   // ── The actual username to query user_profile
   // prefer subUserName prop, fall back to profileName
-const queryUserName     = subUserName || profileName;
-const queryExternalUser = externalUserId || profileName;  // ← ADD
+  const queryUserName = subUserName || profileName;
+  const queryExternalUser = externalUserId || profileName;  // ← ADD
 
   return (
     <div style={{
@@ -128,15 +130,15 @@ const queryExternalUser = externalUserId || profileName;  // ← ADD
           zIndex: responsive.isMobile ? 1000 : "auto",
           ...(isDark
             ? {
-                backdropFilter: "blur(14px)",
-                WebkitBackdropFilter: "blur(14px)",
-              }
+              backdropFilter: "blur(14px)",
+              WebkitBackdropFilter: "blur(14px)",
+            }
             : null),
         }}>
           <div style={{ padding: "0 16px 8px" }}>
             <div
               style={{
-                fontSize: 20  ,
+                fontSize: 20,
                 fontWeight: 900,
                 letterSpacing: 0.8,
                 textTransform: "uppercase",
@@ -215,7 +217,7 @@ const queryExternalUser = externalUserId || profileName;  // ← ADD
                 transition: "all 0.3s ease",
               }}
             >
-              Settings
+              Account Info
             </button>
           </div>
         </div>
@@ -245,7 +247,7 @@ const queryExternalUser = externalUserId || profileName;  // ← ADD
             {!responsive.isDesktop && (
               <button
                 onClick={handleBackToDashboard}
-                  style={{
+                style={{
                   background: "rgba(255, 255, 255, 0.08)",
                   border: "1px solid rgba(0,0,0,0.06)",
                   borderRadius: "8px",
@@ -268,18 +270,18 @@ const queryExternalUser = externalUserId || profileName;  // ← ADD
               margin: 0,
               marginBottom: "12px",
             }}>
-              {activeSection === "dashboard" && dashboardView === "usage"      && "Usage Statistics"}
+              {activeSection === "dashboard" && dashboardView === "usage" && "Usage Statistics"}
               {activeSection === "dashboard" && dashboardView === "rate-limit" && "Rate Limit"}
-              {activeSection === "settings"                                    && "Account Settings"}
+              {activeSection === "settings" && "Account Settings"}
             </h1>
             <p style={{
               fontSize: responsive.isMobile ? "13px" : "15px",
               color: subheaderColor,
               margin: 0,
             }}>
-              {activeSection === "dashboard" && dashboardView === "usage"      && "Monitor your API usage, request counts, and resource consumption over time."}
+              {activeSection === "dashboard" && dashboardView === "usage" && "Monitor your API usage, request counts, and resource consumption over time."}
               {activeSection === "dashboard" && dashboardView === "rate-limit" && "View your current rate limits and adjust them based on your subscription plan."}
-              {activeSection === "settings"                                    && "Update your account preferences and settings"}
+              {activeSection === "settings" && "Update your account preferences and settings"}
             </p>
           </div>
         </div>
@@ -302,79 +304,90 @@ const queryExternalUser = externalUserId || profileName;  // ← ADD
               maxWidth: responsive.isDesktop ? "1400px" : "100%",
             }}>
               {/* ── Pass queryUserName to both Usage and RateLimit ── */}
-              {dashboardView === "usage"      && <Usage      externalUserId={queryExternalUser} subUserName={queryUserName} />}
-              {dashboardView === "rate-limit" && <RateLimit  externalUserId={queryExternalUser} subUserName={queryUserName} />}
+              {dashboardView === "usage" && <Usage externalUserId={queryExternalUser} subUserName={queryUserName} />}
+              {dashboardView === "rate-limit" && <RateLimit externalUserId={queryExternalUser} subUserName={queryUserName} />}
             </div>
           )}
 
           {/* Settings Section */}
           {activeSection === "settings" && (
             <div style={{
+              background: isDark ? "rgba(255,255,255,0.05)" : "#ffffff",
+              color: isDark ? "#ffffff" : "#222222",
+              borderRadius: "16px",
+              padding: responsive.isMobile ? "20px" : "32px",
+              boxShadow: isDark ? "none" : "0 4px 20px rgba(0,0,0,0.05)",
               display: "flex",
               flexDirection: "column",
               gap: "24px",
               maxWidth: "700px",
+              border: isDark ? "1px solid rgba(255,255,255,0.1)" : "1px solid #e0e0e0",
             }}>
-              <div style={{
-                background: "linear-gradient(135deg, rgba(var(--color-primary-rgb), 0.1) 0%, rgba(var(--color-primary-rgb), 0.05) 100%)",
-                border: "1.5px solid rgba(var(--color-primary-rgb), 0.3)",
-                borderRadius: "14px",
-                padding: responsive.isMobile ? "20px" : "28px",
-              }}>
-                <h2 style={{
-                  fontSize: responsive.isMobile ? "20px" : "24px",
-                  fontWeight: 700,
-                  color: headerColor,
-                  margin: 0,
-                  marginBottom: "16px",
-                }}>
-                  {accounts[0]?.name || "My Account"}
-                  <span style={{
-                    fontSize: "11px",
-                    background: "var(--color-primary)",
-                    color: "#ffffff",
-                    padding: "6px 12px",
-                    borderRadius: "6px",
-                    fontWeight: 700,
-                    marginLeft: "12px",
-                  }}>
-                    {accounts[0]?.plan || "Free"}
-                  </span>
-                </h2>
-                <p style={{ fontSize: "14px", color: bodyTextMuted, margin: 0 }}>
-                  {accounts[0]?.email}
-                </p>
-                <p style={{ fontSize: "13px", color: bodyTextMuted, margin: "8px 0 0" }}>
-                  Created on {accounts[0]?.createdAt}
-                </p>
+              <h2 style={{ fontSize: "20px", fontWeight: 700, color: isDark ? "#ffffff" : "#222222", margin: 0 }}>Personal Information</h2>
+
+              {/* Gender
+              <div style={{ display: "flex", gap: "16px", alignItems: "center" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "14px", cursor: "pointer", color: isDark ? "#ccc" : "#222" }}>
+                  <input type="radio" name="gender" defaultChecked style={{ accentColor: "var(--color-primary)" }} /> Male
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "14px", cursor: "pointer", color: isDark ? "#ccc" : "#222" }}>
+                  <input type="radio" name="gender" style={{ accentColor: "var(--color-primary)" }} /> Female
+                </label>
+              </div> */}
+
+              {/* Name */}
+              <div style={{ display: "flex", gap: "16px", flexWrap: "wrap" }}>
+                <div style={{ flex: "1 1 200px" }}>
+                  <label style={{ display: "block", fontSize: "12px", color: isDark ? "#aaa" : "#666", marginBottom: "6px" }}>Name</label>
+                  <input type="text" value={subUserName || ""} readOnly style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: isDark ? "1px solid rgba(255,255,255,0.15)" : "1px solid #e0e0e0", background: isDark ? "rgba(255,255,255,0.05)" : "#f9f9f9", color: isDark ? "#ffffff" : "#222", outline: "none" }} />
+                </div>
               </div>
 
-              {/* Additional settings details */}
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 18,
-                  // Align details with the content inside the top card
-                  paddingLeft: responsive.isMobile ? "20px" : "28px",
-                  paddingRight: responsive.isMobile ? "20px" : "28px",
-                }}
-              >
-                {[
-                  { label: "EMAIL ADDRESS", value: accounts[0]?.email ?? "-" },
-                  { label: "PLAN TYPE", value: accounts[0]?.plan ?? "-" },
-                  { label: "MEMBER SINCE", value: accounts[0]?.createdAt ?? "-" },
-                  { label: "ACCOUNT ID", value: accounts[0]?.id ?? "-" },
-                ].map((row) => (
-                  <div key={row.label} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 0.6, color: bodyTextMuted }}>
-                      {row.label}
-                    </div>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: bodyText }}>
-                      {row.value}
-                    </div>
-                  </div>
-                ))}
+              {/* Email */}
+              <div>
+                <label style={{ display: "block", fontSize: "12px", color: isDark ? "#aaa" : "#666", marginBottom: "6px" }}>Email</label>
+                <div style={{ position: "relative" }}>
+                  <input type="email" value={email || accounts[0]?.email || "rolandDonald@mail.com"} readOnly style={{ width: "100%", padding: "10px 12px", paddingRight: "80px", borderRadius: "8px", border: isDark ? "1px solid rgba(255,255,255,0.15)" : "1px solid #e0e0e0", background: isDark ? "rgba(255,255,255,0.05)" : "#f9f9f9", color: isDark ? "#ffffff" : "#222", outline: "none" }} />
+                  {email && (
+                    <span style={{ position: "absolute", right: "12px", top: "50%", transform: "translateY(-50%)", fontSize: "12px", color: "#00b074", fontWeight: 700 }}>✓ Verified</span>
+                  )}
+                </div>
+              </div>
+
+              {/* User ID */}
+              <div>
+                <label style={{ display: "block", fontSize: "12px", color: isDark ? "#aaa" : "#666", marginBottom: "6px" }}>User ID</label>
+                <input type="text" value={externalUserId || ""} readOnly style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: isDark ? "1px solid rgba(255,255,255,0.15)" : "1px solid #e0e0e0", background: isDark ? "rgba(255,255,255,0.05)" : "#f9f9f9", color: isDark ? "#ffffff" : "#222", outline: "none" }} />
+              </div>
+
+              {/* current Pack */}
+              <div>
+                <label style={{ display: "block", fontSize: "12px", color: isDark ? "#aaa" : "#666", marginBottom: "12px" }}>Current Pack</label>
+                <div style={{ display: "flex", gap: "16px", flexWrap: "wrap" }}>
+                  {["Free", "Pro", "Max"].map((plan) => {
+                    const isActive = currentPlan === plan || (plan === "Pro" && !currentPlan);
+                    return (
+                      <div key={plan} style={{
+                        flex: "1 1 150px",
+                        padding: "16px",
+                        borderRadius: "12px",
+                        border: isActive ? `2px solid var(--color-primary)` : (isDark ? "1px solid rgba(255,255,255,0.15)" : "1px solid #e0e0e0"),
+                        background: isActive ? (isDark ? "rgba(var(--color-primary-rgb), 0.2)" : "rgba(var(--color-primary-rgb), 0.05)") : (isDark ? "rgba(255,255,255,0.05)" : "#f9f9f9"),
+                        cursor: "default",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "8px",
+                        position: "relative"
+                      }}>
+                        {isActive && (
+                          <span style={{ position: "absolute", top: "12px", right: "12px", color: "var(--color-primary)", fontSize: "12px", fontWeight: 700 }}>✓ Active</span>
+                        )}
+                        <h3 style={{ fontSize: "16px", fontWeight: 700, color: isDark ? "#ffffff" : "#222222", margin: 0 }}>{plan}</h3>
+                        <p style={{ fontSize: "12px", color: isDark ? "#aaa" : "#666", margin: 0 }}>{plan === "Free" ? "Basic features" : plan === "Pro" ? "Advanced tools" : "Enterprise power"}</p>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           )}

@@ -17,11 +17,12 @@ async def test_get_sessions_for_user():
     now = datetime.now()
     mock_cursor = MagicMock()
     mock_cursor.fetchall.return_value = [
-        ("sess-001", "Asset Query", now, now),
-        ("sess-002", "PPM Check",   now, now),
+        ("sess-001", "Asset Query", now, now, False, False, None),
+        ("sess-002", "PPM Check",   now, now, True,  False, "Work"),
     ]
     mock_cursor.description = [
-        ("session_id",), ("title",), ("created_at",), ("updated_at",)
+        ("session_id",), ("title",), ("created_at",), ("updated_at",),
+        ("is_pinned",), ("is_archived",), ("group_name",),
     ]
     mock_conn = MagicMock()
     mock_conn.cursor.return_value = mock_cursor
@@ -33,6 +34,11 @@ async def test_get_sessions_for_user():
     assert len(result) == 2
     assert result[0]["session_id"] == "sess-001"
     assert result[0]["title"] == "Asset Query"
+    assert result[0]["is_pinned"] is False
+    assert result[0]["is_archived"] is False
+    assert result[0]["group_name"] is None
+    assert result[1]["is_pinned"] is True
+    assert result[1]["group_name"] == "Work"
 
 
 # Test 2: Check get_chat_history_for_session returns correct chat history

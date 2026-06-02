@@ -22,6 +22,7 @@ export async function POST(req: NextRequest) {
       userName: string;
       clientName: string;
       userId: string;
+      email?: string;
       cl?: string;
       fl?: string;
     };
@@ -32,6 +33,7 @@ export async function POST(req: NextRequest) {
       userName:   payload.userName,
       clientName: payload.clientName,
       userId:     payload.userId,
+      email:      payload.email ?? "",
       cl:         payload.cl ?? "",
       fl:         payload.fl ?? "",
     });

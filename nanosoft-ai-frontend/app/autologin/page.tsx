@@ -60,9 +60,10 @@ export default async function AutoLoginPage({ searchParams }: AutoLoginPageProps
     }
     email = payload.email;
 
-    if (payload.service) {service = payload.service.replace(/\/$/, "");}
-    else if (payload.domain) {service = `https://${payload.domain}.smartfm.cloud`;}
-    else {console.log("[autologin] missing service or domain in payload");
+    if (payload.service) { service = payload.service.replace(/\/$/, ""); }
+    else if (payload.domain) { service = `https://${payload.domain}.smartfm.cloud`; }
+    else {
+      console.log("[autologin] missing service or domain in payload");
       redirect("/?autologin_error=missing_service");
     }
     console.log("[autologin] using", { email, service });
@@ -70,7 +71,7 @@ export default async function AutoLoginPage({ searchParams }: AutoLoginPageProps
     console.error("[autologin] decode/parse error", err);
     redirect("/?autologin_error=decode_error");
   }
-// encoding :
+  // encoding :
   const encodedEmail = Buffer.from(email, "utf-8").toString("base64");   ////////////////////////////////
   const autoLoginUrl = `${service}/askmeapi/autoLogin?p1=${encodeURIComponent(encodedEmail)}`;
   //const autoLoginUrl = `${service}/askmeapi/autoLogin?p1=eyJlbWFpbCI6ImFobWVkLmZAYmNnLXVhZS5jb20iLCJkb21haW4iOiJ2NGRlbW8ifQ`;     ////////////////// REMAINDER REMOVE THIS !!!!!
@@ -106,7 +107,7 @@ export default async function AutoLoginPage({ searchParams }: AutoLoginPageProps
   }
 
 
-// check if userID, userName, and service are present
+  // check if userID, userName, and service are present
 
 
   if (autoLoginOutput?.userID != null && autoLoginOutput?.userName && autoLoginOutput?.service) {
@@ -127,7 +128,7 @@ export default async function AutoLoginPage({ searchParams }: AutoLoginPageProps
       userName: autoLoginOutput.userName,
       service: autoLoginOutput.service,
       clientName,
-      hasToken:  !!authToken,
+      hasToken: !!authToken,
     });
 
 
@@ -158,7 +159,7 @@ export default async function AutoLoginPage({ searchParams }: AutoLoginPageProps
       console.error("[autologin] client_insertion error", err);
     }
 
-    
+
     // getBranding: POST with x-auth, userid, body { data: { service } }
     const getBrandingUrl = `${autoLoginOutput.service}/getBranding`;
     const serviceName = new URL(autoLoginOutput.service).hostname.split(".")[0] ?? "";
@@ -202,38 +203,39 @@ export default async function AutoLoginPage({ searchParams }: AutoLoginPageProps
       }
     }
 
-  const jwt = require("jsonwebtoken");
-  // Must match app/verify-token/route.ts so ?data= tokens verify after redirect
-  const jwtSecret = process.env.JWT_SECRET ?? "nano_encryption_key";
-  console.log("[autologin] signing session JWT", {
-    hasJwtSecretFromEnv: Boolean(process.env.JWT_SECRET),
-    usingFallbackSecret: !process.env.JWT_SECRET,
-  });
+    const jwt = require("jsonwebtoken");
+    // Must match app/verify-token/route.ts so ?data= tokens verify after redirect
+    const jwtSecret = process.env.JWT_SECRET ?? "nano_encryption_key";
+    console.log("[autologin] signing session JWT", {
+      hasJwtSecretFromEnv: Boolean(process.env.JWT_SECRET),
+      usingFallbackSecret: !process.env.JWT_SECRET,
+    });
 
-  // Bundle everything into one single token (userName, clientName, userId + logos)
-  const token = jwt.sign(
-    {
+    // Bundle everything into one single token (userName, clientName, userId + logos)
+    const token = jwt.sign(
+      {
+        userName: autoLoginOutput.userName,
+        clientName: clientName,
+        userId: "1",
+        email: email,
+        cl: LoginPageClientLogoPath ?? "",
+        fl: LoginFooterLogoPath ?? "",
+      },
+      jwtSecret
+    );
+
+    console.log("[autologin] signing JWT payload", {
       userName: autoLoginOutput.userName,
       clientName: clientName,
       userId: "1",
       cl: LoginPageClientLogoPath ?? "",
       fl: LoginFooterLogoPath ?? "",
-    },
-    jwtSecret
-  );
+    });
 
-  console.log("[autologin] signing JWT payload", {
-    userName: autoLoginOutput.userName,
-    clientName: clientName,
-    userId: "1",
-    cl: LoginPageClientLogoPath ?? "",
-    fl: LoginFooterLogoPath ?? "",
-  });
-
-  // Single encoded param — no plain logo URLs in the address bar
-  const target = `/?data=${encodeURIComponent(token)}`;
-  console.log("[autologin] redirecting to main chat (single encoded token)", { target });
-  redirect(target);
+    // Single encoded param — no plain logo URLs in the address bar
+    const target = `/?data=${encodeURIComponent(token)}`;
+    console.log("[autologin] redirecting to main chat (single encoded token)", { target });
+    redirect(target);
   }
 
 
