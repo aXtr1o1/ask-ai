@@ -138,6 +138,7 @@ _QUERY_GROUP_BY_HINTS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\b(?:per|by|each|based)\s+stage\b|\bstage\s+(?:based|wise)\b", re.I), "StageName"),
     (re.compile(r"\b(?:per|by|each|based)\s+frequency\b|\bfrequency\s+(?:based|wise)\b", re.I), "FrequencyName"),
     (re.compile(r"\b(?:per|by|each|based)\s+contract\b|\bcontract\s+(?:based|wise)\b", re.I), "ContractName"),
+    (re.compile(r"\b(?:per|by|each|based)\s+service\s*section\b|\bservice\s*section\s+(?:based|wise)\b", re.I), "DivisionName"),
 ]
 
 
@@ -427,6 +428,8 @@ def _normalize_group_by_value(raw: str, tool_name: str) -> str | None:
     key = re.sub(r"[\s_\-]+", "", raw.strip()).lower()
     if not key:
         return None
+    if tool_name in ("PPM", "ASSETS", "FA") and key in ("servicetype", "servicetypename", "servicesection", "servicesectionname"):
+        return "DivisionName"
     canonical = GROUP_BY_ALIASES.get(key)
     if canonical and canonical in TOOL_GROUP_BY_COLUMNS.get(tool_name, ()):
         return canonical
