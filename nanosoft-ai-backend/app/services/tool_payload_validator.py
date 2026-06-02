@@ -40,27 +40,27 @@ def _normalize_smart_punctuation(value: Any) -> Any:
 # Canonical group-by columns allowed per tool (must match DB / stored procedures)
 TOOL_GROUP_BY_COLUMNS: dict[str, frozenset[str]] = {
     "ASSETS": frozenset({
-        "DivisionName", "DisciplineName", "BuildingName", "FloorName", "LocalityName",
+        "DivisionName", "DisciplineName", "BuildingName", "FloorName", "LocalityName", "LocalityCode",
         "StatusName", "ConditionName", "PriorityName", "AssetTypeName", "EquipmentName",
         "MakeName", "ModelName", "SpotName", "TradeGroupName", "ServiceAreaName",
         "OnHold", "IsSnagged", "IsScraped", "IsEnablePPM", "IsEnableBDM",
     }),
     "PPM": frozenset({
-        "DivisionName", "DisciplineName", "BuildingName", "FloorName", "LocalityName",
+        "DivisionName", "DisciplineName", "BuildingName", "FloorName", "LocalityName", "LocalityCode",
         "FrequencyName", "PPMStatus", "PPMStageName", "ContractName", "SpotName",
     }),
     "BDM": frozenset({
-        "DivisionName", "DisciplineName", "BuildingName", "FloorName", "LocalityName",
+        "DivisionName", "DisciplineName", "BuildingName", "FloorName", "LocalityName", "LocalityCode",
         "WoStatus", "PriorityName", "StageName", "ComplaintTypeName", "ComplaintModeName",
         "ComplaintHeaderName", "ServiceTypeName", "SpotName", "ContractName",
     }),
     "FA": frozenset({
-        "DivisionName", "BuildingName", "FloorName", "LocalityName", "PriorityName",
+        "DivisionName", "BuildingName", "FloorName", "LocalityName", "LocalityCode", "PriorityName",
         "RMStageName", "RMCategoryName", "RMCategorySubName", "FrequencyName",
         "ContractName", "SpotName", "IsRMWithdraw", "IsRMRework", "IsActive",
     }),
     "SB": frozenset({
-        "DivisionName", "DisciplineName", "BuildingName", "FloorName", "LocalityName",
+        "DivisionName", "DisciplineName", "BuildingName", "FloorName", "LocalityName", "LocalityCode",
         "PPMStageName", "FrequencyName", "ServiceTypeName", "ContractName", "SpotName",
     }),
 }
@@ -77,6 +77,8 @@ GROUP_BY_ALIASES: dict[str, str] = {
     "floorname": "FloorName",
     "locality": "LocalityName",
     "localityname": "LocalityName",
+    "localitycode": "LocalityCode",
+    "locality_code": "LocalityCode",
     "status": "StatusName",
     "statusname": "StatusName",
     "wostatus": "WoStatus",
@@ -138,6 +140,7 @@ _QUERY_GROUP_BY_HINTS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\b(?:per|by|each|based)\s+stage\b|\bstage\s+(?:based|wise)\b", re.I), "StageName"),
     (re.compile(r"\b(?:per|by|each|based)\s+frequency\b|\bfrequency\s+(?:based|wise)\b", re.I), "FrequencyName"),
     (re.compile(r"\b(?:per|by|each|based)\s+contract\b|\bcontract\s+(?:based|wise)\b", re.I), "ContractName"),
+    (re.compile(r"\b(?:per|by|each|based)\s+service\s*section\b|\bservice\s*section\s+(?:based|wise)\b", re.I), "DivisionName"),
 ]
 
 
@@ -427,6 +430,8 @@ def _normalize_group_by_value(raw: str, tool_name: str) -> str | None:
     key = re.sub(r"[\s_\-]+", "", raw.strip()).lower()
     if not key:
         return None
+    if tool_name in ("PPM", "ASSETS", "FA") and key in ("servicetype", "servicetypename", "servicesection", "servicesectionname"):
+        return "DivisionName"
     canonical = GROUP_BY_ALIASES.get(key)
     if canonical and canonical in TOOL_GROUP_BY_COLUMNS.get(tool_name, ()):
         return canonical

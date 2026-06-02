@@ -1084,7 +1084,6 @@ class LangChainService:
                         self._accumulate_tokens(context_ai_msg)
                         context_summary = self._get_content_str(context_ai_msg) or f"Found {display_count} records for your request."
                         context_summary = _append_explicit_today(context_summary, user_query)
-                        context_summary = append_match_explanation(context_summary, search_context)
                         logger.info("✅ Context summary generated for large dataset | context='%s'", context_summary[:80])
 
                         large_dataset_response = json.dumps({
@@ -1184,10 +1183,6 @@ class LangChainService:
                 # aggregate context summary same as count (one sentence)
                 # because aggregate answer starts with a summary sentence
                 if is_count_query:
-                    if not _use_keyword_count_reply:
-                        final_content = append_match_explanation(
-                            final_content, search_context, entity=_entity_label
-                        )
                     context_summary = final_content
                     logger.info("🧠 Count query context_summary='%s'", context_summary[:80])
                 elif is_aggregate_query:
@@ -1233,8 +1228,6 @@ class LangChainService:
                             summary_lines.append(stripped)
                    
                     context_summary = " ".join(summary_lines) if summary_lines else f"Found {display_count} records for your request."
-                    final_content = append_match_explanation(final_content, search_context)
-                    context_summary = append_match_explanation(context_summary, search_context)
                     logger.info("🧠 List query context_summary='%s'", context_summary[:80])
 
                 # ── Stash table data for two-step yes/no flow ──

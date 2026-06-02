@@ -6,7 +6,7 @@ from typing import Literal
 
 AllColumns = Literal[
     "DivisionName", "DisciplineName", "BuildingName", "FloorName", 
-    "LocalityName", "StatusName", "ConditionName", "PriorityName", 
+    "LocalityName", "LocalityCode", "StatusName", "ConditionName", "PriorityName", 
     "AssetTypeName", "EquipmentName", "MakeName", "ModelName", 
     "SpotName", "TradeGroupName", "ServiceAreaName", 
     "OnHold", "IsSnagged", "IsScraped", "IsEnablePPM", "IsEnableBDM",
