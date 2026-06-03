@@ -13,6 +13,7 @@ from app.services.audio_service import convert_audio_to_text, get_audio_duration
 from app.services.quota_service import quota_fallback_service
 from app.services.scoped_memory_service import build_scoped_messages
 from app.state import memory_store, MAX_HISTORY, frontend_saved_sessions, lc_memory_for_model, trim_session
+from app.services.space_booking_service import space_booking_service
 
 logger = logging.getLogger('chat_websocket')
 chat_websocket_router = APIRouter()
@@ -311,6 +312,8 @@ async def ws_chat_endpoint(websocket: WebSocket):
             logger.info(f"📊 isAudio flag received: {is_audio}")
             is_graph = bool(data.get("isGraph", False))
             logger.info(f"📊 isGraph flag received: {is_graph}")
+            is_space_booking = bool(data.get("isSpaceBooking", False))
+            logger.info(f"📊 isSpaceBooking flag received: {is_space_booking}")
             group_name = data.get("group_name") or data.get("groupName")
             logger.info(f"📊 group_name={group_name}")
 
@@ -944,49 +947,56 @@ async def ws_chat_endpoint(websocket: WebSocket):
                     context_summary = final_response_text
                     logger.info("⛔ Credits exhausted | name=%s", sub_user_name)
                 else:
-                    # ── Graph gate: if graph_count > graph_limit, skip model ───
-                    try:
-                        if is_graph:
-                            graph_info = await asyncio.to_thread(get_graph_count_and_limit, sub_user_name)
-                        else:
+                    if is_space_booking:
+                        logger.info("🚀 Routing query to SpaceBookingService")
+                        final_response_text, context_summary, _ = await space_booking_service.handle_space_booking(
+                            messages,
+                            user_name=user_name
+                        )
+                    else:
+                        # ── Graph gate: if graph_count > graph_limit, skip model ───
+                        try:
+                            if is_graph:
+                                graph_info = await asyncio.to_thread(get_graph_count_and_limit, sub_user_name)
+                            else:
+                                graph_info = None
+                        except Exception as e:
+                            logger.warning("⚠️ graph check failed (continuing): %s", str(e)[:200])
                             graph_info = None
-                    except Exception as e:
-                        logger.warning("⚠️ graph check failed (continuing): %s", str(e)[:200])
-                        graph_info = None
 
-                    if is_graph and graph_info is not None:
-                        graph_count, graph_limit = graph_info
-                        # If graph_count already reached the allowed limit, block the model call.
-                        # This avoids "count crosses the limit in the same request" behavior.
-                        if graph_count >= graph_limit:
-                            final_response_text = "Your graph credits is over. Please recharge/upgrade your plan to continue."
-                            context_summary = final_response_text
-                            logger.info(
-                                "⛔ Graph exhausted | name=%s graph_count=%s graph_limit=%s",
-                                user_name,
-                                graph_count,
-                                graph_limit,
+                        if is_graph and graph_info is not None:
+                            graph_count, graph_limit = graph_info
+                            # If graph_count already reached the allowed limit, block the model call.
+                            # This avoids "count crosses the limit in the same request" behavior.
+                            if graph_count >= graph_limit:
+                                final_response_text = "Your graph credits is over. Please recharge/upgrade your plan to continue."
+                                context_summary = final_response_text
+                                logger.info(
+                                    "⛔ Graph exhausted | name=%s graph_count=%s graph_limit=%s",
+                                    user_name,
+                                    graph_count,
+                                    graph_limit,
+                                )
+                            else:
+                                final_response_text, context_summary, _ = await langchain_service.process_query(
+                                messages,
+                                user_name=user_name,
+                                user_id=user_id,
+                                session_id=session_id,
+                                is_graph=is_graph,
+                                is_after_clarification=memory_store[session_id].get("is_after_clarification", False),
+                                is_all_datasets=memory_store[session_id].get("is_all_datasets", False),
                             )
                         else:
                             final_response_text, context_summary, _ = await langchain_service.process_query(
-                            messages,
-                            user_name=user_name,
-                            user_id=user_id,
-                            session_id=session_id,
-                            is_graph=is_graph,
-                            is_after_clarification=memory_store[session_id].get("is_after_clarification", False),
-                            is_all_datasets=memory_store[session_id].get("is_all_datasets", False),
-                        )
-                    else:
-                        final_response_text, context_summary, _ = await langchain_service.process_query(
-                            messages,
-                            user_name=user_name,
-                            user_id=user_id,
-                            session_id=session_id,
-                            is_graph=is_graph,
-                            is_after_clarification=memory_store[session_id].get("is_after_clarification", False),
-                            is_all_datasets=memory_store[session_id].get("is_all_datasets", False),
-                        )
+                                messages,
+                                user_name=user_name,
+                                user_id=user_id,
+                                session_id=session_id,
+                                is_graph=is_graph,
+                                is_after_clarification=memory_store[session_id].get("is_after_clarification", False),
+                                is_all_datasets=memory_store[session_id].get("is_all_datasets", False),
+                            )
 
                     logger.info(f"✅ Response generated for session_id: {session_id}")
                     logger.info(f"🧠 context_summary for lc_memory: {context_summary[:80]}")

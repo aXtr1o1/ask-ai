@@ -1140,6 +1140,18 @@ export default function Home() {
 
   // SpaceBooking active feature states
   const [isSpaceBooking, setIsSpaceBooking] = useState<boolean>(false);
+  
+  useEffect(() => {
+    if (isSpaceBooking) {
+      const greeting = `Hello ${userIdFromUrl ?? loggedInUser ?? "there"}, you can book your space here. Please tell me your requirements, and we can proceed with the interaction.`;
+      setMessages(prev => {
+        const updated: Message[] = [...prev, { role: "ai" as const, text: greeting, streaming: false }];
+        sessionMessagesRef.current.set(sessionId, updated);
+        return updated;
+      });
+    }
+  }, [isSpaceBooking, userIdFromUrl, loggedInUser, sessionId]);
+
   const [activeFeature, setActiveFeature] = useState<'chat' | 'archived' | 'groups'>('chat');
   const [showFeaturePlaceholder, setShowFeaturePlaceholder] = useState<boolean>(false);
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
@@ -3173,8 +3185,6 @@ export default function Home() {
       timestamp: Date.now()
     }));
 
-    setIsSpaceBooking(false);
-
     setIsLoading(true);
   };
 
@@ -3245,8 +3255,6 @@ export default function Home() {
       group_name: selectedGroupName,
       timestamp: Date.now()
     }));
-
-    setIsSpaceBooking(false);
 
     setIsLoading(true);
   };
