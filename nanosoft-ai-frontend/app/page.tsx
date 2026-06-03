@@ -17,17 +17,25 @@ import UpgradePlan from "./components/UpgradePlan";
 import ManageAccount from "./components/ManageAccount/ManageAccount";
 import WalkthroughPopup from "./components/WalkthroughPopup";
 import LandingSuggestedQueries from "./components/LandingSuggestedQueries";
+import GroupsChat, { FolderListItem, ChatListItem } from "./components/GroupsChat";
 /* changes done by megnathan: Added imports for the new Ghost Completion feature */
 import { useGhostInputCompletion } from "./hooks/useGhostInputCompletion";
 import { recordPromptForGhostHistory, ghostPromptHistoryStorageKey } from "./lib/ghostInputCompletion";
 /* changes done by megnathan: Cleaned up icon imports to avoid conflicts with local definitions */
-import { 
-  IconUser, IconMicrophone, IconPlayerPlay, IconPlayerPause, 
-  IconTrash, IconArrowUp, IconChartBar, IconList, 
-  IconLayoutGrid, IconMenu2, IconX, IconCrown, 
-  IconDotsVertical, IconCopy, IconCheck
+import {
+  IconUser, IconMicrophone, IconPlayerPlay, IconPlayerPause,
+  IconTrash, IconArrowUp, IconChartBar, IconList,
+  IconLayoutGrid, IconMenu2, IconX, IconCrown,
+  IconDotsVertical, IconCopy, IconCheck, IconBulb, IconFolder
 } from "@tabler/icons-react";
 // ─── Types ───────────────────────────────────────────────────────────────────
+type MultiDatasetView = {
+  name: string;
+  rows: TableWithTileRow[];
+  html: string;
+  totalCount?: number;
+};
+
 interface Message {
   role: "user" | "ai" | "error";
   text: string;
@@ -43,9 +51,19 @@ interface Message {
   tableData?: TableWithTileRow[];  // ← Store table rows for TableWithTile component
   tableTitle?: string;        // ← Title for the table
   tableViewMode?: 'table' | 'tile';  // ← Toggle between table and tile views
+  // ← Multiple datasets (type="multiple_datasets" from backend)
+  multipleDatasets?: MultiDatasetView[];
+  multiSummary?: string;  // ← context_summary from the backend
 }
-interface FolderItem { id: string; name: string; }
-interface ChatSession { id: string; title: string; createdAt: number; updatedAt?: number; isPinned?: boolean; isArchived?: boolean; }
+
+interface ChatSession { id: string; title: string; createdAt: number; updatedAt?: number; isPinned?: boolean; isArchived?: boolean; group_name?: string; }
+interface Group {
+  id: string;
+  name: string;
+  description: string;
+  chatCount: number;
+  updatedAt: string;
+}
 
 // ─── Extract text from any backend response shape ─────────────────────────────
 // Improved: handles JSON strings without spaces, array join, and reply/content/text fields
@@ -186,10 +204,44 @@ const HIDDEN_COLUMNS = new Set([
   'created_at',
   'updatedat',
   'updated_at',
+  'createduserid',
+  'createdttm',
+  'updatedttm',
+  'updateduserid',
+  'deletestat',
+  'downloadstat',
+  'createdby',
+  'updatedby',
+  'rmccmcomplaintidpk',
+  'filepath',
+  '_matched_fields',
+  'matchedfields',
 ]);
 
 function isHiddenColumn(col: string): boolean {
   return HIDDEN_COLUMNS.has(col.toLowerCase().replace(/[\s_]/g, ""));
+}
+
+type SearchContext = {
+  summary_line?: string;
+  total_records?: number;
+  field_match_counts_friendly?: Record<string, number>;
+};
+
+function buildSearchContextBanner(sc: SearchContext | null | undefined): string {
+  if (!sc) return "";
+
+  if (sc.summary_line) {
+    return `<div class="keyword-search-banner" role="status">${esc(sc.summary_line)}</div>`;
+  }
+
+  const counts = sc.field_match_counts_friendly;
+  if (!counts || Object.keys(counts).length === 0) return "";
+
+  const total = sc.total_records ?? 0;
+  const parts = Object.entries(counts).map(([field, n]) => `${esc(field)}: ${n}`);
+  const line = `Found ${total} record${total !== 1 ? "s" : ""} from ${parts.join(", ")}.`;
+  return `<div class="keyword-search-banner" role="status">${line}</div>`;
 }
 
 // ── Status badge renderer ─────────────────────────────────────────────────────
@@ -221,11 +273,11 @@ function buildTable(rows: Record<string, string>[], cols?: string[]): string {
   if (!rows.length) return "";
 
   // Collect column order preserving insertion order
-  const allCols: string[] = cols ?? (() => {
+  const allCols: string[] = (cols ?? (() => {
     const seen: string[] = [];
     rows.forEach(r => Object.keys(r).forEach(k => { if (!seen.includes(k)) seen.push(k); }));
     return seen;
-  })();
+  })()).filter(c => !isHiddenColumn(c));
 
   const thead = `<thead><tr>${allCols.map(c => `<th>${esc(c)}</th>`).join("")}</tr></thead>`;
 
@@ -287,6 +339,18 @@ function renderLargeDataset(text: string): string | null {
     "created_at",
     "updatedat",
     "updated_at",
+    "createduserid",
+    "createdttm",
+    "updatedttm",
+    "updateduserid",
+    "deletestat",
+    "downloadstat",
+    "rmccmcomplaintidpk",
+    "createdby",
+    "updatedby",
+    "filepath",
+    "_matched_fields",
+    "matchedfields",
   ]);
 
   function isHiddenColumn(col: string) {
@@ -367,10 +431,21 @@ function renderLargeDataset(text: string): string | null {
     return null;
   }
 
-  const context = parsed.context_summary || `Dataset contains ${records.length} records`;
+  let context = parsed.context_summary || `Dataset contains ${records.length} records`;
+  const searchBanner = parsed.is_multi_dataset
+    ? ""
+    : buildSearchContextBanner(parsed.search_context as SearchContext);
+
+  if (parsed.search_context?.summary_line) {
+    const summaryLine = parsed.search_context.summary_line.trim();
+    if (context.includes(summaryLine)) {
+      context = context.replace(summaryLine, "").trim();
+    }
+  }
 
   if (!records.length) {
-    return `<div class="large-dataset-context">${escapeHTML(context)}</div>`;
+    const contextDiv = context.trim() ? `<div class="large-dataset-context">${escapeHTML(context)}</div>` : "";
+    return `${searchBanner}${contextDiv}`;
   }
 
   // ─────────────────────────────────────────
@@ -410,9 +485,7 @@ function renderLargeDataset(text: string): string | null {
       if (val === null || val === undefined) {
         cell = "—";
       } else if (typeof val === "boolean") {
-        cell = `<span style="font-weight:600;color:${val ? "#22c55e" : "#ef44440"}">
-                ${val ? "✓" : "✗"}
-                </span>`;
+        cell = escapeHTML(val ? "True" : "False");
       } else if (typeof val === "object") {
         const str = JSON.stringify(val);
         cell = escapeHTML(str.length > 50 ? str.slice(0, 50) + "…" : str);
@@ -451,10 +524,10 @@ function renderLargeDataset(text: string): string | null {
   // ─────────────────────────────────────────
   // Final HTML
   // ─────────────────────────────────────────
+  const contextDiv = context.trim() ? `<div class="large-dataset-context">${escapeHTML(context)}</div>` : "";
   const table = `
-  <div class="large-dataset-context">
-    ${escapeHTML(context)}
-  </div>
+  ${searchBanner}
+  ${contextDiv}
   <div class="large-dataset-wrapper">
     <table class="large-dataset-table">
       ${head}
@@ -470,6 +543,7 @@ function renderLargeDataset(text: string): string | null {
 function formatLargeDatasetTable(largeDataData: any): string {
   let records = largeDataData.records || [];
   const context = largeDataData.context_summary || "";
+  const searchBanner = buildSearchContextBanner(largeDataData.search_context as SearchContext);
 
   // Handle case where records might not be an array
   if (!Array.isArray(records)) {
@@ -542,7 +616,7 @@ function formatLargeDatasetTable(largeDataData: any): string {
       if (val === null || val === undefined) {
         cellContent = "—";
       } else if (typeof val === "boolean") {
-        cellContent = `<span style="font-weight:600;color:${val ? '#22c55e' : '#ef4444'};">${val ? '✓' : '✗'}</span>`;
+        cellContent = esc(val ? "True" : "False");
       } else if (typeof val === "object") {
         const str = JSON.stringify(val);
         cellContent = esc(str.length > 50 ? str.substring(0, 50) + "…" : str);
@@ -591,7 +665,7 @@ function formatLargeDatasetTable(largeDataData: any): string {
     : "";
 
 
-  const fullHTML = contextHTML + tableHTML;
+  const fullHTML = searchBanner + contextHTML + tableHTML;
   console.log(` HTML generated - length: ${fullHTML.length}, has table-wrapper: ${fullHTML.includes('large-dataset-wrapper')}`);
   return fullHTML;
 }
@@ -841,9 +915,13 @@ function formatOutput(text: string): string {
           } else {
             // Single record: ≥3 keys → wide table, else 2-col KV table
             const keys = Object.keys(records[0]);
-            html += keys.length >= 3
-              ? buildTable(records)
-              : renderKVVertical(keys.map(k => ({ key: k, val: records![0][k] })));
+            if (keys.length >= 3) {
+              html += buildTable(records);
+            } else if (keys.length >= 2) {
+              html += renderKVVertical(keys.map(k => ({ key: k, val: records![0][k] })));
+            } else {
+              html += block.map(l => `<div style="line-height:1.75;margin:2px 0;color:#F3F4F6">${md(l.trim())}</div>`).join("");
+            }
           }
           i = j; continue;
         }
@@ -906,11 +984,6 @@ function generateSessionId(): string {
 // Chat history will be implemented later
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
-const IconFolder = () => (
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
-  </svg>
-);
 const IconPlus = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
     <path d="M12 5v14M5 12h14" />
@@ -951,39 +1024,39 @@ const IconUser1 = () => (
   </svg>
 );
 const IconChat = ({ width = 16, height = 16, style }: { width?: number; height?: number; style?: React.CSSProperties }) => (
-  <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+  <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ ...style, width, height, flexShrink: 0 }}>
     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
   </svg>
 );
 const IconArchive = ({ width = 16, height = 16, style }: { width?: number; height?: number; style?: React.CSSProperties }) => (
-  <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+  <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ ...style, width, height, flexShrink: 0 }}>
     <rect x="3" y="4" width="18" height="4" rx="1" /><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8" /><line x1="10" y1="12" x2="14" y2="12" />
   </svg>
 );
 const IconLibrary = ({ width = 16, height = 16, style }: { width?: number; height?: number; style?: React.CSSProperties }) => (
-  <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+  <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ ...style, width, height, flexShrink: 0 }}>
     <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
   </svg>
 );
 const IconShare = ({ width = 16, height = 16, style }: { width?: number; height?: number; style?: React.CSSProperties }) => (
-  <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+  <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ ...style, width, height, flexShrink: 0 }}>
     <circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" /><line x1="8.59" y1="13.51" x2="15.41" y2="17.49" /><line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
   </svg>
 );
 
 const IconPin = ({ size = 16, style }: { size?: number; style?: React.CSSProperties }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ ...style, width: size, height: size, flexShrink: 0 }}>
     <path d="M12 17v5M9 17h6M15 13V4H9v9l-2 4h10l-2-4z" />
   </svg>
 );
 
 const IconCheckbox = ({ width = 16, height = 16, style }: { width?: number; height?: number; style?: React.CSSProperties }) => (
-  <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+  <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ ...style, width, height, flexShrink: 0 }}>
     <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
   </svg>
 );
 const IconWarning = ({ width = 14, height = 14, style }: { width?: number; height?: number; style?: React.CSSProperties }) => (
-  <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+  <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ ...style, width, height, flexShrink: 0 }}>
     <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
   </svg>
 );
@@ -1030,6 +1103,7 @@ export default function Home() {
   // const searchParams  = useSearchParams();
   const responsive = useResponsive();  // Auto-detect screen size
   const [userIdFromUrl, setUserIdFromUrl] = useState<string | null>(null); // display name
+  const [createGroupTrigger, setCreateGroupTrigger] = useState(0);
   const [userIdInt, setUserIdInt] = useState<number | null>(null); // integer user_id for filtering
   const [clientNameFromUrl, setClientNameFromUrl] = useState<string | null>(null); // backend username
   // `input` is the debounced value (used for heavier work).
@@ -1051,6 +1125,7 @@ export default function Home() {
   const [playbackTime, setPlaybackTime] = useState(0);
   const [slideGestureActive, setSlideGestureActive] = useState(false);
   const [loggedInUser, setLoggedInUser] = useState<string | null>(null); // backend username (client_name)
+  const [userEmail, setUserEmail] = useState<string | null>(null);
   const [authChecked, setAuthChecked] = useState<boolean>(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [showUpgradePlan, setShowUpgradePlan] = useState(false);
@@ -1061,17 +1136,19 @@ export default function Home() {
   const [wsConnectionState, setWsConnectionState] = useState<'connecting' | 'connected' | 'failed'>('connecting');
   const [isGraphMode, setIsGraphMode] = useState<boolean>(false);
   const [chartType, setChartType] = useState<ChartType>('vertical-bar');
-  const [activeFeature, setActiveFeature] = useState<'chat' | 'archived' | 'library'>('chat');
+  const [activeFeature, setActiveFeature] = useState<'chat' | 'archived' | 'groups'>('chat');
   const [showFeaturePlaceholder, setShowFeaturePlaceholder] = useState<boolean>(false);
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [shareLinkCopied, setShareLinkCopied] = useState(false);
   /* changes done by megnathan: Added share code states */
   const [shareCode, setShareCode] = useState<string | null>(null);
   const [isGeneratingCode, setIsGeneratingCode] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [inputShareCode, setInputShareCode] = useState("");
   const [isImporting, setIsImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
   /* changes done by megnathan: Track which session is actually being shared */
   const [sessionToShare, setSessionToShare] = useState<string | null>(null);
   /* changes done by megnathan: Added share code copy feedback state */
@@ -1086,14 +1163,50 @@ export default function Home() {
 
   // Inline edit state for renaming sessions
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
+  const [editingFolderTitle, setEditingFolderTitle] = useState<string>("");
   const [editingTitle, setEditingTitle] = useState<string>("");
   const editingInputRef = useRef<HTMLInputElement | null>(null);
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [selectedGroupName, setSelectedGroupName] = useState<string | null>(null);
+  const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
+  const [openGroupMenuId, setOpenGroupMenuId] = useState<string | null>(null);
+  const [openChatMenuId, setOpenChatMenuId] = useState<string | null>(null);
+  const [groupActiveType, setGroupActiveType] = useState<'folder' | 'chat'>('folder');
+
+  const handleCreateGroup = async (name: string) => {
+    const newGroup: Group = {
+      id: Math.random().toString(36).substr(2, 9),
+      name,
+      description: "Custom group",
+      chatCount: 0,
+      updatedAt: new Date().toLocaleDateString()
+    };
+    setGroups(prev => [...prev, newGroup]);
+    setSelectedGroupName(name);
+    setMessages([]); // Clear messages for new group chat
+    setSessionId(generateSessionId()); // New session for the group
+
+    try {
+      await fetch(`${baseUrl}/api/folder/create`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userName: userIdFromUrl ?? loggedInUser,
+          folderName: name
+        }),
+      });
+    } catch (err) {
+      console.warn("Failed to create folder on server:", err);
+    }
+  };
   // Archived sessions (store only id/title client-side)
   const [archivedSessions, setArchivedSessions] = useState<ChatSession[]>([]);
-  // Delete confirmation modal state
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteSessionId, setDeleteSessionId] = useState<string | null>(null);
   const [deleteSessionTitle, setDeleteSessionTitle] = useState<string>("");
+  const [isCreateGroupModalOpen, setIsCreateGroupModalOpen] = useState(false);
+  const [newGroupName, setNewGroupName] = useState("");
 
   // Helper to toggle a global body class used for applying a full-page blur fallback
   const setGlobalBackdropBlur = (enable: boolean) => {
@@ -1115,6 +1228,27 @@ export default function Home() {
       setIsManageAccountMenuOpen(false);
     }
   }, [showManageAccount]);
+
+  // Derive groups from chatSessions so they persist on refresh
+  useEffect(() => {
+    const uniqueGroupNames = Array.from(new Set(chatSessions.map(s => s.group_name).filter(Boolean)));
+
+    setGroups(prev => {
+      const merged = [...prev];
+      uniqueGroupNames.forEach(name => {
+        if (!merged.some(g => g.name === name)) {
+          merged.push({
+            id: name as string,
+            name: name as string,
+            description: "Custom group",
+            chatCount: chatSessions.filter(s => s.group_name === name).length,
+            updatedAt: new Date().toLocaleDateString()
+          });
+        }
+      });
+      return merged;
+    });
+  }, [chatSessions]);
 
   // Load archived sessions from localStorage on mount
   // useEffect(() => {
@@ -1240,15 +1374,21 @@ export default function Home() {
               throw new Error("Token verification failed");
             }
 
-            const { userName, clientName, userId, cl, fl } = parsed as {
+            const { userName, clientName, userId, cl, fl, email } = parsed as {
               userName?: string;
               clientName?: string;
               userId?: string;
               cl?: string;
               fl?: string;
+              email?: string;
             };
 
             console.log("[auth] token verified");
+
+            if (email) {
+              setUserEmail(email);
+              localStorage.setItem("userEmail", email);
+            }
 
             if (userName) {
               setUserIdFromUrl(userName);
@@ -1277,7 +1417,8 @@ export default function Home() {
 
             }
 
-            setTokenVerified(true); // ← ADD THIS LINE
+            setTokenVerified(true);
+            setAuthChecked(true); // Ensure loading screen clears on success
 
           } catch (err) {
             console.error("[auth] verification failed — checking URL params or stored session");
@@ -1291,6 +1432,11 @@ export default function Home() {
 
             const storedLogoPath = localStorage.getItem("loginPageClientLogoPath");
             const storedFooterLogoPath = localStorage.getItem("loginFooterLogoPath");
+            const storedEmail = localStorage.getItem("userEmail");
+
+            if (storedEmail) {
+              setUserEmail(storedEmail);
+            }
 
             if (storedUserName) {
               setUserIdFromUrl(storedUserName);
@@ -1310,6 +1456,7 @@ export default function Home() {
             if (storedFooterLogoPath) setLoginFooterLogoPath(storedFooterLogoPath);
 
             setTokenVerified(true);
+            setAuthChecked(true); // Ensure loading screen clears even on error
           }
         };
         verifyJwt();
@@ -1327,6 +1474,11 @@ export default function Home() {
 
         const storedLogoPath = localStorage.getItem("loginPageClientLogoPath");
         const storedFooterLogoPath = localStorage.getItem("loginFooterLogoPath");
+        const storedEmail = localStorage.getItem("userEmail");
+
+        if (storedEmail) {
+          setUserEmail(storedEmail);
+        }
 
         if (storedUserName) {
           setUserIdFromUrl(storedUserName);
@@ -1388,6 +1540,7 @@ export default function Home() {
 
   // Add this state at top of component with other states:
   const [tokenVerified, setTokenVerified] = useState(false);
+  const redirectedRef = useRef(false); // Prevents redirect loops
 
   // Auth guard
   useEffect(() => {
@@ -1419,7 +1572,7 @@ export default function Home() {
               }
             ]);
             setSessionId(sharedSid);
-            setMessages(mappedHistory);
+            setMessages(processLoadedMessages(mappedHistory));
             console.log("[share] shared chat loaded and mapped");
             setAuthChecked(true);
           }
@@ -1438,7 +1591,10 @@ export default function Home() {
       setLoggedInUser(backendUserName);
       setAuthChecked(true);
 
-      if (window.location.search) {
+      const params = new URLSearchParams(window.location.search);
+      const isSensitive = params.has("data") || params.has("userName") || params.has("clientName") || params.has("userId");
+      if (isSensitive && !redirectedRef.current) {
+        redirectedRef.current = true;
         router.replace("/");
       }
       return;
@@ -1481,6 +1637,13 @@ export default function Home() {
       setSidebarOpen(false);
     }
   }, [showManageAccount]);
+
+  // Handle sidebar close when import or share modal opens (mobile fix)
+  useEffect(() => {
+    if ((importModalOpen || shareModalOpen) && (responsive.isMobile || responsive.isTablet)) {
+      setSidebarOpen(false);
+    }
+  }, [importModalOpen, shareModalOpen, responsive.isMobile, responsive.isTablet]);
 
   // Handle body overflow when manage account modal opens/closes
   useEffect(() => {
@@ -1584,6 +1747,7 @@ export default function Home() {
         body: JSON.stringify({
           userName: userIdFromUrl ?? loggedInUser,
           sessionId: sid,
+          group_name: selectedGroupName,
           chatHistory: valid.map(m => ({
             role: m.role,
             text: m.isAudio
@@ -1659,7 +1823,7 @@ export default function Home() {
       return;
     }
     // Small async tick to ensure layout effect ran and sessionMenuPos updated
-    const t = setTimeout(() => setSessionMenuVisible(true), 0);
+    const t = setTimeout(() => setSessionMenuVisible(true), 100);
     return () => clearTimeout(t);
   }, [sessionMenuOpen, sessionMenuPos]);
 
@@ -1773,6 +1937,55 @@ export default function Home() {
     }
   };
 
+  const handleRenameFolder = async (oldName: string, newName: string) => {
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === oldName) return;
+
+    setGroups(prev => prev.map(g => g.name === oldName ? { ...g, name: trimmed } : g));
+    setChatSessions(prev => prev.map(s => s.group_name === oldName ? { ...s, group_name: trimmed } : s));
+
+    try {
+      await fetch(`${baseUrl}/api/folder/rename`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userName: userIdFromUrl ?? loggedInUser,
+          oldFolderName: oldName,
+          newFolderName: trimmed
+        }),
+      });
+    } catch (err) {
+      console.warn("Failed to rename folder on server:", err);
+    }
+  };
+
+  const handleDeleteFolder = async (folderName: string) => {
+    setGroups(prev => prev.filter(g => g.name !== folderName));
+    setChatSessions(prev => prev.filter(s => s.group_name !== folderName));
+
+    if (selectedGroupName === folderName) {
+      setSelectedGroupName("");
+      setGroupActiveType('chat');
+      const newSid = generateSessionId();
+      setSessionId(newSid);
+      sessionIdRef.current = newSid;
+      setMessages([]);
+    }
+
+    try {
+      await fetch(`${baseUrl}/api/folder/delete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userName: userIdFromUrl ?? loggedInUser,
+          folderName: folderName
+        }),
+      });
+    } catch (err) {
+      console.warn("Failed to delete folder on server:", err);
+    }
+  };
+
   const handlePinSession = async (sid: string, isPinned: boolean) => {
     try {
       const res = await fetch(`${baseUrl}/api/sessions/pin`, {
@@ -1787,7 +2000,7 @@ export default function Home() {
       if (res.ok) {
         setChatSessions(prev => {
           const updated = prev.map(s => s.id === sid ? { ...s, isPinned } : s);
-          return sortSessionsNewestFirst(updated);
+          return updated;
         });
       }
     } catch (e) {
@@ -1824,7 +2037,6 @@ export default function Home() {
     setShareLink("");
     setShareModalOpen(true); // Open modal immediately
     setIsSharing(true);      // Show loading inside modal
-    
     try {
       // 1. Force save the current history to DB first
       const currentMsgs = sessionMessagesRef.current.get(sid) || messages;
@@ -1888,10 +2100,11 @@ export default function Home() {
   /* changes done by megnathan: Added import by code handler (improved error logging) */
   const handleImportByCode = async () => {
     if (!inputShareCode || inputShareCode.length !== 5) {
-      alert("Please enter a valid 5-digit code.");
+      setImportError("Please enter a valid 5-digit code.");
       return;
     }
     setIsImporting(true);
+    setImportError(null);
     const actualUserName = userIdFromUrl ?? localStorage.getItem("userName") ?? loggedInUser;
 
     console.log(`[Import] Starting import for code: ${inputShareCode} | User: ${actualUserName}`);
@@ -1921,15 +2134,15 @@ export default function Home() {
           console.log("[Import] Session selection triggered.");
         } catch (innerError: any) {
           console.error("[Import] Error during list refresh/selection:", innerError);
-          alert("Import was successful, but failed to load the new chat automatically. Please refresh the page.");
+          setImportError("Import was successful, but failed to load the new chat automatically.");
         }
       } else {
         console.warn("[Import] Server returned error:", data.detail);
-        alert(data.detail || "Invalid code or import failed.");
+        setImportError(data.detail || "Invalid code or import failed.");
       }
     } catch (e: any) {
       console.error("[Import] Fatal error during fetch:", e);
-      alert(`An error occurred during import: ${e.message || "Unknown error"}`);
+      setImportError(`An error occurred during import: ${e.message || "Unknown error"}`);
     } finally {
       setIsImporting(false);
     }
@@ -2022,17 +2235,70 @@ export default function Home() {
             processedText = cleanedForGraph // ← Keep raw JSON for parseGraphData() in render
             isGraphResponse = true;
           } else {
-            // Not a graph → continue with normal processing
-            // 🔑 SECOND: Extract response content (removes session_id wrapper)
-            const cleanedText = extractResponseContent(finalText);
+            // 🔑 SECOND: Check if this is a MULTIPLE_DATASETS response
+            let multipleDatasets: MultiDatasetView[] = [];
+            let multiSummary: string | undefined;
+            try {
+              const outerParsed = JSON.parse(finalText);
+              const innerStr = outerParsed?.response ?? finalText;
+              const inner = typeof innerStr === "string" ? JSON.parse(innerStr) : innerStr;
+              if (inner?.type === "multiple_datasets" && Array.isArray(inner?.datasets)) {
+                console.log("📋 [DONE] Multiple datasets response detected — rendering", inner.datasets.length, "tables");
+                multiSummary = inner.context_summary || "Here are the results of your query.";
+                const parsedMulti: MultiDatasetView[] = (inner.datasets as Array<{
+                  name: string;
+                  records?: Record<string, unknown>[];
+                  total_count?: number;
+                  search_context?: SearchContext;
+                }>).map((ds) => {
+                  const dsJsonStr = JSON.stringify({
+                    context_summary: ds.name,
+                    search_context: ds.search_context,
+                    is_multi_dataset: true,
+                    records: (ds.records || []).filter((rec: Record<string, unknown>) =>
+                      Object.values(rec).some(v => v !== null && v !== undefined && v !== "")
+                    ),
+                  });
+                  const html = renderLargeDataset(dsJsonStr) || "";
+                  const rows = extractTableRows(html);
+                  return {
+                    name: ds.name,
+                    rows,
+                    html,
+                    totalCount: typeof ds.total_count === "number" ? ds.total_count : rows.length,
+                  };
+                });
+                multipleDatasets = parsedMulti.filter((ds) => ds.rows.length > 0);
+                processedText = multiSummary || "Here are the results of your query.";
+                setMessages(prev => {
+                  const u = [...prev];
+                  const l = u.length - 1;
+                  if (u[l]?.role === "ai") {
+                    u[l] = {
+                      role: "ai",
+                      text: multiSummary!,
+                      streaming: false,
+                      originalText: finalText,
+                      ...(multipleDatasets.length > 0 ? { multipleDatasets, multiSummary } : {}),
+                    };
+                  }
+                  const activeSid = sessionIdRef.current;
+                  sessionMessagesRef.current.set(activeSid, u);
+                  return u;
+                });
+                accRef.current = "";
+                setIsLoading(false);
+                setTimeout(() => inputRef.current?.focus(), 50);
+                return;
+              }
+            } catch { /* not a multiple_datasets JSON */ }
 
-            // 🔑 THIRD: ALWAYS TRY RENDERING AS TABLE STRUCTURE FIRST (ALL SIZES, NO LIMITS)
+            // Not a graph, not multiple_datasets → continue with normal processing
+            const cleanedText = extractResponseContent(finalText);
             const largeDatasetHTML = renderLargeDataset(cleanedText);
 
             if (largeDatasetHTML) {
-              // Successfully rendered as unified table structure (any size)
               processedText = largeDatasetHTML;
-              // Always extract table rows for TableWithTile component
               const rows = extractTableRows(largeDatasetHTML);
               if (rows.length > 0) {
                 tableData = rows;
@@ -2040,7 +2306,6 @@ export default function Home() {
                 console.log("✅ [DONE] Rendered as unified table structure (" + rows.length + " rows)");
               }
             } else {
-              // Not tabular data → format as text output only
               try {
                 processedText = formatOutput(cleanedText);
                 console.log("📝 [DONE] Formatted as text");
@@ -2121,11 +2386,16 @@ export default function Home() {
         console.warn("⚠️ WebSocket closed");
         if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
         setIsLoading(false);
-        if (!event.wasClean && userActiveRef.current) {
+        // Auto-reconnect logic RESTORED
+        if (loggedInUser || new URLSearchParams(window.location.search).get("sharedSessionId")) {
           const delay = reconnectDelayRef.current;
-          reconnectDelayRef.current = Math.min(15000, delay * 2);
-          setTimeout(() => connectWS(), delay);
+          console.log(`[WS] Connection lost. Reconnecting in ${delay}ms...`);
+          reconnectDelayRef.current = Math.min(5000, delay * 1.5);
+          setTimeout(() => {
+            if (wsRef.current === null) connectWS();
+          }, delay);
         }
+
       }
     };
 
@@ -2135,9 +2405,17 @@ export default function Home() {
         wsConnectTimeoutRef.current = null;
       }
       setWsConnectionState('failed');
-      // Log connection error to console only — do not surface as chat bubble
-      console.error("❌ WebSocket error — connection failed, will retry");
+      console.error("❌ WebSocket error — connection failed");
       setIsLoading(false);
+      // Auto-reconnect on error
+      const sharedSid = new URLSearchParams(window.location.search).get("sharedSessionId");
+      if (loggedInUser || sharedSid) {
+        const delay = reconnectDelayRef.current;
+        reconnectDelayRef.current = Math.min(5000, delay * 1.5);
+        setTimeout(() => {
+          if (wsRef.current === null) connectWS();
+        }, delay);
+      }
     };
   };
 
@@ -2162,12 +2440,24 @@ export default function Home() {
     };
   }, [authChecked, loggedInUser]);
 
-  // Helper: sort sessions newest-first (by updatedAt or createdAt)
-  const sortSessionsNewestFirst = (list: ChatSession[]): ChatSession[] =>
+  // Helper: safely parse date or fallback
+  const parseDateSafe = (dateStr: string | undefined, fallback: number) => {
+    if (!dateStr) return fallback;
+    const parsed = new Date(dateStr).getTime();
+    return isNaN(parsed) ? fallback : parsed;
+  };
+
+  // Helper: sort sessions by recent activity (updatedAt) primarily
+  const sortSessionsStable = (list: ChatSession[]): ChatSession[] =>
     [...list].sort((a, b) => {
+      // 1. Pins always stay at the very top
       if (a.isPinned && !b.isPinned) return -1;
       if (!a.isPinned && b.isPinned) return 1;
-      return (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt);
+
+      // 2. Sort by activity (newest update at top)
+      const timeA = a.updatedAt || a.createdAt || 0;
+      const timeB = b.updatedAt || b.createdAt || 0;
+      return timeB - timeA;
     });
 
   // Fetch chat sessions list for sidebar (new at top, old at bottom)
@@ -2182,28 +2472,55 @@ export default function Home() {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      const fetched: ChatSession[] = (data?.sessions ?? []).map(
-        (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; is_pinned?: boolean; is_archived?: boolean }) => ({
-          id: s.session_id,
-          title: s.title || "Chat",
-          createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
-          updatedAt: s.updated_at ? new Date(s.updated_at).getTime() : undefined,
-          isPinned: s.is_pinned || false,
-          isArchived: s.is_archived || false,
-        })
-      );
-      setChatSessions(sortSessionsNewestFirst(fetched));
+      setChatSessions(prev => {
+        const fetched: ChatSession[] = (data?.sessions ?? []).map(
+          (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; is_pinned?: boolean; is_archived?: boolean; group_name?: string }) => {
+            const existing = prev.find(p => p.id === s.session_id);
+            return {
+              id: s.session_id,
+              title: s.title || "Chat",
+              createdAt: parseDateSafe(s.created_at, existing?.createdAt || Date.now()),
+              updatedAt: parseDateSafe(s.updated_at, existing?.updatedAt || Date.now()),
+              isPinned: s.is_pinned || false,
+              isArchived: s.is_archived || false,
+              group_name: s.group_name,
+            };
+          }
+        );
+        const unsavedNewChats = prev.filter(s => s.title === "New Chat" && !fetched.some(f => f.id === s.id));
+        return sortSessionsStable([...unsavedNewChats, ...fetched]);
+      });
     } catch (err) {
       console.warn("Failed to fetch chat sessions:", err);
-      setChatSessions([]);
+    }
+  };
+
+  const fetchFolders = async () => {
+    if (!authChecked || !loggedInUser) return;
+    try {
+      const res = await fetch(`${baseUrl}/api/folders/${userIdFromUrl ?? loggedInUser}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data.status === "ok" && data.folders) {
+        setGroups(data.folders.map((name: string) => ({
+          id: name,
+          name,
+          description: "Custom group",
+          chatCount: 0,
+          updatedAt: new Date().toLocaleDateString()
+        })));
+      }
+    } catch (err) {
+      console.warn("Failed to fetch folders from server:", err);
     }
   };
 
   useEffect(() => {
     fetchSessions();
+    fetchFolders();
   }, [authChecked, loggedInUser]);
 
-  const handleFeatureClick = (featureName: 'chat' | 'archived' | 'library') => {
+  const handleFeatureClick = (featureName: 'chat' | 'archived' | 'groups') => {
     // Chat and Archived have real views implemented; only Library shows placeholder
     if (featureName === 'chat') {
       setShowFeaturePlaceholder(false);
@@ -2212,9 +2529,62 @@ export default function Home() {
     setShowFeaturePlaceholder(true);
   };
 
+  const showWarningToast = (message: string) => {
+    if (typeof document === "undefined") return;
+    const isDark = document.documentElement.getAttribute("data-theme") !== "light";
+    const bg = isDark ? "rgba(28, 28, 30, 0.97)" : "rgba(255, 255, 255, 0.97)";
+    const border = isDark ? "rgba(212, 175, 55, 0.5)" : "rgba(180, 140, 30, 0.4)";
+    const textColor = isDark ? "#ffffff" : "#1a1a1a";
+    const accent = isDark ? "#D4AF37" : "#9A7B20";
+    const shadow = isDark ? "0 8px 32px rgba(0,0,0,0.5)" : "0 8px 32px rgba(0,0,0,0.15)";
+
+    const toast = document.createElement("div");
+    toast.style.cssText = `
+      position: fixed;
+      bottom: 32px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: ${bg};
+      border: 1px solid ${border};
+      border-radius: 12px;
+      padding: 14px 24px;
+      color: ${textColor};
+      font-size: 14px;
+      font-weight: 500;
+      box-shadow: ${shadow};
+      z-index: 99999;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      opacity: 0;
+      transition: opacity 0.3s ease, transform 0.3s ease;
+      pointer-events: none;
+      white-space: nowrap;
+      backdrop-filter: blur(8px);
+    `;
+
+    toast.innerHTML = `<span style="color:${accent};font-size:18px;">⚠️</span> <span>${message}</span>`;
+
+    document.body.appendChild(toast);
+    requestAnimationFrame(() => {
+      toast.style.opacity = "1";
+      toast.style.transform = "translateX(-50%) translateY(0)";
+    });
+    setTimeout(() => {
+      toast.style.opacity = "0";
+      toast.style.transform = "translateX(-50%) translateY(20px)";
+      setTimeout(() => {
+        if (toast.parentNode) {
+          toast.parentNode.removeChild(toast);
+        }
+      }, 350);
+    }, 3000);
+  };
+
   const handleNewChat = async () => {
     if (isLoading) {
-      setMessages(prev => [...prev, { role: "error", text: "Please wait for the current response to finish before starting a new chat." }]);
+      showWarningToast("Please wait, don't switch the chat!");
+      console.log("⚠️ Chat creation blocked: Please wait, don't switch the chat!");
       return;
     }
     // Persist current session messages to ref before leaving
@@ -2235,6 +2605,10 @@ export default function Home() {
       setSidebarOpen(false);
     }
 
+    if (activeFeature === 'groups' && selectedGroupName) {
+      setGroupActiveType('chat');
+    }
+
     // Immediately show this new chat at the top of the history list
     setChatSessions(prev => {
       const existing = prev.filter(s => s.id !== newSessionId);
@@ -2243,6 +2617,7 @@ export default function Home() {
         title: "New Chat",
         createdAt: Date.now(),
         updatedAt: Date.now(),
+        group_name: activeFeature === 'groups' ? (selectedGroupName ?? undefined) : undefined,
       };
       return [newCapsule, ...existing];
     });
@@ -2257,35 +2632,45 @@ export default function Home() {
         });
         if (!res.ok) return;
         const data = await res.json();
+        const currentSessions = chatSessions;
         const fetched: ChatSession[] = (data?.sessions ?? []).map(
-          (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; is_pinned?: boolean; is_archived?: boolean }) => ({
-            id: s.session_id,
-            title: s.title || "Chat",
-            createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
-            updatedAt: s.updated_at ? new Date(s.updated_at).getTime() : undefined,
-            isPinned: s.is_pinned || false,
-            isArchived: s.is_archived || false,
-          })
-        );
-        setChatSessions(prev => {
-          const newCapsule: ChatSession = {
-            id: newSessionId,
-            title: "New Chat",
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-          };
-          // Previous chat stays second (just left, not yet saved so backend may have old order)
-          const previousSession = prev.find(s => s.id === previousSid) ?? fetched.find(s => s.id === previousSid);
-          const rest = sortSessionsNewestFirst(
-            fetched.filter(s => s.id !== newSessionId && s.id !== previousSid)
-          );
-          if (previousSession) {
-            const fromApi = fetched.find(s => s.id === previousSid);
-            const title = fromApi?.title ?? previousSession.title;
-            return [newCapsule, { ...previousSession, title }, ...rest];
+          (s: any) => {
+            const existing = currentSessions.find(p => p.id === s.session_id);
+            return {
+              id: s.session_id,
+              title: s.title || "Chat",
+              createdAt: parseDateSafe(s.created_at, existing?.createdAt || Date.now()),
+              updatedAt: parseDateSafe(s.updated_at, existing?.updatedAt || Date.now()),
+              isPinned: s.is_pinned || false,
+              isArchived: s.is_archived || false,
+              group_name: s.group_name,
+            };
           }
-          return [newCapsule, ...rest];
+        );
+
+        setChatSessions(prev => {
+          const unsavedNewChats = prev.filter(s => s.title === "New Chat" && !fetched.some(f => f.id === s.id));
+          return sortSessionsStable([...unsavedNewChats, ...fetched]);
         });
+
+        // Re-derive groups so new group chats appear immediately
+        const uniqueGroupNames = Array.from(new Set(fetched.map(s => s.group_name).filter(Boolean))) as string[];
+        if (uniqueGroupNames.length > 0) {
+          setGroups(prevGroups => {
+            const existingNames = prevGroups.map(g => g.name);
+            const newNames = uniqueGroupNames.filter(name => !existingNames.includes(name));
+            return [
+              ...prevGroups.map(g => ({ ...g, chatCount: fetched.filter(s => s.group_name === g.name).length })),
+              ...newNames.map(name => ({
+                id: name,
+                name,
+                description: "Custom group",
+                chatCount: fetched.filter(s => s.group_name === name).length,
+                updatedAt: new Date().toLocaleDateString(),
+              }))
+            ];
+          });
+        }
       } catch (err) {
         console.warn("Failed to refetch sessions:", err);
       }
@@ -2307,6 +2692,51 @@ export default function Home() {
       if (graphData) {
         console.log("📊 [HISTORY] Graph response detected — keeping as raw JSON for chart");
         return { ...m, text, originalText: text, isGraphResponse: true };
+      }
+
+      // 🔑 Check if this is a MULTIPLE_DATASETS response
+      try {
+        if (text.trim().startsWith('{')) {
+          const parsed = JSON.parse(text);
+          const innerStr = parsed?.response ?? text;
+          const inner = typeof innerStr === "string" ? JSON.parse(innerStr) : innerStr;
+          if (inner?.type === "multiple_datasets" && Array.isArray(inner?.datasets)) {
+            console.log("📋 [HISTORY] Multiple datasets response detected — rendering tables");
+            const multiSummary = inner.context_summary || "Here are the results of your query.";
+            const parsedMulti: MultiDatasetView[] = (inner.datasets as Array<{
+              name: string;
+              records?: Record<string, unknown>[];
+              total_count?: number;
+              search_context?: SearchContext;
+            }>).map((ds) => {
+              const dsJsonStr = JSON.stringify({
+                context_summary: ds.name,
+                search_context: ds.search_context,
+                is_multi_dataset: true,
+                records: (ds.records || []).filter((rec: Record<string, unknown>) =>
+                  Object.values(rec).some(v => v !== null && v !== undefined && v !== "")
+                ),
+              });
+              const html = renderLargeDataset(dsJsonStr) || "";
+              const rows = extractTableRows(html);
+              return {
+                name: ds.name,
+                rows,
+                html,
+                totalCount: typeof ds.total_count === "number" ? ds.total_count : rows.length,
+              };
+            });
+            const multipleDatasets = parsedMulti.filter((ds) => ds.rows.length > 0);
+            return {
+              ...m,
+              text: multiSummary,
+              originalText: text,
+              ...(multipleDatasets.length > 0 ? { multipleDatasets, multiSummary } : {}),
+            };
+          }
+        }
+      } catch (e) {
+        /* Not JSON, ignore */
       }
 
       // 🔑 Detect if the history text is a Table JSON (records/data/columns key)
@@ -2381,7 +2811,8 @@ export default function Home() {
   const switchSession = async (targetSid: string) => {
     if (targetSid === sessionId) return; // already active
     if (isLoading) {
-      setMessages(prev => [...prev, { role: "error", text: "Please wait for the current response to finish before switching chats." }]);
+      showWarningToast("Please wait, don't switch the chat!");
+      console.log("⚠️ Chat switch blocked: Please wait, don't switch the chat!");
       return;
     }
 
@@ -2396,6 +2827,14 @@ export default function Home() {
     // Save current messages
     sessionMessagesRef.current.set(currentSid, messages);
 
+    // Update selected group name based on the target session
+    const targetSession = chatSessions.find(s => s.id === targetSid);
+    if (targetSession && targetSession.group_name) {
+      setSelectedGroupName(targetSession.group_name);
+    } else {
+      setSelectedGroupName(null);
+    }
+
     // Refresh from backend to get latest titles; do not move clicked chat to top (just highlight)
     const refreshSessions = async () => {
       if (!loggedInUser) return;
@@ -2407,21 +2846,23 @@ export default function Home() {
         });
         if (!res.ok) return;
         const data = await res.json();
-        const fetched: ChatSession[] = (data?.sessions ?? []).map(
-          (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; is_pinned?: boolean; is_archived?: boolean }) => ({
-            id: s.session_id,
-            title: s.title || "Chat",
-            createdAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
-            updatedAt: s.updated_at ? new Date(s.updated_at).getTime() : undefined,
-            isPinned: s.is_pinned || false,
-            isArchived: s.is_archived || false,
-          })
-        );
         setChatSessions(prev => {
-          const merged = sortSessionsNewestFirst(fetched);
-          // If current list has a session not in fetched (e.g. new unsaved), prepend it
+          const fetched: ChatSession[] = (data?.sessions ?? []).map(
+            (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; group_name?: string; is_pinned?: boolean; is_archived?: boolean }) => {
+              const existing = prev.find(p => p.id === s.session_id);
+              return {
+                id: s.session_id,
+                title: s.title || "Chat",
+                createdAt: parseDateSafe(s.created_at, existing?.createdAt || Date.now()),
+                updatedAt: parseDateSafe(s.updated_at, existing?.updatedAt || Date.now()),
+                isPinned: s.is_pinned || false,
+                isArchived: s.is_archived || false,
+                group_name: s.group_name,
+              };
+            }
+          );
           const onlyInPrev = prev.filter(s => !fetched.some(f => f.id === s.id));
-          return sortSessionsNewestFirst([...onlyInPrev, ...merged]);
+          return sortSessionsStable([...onlyInPrev, ...fetched]);
         });
       } catch (err) {
         console.warn("Failed to refresh sessions:", err);
@@ -2491,6 +2932,50 @@ export default function Home() {
       startPing();
     }
   };
+
+  // Pre-fetch history for expanded groups to make loading instant
+  useEffect(() => {
+    if (!authChecked || !loggedInUser) return;
+
+    const preFetchHistory = async () => {
+      for (const groupName of expandedGroups) {
+        const chatsInGroup = chatSessions.filter(s => s.group_name === groupName);
+        for (const s of chatsInGroup) {
+          if (!sessionMessagesRef.current.has(s.id)) {
+            try {
+              const res = await fetch(`${baseUrl}/api/session`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ userName: userIdFromUrl ?? loggedInUser, sessionId: s.id, historyOnClick: true }),
+              });
+              if (res.ok) {
+                const data = await res.json();
+                const history: Message[] = [];
+                for (const entry of (data?.chat_history ?? [])) {
+                  if (entry.query) {
+                    if (entry.is_audio) {
+                      history.push({ role: "user", text: "Voice message", isAudio: true, audioUrl: entry.query, audioDuration: 0 });
+                    } else {
+                      history.push({ role: "user", text: entry.query });
+                    }
+                  }
+                  if (entry.assistant) {
+                    history.push({ role: "ai", text: entry.assistant });
+                  }
+                }
+                const processed = processLoadedMessages(history);
+                sessionMessagesRef.current.set(s.id, processed);
+              }
+            } catch (err) {
+              console.warn(`Failed to pre-fetch history for ${s.id}:`, err);
+            }
+          }
+        }
+      }
+    };
+
+    preFetchHistory();
+  }, [expandedGroups, chatSessions, loggedInUser, authChecked, baseUrl, userIdFromUrl]);
 
   const handleLogout = async () => {
     const savePromises: Promise<void>[] = [];
@@ -2624,6 +3109,68 @@ export default function Home() {
     }
   };
 
+  // Helper to programmatically send a message text directly over WS (e.g. for pills)
+  const sendTextDirectly = (text: string) => {
+    if (isLoading) return;
+    clearGhostCompletion();
+    const userText = text.trim();
+    const ws = wsRef.current;
+
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      console.warn("Socket not ready for session:", sessionId);
+      setMessages(prev => [...prev, { role: "error", text: "Still connecting. Please wait." }]);
+      return;
+    }
+
+    recordPromptForGhostHistory(ghostPromptHistoryStorageKey(loggedInUser), userText);
+
+    const now = Date.now();
+    setChatSessions(prev => {
+      const existing = prev.find(s => s.id === sessionId);
+      const rest = prev.filter(s => s.id !== sessionId);
+      if (existing) {
+        return [{ ...existing, updatedAt: now }, ...rest];
+      }
+      const newCapsule: ChatSession = {
+        id: sessionId,
+        title: "New Chat",
+        createdAt: now,
+        updatedAt: now,
+      };
+      return [newCapsule, ...rest];
+    });
+
+    setShowFeaturePlaceholder(false);
+    setMessages(prev => {
+      const updated = [...prev, {
+        role: "user" as const,
+        text: userText
+      }];
+      sessionMessagesRef.current.set(sessionId, updated);
+      return updated;
+    });
+
+    setIsLoading(true);
+    accRef.current = "";
+
+    ws.send(JSON.stringify({
+      type: "message",
+      messageType: "text",
+      isAudio: false,
+      isText: true,
+      isGraph: isGraphMode,
+      query: userText,
+      userName: loggedInUser,
+      subUserName: userIdFromUrl ?? loggedInUser,
+      userId: userIdInt !== null ? String(userIdInt) : undefined,
+      sessionId,
+      group_name: selectedGroupName,
+      timestamp: Date.now()
+    }));
+
+    setIsLoading(true);
+  };
+
   // ── Send message over the persistent WebSocket ────────────────────────────
   const sendMessage = () => {
     const domVal = inputRef.current?.value ?? "";
@@ -2687,11 +3234,12 @@ export default function Home() {
       subUserName: userIdFromUrl ?? loggedInUser,
       userId: userIdInt !== null ? String(userIdInt) : undefined,
       sessionId,
+      group_name: selectedGroupName,
       timestamp: Date.now()
     }));
 
     setIsLoading(true);
-  }; 
+  };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Tab" && ghostSuffixStrRef.current) {
@@ -2792,8 +3340,8 @@ export default function Home() {
                 className="main-input"
                 defaultValue={input}
                 onCompositionStart={() => { isComposingRef.current = true; }}
-                onCompositionEnd={(e) => { 
-                  isComposingRef.current = false; 
+                onCompositionEnd={(e) => {
+                  isComposingRef.current = false;
                   syncGhostUserMirror();
                   applyGhostSuffixFromInput();
                 }}
@@ -2952,7 +3500,7 @@ export default function Home() {
       {/* Content above background (MainLayout-style) */}
       <div
         className={
-          !historyLoading && isLanding
+          !historyLoading && isLanding && (activeFeature === 'chat' || activeFeature === 'groups')
             ? "app-content-wrapper app-content-wrapper--landing-start"
             : "app-content-wrapper"
         }
@@ -2966,6 +3514,7 @@ export default function Home() {
             top: 0,
             left: 0,
             zIndex: responsive.isMobile && sidebarOpen ? 9999 : 2,
+            filter: (importModalOpen || shareModalOpen) ? 'blur(5px)' : 'none',
           }}
         >
           <aside className="sidebar">
@@ -3072,14 +3621,6 @@ export default function Home() {
                       <IconUser size={18} />
                       <span>Manage Account</span>
                     </button>
-                    <div className="profile-divider" />
-                    <button
-                      className="profile-dropdown-item profile-action-btn profile-logout"
-                      onClick={handleLogout}
-                    >
-                      <IconLogout />
-                      <span>Logout</span>
-                    </button>
                   </div>
                 </div>
               </div>
@@ -3105,7 +3646,11 @@ export default function Home() {
               {/* changes done by megnathan: Added import via code menu button */}
               <button
                 className="new-chat-btn"
-                onClick={() => setImportModalOpen(true)}
+                onClick={() => {
+                  setImportError(null);
+                  setInputShareCode("");
+                  setImportModalOpen(true);
+                }}
                 title="Import chat via code"
                 style={{ width: '40px', padding: '10px 0', justifyContent: 'center' }}
               >
@@ -3120,8 +3665,14 @@ export default function Home() {
               <div
                 className={`feature-item ${activeFeature === 'chat' ? 'active' : ''}`}
                 onClick={() => {
+                  setSearchTerm("");
                   setActiveFeature('chat');
                   handleFeatureClick('chat');
+                  setSelectedGroupName(null);
+                  const newSid = generateSessionId();
+                  setSessionId(newSid);
+                  sessionIdRef.current = newSid;
+                  setMessages([]);
                 }}
               >
                 <IconChat />
@@ -3130,105 +3681,133 @@ export default function Home() {
               <div
                 className={`feature-item ${activeFeature === 'archived' ? 'active' : ''}`}
                 onClick={() => {
+                  setSearchTerm("");
                   setActiveFeature('archived');
                   handleFeatureClick('archived');
+                  setSelectedGroupName(null);
+                  setMessages([]); // Clear messages to show landing container
                 }}
               >
                 <IconArchive />
                 <span>Archived</span>
               </div>
               <div
-                className={`feature-item ${activeFeature === 'library' ? 'active' : ''}`}
+                className={`feature-item ${activeFeature === 'groups' ? 'active' : ''}`}
                 onClick={() => {
-                  setActiveFeature('library');
-                  handleFeatureClick('library');
+                  setSearchTerm("");
+                  setActiveFeature('groups');
+                  handleFeatureClick('groups');
                 }}
               >
                 <IconLibrary />
-                <span>Groups</span>
-              </div>
-
-              <div className="search-section-sidebar" style={{ padding: '8px 12px', marginTop: 16 }}>
-                <div className="search-input-wrapper" style={{ position: 'relative' }}>
-                  <IconSearch style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }} />
-                  <input
-                    type="text"
-                    placeholder="Search chats..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
+                <span style={{ flex: 1 }}>Groups</span>
+                {activeFeature === 'groups' && (
+                  <button
+                    title="Create group"
+                    onClick={(e) => { e.stopPropagation(); setCreateGroupTrigger(prev => prev + 1); }}
                     style={{
-                      width: '100%',
-                      padding: '8px 10px 8px 34px',
-                      borderRadius: 8,
-                      border: '1px solid var(--color-border)',
-                      background: 'rgba(255,255,255,0.05)',
-                      fontSize: 13,
-                      outline: 'none',
-                      color: 'inherit'
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      padding: '0 4px',
+                      color: 'var(--color-text-secondary)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      borderRadius: '4px',
+                      transition: 'color 0.15s',
+                      fontSize: '18px',
+                      lineHeight: 1,
+                      fontWeight: 300,
                     }}
-                  />
-                </div>
-                {searchTerm && (
-                  <div className="search-results-dropdown" style={{
-                    marginTop: 8,
-                    maxHeight: 200,
-                    overflowY: 'auto',
-                    background: 'var(--color-bg-secondary)',
-                    borderRadius: 8,
-                    border: '1px solid var(--color-border)',
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
-                  }}>
-                    {chatSessions.filter(s => s.title.toLowerCase().includes(searchTerm.toLowerCase())).length > 0 ? (
-                      chatSessions
-                        .filter(s => s.title.toLowerCase().includes(searchTerm.toLowerCase()))
-                        .map(s => (
-                          <div
-                            key={s.id}
-                            className="search-result-item"
-                            onClick={() => {
-                              switchSession(s.id);
-                              setSearchTerm("");
-                              setActiveFeature('chat');
-                            }}
-                            style={{
-                              padding: '8px 12px',
-                              cursor: 'pointer',
-                              fontSize: 12,
-                              borderBottom: '1px solid rgba(255,255,255,0.05)',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 8
-                            }}
-                          >
-                            <IconChat width={14} height={14} style={{ opacity: 0.5 }} />
-                            <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.title}</span>
-                          </div>
-                        ))
-                    ) : (
-                      <div style={{ padding: '12px', textAlign: 'center', fontSize: 12, opacity: 0.5 }}>No results found</div>
-                    )}
-                  </div>
+                    onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.color = 'var(--color-accent, #c8932a)')}
+                    onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.color = 'var(--color-text-secondary)')}
+                  >+</button>
                 )}
               </div>
 
-              {showFeaturePlaceholder && activeFeature === 'library' && (
-                <div className="feature-placeholder-sidebar">
-                  <div className="feature-placeholder-box">
-                    <div className="feature-placeholder-title">
-                      Groups
+              {activeFeature === 'groups' && (
+                <div style={{ overflowY: 'auto', flex: 1, paddingRight: '4px' }}>
+                  {groups.map(group => (
+                    <div key={group.id}>
+                      <FolderListItem
+                        group={group}
+                        selectedGroupName={selectedGroupName}
+                        groupActiveType={groupActiveType}
+                        editingFolderId={editingFolderId}
+                        editingFolderTitle={editingFolderTitle}
+                        setEditingFolderId={setEditingFolderId}
+                        setEditingFolderTitle={setEditingFolderTitle}
+                        expandedGroups={expandedGroups}
+                        setExpandedGroups={setExpandedGroups}
+                        setActiveFeature={setActiveFeature}
+                        setSelectedGroupName={setSelectedGroupName}
+                        setGroupActiveType={setGroupActiveType}
+                        setMessages={setMessages}
+                        sessionId={sessionId}
+                        setSessionId={setSessionId}
+                        generateSessionId={generateSessionId}
+                        chatSessions={chatSessions}
+                        setChatSessions={setChatSessions}
+                        onRename={handleRenameFolder}
+                        onDelete={handleDeleteFolder}
+                      />
+
+                      {expandedGroups.includes(group.name) && chatSessions.filter(s => s.group_name === group.name).map(s => (
+                        <ChatListItem
+                          key={s.id}
+                          s={s}
+                          sessionId={sessionId}
+                          groupActiveType={groupActiveType}
+                          editingSessionId={editingSessionId}
+                          editingTitle={editingTitle}
+                          setEditingTitle={setEditingTitle}
+                          setEditingSessionId={setEditingSessionId}
+                          commitRename={commitRename}
+                          handleRenameSession={handleRenameSession}
+                          switchSession={switchSession}
+                          setActiveFeature={setActiveFeature}
+                          setSelectedGroupName={setSelectedGroupName}
+                          setGroupActiveType={setGroupActiveType}
+                          group={group}
+                          onDeleteChat={handleDeleteSession}
+                        />
+                      ))}
                     </div>
-                    <div className="feature-placeholder-subtitle">
-                      Yet to be implemented
-                    </div>
+                  ))}
+                </div>
+              )}
+
+              {activeFeature !== 'groups' && (
+                <div className="search-section-sidebar" style={{ padding: '8px 12px', marginTop: 16 }}>
+                  <div className="search-input-wrapper" style={{ position: 'relative' }}>
+                    <IconSearch style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }} />
+                    <input
+                      type="text"
+                      placeholder="Search chats..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '8px 10px 8px 34px',
+                        borderRadius: 8,
+                        border: '1px solid var(--color-border)',
+                        background: 'rgba(255,255,255,0.05)',
+                        fontSize: 13,
+                        outline: 'none',
+                        color: 'inherit'
+                      }}
+                    />
                   </div>
                 </div>
               )}
+
+
 
               {/* Archived view */}
               {activeFeature === 'archived' && (
                 <div className="chat-history-box" style={{ marginTop: 24, display: "flex", flexDirection: "column", minHeight: 0 }}>
                   <div className="chat-history-scroll">
-                    {chatSessions.filter(s => s.isArchived).map(a => (
+                    {chatSessions.filter(s => s.isArchived && (!searchTerm || s.title.toLowerCase().includes(searchTerm.toLowerCase()))).map(a => (
                       <div
                         key={a.id}
                         className="sidebar-item"
@@ -3239,21 +3818,106 @@ export default function Home() {
                       >
                         <div className="content" style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
                           <IconArchive width={16} height={16} />
-                          <span title={a.title} style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{a.title}</span>
+                          {editingSessionId === a.id ? (
+                            <input
+                              ref={(el) => { editingInputRef.current = el; if (el) el.focus(); }}
+                              value={editingTitle}
+                              onChange={(e) => setEditingTitle(e.target.value)}
+                              onBlur={() => commitRename(a.id)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") { e.preventDefault(); commitRename(a.id); }
+                                if (e.key === "Escape") { setEditingSessionId(null); setEditingTitle(""); }
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                              title={a.title}
+                              style={{
+                                whiteSpace: "nowrap",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                borderRadius: 6,
+                                padding: "4px 6px",
+                                border: "1px solid var(--color-border)",
+                                background: "var(--color-bg-alt)",
+                                color: "var(--color-text)",
+                                width: '100%',
+                                fontSize: '12px'
+                              }}
+                            />
+                          ) : (
+                            <span
+                              key={a.title}
+                              className="title-typing"
+                              title={a.title}
+                              style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                            >
+                              {a.title}
+                            </span>
+                          )}
                         </div>
-                        <div>
+                        <div style={{ display: 'flex', alignItems: 'center' }}>
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleArchiveSession(a.id, false);
+                              const btn = e.currentTarget as HTMLElement;
+                              const pos = computeSessionMenuPos(btn, 140);
+                              const willOpen = sessionMenuOpen !== a.id;
+                              setSessionMenuOpen(willOpen ? a.id : null);
+                              setSessionMenuPos(willOpen ? pos : null);
+                              setSessionMenuVisible(false);
                             }}
-                            title="Unarchive"
-                            style={{ background: 'transparent', border: 'none', color: 'var(--color-text)', cursor: 'pointer', padding: 6, borderRadius: 6 }}
-                          >Unarchive</button>
+                            aria-label="Session options"
+                            title="Options"
+                            style={{
+                              background: 'transparent',
+                              border: 'none',
+                              color: 'var(--color-text)',
+                              cursor: 'pointer',
+                              padding: '6px',
+                              borderRadius: 6,
+                            }}
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="5" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="12" cy="19" r="1" /></svg>
+                          </button>
+
+                          {sessionMenuOpen === a.id && sessionMenuPos && typeof document !== 'undefined' && createPortal(
+                            <div
+                              ref={(el) => { sessionMenuRef.current = el; }}
+                              onClick={(e) => e.stopPropagation()}
+                              className="session-menu"
+                              style={{
+                                position: 'fixed',
+                                top: `${sessionMenuPos.top}px`,
+                                transform: sessionMenuPos.placement === 'above' ? 'translate(calc(-100% + 24px), -100%)' : 'translateX(calc(-100% + 24px))',
+                                left: `${sessionMenuPos.left}px`,
+                                background: 'var(--color-bg-alt)',
+                                border: '1px solid var(--color-border)',
+                                borderRadius: 8,
+                                padding: '6px 8px',
+                                boxShadow: '0 6px 18px rgba(0,0,0,0.4)',
+                                zIndex: 20000,
+                                minWidth: 140,
+                                whiteSpace: 'nowrap',
+                                visibility: sessionMenuVisible ? 'visible' : 'hidden',
+                                pointerEvents: sessionMenuVisible ? 'auto' : 'none',
+                                opacity: sessionMenuVisible ? 1 : 0,
+                                transition: 'opacity 0.2s ease-out',
+                                animation: 'none',
+                              }}>
+                              <button
+                                onClick={() => { setSessionMenuOpen(null); setSessionMenuPos(null); handleRenameSession(a.id); }}
+                                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 8px', background: 'transparent', border: 'none', color: 'var(--color-text)', cursor: 'pointer' }}
+                              >Rename</button>
+                              <button
+                                onClick={() => { setSessionMenuOpen(null); setSessionMenuPos(null); handleArchiveSession(a.id, false); }}
+                                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 8px', background: 'transparent', border: 'none', color: 'var(--color-text)', cursor: 'pointer' }}
+                              >Unarchive</button>
+                            </div>,
+                            document.body
+                          )}
                         </div>
                       </div>
                     ))}
-                    {chatSessions.filter(s => s.isArchived).length === 0 && (
+                    {chatSessions.filter(s => s.isArchived && (!searchTerm || s.title.toLowerCase().includes(searchTerm.toLowerCase()))).length === 0 && (
                       <div style={{ padding: "12px 16px", fontSize: 12, color: "#7a8f75", fontStyle: "italic" }}>
                         No archived chats
                       </div>
@@ -3262,12 +3926,12 @@ export default function Home() {
                 </div>
               )}
 
-              {/* Chat History – only visible when Chat feature is active and not searching */}
-              {activeFeature === 'chat' && !searchTerm && (
+              {/* Chat History – only visible when Chat feature is active */}
+              {activeFeature === 'chat' && (
 
                 <div className="chat-history-box" style={{ marginTop: 24, display: "flex", flexDirection: "column", minHeight: 0 }}>
                   <div className="chat-history-scroll">
-                    {chatSessions.filter(s => !s.isArchived).map(s => (
+                    {chatSessions.filter(s => !s.isArchived && !s.group_name && (!searchTerm || s.title.toLowerCase().includes(searchTerm.toLowerCase()))).map(s => (
                       <div
                         key={s.id}
                         className={`sidebar-item${s.id === sessionId ? " active" : ""}`}
@@ -3302,7 +3966,9 @@ export default function Home() {
                             />
                           ) : (
                             <span
+                              key={s.title}
                               title={s.title}
+                              className="title-typing"
                               style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
                             >
                               {previewTitle(s.title, 2)}
@@ -3335,7 +4001,7 @@ export default function Home() {
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="5" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="12" cy="19" r="1" /></svg>
                           </button>
 
-                          {sessionMenuOpen === s.id && sessionMenuPos && (
+                          {sessionMenuOpen === s.id && sessionMenuPos && typeof document !== 'undefined' && createPortal(
                             <div
                               ref={(el) => { sessionMenuRef.current = el; }}
                               onClick={(e) => e.stopPropagation()}
@@ -3355,6 +4021,9 @@ export default function Home() {
                                 whiteSpace: 'nowrap',
                                 visibility: sessionMenuVisible ? 'visible' : 'hidden',
                                 pointerEvents: sessionMenuVisible ? 'auto' : 'none',
+                                opacity: sessionMenuVisible ? 1 : 0,
+                                transition: 'opacity 0.2s ease-out',
+                                animation: 'none',
                               }}>
                               <button
                                 onClick={() => { setSessionMenuOpen(null); setSessionMenuPos(null); handleRenameSession(s.id); }}
@@ -3376,7 +4045,8 @@ export default function Home() {
                                 onClick={() => { setSessionMenuOpen(null); setSessionMenuPos(null); handleShareSession(s.id); }}
                                 style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 8px', background: 'transparent', border: 'none', color: 'var(--color-primary)', cursor: 'pointer', borderTop: '1px solid rgba(255,255,255,0.05)', fontWeight: 600 }}
                               >Share Chat</button>
-                            </div>
+                            </div>,
+                            document.body
                           )}
                         </div>
                       </div>
@@ -3513,7 +4183,7 @@ export default function Home() {
           )}
 
           {/* Landing — welcome shifted up; input vertically centered (only before first message) */}
-          {!historyLoading && isLanding && (
+          {!historyLoading && isLanding && (activeFeature === 'chat' || activeFeature === 'groups' || activeFeature === 'archived') && (
             <div className="landing-start-column">
               <div className="landing-start-spacer-top" aria-hidden />
               <div className="landing-container landing-container--start">
@@ -3532,9 +4202,9 @@ export default function Home() {
                       animation: "goldShine 3s ease-in-out infinite",
                     }}
                   >
-                    Welcome to Ask AI
+                    {selectedGroupName ? `📁 ${selectedGroupName}` : "Welcome to Ask AI"}
                   </h1>
-                  <p className="landing-subtitle">{"Let's work together buddy"}</p>
+                  <p className="landing-subtitle">{selectedGroupName ? `Start a new chat in ${selectedGroupName}` : "Let's work together buddy"}</p>
                 </div>
               </div>
               {renderChatInputFooter("landing")}
@@ -3543,8 +4213,14 @@ export default function Home() {
           )}
 
           {/* Chat area */}
-          {!historyLoading && !isLanding && (
+          {!historyLoading && !isLanding && (activeFeature === 'chat' || activeFeature === 'groups' || activeFeature === 'archived') && (
             <div className="chat-scroll-area">
+              {selectedGroupName && (
+                <div style={{ padding: '12px 24px', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <IconFolder size={14} style={{ color: 'var(--color-primary)' }} />
+                  <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text)' }}>{selectedGroupName}</span>
+                </div>
+              )}
               <div className="messages-container">
                 {messages.map((msg, idx) => {
                   const isUser = msg.role === "user";
@@ -3584,7 +4260,7 @@ export default function Home() {
                       )}
 
                       <div
-                        className={`message-bubble ${msg.role}${isGraphMsg ? ' graph-message' : ''}${msg.tableData && msg.tableData.length > 0 ? ' table-message' : ''}`}
+                        className={`message-bubble ${msg.role}${isGraphMsg ? ' graph-message' : ''}${(msg.tableData && msg.tableData.length > 0) || (msg.multipleDatasets && msg.multipleDatasets.length > 0) ? ' table-message' : ''}`}
                         style={{ position: 'relative' }}
                       >
 
@@ -3699,6 +4375,35 @@ export default function Home() {
                             );
                           })()
 
+                        ) : msg.multipleDatasets && msg.multipleDatasets.length > 0 ? (
+                          /* ── Multiple Tables: render summary + one TableWithTile per dataset ── */
+                          <div style={{ width: '100%' }}>
+                            {msg.multiSummary && (
+                              <div style={{
+                                marginBottom: '16px',
+                                fontSize: responsive.isMobile ? '13px' : '14px',
+                                lineHeight: 1.6,
+                                color: 'var(--color-text)',
+                                padding: '10px 14px',
+                                background: 'var(--color-surface-2, rgba(255,255,255,0.05))',
+                                borderRadius: '8px',
+                                borderLeft: '3px solid var(--color-accent, #D4AF37)',
+                              }}>
+                                {msg.multiSummary}
+                              </div>
+                            )}
+                            {msg.multipleDatasets.map((ds, dsIdx) => (
+                              <div key={dsIdx} style={{ marginBottom: dsIdx < msg.multipleDatasets!.length - 1 ? '24px' : 0 }}>
+                                <TableWithTile
+                                  rows={ds.rows}
+                                  title={ds.name}
+                                  htmlTableContent={ds.html}
+                                  totalCount={ds.totalCount}
+                                />
+                              </div>
+                            ))}
+                          </div>
+
                         ) : msg.tableData && msg.tableData.length > 0 ? (
                           /* ── Table: Render with TableWithTile component with toggle buttons for table/tile views ── */
                           <TableWithTile
@@ -3725,7 +4430,7 @@ export default function Home() {
                         )}
 
                         {/* Copy button for text bubbles only */}
-                        {!isAudio && !isGraphMsg && !(msg.tableData && msg.tableData.length > 0) && (
+                        {!isAudio && !isGraphMsg && !(msg.tableData && msg.tableData.length > 0) && !(msg.multipleDatasets && msg.multipleDatasets.length > 0) && (
                           <>
                             <button
                               className="copy-bubble-btn"
@@ -3787,12 +4492,14 @@ export default function Home() {
                           </>
                         )}
 
+
+
                       </div>
                     </div>
                   );
                 })}
 
-                {isLoading && (() => {
+                {isLoading && !(messages[messages.length - 1]?.role === "ai" && messages[messages.length - 1]?.streaming) && (() => {
                   const isDarkTheme = typeof window !== 'undefined' ? document.documentElement.getAttribute('data-theme') === 'dark' : (theme === 'dark');
                   return (
                     <div className="loading-indicator" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
@@ -3820,15 +4527,15 @@ export default function Home() {
                             <div key={textIdx} style={{
                               position: 'absolute',
                               opacity: 0,
-                              animation: 'cycle-text-5 10s infinite',
+                              animation: 'cycle-text-5 10s linear',
                               animationDelay: `${textIdx * 2}s`,
+                              animationFillMode: 'forwards',
                               whiteSpace: 'nowrap',
                               display: 'flex',
                               alignItems: 'center',
                               gap: '2px'
                             }}>
                               <span>{text}</span>
-                              {/* Animated dots attached to the text */}
                               <div style={{ display: 'flex', gap: '2px', alignItems: 'flex-end', height: '10px', paddingBottom: '2px' }}>
                                 {[0, 1, 2].map(i => (
                                   <span key={i} style={{
@@ -3840,13 +4547,41 @@ export default function Home() {
                               </div>
                             </div>
                           ))}
+                          {/* Final "Please wait" message that appears after 10s if still loading */}
+                          <div style={{
+                            position: 'absolute',
+                            opacity: 0,
+                            animation: 'fade-in-final 1s ease-out forwards',
+                            animationDelay: '10s',
+                            whiteSpace: 'nowrap',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '2px',
+                            paddingLeft: '16px'
+                          }}>
+                            <span>please wait</span>
+                            <div style={{ display: 'flex', gap: '2px', alignItems: 'flex-end', height: '10px', paddingBottom: '2px' }}>
+                              {[0, 1, 2].map(i => (
+                                <span key={i} style={{
+                                  display: "inline-block", width: 3, height: 3,
+                                  borderRadius: "50%", background: "currentColor",
+                                  animation: `bounce 1.2s ease-in-out ${i * 0.2}s infinite`,
+                                }} />
+                              ))}
+                            </div>
+                          </div>
                         </div>
                       </div>
                       <style>{`
                         @keyframes cycle-text-5 {
                           0% { opacity: 0; transform: translateY(10px); }
                           5%, 15% { opacity: 1; transform: translateY(0); }
-                          20%, 100% { opacity: 0; transform: translateY(-10px); }
+                          20% { opacity: 0; transform: translateY(-10px); }
+                          100% { opacity: 0; transform: translateY(-10px); }
+                        }
+                        @keyframes fade-in-final {
+                          from { opacity: 0; transform: translateY(10px); }
+                          to { opacity: 1; transform: translateY(0); }
                         }
                         @keyframes bounce {
                           0%, 100% { transform: translateY(0); }
@@ -3861,8 +4596,13 @@ export default function Home() {
             </div>
           )}
 
+          {/* Groups view */}
+          {!historyLoading && activeFeature === 'groups' && (
+            <GroupsChat createGroupTrigger={createGroupTrigger} groups={groups} onCreateGroup={handleCreateGroup} />
+          )}
+
           {/* Input footer — bottom bar after chat starts or while history loads (not duplicated on landing) */}
-          {(historyLoading || !isLanding) && renderChatInputFooter("default")}
+          {(historyLoading || (!isLanding && (activeFeature === 'chat' || activeFeature === 'groups' || activeFeature === 'archived'))) && renderChatInputFooter("default")}
 
           {/* Upgrade Plan Modal */}
           {showUpgradePlan && (
@@ -3990,7 +4730,8 @@ export default function Home() {
                   currentPlan={currentPlan}
                   profileName={loggedInUser || "My Account"}
                   subUserName={userIdFromUrl ?? loggedInUser ?? ""}
-                  externalUserId={loggedInUser ?? ""}
+                  externalUserId={userIdInt ? String(userIdInt) : (loggedInUser ?? "")}
+                  email={userEmail ?? ""}
                   onMobileSidebarOpenChange={(open) => setIsManageAccountMenuOpen(open)}
                 />
               </div>
@@ -4008,8 +4749,10 @@ export default function Home() {
               backgroundColor: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)'
             }}>
               <div style={{
-                background: 'var(--color-bg-sidebar)', padding: '24px', borderRadius: '16px',
-                width: '90%', maxWidth: '400px', border: '1px solid rgba(255,255,255,0.1)',
+                background: (typeof window !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark') ? 'var(--color-bg-sidebar)' : '#ffffff',
+                padding: '24px', borderRadius: '16px',
+                width: '90%', maxWidth: '400px',
+                border: (typeof window !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark') ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(0,0,0,0.1)',
                 boxShadow: '0 20px 25px -5px rgba(0,0,0,0.5)', textAlign: 'center'
               }}>
                 <h3 style={{ margin: '0 0 8px 0', fontSize: '1.25rem', fontWeight: 600 }}>Share Chat</h3>
@@ -4021,8 +4764,10 @@ export default function Home() {
                 <div style={{ textAlign: 'left', marginBottom: '8px', fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-primary)' }}>SHARE LINK</div>
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: '8px',
-                  background: 'rgba(0,0,0,0.2)', padding: '12px', borderRadius: '8px',
-                  border: '1px solid rgba(255,255,255,0.05)', marginBottom: '24px'
+                  background: (typeof window !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark') ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.05)',
+                  padding: '12px', borderRadius: '8px',
+                  border: (typeof window !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark') ? '1px solid rgba(255,255,255,0.05)' : '1px solid rgba(0,0,0,0.1)',
+                  marginBottom: '24px'
                 }}>
                   <input
                     readOnly
@@ -4035,22 +4780,38 @@ export default function Home() {
                   />
                   <button
                     onClick={() => {
-                      if (!isSharing && shareLink) navigator.clipboard.writeText(shareLink);
+                      if (!isSharing && shareLink) {
+                        navigator.clipboard.writeText(shareLink);
+                        setShareLinkCopied(true);
+                        setTimeout(() => setShareLinkCopied(false), 2000);
+                      }
                     }}
                     disabled={isSharing || !shareLink}
                     style={{
                       background: 'var(--color-primary)', border: 'none', borderRadius: '6px',
                       padding: '6px 12px', color: '#000', fontWeight: 600, cursor: 'pointer', fontSize: '0.75rem',
-                      opacity: (isSharing || !shareLink) ? 0.5 : 1
+                      opacity: (isSharing || !shareLink) ? 0.5 : 1,
+                      display: 'flex', alignItems: 'center', gap: '4px'
                     }}
-                  >Copy</button>
+                  >
+                    {shareLinkCopied ? (
+                      <>
+                        <IconCheck size={14} />
+                        Copied
+                      </>
+                    ) : (
+                      "Copy"
+                    )}
+                  </button>
                 </div>
 
                 {/* changes done by megnathan: Added Share via Code section with copy icon */}
                 <div style={{ textAlign: 'left', marginBottom: '8px', fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-primary)' }}>SHARE VIA CODE</div>
                 <div style={{
-                  background: 'rgba(0,0,0,0.2)', padding: '16px', borderRadius: '8px',
-                  border: '1px solid rgba(255,255,255,0.05)', marginBottom: '24px',
+                  background: (typeof window !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark') ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.05)',
+                  padding: '16px', borderRadius: '8px',
+                  border: (typeof window !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark') ? '1px solid rgba(255,255,255,0.05)' : '1px solid rgba(0,0,0,0.1)',
+                  marginBottom: '24px',
                   display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'center'
                 }}>
                   {shareCode ? (
@@ -4066,7 +4827,8 @@ export default function Home() {
                           setTimeout(() => setShareCodeCopied(false), 2000);
                         }}
                         style={{
-                          background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+                          background: (typeof window !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark') ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)',
+                          border: (typeof window !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark') ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(0,0,0,0.1)',
                           borderRadius: '8px', padding: '8px', color: 'var(--color-primary)', cursor: 'pointer',
                           display: 'flex', alignItems: 'center', justifyContent: 'center'
                         }}
@@ -4102,16 +4864,31 @@ export default function Home() {
 
           {/* changes done by megnathan: Added Import Modal */}
           {importModalOpen && (
-            <div style={{
-              position: 'fixed', inset: 0, zIndex: 9999,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              backgroundColor: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)'
-            }}>
-              <div style={{
-                background: 'var(--color-bg-sidebar)', padding: '24px', borderRadius: '16px',
-                width: '90%', maxWidth: '400px', border: '1px solid rgba(255,255,255,0.1)',
-                boxShadow: '0 20px 25px -5px rgba(0,0,0,0.5)', textAlign: 'center'
-              }}>
+            <div
+              style={{
+                position: 'fixed', inset: 0, zIndex: 9999,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                backgroundColor: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)',
+                pointerEvents: 'auto' // Ensure it captures all touches
+              }}
+              onClick={(e) => {
+                // Prevent backdrop clicks from doing anything
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+            >
+              <div
+                style={{
+                  background: (typeof window !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark') ? 'var(--color-bg-sidebar)' : '#ffffff',
+                  padding: '24px', borderRadius: '16px',
+                  width: '90%', maxWidth: '400px',
+                  border: (typeof window !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark') ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(0,0,0,0.1)',
+                  boxShadow: '0 20px 25px -5px rgba(0,0,0,0.5)', textAlign: 'center',
+                  position: 'relative',
+                  zIndex: 10000
+                }}
+                onClick={(e) => e.stopPropagation()} // Prevent click inside from reaching backdrop
+              >
                 <h3 style={{ margin: '0 0 8px 0', fontSize: '1.25rem', fontWeight: 600 }}>Import Chat via Code</h3>
                 <p style={{ margin: '0 0 20px 0', fontSize: '0.875rem', color: 'var(--color-text-dim)' }}>
                   Enter the 5-digit code to add a shared chat to your history.
@@ -4125,14 +4902,31 @@ export default function Home() {
                     placeholder="Enter the code"
                     className="import-code-input"
                     value={inputShareCode}
-                    onChange={(e) => setInputShareCode(e.target.value.replace(/[^0-9]/g, ""))}
+                    onChange={(e) => {
+                      setImportError(null);
+                      setInputShareCode(e.target.value.replace(/[^0-9]/g, ""));
+                    }}
                     style={{
-                      width: '100%', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.1)',
+                      width: '100%',
+                      background: (typeof window !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark') ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.05)',
+                      border: (typeof window !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark') ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(0,0,0,0.1)',
                       borderRadius: '8px', padding: '16px', color: 'var(--color-text)',
                       fontSize: '24px', textAlign: 'center', fontWeight: 800, letterSpacing: '8px',
                       outline: 'none'
                     }}
                   />
+                  {importError && (
+                    <div style={{
+                      color: '#ef4444',
+                      fontSize: '13px',
+                      fontWeight: 500,
+                      marginTop: '10px',
+                      textAlign: 'center',
+                      lineHeight: '1.4'
+                    }}>
+                      {importError}
+                    </div>
+                  )}
                   <style jsx>{`
                     .import-code-input::placeholder {
                       font-size: 16px;
@@ -4145,14 +4939,22 @@ export default function Home() {
 
                 <div style={{ display: 'flex', gap: '12px' }}>
                   <button
-                    onClick={() => setImportModalOpen(false)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setImportError(null);
+                      setInputShareCode("");
+                      setImportModalOpen(false);
+                    }}
                     style={{
                       flex: 1, padding: '12px', borderRadius: '8px', background: 'rgba(255,255,255,0.05)',
                       border: 'none', color: 'var(--color-text)', cursor: 'pointer', fontWeight: 500
                     }}
                   >Cancel</button>
                   <button
-                    onClick={handleImportByCode}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleImportByCode();
+                    }}
                     disabled={isImporting || inputShareCode.length !== 5}
                     style={{
                       flex: 1, padding: '12px', borderRadius: '8px', background: 'var(--color-primary)',

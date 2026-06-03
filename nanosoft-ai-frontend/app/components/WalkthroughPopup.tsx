@@ -30,6 +30,29 @@ const WALKTHROUGH_SLIDES: WalkthroughSlide[] = [
 export default function WalkthroughPopup() {
   const [currentSlide, setCurrentSlide] = useState(0);
   const [isOpen, setIsOpen] = useState(true);
+  const [visible, setVisible] = useState(false);  // drives enter animation
+  const [closing, setClosing] = useState(false);   // drives exit animation
+  const [slideKey, setSlideKey] = useState(0);     // forces slide re-animation
+
+  // Inject keyframes once into <head>
+  useEffect(() => {
+    if (document.getElementById("wt-keyframes")) return;
+    const s = document.createElement("style");
+    s.id = "wt-keyframes";
+    s.textContent = `
+      @keyframes wt-fade-in   { from{opacity:0}              to{opacity:1} }
+      @keyframes wt-modal-in  { from{opacity:0;transform:translate(-50%,-48%) scale(0.93)} to{opacity:1;transform:translate(-50%,-50%) scale(1)} }
+      @keyframes wt-modal-out { from{opacity:1;transform:translate(-50%,-50%) scale(1)}    to{opacity:0;transform:translate(-50%,-52%) scale(0.93)} }
+      @keyframes wt-slide-in  { from{opacity:0;transform:translateX(16px)}               to{opacity:1;transform:translateX(0)} }
+    `;
+    document.head.appendChild(s);
+  }, []);
+
+  // Trigger enter animation on next tick so browser paints first
+  useEffect(() => {
+    const t = setTimeout(() => setVisible(true), 10);
+    return () => clearTimeout(t);
+  }, []);
 
   // Auto-advance slides every 3 seconds
   useEffect(() => {
@@ -50,7 +73,7 @@ export default function WalkthroughPopup() {
   useEffect(() => {
     const sidebar = document.querySelector('.sidebar-shell');
     const mainContent = document.querySelector('[role="main"]') || document.querySelector('main');
-    
+
     if (isOpen) {
       if (sidebar) {
         (sidebar as HTMLElement).style.filter = "blur(6px)";
@@ -92,7 +115,8 @@ export default function WalkthroughPopup() {
   };
 
   const handleClose = () => {
-    setIsOpen(false);
+    setClosing(true);
+    setTimeout(() => setIsOpen(false), 270);
   };
 
   const slide = WALKTHROUGH_SLIDES[currentSlide];
@@ -108,13 +132,12 @@ export default function WalkthroughPopup() {
         data-walkthrough-overlay="true"
         style={{
           position: "fixed",
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
+          top: 0, left: 0, right: 0, bottom: 0,
           backgroundColor: "rgba(0, 0, 0, 0.5)",
           zIndex: 99998,
           backdropFilter: "blur(8px)",
+          opacity: visible && !closing ? 1 : 0,
+          transition: "opacity 0.28s ease",
         }}
         onClick={handleClose}
       />
@@ -138,6 +161,11 @@ export default function WalkthroughPopup() {
           overflow: "hidden",
           display: "flex",
           flexDirection: "column",
+          animation: closing
+            ? "wt-modal-out 0.27s cubic-bezier(0.4,0,1,1) forwards"
+            : visible
+              ? "wt-modal-in 0.35s cubic-bezier(0.22,1,0.36,1) forwards"
+              : "none",
         }}
       >
         {/* Header */}
@@ -199,6 +227,7 @@ export default function WalkthroughPopup() {
           }}
         >
           <img
+            key={slideKey}
             src={slide.imageSrc}
             alt={`Slide ${currentSlide + 1}`}
             style={{
@@ -210,6 +239,7 @@ export default function WalkthroughPopup() {
               borderRadius: "10px",
               border: `2px solid var(--color-primary)`,
               objectFit: "contain",
+              animation: "wt-slide-in 0.3s cubic-bezier(0.22,1,0.36,1) forwards",
             }}
             onError={(e) => {
               console.log("Image failed to load:", slide.imageSrc);
@@ -267,7 +297,10 @@ export default function WalkthroughPopup() {
             {WALKTHROUGH_SLIDES.map((_, idx) => (
               <button
                 key={idx}
-                onClick={() => setCurrentSlide(idx)}
+                onClick={() => {
+                  setCurrentSlide(idx);
+                  setSlideKey(k => k + 1);
+                }}
                 style={{
                   width: idx === currentSlide ? "24px" : "8px",
                   height: "8px",

@@ -103,7 +103,7 @@ async def generate_session_title(history: list) -> str:
 
 
 # ── Save session to PostgreSQL ──────────────────────────────────────────────
-async def save_session_to_postgres_service(session_id: str, user_name: str, history: list):
+async def save_session_to_postgres_service(session_id: str, user_name: str, history: list, group_name: str = None):
     """
     Saves chat session history + generated title to PostgreSQL (chat_sessions).
     Uses upsert on session_id (insert or update).
@@ -123,15 +123,16 @@ async def save_session_to_postgres_service(session_id: str, user_name: str, hist
             try:
                 cur.execute(
                     """
-                    INSERT INTO chat_sessions (session_id, user_name, chat_history, title, updated_at)
-                    VALUES (%s, %s, %s::jsonb, %s, NOW())
+                    INSERT INTO chat_sessions (session_id, user_name, chat_history, title, updated_at, group_name)
+                    VALUES (%s, %s, %s::jsonb, %s, NOW(), %s)
                     ON CONFLICT (session_id) DO UPDATE SET
                         user_name    = EXCLUDED.user_name,
                         chat_history = EXCLUDED.chat_history,
                         title        = EXCLUDED.title,
-                        updated_at   = NOW()
+                        updated_at   = NOW(),
+                        group_name   = EXCLUDED.group_name
                     """,
-                    (session_id, user_name, history_json, title),
+                    (session_id, user_name, history_json, title, group_name),
                 )
             except Exception as conflict_err:
                 if "unique or exclusion constraint" in str(conflict_err).lower() or "on_conflict" in str(conflict_err).lower():
@@ -144,18 +145,18 @@ async def save_session_to_postgres_service(session_id: str, user_name: str, hist
                         cur.execute(
                             """
                             UPDATE chat_sessions
-                            SET user_name = %s, chat_history = %s::jsonb, title = %s, updated_at = NOW()
+                            SET user_name = %s, chat_history = %s::jsonb, title = %s, updated_at = NOW(), group_name = %s
                             WHERE session_id = %s
                             """,
-                            (user_name, history_json, title, session_id),
+                            (user_name, history_json, title, group_name, session_id),
                         )
                     else:
                         cur.execute(
                             """
-                            INSERT INTO chat_sessions (session_id, user_name, chat_history, title, updated_at)
-                            VALUES (%s, %s, %s::jsonb, %s, NOW())
+                            INSERT INTO chat_sessions (session_id, user_name, chat_history, title, updated_at, group_name)
+                            VALUES (%s, %s, %s::jsonb, %s, NOW(), %s)
                             """,
-                            (session_id, user_name, history_json, title),
+                            (session_id, user_name, history_json, title, group_name),
                         )
                 else:
                     raise
@@ -346,3 +347,102 @@ async def get_public_chat_history(session_id: str, owner: str = None) -> list:
     except Exception as e:
         logger.error(f"❌ Failed to fetch public history | error={e}")
         return None
+
+
+async def create_folder(user_name: str, folder_name: str) -> bool:
+    """Create a new folder for a user."""
+    try:
+        conn = get_pool()
+        conn.rollback()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO "Groups_folderName" (user_name, folder_name, created_at)
+                VALUES (%s, %s, NOW())
+                ON CONFLICT (user_name, folder_name) DO NOTHING
+                """,
+                (user_name, folder_name),
+            )
+            conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"❌ Failed to create folder | user={user_name} | folder={folder_name} | error={e}", exc_info=True)
+        return False
+
+
+async def rename_folder(user_name: str, old_folder_name: str, new_folder_name: str) -> bool:
+    """Rename a folder and update all chats inside it."""
+    try:
+        conn = get_pool()
+        conn.rollback()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE "Groups_folderName"
+                SET folder_name = %s
+                WHERE user_name = %s AND folder_name = %s
+                """,
+                (new_folder_name, user_name, old_folder_name),
+            )
+            cur.execute(
+                """
+                UPDATE chat_sessions
+                SET group_name = %s
+                WHERE user_name = %s AND group_name = %s
+                """,
+                (new_folder_name, user_name, old_folder_name),
+            )
+            conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"❌ Failed to rename folder | user={user_name} | old={old_folder_name} | new={new_folder_name} | error={e}", exc_info=True)
+        return False
+
+
+async def delete_folder(user_name: str, folder_name: str) -> bool:
+    """Delete a folder and all chats inside it."""
+    try:
+        conn = get_pool()
+        conn.rollback()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                DELETE FROM "Groups_folderName"
+                WHERE user_name = %s AND folder_name = %s
+                """,
+                (user_name, folder_name),
+            )
+            cur.execute(
+                """
+                DELETE FROM chat_sessions
+                WHERE user_name = %s AND group_name = %s
+                """,
+                (user_name, folder_name),
+            )
+            conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"❌ Failed to delete folder | user={user_name} | folder={folder_name} | error={e}", exc_info=True)
+        return False
+
+
+async def get_folders(user_name: str) -> list:
+    """Get all folders for a user."""
+    try:
+        conn = get_pool()
+        conn.rollback()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT folder_name FROM "Groups_folderName"
+                WHERE user_name = %s
+                ORDER BY created_at DESC
+                """,
+                (user_name,),
+            )
+            rows = cur.fetchall()
+            conn.rollback()
+            return [row[0] for row in rows]
+    except Exception as e:
+        logger.error(f"❌ Failed to get folders | user={user_name} | error={e}", exc_info=True)
+        return []

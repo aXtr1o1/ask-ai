@@ -42,13 +42,20 @@ class QuotaFallbackService:
     
     def is_quota_error(self, error: Exception) -> bool:
         """
-        Treat ANY model failure as a fallback trigger.
-        This covers: quota exceeded, token limit, timeout,
-        internal model errors, network failures, etc.
+        Detect if the error is actually a quota or rate limit issue.
+        Triggers fallback menu only for 403, 429, or explicit quota errors.
         """
         error_str = str(error).lower()
-        logger.warning(f"⚠️ Model failure detected — triggering fallback: {error_str[:120]}")
-        return True
+        
+        # List of indicators for quota/rate limit issues
+        quota_indicators = ["403", "429", "quota", "rate limit", "rate_limit"]
+        
+        if any(indicator in error_str for indicator in quota_indicators):
+            logger.warning(f"⚠️ Quota/Rate Limit error detected — triggering fallback: {error_str[:120]}")
+            return True
+            
+        logger.error(f"❌ Actual Model/System error (not quota): {error_str}")
+        return False
     
     def get_quota_exceeded_message(self) -> str:
         """

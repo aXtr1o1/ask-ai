@@ -256,6 +256,28 @@ body {
   animation: goldShine 3s ease-in-out infinite;
 }
 
+/* ─── 4.1 TYPING-STYLE TITLE ANIMATION ─── */
+@keyframes titleReveal {
+  0% {
+    opacity: 0;
+    transform: translateX(-15px);
+    filter: blur(5px);
+    clip-path: inset(0 100% 0 0);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+    filter: blur(0);
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+.title-typing {
+  display: inline-block;
+  animation: titleReveal 0.8s cubic-bezier(0.19, 1, 0.22, 1) forwards;
+  vertical-align: middle;
+}
+
 /* Dropdown slide-down */
 @keyframes dropdownOpen {
   from {
@@ -4795,4 +4817,54 @@ body.upgrade-plan-open .main-content {
 * {
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
+}
+
+/* Keyword search provenance banner (match field breakdown) */
+.keyword-search-banner {
+  margin: 10px 0 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--color-border);
+  background: var(--color-primary-soft);
+  color: var(--color-text);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.keyword-match-breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.keyword-match-label {
+  font-weight: 600;
+  margin-right: 4px;
+}
+
+.keyword-match-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--color-bg-alt);
+  border: 1px solid var(--color-border);
+}
+
+.keyword-match-field {
+  font-weight: 500;
+}
+
+.keyword-match-count {
+  font-weight: 700;
+  color: var(--color-primary-strong, var(--color-primary));
+}
+
+.keyword-fallback-note {
+  margin-top: 8px;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
 }

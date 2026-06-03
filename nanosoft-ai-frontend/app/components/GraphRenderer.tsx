@@ -63,7 +63,8 @@ export function parseGraphData(text: string): GraphData | null {
     return inner as GraphData;
   } catch (error) {
     // Not JSON or not a graph response — return null, fall through to next handler
-    console.warn("⚠️ parseGraphData parse error:", error instanceof Error ? error.message : error);
+    // We don't log a warning here because this is called for all messages, 
+    // and normal text messages will naturally fail to parse as JSON.
     return null;
   }
 }

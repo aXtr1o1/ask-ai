@@ -31,7 +31,8 @@ async def get_sessions_for_user(user_name: str) -> list:
             """
             SELECT session_id, title, created_at, updated_at,
                    COALESCE(is_pinned, FALSE)  AS is_pinned,
-                   COALESCE(is_archived, FALSE) AS is_archived
+                   COALESCE(is_archived, FALSE) AS is_archived,
+                   group_name
             FROM chat_sessions
             WHERE user_name = %s
             ORDER BY COALESCE(is_pinned, FALSE) DESC, updated_at DESC
@@ -52,6 +53,7 @@ async def get_sessions_for_user(user_name: str) -> list:
                 "updated_at":  row[cols.index("updated_at")].isoformat() if row[cols.index("updated_at")] else None,
                 "is_pinned":   bool(row[cols.index("is_pinned")]),
                 "is_archived": bool(row[cols.index("is_archived")]),
+                "group_name":  row[cols.index("group_name")],
             }
             for row in rows
         ]
