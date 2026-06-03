@@ -58,6 +58,7 @@ interface Message {
   // ← Multiple datasets (type="multiple_datasets" from backend)
   multipleDatasets?: MultiDatasetView[];
   multiSummary?: string;  // ← context_summary from the backend
+  isSpaceBooking?: boolean;   // ← Track if message belongs to Space Booking session
 }
 
 interface ChatSession { id: string; title: string; createdAt: number; updatedAt?: number; isPinned?: boolean; isArchived?: boolean; group_name?: string; }
@@ -1146,8 +1147,11 @@ export default function Home() {
   const [isSpaceBookingModalOpen, setIsSpaceBookingModalOpen] = useState<boolean>(false);
   const [isComplaints, setIsComplaints] = useState<boolean>(false);
   const [isComplaintsModalOpen, setIsComplaintsModalOpen] = useState<boolean>(false);
+  const [showLockedPopup, setShowLockedPopup] = useState<boolean>(false);
 
+  const isSpaceBookingRef = useRef(isSpaceBooking);
   useEffect(() => {
+    isSpaceBookingRef.current = isSpaceBooking;
     if (isSpaceBooking) {
       setIsSpaceBookingModalOpen(true);
     }
@@ -2301,6 +2305,7 @@ export default function Home() {
                       text: multiSummary!,
                       streaming: false,
                       originalText: finalText,
+                      isSpaceBooking: isSpaceBookingRef.current,
                       ...(multipleDatasets.length > 0 ? { multipleDatasets, multiSummary } : {}),
                     };
                   }
@@ -2350,7 +2355,8 @@ export default function Home() {
                 chartType: chartType,              // ← Store chart type
                 originalText: finalText,           // ← Store original raw response before HTML processing
                 tableData: tableData,              // ← Store table rows
-                tableTitle: tableTitle              // ← Store table title
+                tableTitle: tableTitle,             // ← Store table title
+                isSpaceBooking: isSpaceBookingRef.current // ← Store space booking state
               };
             }
             // Persist to per-session store so switching sessions keeps history
@@ -2385,10 +2391,10 @@ export default function Home() {
             const l = u.length - 1;
             // If last message is already our streaming AI bubble → update it
             if (u[l]?.role === "ai" && u[l]?.streaming === true) {
-              u[l] = { ...u[l], text: displayText, streaming: true };  // ← Preserve chartType
+              u[l] = { ...u[l], text: displayText, streaming: true, isSpaceBooking: isSpaceBookingRef.current };  // ← Preserve chartType
             } else {
               // First chunk → create the AI bubble now (only once) with current chartType
-              u.push({ role: "ai", text: displayText, streaming: true, chartType: chartType });
+              u.push({ role: "ai", text: displayText, streaming: true, chartType: chartType, isSpaceBooking: isSpaceBookingRef.current });
             }
             return u;
           });
@@ -2617,6 +2623,7 @@ export default function Home() {
     setMessages([]);
     accRef.current = "";
     setIsLoading(false);
+    setIsSpaceBooking(false); // Reset space booking state when starting a new chat
 
     const newSessionId = generateSessionId();
     setSessionId(newSessionId);
@@ -2749,10 +2756,21 @@ export default function Home() {
               };
             });
             const multipleDatasets = parsedMulti.filter((ds) => ds.rows.length > 0);
+            const isSpaceBooking = multipleDatasets.some(ds =>
+              ds.rows.some(row =>
+                Object.keys(row).some(col =>
+                  typeof col === 'string' && (
+                    col.toUpperCase() === "SPOTIDPK" ||
+                    col.toUpperCase() === "SPOTCODE"
+                  )
+                )
+              )
+            );
             return {
               ...m,
               text: multiSummary,
               originalText: text,
+              isSpaceBooking,
               ...(multipleDatasets.length > 0 ? { multipleDatasets, multiSummary } : {}),
             };
           }
@@ -2769,8 +2787,16 @@ export default function Home() {
             const tableHTML = renderLargeDataset(text);
             if (tableHTML) {
               const rows = extractTableRows(tableHTML);
+              const isSpaceBooking = rows.some(row =>
+                Object.keys(row).some(col =>
+                  typeof col === 'string' && (
+                    col.toUpperCase() === "SPOTIDPK" ||
+                    col.toUpperCase() === "SPOTCODE"
+                  )
+                )
+              );
               // ✅ Set originalText = raw JSON so future saves preserve it
-              return { ...m, text: tableHTML, originalText: text, tableData: rows, tableTitle: "Results" };
+              return { ...m, text: tableHTML, originalText: text, tableData: rows, tableTitle: "Results", isSpaceBooking };
             }
           }
         }
@@ -2787,8 +2813,16 @@ export default function Home() {
         console.log("✅ [HISTORY] Message already HTML formatted - extracting table data");
         const rows = extractTableRows(text);
         if (rows.length > 0) {
+          const isSpaceBooking = rows.some(row =>
+            Object.keys(row).some(col =>
+              typeof col === 'string' && (
+                col.toUpperCase() === "SPOTIDPK" ||
+                col.toUpperCase() === "SPOTCODE"
+              )
+            )
+          );
           // ✅ originalText stays as the HTML — no raw JSON available here
-          return { ...m, text, originalText: text, tableData: rows, tableTitle: "Results" };
+          return { ...m, text, originalText: text, tableData: rows, tableTitle: "Results", isSpaceBooking };
         }
         return { ...m, originalText: text };
       }
@@ -2803,8 +2837,16 @@ export default function Home() {
         console.log("✅ [HISTORY] Successfully rendered as table structure");
         const rows = extractTableRows(tableHTML);
         if (rows.length > 0) {
+          const isSpaceBooking = rows.some(row =>
+            Object.keys(row).some(col =>
+              typeof col === 'string' && (
+                col.toUpperCase() === "SPOTIDPK" ||
+                col.toUpperCase() === "SPOTCODE"
+              )
+            )
+          );
           // ✅ originalText = raw text from DB so future saves re-parse correctly
-          return { ...m, text: tableHTML, originalText: text, tableData: rows, tableTitle: "Results" };
+          return { ...m, text: tableHTML, originalText: text, tableData: rows, tableTitle: "Results", isSpaceBooking };
         }
         return { ...m, text: tableHTML, originalText: text };
       }
@@ -2815,7 +2857,15 @@ export default function Home() {
         // Check if formatOutput produced an HTML table
         const rows = extractTableRows(formattedText);
         if (rows.length > 0) {
-          return { ...m, text: formattedText, originalText: text, tableData: rows, tableTitle: "Results" };
+          const isSpaceBooking = rows.some(row =>
+            Object.keys(row).some(col =>
+              typeof col === 'string' && (
+                col.toUpperCase() === "SPOTIDPK" ||
+                col.toUpperCase() === "SPOTCODE"
+              )
+            )
+          );
+          return { ...m, text: formattedText, originalText: text, tableData: rows, tableTitle: "Results", isSpaceBooking };
         }
         // If the formatted text has raw HTML tags, decode them
         if (formattedText.includes('<div') || formattedText.includes('&lt;')) {
@@ -2842,6 +2892,8 @@ export default function Home() {
     if (responsive.isMobile) {
       setSidebarOpen(false);
     }
+
+    setIsSpaceBooking(false); // Reset space booking state when switching session
 
     // Capture the currently active session ID
     const currentSid = sessionIdRef.current;
@@ -3359,6 +3411,8 @@ export default function Home() {
               setIsSpaceBooking={setIsSpaceBooking}
               isComplaints={isComplaints}
               setIsComplaints={setIsComplaints}
+              isChatStarted={messages.length > 0}
+              onLockedClick={() => setShowLockedPopup(true)}
             >
               {/* changes done by megnathan: Used correct CSS classes for perfect Ghost Text alignment */}
               <div className="main-input-stack" style={{ flexGrow: 1 }}>
@@ -4443,6 +4497,7 @@ export default function Home() {
                                   title={ds.name}
                                   htmlTableContent={ds.html}
                                   totalCount={ds.totalCount}
+                                  showOnlyTiles={msg.isSpaceBooking}
                                 />
                               </div>
                             ))}
@@ -4454,6 +4509,7 @@ export default function Home() {
                             rows={msg.tableData}
                             title={msg.tableTitle || "Data"}
                             htmlTableContent={msg.text}
+                            showOnlyTiles={msg.isSpaceBooking}
                           />
 
                         ) : (
@@ -5017,6 +5073,88 @@ export default function Home() {
           )}
           {isComplaintsModalOpen && (
             <ComplaintsModal onClose={() => setIsComplaintsModalOpen(false)} />
+          )}
+          {showLockedPopup && (
+            <div
+              style={{
+                position: "fixed",
+                inset: 0,
+                backgroundColor: "rgba(0, 0, 0, 0.55)",
+                backdropFilter: "blur(6px)",
+                WebkitBackdropFilter: "blur(6px)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 30000,
+                padding: "16px",
+              }}
+            >
+              <div
+                style={{
+                  width: "100%",
+                  maxWidth: "380px",
+                  background: "var(--glass-bg, #1a1a1a)",
+                  border: "1px solid rgba(255, 255, 255, 0.1)",
+                  borderRadius: "16px",
+                  boxShadow: "0 15px 35px rgba(0, 0, 0, 0.4)",
+                  padding: "20px",
+                  textAlign: "center",
+                  color: "#ffffff",
+                }}
+              >
+                <h4 style={{ margin: "0 0 8px 0", fontSize: "16px", fontWeight: 700 }}>
+                  Mode is Locked
+                </h4>
+                <p style={{ margin: "0 0 20px 0", fontSize: "13px", color: "rgba(255, 255, 255, 0.7)", lineHeight: "1.4" }}>
+                  This chat session is locked to your current mode. To switch modes, please start a new chat.
+                </p>
+                <div style={{ display: "flex", gap: "10px" }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowLockedPopup(false);
+                      handleNewChat();
+                    }}
+                    style={{
+                      flex: 1,
+                      background: "var(--color-primary, #d4af37)",
+                      color: "#000000",
+                      border: "none",
+                      borderRadius: "8px",
+                      padding: "10px",
+                      fontSize: "13px",
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      transition: "opacity 0.2s",
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.opacity = "0.9"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
+                  >
+                    Create New Chat
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowLockedPopup(false)}
+                    style={{
+                      flex: 1,
+                      background: "transparent",
+                      color: "#ffffff",
+                      border: "1px solid rgba(255, 255, 255, 0.2)",
+                      borderRadius: "8px",
+                      padding: "10px",
+                      fontSize: "13px",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      transition: "background 0.2s",
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255, 255, 255, 0.05)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
         </div>
       </div>

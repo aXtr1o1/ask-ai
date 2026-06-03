@@ -18,6 +18,10 @@ interface SpaceBookingProps {
   // Complaints state
   isComplaints: boolean;
   setIsComplaints: (val: boolean) => void;
+
+  // Chat locking state
+  isChatStarted?: boolean;
+  onLockedClick?: () => void;
 }
 
 export default function SpaceBooking({
@@ -26,6 +30,8 @@ export default function SpaceBooking({
   setIsSpaceBooking,
   isComplaints,
   setIsComplaints,
+  isChatStarted = false,
+  onLockedClick,
 }: SpaceBookingProps) {
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -231,27 +237,39 @@ export default function SpaceBooking({
               display: "flex",
               alignItems: "center",
               gap: "8px",
-              background: "var(--color-primary-soft, rgba(212, 175, 55, 0.15))",
-              border: "1px solid var(--color-primary, rgba(212, 175, 55, 0.3))",
+              background: isChatStarted
+                ? "rgba(255, 255, 255, 0.08)"
+                : "var(--color-primary-soft, rgba(212, 175, 55, 0.15))",
+              border: isChatStarted
+                ? "1px solid rgba(255, 255, 255, 0.12)"
+                : "1px solid var(--color-primary, rgba(212, 175, 55, 0.3))",
               borderRadius: "20px",
               padding: "4px 12px",
               fontSize: "12px",
               fontWeight: 500,
-              color: "var(--tile-label-color, #F7EF8A)",
+              color: isChatStarted
+                ? "#a0a0a0"
+                : "var(--tile-label-color, #F7EF8A)",
               cursor: "pointer",
             }}
-            onClick={() => setIsSpaceBooking(false)}
-            title="Click to turn off Space Booking mode"
+            onClick={() => {
+              if (isChatStarted) {
+                onLockedClick?.();
+              } else {
+                setIsSpaceBooking(false);
+              }
+            }}
+            title={isChatStarted ? "Mode is locked for this chat" : "Click to turn off Space Booking mode"}
           >
-            <IconCalendar size={14} style={{ color: "var(--tile-label-color, #F7EF8A)" }} />
+            <IconCalendar size={14} style={{ color: isChatStarted ? "#a0a0a0" : "var(--tile-label-color, #F7EF8A)" }} />
             <span>Space Booking</span>
             <span
               style={{
                 width: "6px",
                 height: "6px",
                 borderRadius: "50%",
-                backgroundColor: "var(--tile-label-color, #F7EF8A)",
-                boxShadow: "0 0 8px var(--tile-label-color, #F7EF8A)",
+                backgroundColor: isChatStarted ? "#a0a0a0" : "var(--tile-label-color, #F7EF8A)",
+                boxShadow: isChatStarted ? "none" : "0 0 8px var(--tile-label-color, #F7EF8A)",
                 marginLeft: "2px",
               }}
             />
@@ -273,27 +291,39 @@ export default function SpaceBooking({
               display: "flex",
               alignItems: "center",
               gap: "8px",
-              background: "var(--color-primary-soft, rgba(212, 175, 55, 0.15))",
-              border: "1px solid var(--color-primary, rgba(212, 175, 55, 0.3))",
+              background: isChatStarted
+                ? "rgba(255, 255, 255, 0.08)"
+                : "var(--color-primary-soft, rgba(212, 175, 55, 0.15))",
+              border: isChatStarted
+                ? "1px solid rgba(255, 255, 255, 0.12)"
+                : "1px solid var(--color-primary, rgba(212, 175, 55, 0.3))",
               borderRadius: "20px",
               padding: "4px 12px",
               fontSize: "12px",
               fontWeight: 500,
-              color: "var(--tile-label-color, #F7EF8A)",
+              color: isChatStarted
+                ? "#a0a0a0"
+                : "var(--tile-label-color, #F7EF8A)",
               cursor: "pointer",
             }}
-            onClick={() => setIsComplaints(false)}
-            title="Click to turn off Complaints mode"
+            onClick={() => {
+              if (isChatStarted) {
+                onLockedClick?.();
+              } else {
+                setIsComplaints(false);
+              }
+            }}
+            title={isChatStarted ? "Mode is locked for this chat" : "Click to turn off Complaints mode"}
           >
-            <IconMessageReport size={14} style={{ color: "var(--tile-label-color, #F7EF8A)" }} />
+            <IconMessageReport size={14} style={{ color: isChatStarted ? "#a0a0a0" : "var(--tile-label-color, #F7EF8A)" }} />
             <span>Complaints</span>
             <span
               style={{
                 width: "6px",
                 height: "6px",
                 borderRadius: "50%",
-                backgroundColor: "var(--tile-label-color, #F7EF8A)",
-                boxShadow: "0 0 8px var(--tile-label-color, #F7EF8A)",
+                backgroundColor: isChatStarted ? "#a0a0a0" : "var(--tile-label-color, #F7EF8A)",
+                boxShadow: isChatStarted ? "none" : "0 0 8px var(--tile-label-color, #F7EF8A)",
                 marginLeft: "2px",
               }}
             />

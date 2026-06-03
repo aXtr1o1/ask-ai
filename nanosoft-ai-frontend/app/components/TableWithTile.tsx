@@ -14,6 +14,7 @@ interface TableWithTileProps {
   htmlTableContent?: string; // Old HTML table format
   /** When set, pagination shows "Showing X of totalCount" (preview of a larger result set). */
   totalCount?: number;
+  showOnlyTiles?: boolean;
 }
 
 const TableWithTile = React.memo(function TableWithTile({
@@ -22,6 +23,7 @@ const TableWithTile = React.memo(function TableWithTile({
   title = "Data",
   htmlTableContent,
   totalCount,
+  showOnlyTiles = false,
 }: TableWithTileProps) {
   const responsive = useResponsive();
   const tableConfig = getResponsiveTable(responsive.screen);
@@ -37,7 +39,14 @@ const TableWithTile = React.memo(function TableWithTile({
   const tileFieldBorder = "var(--tile-field-border, 1px solid rgba(148, 163, 184, 0.25))";
   const tileFieldLabelColor = "var(--tile-field-label, #0f172a)";
   const tileFieldValueColor = "var(--tile-field-value, #1f2937)";
-  const [viewMode, setViewMode] = useState<"table" | "tile">("table");
+  const [viewMode, setViewMode] = useState<"table" | "tile">(showOnlyTiles ? "tile" : "table");
+
+  useEffect(() => {
+    if (showOnlyTiles) {
+      setViewMode("tile");
+    }
+  }, [showOnlyTiles]);
+
   const [page, setPage] = useState(0);
   const LIMIT = 100;
 
@@ -191,11 +200,11 @@ const TableWithTile = React.memo(function TableWithTile({
 
     // Show toast notification
     const isDark = document.documentElement.getAttribute("data-theme") !== "light";
-    const bg       = isDark ? "rgba(28, 28, 30, 0.97)"  : "rgba(255, 255, 255, 0.97)";
-    const border    = isDark ? "rgba(212, 175, 55, 0.5)" : "rgba(180, 140, 30, 0.4)";
-    const textColor = isDark ? "#ffffff"                  : "#1a1a1a";
-    const accent    = isDark ? "#D4AF37"                  : "#9A7B20";
-    const shadow    = isDark ? "0 8px 32px rgba(0,0,0,0.5)" : "0 8px 32px rgba(0,0,0,0.15)";
+    const bg = isDark ? "rgba(28, 28, 30, 0.97)" : "rgba(255, 255, 255, 0.97)";
+    const border = isDark ? "rgba(212, 175, 55, 0.5)" : "rgba(180, 140, 30, 0.4)";
+    const textColor = isDark ? "#ffffff" : "#1a1a1a";
+    const accent = isDark ? "#D4AF37" : "#9A7B20";
+    const shadow = isDark ? "0 8px 32px rgba(0,0,0,0.5)" : "0 8px 32px rgba(0,0,0,0.15)";
 
     const toast = document.createElement("div");
     toast.style.cssText = `
@@ -221,7 +230,7 @@ const TableWithTile = React.memo(function TableWithTile({
       white-space: nowrap;
       backdrop-filter: blur(8px);
     `;
-    
+
     /* changes done by megnathan: Vary toast message based on whether save is confirmed or just started */
     if (isFallback) {
       toast.innerHTML = `<span style="color:${accent};font-size:18px;">ℹ</span> <span>Download started...</span>`;
@@ -260,135 +269,137 @@ const TableWithTile = React.memo(function TableWithTile({
       {/* Table content with buttons inside */}
       <div className="table-with-tile" style={{ marginTop: 0, position: 'relative' }}>
         {/* Toggle buttons positioned at top - right corner INSIDE the border */}
-        <div style={toggleContainerStyle}>
-          {/* Table View Button (Left) - Toggle to Table */}
-          <button
-            onClick={() => setViewMode("table")}
-            title="Switch to Table View"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: '4px 8px',
-              borderRadius: '6px',
-              background: viewMode === "table"
-                ? 'linear-gradient(180deg, #ae8625 0%, #f7ef8a 35%, #d2ac47 65%, #edc967 100%)'
-                : 'rgba(174, 134, 37, 0.3)',
-              color: '#1f2937',
-              border: '1px solid #d4af37',
-              cursor: 'pointer',
-              fontSize: '11px',
-              fontWeight: 600,
-              transition: 'all 0.2s ease-in-out',
-              backdropFilter: 'blur(8px)',
-              transform: 'scale(1)',
-              opacity: viewMode === "table" ? 1 : 0.6,
-              boxShadow: viewMode === "table"
-                ? '0 0 12px rgba(212, 175, 55, 0.6), inset 0 0 8px rgba(255, 255, 255, 0.3)'
-                : 'none',
-            }}
-            onMouseDown={e => {
-              (e.target as HTMLElement).style.transform = 'scale(0.95)';
-            }}
-            onMouseUp={e => {
-              (e.target as HTMLElement).style.transform = 'scale(1)';
-            }}
-          >
-            <span style={{
-              display: 'flex',
-              alignItems: 'center',
-              textShadow: viewMode === "table" ? '0 0 8px rgba(255, 255, 255, 0.8)' : 'none',
-            }}>
-              <IconList size={14} />
-            </span>
-          </button>
+        {!showOnlyTiles && (
+          <div style={toggleContainerStyle}>
+            {/* Table View Button (Left) - Toggle to Table */}
+            <button
+              onClick={() => setViewMode("table")}
+              title="Switch to Table View"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '4px 8px',
+                borderRadius: '6px',
+                background: viewMode === "table"
+                  ? 'linear-gradient(180deg, #ae8625 0%, #f7ef8a 35%, #d2ac47 65%, #edc967 100%)'
+                  : 'rgba(174, 134, 37, 0.3)',
+                color: '#1f2937',
+                border: '1px solid #d4af37',
+                cursor: 'pointer',
+                fontSize: '11px',
+                fontWeight: 600,
+                transition: 'all 0.2s ease-in-out',
+                backdropFilter: 'blur(8px)',
+                transform: 'scale(1)',
+                opacity: viewMode === "table" ? 1 : 0.6,
+                boxShadow: viewMode === "table"
+                  ? '0 0 12px rgba(212, 175, 55, 0.6), inset 0 0 8px rgba(255, 255, 255, 0.3)'
+                  : 'none',
+              }}
+              onMouseDown={e => {
+                (e.target as HTMLElement).style.transform = 'scale(0.95)';
+              }}
+              onMouseUp={e => {
+                (e.target as HTMLElement).style.transform = 'scale(1)';
+              }}
+            >
+              <span style={{
+                display: 'flex',
+                alignItems: 'center',
+                textShadow: viewMode === "table" ? '0 0 8px rgba(255, 255, 255, 0.8)' : 'none',
+              }}>
+                <IconList size={14} />
+              </span>
+            </button>
 
-          {/* Tile View Button (Right) - Toggle to Tile */}
-          <button
-            onClick={() => setViewMode("tile")}
-            title="Switch to Tile View"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: '4px 8px',
-              borderRadius: '6px',
-              background: viewMode === "tile"
-                ? 'linear-gradient(180deg, #ae8625 0%, #f7ef8a 35%, #d2ac47 65%, #edc967 100%)'
-                : 'rgba(174, 134, 37, 0.3)',
-              color: '#1f2937',
-              border: '1px solid #d4af37',
-              cursor: 'pointer',
-              fontSize: '11px',
-              fontWeight: 600,
-              transition: 'all 0.2s ease-in-out',
-              backdropFilter: 'blur(8px)',
-              transform: 'scale(1)',
-              opacity: viewMode === "tile" ? 1 : 0.6,
-              boxShadow: viewMode === "tile"
-                ? '0 0 12px rgba(212, 175, 55, 0.6), inset 0 0 8px rgba(255, 255, 255, 0.3)'
-                : 'none',
-            }}
-            onMouseDown={e => {
-              (e.target as HTMLElement).style.transform = 'scale(0.95)';
-            }}
-            onMouseUp={e => {
-              (e.target as HTMLElement).style.transform = 'scale(1)';
-            }}
-          >
-            <span style={{
-              display: 'flex',
-              alignItems: 'center',
-              textShadow: viewMode === "tile" ? '0 0 8px rgba(255, 255, 255, 0.8)' : 'none',
-            }}>
-              <IconLayoutGrid size={14} />
-            </span>
-          </button>
+            {/* Tile View Button (Right) - Toggle to Tile */}
+            <button
+              onClick={() => setViewMode("tile")}
+              title="Switch to Tile View"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '4px 8px',
+                borderRadius: '6px',
+                background: viewMode === "tile"
+                  ? 'linear-gradient(180deg, #ae8625 0%, #f7ef8a 35%, #d2ac47 65%, #edc967 100%)'
+                  : 'rgba(174, 134, 37, 0.3)',
+                color: '#1f2937',
+                border: '1px solid #d4af37',
+                cursor: 'pointer',
+                fontSize: '11px',
+                fontWeight: 600,
+                transition: 'all 0.2s ease-in-out',
+                backdropFilter: 'blur(8px)',
+                transform: 'scale(1)',
+                opacity: viewMode === "tile" ? 1 : 0.6,
+                boxShadow: viewMode === "tile"
+                  ? '0 0 12px rgba(212, 175, 55, 0.6), inset 0 0 8px rgba(255, 255, 255, 0.3)'
+                  : 'none',
+              }}
+              onMouseDown={e => {
+                (e.target as HTMLElement).style.transform = 'scale(0.95)';
+              }}
+              onMouseUp={e => {
+                (e.target as HTMLElement).style.transform = 'scale(1)';
+              }}
+            >
+              <span style={{
+                display: 'flex',
+                alignItems: 'center',
+                textShadow: viewMode === "tile" ? '0 0 8px rgba(255, 255, 255, 0.8)' : 'none',
+              }}>
+                <IconLayoutGrid size={14} />
+              </span>
+            </button>
 
-          {/* Download Button */}
-          <button
-            onClick={handleDownload}
-            title="Download data"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: '4px 8px',
-              borderRadius: '6px',
-              background: 'rgba(174, 134, 37, 0.3)',
-              color: '#1f2937',
-              border: '1px solid #d4af37',
-              cursor: 'pointer',
-              fontSize: '11px',
-              fontWeight: 600,
-              transition: 'all 0.2s ease-in-out',
-              backdropFilter: 'blur(8px)',
-              transform: 'scale(1)',
-              opacity: 0.8,
-            }}
-            onMouseDown={e => {
-              (e.target as HTMLElement).style.transform = 'scale(0.95)';
-            }}
-            onMouseUp={e => {
-              (e.target as HTMLElement).style.transform = 'scale(1)';
-            }}
-            onMouseEnter={e => {
-              (e.currentTarget as HTMLElement).style.opacity = '1';
-              (e.currentTarget as HTMLElement).style.boxShadow = '0 0 12px rgba(212, 175, 55, 0.6)';
-            }}
-            onMouseLeave={e => {
-              (e.currentTarget as HTMLElement).style.opacity = '0.8';
-              (e.currentTarget as HTMLElement).style.boxShadow = 'none';
-            }}
-          >
-            <span style={{
-              display: 'flex',
-              alignItems: 'center',
-            }}>
-              <IconDownload size={14} />
-            </span>
-          </button>
-        </div>
+            {/* Download Button */}
+            <button
+              onClick={handleDownload}
+              title="Download data"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '4px 8px',
+                borderRadius: '6px',
+                background: 'rgba(174, 134, 37, 0.3)',
+                color: '#1f2937',
+                border: '1px solid #d4af37',
+                cursor: 'pointer',
+                fontSize: '11px',
+                fontWeight: 600,
+                transition: 'all 0.2s ease-in-out',
+                backdropFilter: 'blur(8px)',
+                transform: 'scale(1)',
+                opacity: 0.8,
+              }}
+              onMouseDown={e => {
+                (e.target as HTMLElement).style.transform = 'scale(0.95)';
+              }}
+              onMouseUp={e => {
+                (e.target as HTMLElement).style.transform = 'scale(1)';
+              }}
+              onMouseEnter={e => {
+                (e.currentTarget as HTMLElement).style.opacity = '1';
+                (e.currentTarget as HTMLElement).style.boxShadow = '0 0 12px rgba(212, 175, 55, 0.6)';
+              }}
+              onMouseLeave={e => {
+                (e.currentTarget as HTMLElement).style.opacity = '0.8';
+                (e.currentTarget as HTMLElement).style.boxShadow = 'none';
+              }}
+            >
+              <span style={{
+                display: 'flex',
+                alignItems: 'center',
+              }}>
+                <IconDownload size={14} />
+              </span>
+            </button>
+          </div>
+        )}
 
         <div className="content-shell" style={{ paddingTop: 0 }}>
           <div className="data-view-shell" style={{
