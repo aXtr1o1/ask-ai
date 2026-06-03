@@ -988,7 +988,6 @@ function generateSessionId(): string {
 // Chat history will be implemented later
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
-
 const IconPlus = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
     <path d="M12 5v14M5 12h14" />
@@ -2060,7 +2059,6 @@ export default function Home() {
     setShareLink("");
     setShareModalOpen(true); // Open modal immediately
     setIsSharing(true);      // Show loading inside modal
-
     try {
       // 1. Force save the current history to DB first
       const currentMsgs = sessionMessagesRef.current.get(sid) || messages;
@@ -3193,8 +3191,6 @@ export default function Home() {
       timestamp: Date.now()
     }));
 
-    setIsSpaceBooking(false);
-
     setIsLoading(true);
   };
 
@@ -3265,8 +3261,6 @@ export default function Home() {
       group_name: selectedGroupName,
       timestamp: Date.now()
     }));
-
-    setIsSpaceBooking(false);
 
     setIsLoading(true);
   };
@@ -3661,7 +3655,6 @@ export default function Home() {
                       <IconUser size={18} />
                       <span>Manage Account</span>
                     </button>
-
                   </div>
                 </div>
               </div>
