@@ -22,6 +22,9 @@ import GroupsChat, { FolderListItem, ChatListItem } from "./components/GroupsCha
 import { useGhostInputCompletion } from "./hooks/useGhostInputCompletion";
 import { recordPromptForGhostHistory, ghostPromptHistoryStorageKey } from "./lib/ghostInputCompletion";
 import SpaceBooking from "./components/Bookings/spacebooking";
+import SpaceBookingModal from "./components/Bookings/SpaceBookingModal";
+import ComplaintsModal from "./components/Bookings/ComplaintsModal";
+
 /* changes done by megnathan: Cleaned up icon imports to avoid conflicts with local definitions */
 import {
   IconUser, IconMicrophone, IconPlayerPlay, IconPlayerPause,
@@ -1141,6 +1144,21 @@ export default function Home() {
 
   // SpaceBooking active feature states
   const [isSpaceBooking, setIsSpaceBooking] = useState<boolean>(false);
+  const [isSpaceBookingModalOpen, setIsSpaceBookingModalOpen] = useState<boolean>(false);
+  const [isComplaints, setIsComplaints] = useState<boolean>(false);
+  const [isComplaintsModalOpen, setIsComplaintsModalOpen] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (isSpaceBooking) {
+      setIsSpaceBookingModalOpen(true);
+    }
+  }, [isSpaceBooking]);
+
+  useEffect(() => {
+    if (isComplaints) {
+      setIsComplaintsModalOpen(true);
+    }
+  }, [isComplaints]);
   const [activeFeature, setActiveFeature] = useState<'chat' | 'archived' | 'groups'>('chat');
   const [showFeaturePlaceholder, setShowFeaturePlaceholder] = useState<boolean>(false);
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
@@ -3345,6 +3363,8 @@ export default function Home() {
             <SpaceBooking
               isSpaceBooking={isSpaceBooking}
               setIsSpaceBooking={setIsSpaceBooking}
+              isComplaints={isComplaints}
+              setIsComplaints={setIsComplaints}
             >
               {/* changes done by megnathan: Used correct CSS classes for perfect Ghost Text alignment */}
               <div className="main-input-stack" style={{ flexGrow: 1 }}>
@@ -4998,6 +5018,12 @@ export default function Home() {
                 </div>
               </div>
             </div>
+          )}
+          {isSpaceBookingModalOpen && (
+            <SpaceBookingModal onClose={() => setIsSpaceBookingModalOpen(false)} />
+          )}
+          {isComplaintsModalOpen && (
+            <ComplaintsModal onClose={() => setIsComplaintsModalOpen(false)} />
           )}
         </div>
       </div>
