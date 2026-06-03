@@ -21,6 +21,7 @@ import GroupsChat, { FolderListItem, ChatListItem } from "./components/GroupsCha
 /* changes done by megnathan: Added imports for the new Ghost Completion feature */
 import { useGhostInputCompletion } from "./hooks/useGhostInputCompletion";
 import { recordPromptForGhostHistory, ghostPromptHistoryStorageKey } from "./lib/ghostInputCompletion";
+import SpaceBooking from "./components/Bookings/spacebooking";
 /* changes done by megnathan: Cleaned up icon imports to avoid conflicts with local definitions */
 import {
   IconUser, IconMicrophone, IconPlayerPlay, IconPlayerPause,
@@ -1137,6 +1138,9 @@ export default function Home() {
   const [wsConnectionState, setWsConnectionState] = useState<'connecting' | 'connected' | 'failed'>('connecting');
   const [isGraphMode, setIsGraphMode] = useState<boolean>(false);
   const [chartType, setChartType] = useState<ChartType>('vertical-bar');
+
+  // SpaceBooking active feature states
+  const [isSpaceBooking, setIsSpaceBooking] = useState<boolean>(false);
   const [activeFeature, setActiveFeature] = useState<'chat' | 'archived' | 'groups'>('chat');
   const [showFeaturePlaceholder, setShowFeaturePlaceholder] = useState<boolean>(false);
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
@@ -3161,6 +3165,7 @@ export default function Home() {
       isAudio: false,
       isText: true,
       isGraph: isGraphMode,
+      isSpaceBooking,
       query: userText,
       userName: loggedInUser,
       subUserName: userIdFromUrl ?? loggedInUser,
@@ -3169,6 +3174,8 @@ export default function Home() {
       group_name: selectedGroupName,
       timestamp: Date.now()
     }));
+
+    setIsSpaceBooking(false);
 
     setIsLoading(true);
   };
@@ -3231,6 +3238,7 @@ export default function Home() {
       isAudio: false,
       isText: true,
       isGraph: isGraphMode,
+      isSpaceBooking,
       query: userText,
       userName: loggedInUser,
       subUserName: userIdFromUrl ?? loggedInUser,
@@ -3239,6 +3247,8 @@ export default function Home() {
       group_name: selectedGroupName,
       timestamp: Date.now()
     }));
+
+    setIsSpaceBooking(false);
 
     setIsLoading(true);
   };
@@ -3331,87 +3341,95 @@ export default function Home() {
                 </span>
               </div>
             )}
-            {/* changes done by megnathan: Used correct CSS classes for perfect Ghost Text alignment */}
-            <div className="main-input-stack">
-              <div className="main-input-ghost-mirror">
-                <span ref={ghostUserSpanRef} className="ghost-mirror-user"></span>
-                <span ref={ghostSuffixSpanRef} className="ghost-mirror-suffix"></span>
-              </div>
-              <textarea
-                ref={inputRef}
-                className="main-input"
-                defaultValue={input}
-                onCompositionStart={() => { isComposingRef.current = true; }}
-                onCompositionEnd={(e) => {
-                  isComposingRef.current = false;
-                  syncGhostUserMirror();
-                  applyGhostSuffixFromInput();
-                }}
-                onChange={(e) => {
-                  // Update ref immediately (no re-render)
-                  rawInputRef.current = e.target.value;
-                  // Resize based on DOM measurements
-                  resizeTA();
-                  syncGhostUserMirror();
-                  applyGhostSuffixFromInput();
 
-                  // Debounce updating the heavier `input` state
-                  if (inputDebounceRef.current) {
-                    clearTimeout(inputDebounceRef.current);
-                    inputDebounceRef.current = null;
+            <SpaceBooking
+              isSpaceBooking={isSpaceBooking}
+              setIsSpaceBooking={setIsSpaceBooking}
+            >
+              {/* changes done by megnathan: Used correct CSS classes for perfect Ghost Text alignment */}
+              <div className="main-input-stack" style={{ flexGrow: 1 }}>
+                <div className="main-input-ghost-mirror">
+                  <span ref={ghostUserSpanRef} className="ghost-mirror-user"></span>
+                  <span ref={ghostSuffixSpanRef} className="ghost-mirror-suffix"></span>
+                </div>
+                <textarea
+                  ref={inputRef}
+                  className="main-input"
+                  defaultValue={input}
+                  onCompositionStart={() => { isComposingRef.current = true; }}
+                  onCompositionEnd={(e) => {
+                    isComposingRef.current = false;
+                    syncGhostUserMirror();
+                    applyGhostSuffixFromInput();
+                  }}
+                  onChange={(e) => {
+                    // Update ref immediately (no re-render)
+                    rawInputRef.current = e.target.value;
+                    // Resize based on DOM measurements
+                    resizeTA();
+                    syncGhostUserMirror();
+                    applyGhostSuffixFromInput();
+
+                    // Debounce updating the heavier `input` state
+                    if (inputDebounceRef.current) {
+                      clearTimeout(inputDebounceRef.current);
+                      inputDebounceRef.current = null;
+                    }
+                    inputDebounceRef.current = window.setTimeout(() => {
+                      setInput(rawInputRef.current);
+                      inputDebounceRef.current = null;
+                    }, DEBOUNCE_MS);
+                  }}
+                  onKeyDown={handleKeyDown}
+                  disabled={isLoading || wsConnectionState !== "connected" || isGuestOnShared}
+                  placeholder={
+                    isGuestOnShared ? "" : (wsConnectionState === "connected" ? "Ask Anything..." : "Waiting for connection…")
                   }
-                  inputDebounceRef.current = window.setTimeout(() => {
-                    setInput(rawInputRef.current);
-                    inputDebounceRef.current = null;
-                  }, DEBOUNCE_MS);
-                }}
-                onKeyDown={handleKeyDown}
-                disabled={isLoading || wsConnectionState !== "connected" || isGuestOnShared}
-                placeholder={
-                  isGuestOnShared ? "" : (wsConnectionState === "connected" ? "Ask Anything..." : "Waiting for connection…")
+                  rows={1}
+                />
+              </div>
+              <VoiceMicButton
+                forwardedRef={voiceRecorder.micButtonRef}
+                onClick={voiceRecorder.toggleRecording}
+                disabled={
+                  isLoading ||
+                  wsConnectionState !== "connected" ||
+                  voiceRecorder.recordedAudioBlob !== null ||
+                  isGuestOnShared
                 }
-                rows={1}
               />
-            </div>
-            <VoiceMicButton
-              forwardedRef={voiceRecorder.micButtonRef}
-              onClick={voiceRecorder.toggleRecording}
-              disabled={
-                isLoading ||
-                wsConnectionState !== "connected" ||
-                voiceRecorder.recordedAudioBlob !== null ||
-                isGuestOnShared
-              }
-            />
-            <button
-              onClick={() => setIsGraphMode((p) => !p)}
-              title={isGraphMode ? "Graph mode ON — click to turn off" : "Click for graph output"}
-              style={{
-                background: isGraphMode
-                  ? "linear-gradient(135deg, #d4af37, #f5c249)"
-                  : "transparent",
-                border: isGraphMode
-                  ? "1px solid #d4af37"
-                  : "1px solid rgba(255,255,255,0.15)",
-                borderRadius: 8,
-                padding: "6px 8px",
-                cursor: "pointer",
-                color: isGraphMode ? "#000" : "#9CA3AF",
-                transition: "all 0.2s ease",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <IconChartBar size={18} stroke={1.5} />
-            </button>
-            <button
-              className="send-btn"
-              onClick={sendMessage}
-              disabled={isLoading || wsConnectionState !== "connected" || !(inputRef.current?.value ?? "").trim() || isGuestOnShared}
-            >
-              <IconArrowUp size={16} color="white" stroke={2} />
-            </button>
+              <button
+                onClick={() => setIsGraphMode((p) => !p)}
+                title={isGraphMode ? "Graph mode ON — click to turn off" : "Click for graph output"}
+                style={{
+                  background: isGraphMode
+                    ? "linear-gradient(135deg, #d4af37, #f5c249)"
+                    : "transparent",
+                  border: isGraphMode
+                    ? "1px solid #d4af37"
+                    : "1px solid rgba(255,255,255,0.15)",
+                  borderRadius: 8,
+                  padding: "6px 8px",
+                  cursor: "pointer",
+                  color: isGraphMode ? "#000" : "#9CA3AF",
+                  transition: "all 0.2s ease",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <IconChartBar size={18} stroke={1.5} />
+              </button>
+              <button
+                className="send-btn"
+                onClick={sendMessage}
+                disabled={isLoading || wsConnectionState !== "connected" || !(inputRef.current?.value ?? "").trim() || isGuestOnShared}
+                style={{ flexShrink: 0 }}
+              >
+                <IconArrowUp size={16} color="white" stroke={2} />
+              </button>
+            </SpaceBooking>
           </div>
         )}
         {variant === "landing" && (
@@ -4205,9 +4223,19 @@ export default function Home() {
                       animation: "goldShine 3s ease-in-out infinite",
                     }}
                   >
-                    {selectedGroupName ? `📁 ${selectedGroupName}` : "Welcome to Ask AI"}
+                    {isSpaceBooking
+                      ? "Welcome to Space Booking"
+                      : selectedGroupName
+                        ? `📁 ${selectedGroupName}`
+                        : "Welcome to Ask AI"}
                   </h1>
-                  <p className="landing-subtitle">{selectedGroupName ? `Start a new chat in ${selectedGroupName}` : "Let's work together buddy"}</p>
+                  <p className="landing-subtitle">
+                    {isSpaceBooking
+                      ? "Let's book your space buddy"
+                      : selectedGroupName
+                        ? `Start a new chat in ${selectedGroupName}`
+                        : "Let's work together buddy"}
+                  </p>
                 </div>
               </div>
               {renderChatInputFooter("landing")}

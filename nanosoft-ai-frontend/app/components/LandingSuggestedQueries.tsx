@@ -70,7 +70,7 @@ export default function LandingSuggestedQueries({
     () =>
       activeGroupId
         ? LANDING_SUGGESTED_QUERY_GROUPS.find((g) => g.id === activeGroupId) ??
-          null
+        null
         : null,
     [activeGroupId]
   );
