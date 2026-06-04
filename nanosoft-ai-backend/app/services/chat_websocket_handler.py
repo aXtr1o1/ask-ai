@@ -951,7 +951,9 @@ async def ws_chat_endpoint(websocket: WebSocket):
                         logger.info("🚀 Routing query to SpaceBookingService")
                         final_response_text, context_summary, _ = await space_booking_service.handle_space_booking(
                             messages,
-                            user_name=user_name
+                            user_name=user_name,
+                            sub_user_name=sub_user_name,
+                            session_id=session_id
                         )
                     else:
                         # ── Graph gate: if graph_count > graph_limit, skip model ───

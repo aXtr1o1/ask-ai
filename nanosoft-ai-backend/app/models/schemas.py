@@ -334,3 +334,12 @@ class ClientInsertionRequest(BaseModel):
     userName: str
     service: str
     token: str
+
+class BookSpotInput(BaseModel):
+    user_name: str = Field(description="The client_name/user_name from the frontend context.")
+    sub_user_name: Optional[str] = Field(default=None, description="The specific user making the booking, if any.")
+    spot_code: str = Field(description="The unique Spot Code being booked (e.g., WRMF-NES).")
+    spot_name: Optional[str] = Field(default="Unknown Spot", description="The name of the spot.")
+    building_name: Optional[str] = Field(default="Unknown Building", description="The name of the building where the spot is located.")
+    floor_name: Optional[str] = Field(default="Unknown Floor", description="The floor where the spot is located.")
+    timing: Optional[str] = Field(default=None, description="The preferred time or duration for the booking explicitly provided by the user. If the user hasn't explicitly provided a time yet, leave this field EMPTY/NULL and ask them for it.")
