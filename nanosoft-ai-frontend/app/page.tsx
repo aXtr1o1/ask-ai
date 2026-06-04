@@ -815,7 +815,7 @@ function injectCalendarIcon(text: string, msgIdx: number = -1): string {
 // Telemetry-logged date/time extraction from message text
 function parseDateTimeFromMessage(text: string): { date: string; fromTime: string; toTime: string } {
   console.log("🔍 [Telemetry] Running parseDateTimeFromMessage on text:", text);
-  
+
   let date = new Date().toISOString().split("T")[0];
   let fromTime = "10:00";
   let toTime = "11:00";
@@ -842,7 +842,7 @@ function parseDateTimeFromMessage(text: string): { date: string; fromTime: strin
     // 2. Try to find times like "10am", "2pm", "10:00", "15:00"
     const timeRegex = /\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i;
     const timeMatches = [...text.matchAll(new RegExp(timeRegex, "gi"))];
-    
+
     if (timeMatches.length >= 1) {
       const parseMatch = (m: RegExpMatchArray) => {
         let hour = parseInt(m[1], 10);
@@ -1239,9 +1239,6 @@ export default function Home() {
   const [isSpaceBooking, setIsSpaceBooking] = useState<boolean>(false);
   const [isComplaints, setIsComplaints] = useState<boolean>(false);
   const [isComplaintsModalOpen, setIsComplaintsModalOpen] = useState<boolean>(false);
-  const [activeBookingEditIndex, setActiveBookingEditIndex] = useState<number | null>(null);
-  const [bookingFrom, setBookingFrom] = useState<string>("");
-  const [bookingTo, setBookingTo] = useState<string>("");
   const [activeBookingBubbleIndex, setActiveBookingBubbleIndex] = useState<number | null>(null);
   const [bookingStartDate, setBookingStartDate] = useState<string>("");
   const [bookingEndDate, setBookingEndDate] = useState<string>("");
@@ -1308,6 +1305,10 @@ export default function Home() {
     setSelectedGroupName(name);
     setMessages([]); // Clear messages for new group chat
     setSessionId(generateSessionId()); // New session for the group
+    setIsSpaceBooking(false);
+    setIsComplaints(false);
+    setIsComplaintsModalOpen(false);
+    setActiveBookingBubbleIndex(null);
 
     try {
       await fetch(`${baseUrl}/api/folder/create`, {
@@ -1694,7 +1695,9 @@ export default function Home() {
               }
             ]);
             setSessionId(sharedSid);
-            setMessages(processLoadedMessages(mappedHistory));
+            const processed = processLoadedMessages(mappedHistory);
+            setMessages(processed);
+            setIsSpaceBooking(processed.some(m => m.isSpaceBooking));
             console.log("[share] shared chat loaded and mapped");
             setAuthChecked(true);
           }
@@ -2720,6 +2723,9 @@ export default function Home() {
     accRef.current = "";
     setIsLoading(false);
     setIsSpaceBooking(false); // Reset space booking state when starting a new chat
+    setIsComplaints(false);
+    setIsComplaintsModalOpen(false);
+    setActiveBookingBubbleIndex(null);
 
     const newSessionId = generateSessionId();
     setSessionId(newSessionId);
@@ -2990,6 +2996,9 @@ export default function Home() {
     }
 
     setIsSpaceBooking(false); // Reset space booking state when switching session
+    setIsComplaints(false);
+    setIsComplaintsModalOpen(false);
+    setActiveBookingBubbleIndex(null);
 
     // Capture the currently active session ID
     const currentSid = sessionIdRef.current;
@@ -3051,6 +3060,8 @@ export default function Home() {
     if (cached && cached.length > 0) {
       const processed = processLoadedMessages(cached);
       setMessages(processed);
+      const isBookingSession = processed.some(m => m.isSpaceBooking);
+      setIsSpaceBooking(isBookingSession);
     } else {
       // Fetch from backend
       setHistoryLoading(true);
@@ -3087,6 +3098,8 @@ export default function Home() {
         const processed = processLoadedMessages(history);
         sessionMessagesRef.current.set(targetSid, processed);
         setMessages(processed);
+        const isBookingSession = processed.some(m => m.isSpaceBooking);
+        setIsSpaceBooking(isBookingSession);
       } catch (err) {
         console.warn("Failed to fetch session history:", err);
         setMessages([]);
@@ -3856,6 +3869,10 @@ export default function Home() {
                   setSessionId(newSid);
                   sessionIdRef.current = newSid;
                   setMessages([]);
+                  setIsSpaceBooking(false);
+                  setIsComplaints(false);
+                  setIsComplaintsModalOpen(false);
+                  setActiveBookingBubbleIndex(null);
                 }}
               >
                 <IconChat />
@@ -3869,6 +3886,10 @@ export default function Home() {
                   handleFeatureClick('archived');
                   setSelectedGroupName(null);
                   setMessages([]); // Clear messages to show landing container
+                  setIsSpaceBooking(false);
+                  setIsComplaints(false);
+                  setIsComplaintsModalOpen(false);
+                  setActiveBookingBubbleIndex(null);
                 }}
               >
                 <IconArchive />
@@ -3880,6 +3901,10 @@ export default function Home() {
                   setSearchTerm("");
                   setActiveFeature('groups');
                   handleFeatureClick('groups');
+                  setIsSpaceBooking(false);
+                  setIsComplaints(false);
+                  setIsComplaintsModalOpen(false);
+                  setActiveBookingBubbleIndex(null);
                 }}
               >
                 <IconLibrary />
@@ -4719,7 +4744,7 @@ export default function Home() {
                             onSave={(from, to) => {
                               setBookingFrom(from);
                               setBookingTo(to);
-                              
+
                               let bookingMsg = `${from} to ${to}`;
                               if (from.includes(" ") && to.includes(" ")) {
                                 const partsFrom = from.split(" ");
@@ -4729,10 +4754,10 @@ export default function Home() {
                                 const endTime = partsTo[1];
                                 bookingMsg = `${date} from ${startTime} to ${endTime}`;
                               }
-                              
+
                               console.log("📅 [Telemetry] Inline saving booking times. Sending message:", bookingMsg);
                               sendTextDirectly(bookingMsg);
-                              
+
                               // Reset inline bubble index to close the inline picker
                               setActiveBookingBubbleIndex(null);
                             }}

@@ -583,7 +583,7 @@ export function ChatListItem({
           }}
         />
       ) : (
-        <span 
+        <span
           key={s.title}
           className="title-typing"
           style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
