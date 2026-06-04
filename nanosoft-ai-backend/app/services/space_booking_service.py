@@ -197,7 +197,6 @@ class SpaceBookingService:
                             args["building_name"] = verified.get("BuildingName", args.get("building_name"))
                             args["floor_name"]    = verified.get("FloorName", args.get("floor_name"))
                             logger.info("✅ Spot verified from cache: %s → %s", spot_code_req, args["spot_name"])
-
                         tool_result_str = await BOOK_SPOT.ainvoke(args)
 
                         try:
@@ -245,41 +244,9 @@ class SpaceBookingService:
                         tool_result_str = await GET_BOOKING_STATUS.ainvoke(args)
                         logger.info("🔍 GET_BOOKING_STATUS result: %s", tool_result_str[:200])
 
-                        try:
-                            status_data = json.loads(tool_result_str)
-                            if status_data.get("found"):
-                                bid   = status_data.get("booking_id", "—")
-                                sname = status_data.get("spot_name", "—")
-                                scode = status_data.get("spot_code", "—")
-                                bname = status_data.get("building_name", "—")
-                                fname = status_data.get("floor_name", "—")
-                                tming = status_data.get("timing", "—")
-                                status_reply = (
-                                    f"Here's the status of your booking:\n\n"
-                                    f"Booking ID: {bid}\n"
-                                    f"Space: {sname} ({scode})\n"
-                                    f"Location: {bname}, {fname}\n"
-                                    f"Time: {tming}\n"
-                                    f"Status: Confirmed ✅\n\n"
-                                    f"Let me know if there's anything else I can help you with!"
-                                )
-                            else:
-                                bid = args.get("booking_id", "?")
-                                status_reply = (
-                                    f"I couldn't find a booking with ID **{bid}**. "
-                                    f"Please double-check the ID and try again."
-                                )
-                        except (json.JSONDecodeError, Exception) as e:
-                            logger.error("GET_BOOKING_STATUS parse error: %s", e)
-                            status_reply = (
-                                "Something went wrong while fetching your booking. "
-                                "Please try again."
-                            )
-
-                        logger.info("📋 Booking status reply generated")
-                        sb_thread.append(AIMessage(content=status_reply))
-                        _save_sb_thread(session_id, sb_thread)
-                        return status_reply, status_reply, messages
+                        prompt_messages.append(ToolMessage(
+                            name=tc["name"], tool_call_id=tc["id"], content=tool_result_str
+                        ))
 
                 # Final model response
                 ai_msg2 = await self.model.ainvoke(prompt_messages)
@@ -308,14 +275,30 @@ class SpaceBookingService:
 
                 # ── Respond: table for multiple spots, conversational otherwise ──
                 if tool_data and "p_list" in tool_data and len(tool_data["p_list"]) > 1:
+                    total = tool_data.get("TotalCount", len(tool_data["p_list"]))
+                    p_list = tool_data["p_list"]
+
+                    # For large result sets (>8), override the AI summary with a short message
+                    # so the AI doesn't dump the full list into the text — the tiles handle display
+                    if total > 8:
+                        building_name = p_list[0].get("BuildingName", "this building") if p_list else "this building"
+                        summary = (
+                            f"You've got {total} spaces available at {building_name}. "
+                            f"Browse the options below and let me know which Spot Code you'd like — "
+                            f"I'll get it booked for you right away!"
+                        )
+                    else:
+                        summary = content
+
                     final_response = {
                         "type": "large_dataset",
-                        "context_summary": content,
-                        "records": _slim_records(tool_data["p_list"])  # ← 4 fields only
+                        "context_summary": summary,
+                        "records": _slim_records(p_list)  # ← 4 fields only
                     }
-                    return json.dumps(final_response), content, messages
+                    return json.dumps(final_response), summary, messages
                 else:
                     return content, content, messages
+
 
             # No tool called — pure conversational
             content = ai_msg.content or ""

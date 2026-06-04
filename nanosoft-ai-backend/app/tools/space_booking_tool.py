@@ -111,7 +111,7 @@ def _fetch_booking_sync(booking_id: str, user_name: str) -> str:
             cur.execute(
                 """
                 SELECT booking_id, client_name, sub_user_name,
-                       spot_code, spot_name, building_name, floor_name, timing
+                       spot_code, spot_name, building_name, floor_name, start_time, end_time
                 FROM space_bookings
                 WHERE booking_id = %s
                 """,
@@ -128,7 +128,8 @@ def _fetch_booking_sync(booking_id: str, user_name: str) -> str:
                     "spot_name":     row[4],
                     "building_name": row[5],
                     "floor_name":    row[6],
-                    "timing":        row[7],
+                    "start_time":    row[7],
+                    "end_time":      row[8],
                     "status":        "Confirmed"
                 })
             else:
@@ -157,8 +158,8 @@ def _insert_booking(booking_data: dict) -> str:
             cur.execute(
                 """
                 INSERT INTO space_bookings
-                (booking_id, client_name, sub_user_name, spot_code, spot_name, building_name, floor_name, timing)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                (booking_id, client_name, sub_user_name, spot_code, spot_name, building_name, floor_name, start_time, end_time)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     booking_id,
@@ -168,7 +169,8 @@ def _insert_booking(booking_data: dict) -> str:
                     booking_data.get("spot_name"),
                     booking_data.get("building_name"),
                     booking_data.get("floor_name"),
-                    booking_data.get("timing")
+                    booking_data.get("start_time"),
+                    booking_data.get("end_time"),
                 )
             )
             conn.commit()
@@ -181,7 +183,8 @@ def _insert_booking(booking_data: dict) -> str:
             "spot_name": booking_data.get("spot_name"),
             "building_name": booking_data.get("building_name"),
             "floor_name": booking_data.get("floor_name"),
-            "timing": booking_data.get("timing"),
+            "start_time": booking_data.get("start_time"),
+            "end_time": booking_data.get("end_time"),
         })
     except Exception as e:
         logger.error(f"❌ Failed to insert booking: {e}", exc_info=True)
@@ -195,13 +198,14 @@ async def BOOK_SPOT(
     spot_name: Optional[str] = "Unknown Spot",
     building_name: Optional[str] = "Unknown Building",
     floor_name: Optional[str] = "Unknown Floor",
-    timing: Optional[str] = None,
+    start_time: Optional[str] = None,
+    end_time: Optional[str] = None,
     sub_user_name: Optional[str] = None
 ) -> str:
-    """Book a space after the user has confirmed the spot and provided their preferred time."""
-    logger.info(f"🛠️ BOOK_SPOT: spot_code={spot_code}, timing={timing}")
+    """Book a space after the user has confirmed the spot and provided their start and end time."""
+    logger.info(f"🛠️ BOOK_SPOT: spot_code={spot_code}, start_time={start_time}, end_time={end_time}")
 
-    if not timing or timing.strip() == "" or timing.lower() in ("none", "unknown"):
+    if not start_time or start_time.strip() == "" or start_time.lower() in ("none", "unknown"):
         return json.dumps({
             "error_type": "missing_time",
             "spot_code": spot_code,
@@ -215,6 +219,11 @@ async def BOOK_SPOT(
         "spot_name": spot_name,
         "building_name": building_name,
         "floor_name": floor_name,
-        "timing": timing
+        "start_time": start_time,
+        "end_time": end_time or start_time,  # fallback: same as start if end not given
     }
     return await asyncio.to_thread(_insert_booking, booking_data)
+
+
+
+
