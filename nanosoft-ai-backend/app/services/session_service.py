@@ -32,7 +32,8 @@ async def get_sessions_for_user(user_name: str) -> list:
             SELECT session_id, title, created_at, updated_at,
                    COALESCE(is_pinned, FALSE)  AS is_pinned,
                    COALESCE(is_archived, FALSE) AS is_archived,
-                   group_name
+                   group_name,
+                   COALESCE(is_space_booking, FALSE) AS is_space_booking
             FROM chat_sessions
             WHERE user_name = %s
             ORDER BY COALESCE(is_pinned, FALSE) DESC, updated_at DESC
@@ -54,6 +55,7 @@ async def get_sessions_for_user(user_name: str) -> list:
                 "is_pinned":   bool(row[cols.index("is_pinned")]),
                 "is_archived": bool(row[cols.index("is_archived")]),
                 "group_name":  row[cols.index("group_name")],
+                "is_space_booking": bool(row[cols.index("is_space_booking")]),
             }
             for row in rows
         ]

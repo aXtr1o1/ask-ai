@@ -59,7 +59,8 @@ async def sessions_endpoint(request: SessionRequest):
             session_id = session_id,
             user_name  = user_name,
             history    = history_pairs,
-            group_name = request.group_name
+            group_name = request.group_name,
+            is_space_booking = request.isSpaceBooking or False
         )
         #Mark this session as saved by frontend
         # So WebSocketDisconnect will NOT save it again
@@ -383,8 +384,28 @@ def api_health():
 
 @app_endpoints_router.on_event("startup")
 async def startup_event():
-    get_pool()
+    conn = get_pool()
     logger.info("🚀 PostgreSQL client initialized during startup")
+    try:
+        conn.rollback()
+        with conn.cursor() as cur:
+            # Check if column is_space_booking exists in chat_sessions
+            cur.execute("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name='chat_sessions' AND column_name='is_space_booking'
+            """)
+            if not cur.fetchone():
+                logger.info("Adding column 'is_space_booking' to 'chat_sessions' table...")
+                cur.execute("ALTER TABLE chat_sessions ADD COLUMN is_space_booking BOOLEAN DEFAULT FALSE")
+                conn.commit()
+                logger.info("Column 'is_space_booking' added successfully.")
+            else:
+                logger.info("Column 'is_space_booking' already exists in 'chat_sessions'.")
+    except Exception as e:
+        logger.error(f"Failed to migrate database: {e}", exc_info=True)
+        if conn:
+            conn.rollback()
 
 @app_endpoints_router.get("/health", tags=["Health"])
 def health():

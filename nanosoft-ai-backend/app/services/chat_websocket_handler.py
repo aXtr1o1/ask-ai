@@ -283,7 +283,8 @@ async def ws_chat_endpoint(websocket: WebSocket):
                         session_id = current_session_id,
                         user_name  = session_data.get("sub_user_name") or session_data.get("user_name", ""),
                         history    = session_data.get("history", []),
-                        group_name = session_data.get("group_name")
+                        group_name = session_data.get("group_name"),
+                        is_space_booking = session_data.get("is_space_booking", False)
                     )
                 break
 
@@ -918,13 +919,17 @@ async def ws_chat_endpoint(websocket: WebSocket):
                     "user_name":     user_name,
                     "sub_user_name": sub_user_name,
                     "pending_transcription": None,
-                    "group_name": group_name
+                    "group_name": group_name,
+                    "is_space_booking": is_space_booking
                 }
                 logger.info(f"🆕 Memory initialized for session_id: {session_id}")
             else:
                 # Update group_name if it was passed
                 if group_name:
                     memory_store[session_id]["group_name"] = group_name
+                # Keep is_space_booking flag sticky (once True, always True)
+                if is_space_booking:
+                    memory_store[session_id]["is_space_booking"] = True
 
             messages = build_scoped_messages(
                 user_name=user_name,
@@ -1200,7 +1205,8 @@ async def ws_chat_endpoint(websocket: WebSocket):
                     session_id = current_session_id,
                     user_name  = session_data.get("sub_user_name") or session_data.get("user_name", ""),
                     history    = session_data.get("history", []),
-                    group_name = session_data.get("group_name")
+                    group_name = session_data.get("group_name"),
+                    is_space_booking = session_data.get("is_space_booking", False)
                 )
                 logger.info(f"✅ Saved on disconnect | session={current_session_id}")
                 

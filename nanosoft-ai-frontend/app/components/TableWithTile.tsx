@@ -15,6 +15,8 @@ interface TableWithTileProps {
   /** When set, pagination shows "Showing X of totalCount" (preview of a larger result set). */
   totalCount?: number;
   showOnlyTiles?: boolean;
+  /** Explicit flag: renders space booking bullet-list tiles instead of normal pill grid */
+  isSpaceBooking?: boolean;
 }
 
 const TableWithTile = React.memo(function TableWithTile({
@@ -24,6 +26,7 @@ const TableWithTile = React.memo(function TableWithTile({
   htmlTableContent,
   totalCount,
   showOnlyTiles = false,
+  isSpaceBooking = false,
 }: TableWithTileProps) {
   const responsive = useResponsive();
   const tableConfig = getResponsiveTable(responsive.screen);
@@ -74,6 +77,9 @@ const TableWithTile = React.memo(function TableWithTile({
     });
     return Array.from(cols);
   }, [columns, rows]);
+
+  // Use explicit prop — falls back to column sniffing if prop not provided
+  const isSpaceBookingData = isSpaceBooking;
 
   // Pagination: compute the slice of rows to display
   const totalPages = Math.max(1, Math.ceil(rows.length / LIMIT));
@@ -477,7 +483,66 @@ const TableWithTile = React.memo(function TableWithTile({
                     padding: responsive.isMobile ? '8px' : '20px 24px',
                   }}>
                     {pagedRows.map((row, rowIdx) => {
-                      // Detect status from row data for status dot color
+                      if (isSpaceBookingData) {
+                        // ── Space Booking: bullet list layout ──────────────────
+                        return (
+                          <div key={startIdx + rowIdx} className="tile-card animate-fadeIn" style={{
+                            padding: responsive.isMobile ? '12px 16px' : '16px 20px',
+                            backgroundColor: tileBackground,
+                            border: tileBorder,
+                            color: tileText,
+                            boxShadow: isDark ? '0 8px 24px rgba(0,0,0,0.4)' : '0 8px 24px rgba(0,0,0,0.08)',
+                            borderRadius: '12px',
+                            transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+                            minWidth: 0,
+                            cursor: 'pointer',
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.borderColor = 'var(--color-primary, #d4af37)';
+                            e.currentTarget.style.transform = 'translateY(-2px)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.borderColor = '';
+                            e.currentTarget.style.transform = 'translateY(0)';
+                          }}
+                          >
+                            <ul style={{
+                              listStyle: 'none',
+                              margin: 0,
+                              padding: 0,
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '6px',
+                            }}>
+                              {detectedColumns.map((col) => {
+                                const val = formatCellValue(row[col]);
+                                return (
+                                  <li key={col} style={{ display: 'flex', alignItems: 'baseline', gap: '8px', minWidth: 0 }}>
+                                    <span style={{
+                                      width: '5px', height: '5px', borderRadius: '50%',
+                                      background: 'rgba(212,175,55,0.7)', flexShrink: 0, marginTop: '5px',
+                                    }} />
+                                    <span style={{
+                                      fontSize: '11px', fontWeight: 700, textTransform: 'uppercase',
+                                      letterSpacing: '0.5px', color: tileTextMuted, flexShrink: 0, whiteSpace: 'nowrap',
+                                    }}>
+                                      {col}:
+                                    </span>
+                                    <span style={{
+                                      fontSize: '13px', fontWeight: 500, color: tileFieldValueColor,
+                                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                                    }}>
+                                      {val}
+                                    </span>
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          </div>
+                        );
+                      }
+
+                      // ── Normal Ask AI: original pill grid layout ────────────
                       const statusValue = row.status || row.STATUS || row.condition || row.CONDITION || "neutral";
                       const isActive = ["active", "online", "good", "operational"].some(s => statusValue.toLowerCase().includes(s));
                       const statusColor = isActive ? "#10b981" : "#6b7280";
@@ -500,6 +565,7 @@ const TableWithTile = React.memo(function TableWithTile({
                         }
                       }
                       return (
+
                         <div key={startIdx + rowIdx} className="tile-card" style={{
                           padding: responsive.isMobile ? '8px' : '16px',
                           minHeight: 'auto',
@@ -540,7 +606,7 @@ const TableWithTile = React.memo(function TableWithTile({
                               title={isActive ? 'Active' : 'Inactive'}
                             />
 
-                            {/* Card Content - Horizontal Spread Layout */}
+                            {/* Card Content - Pill grid layout */}
                             <div style={{
                               flex: 1,
                               display: 'grid',
@@ -576,7 +642,7 @@ const TableWithTile = React.memo(function TableWithTile({
                                     overflow: 'hidden',
                                     textOverflow: 'ellipsis',
                                     color: tileTextMuted,
-                                    opacity: 0.8
+                                    opacity: 0.8,
                                   }}>{col}</div>
                                   <div className="tile-field-value" style={{
                                     fontSize: '13px',

@@ -319,6 +319,7 @@ class SessionRequest(BaseModel):
     chatHistory: Optional[List[FrontendChatMessage]] = None
     historyOnClick: bool = False
     group_name: Optional[str] = None
+    isSpaceBooking: Optional[bool] = False
 
 class ClientInsertionRequest(BaseModel):
     """Request schema for client insertion"""

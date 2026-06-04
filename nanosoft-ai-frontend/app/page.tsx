@@ -61,7 +61,7 @@ interface Message {
   isSpaceBooking?: boolean;   // ← Track if message belongs to Space Booking session
 }
 
-interface ChatSession { id: string; title: string; createdAt: number; updatedAt?: number; isPinned?: boolean; isArchived?: boolean; group_name?: string; }
+interface ChatSession { id: string; title: string; createdAt: number; updatedAt?: number; isPinned?: boolean; isArchived?: boolean; group_name?: string; isSpaceBooking?: boolean; }
 interface Group {
   id: string;
   name: string;
@@ -1126,6 +1126,14 @@ const IconChat = ({ width = 16, height = 16, style }: { width?: number; height?:
     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
   </svg>
 );
+const IconCalendar = ({ width = 16, height = 16, style }: { width?: number; height?: number; style?: React.CSSProperties }) => (
+  <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ ...style, width, height, flexShrink: 0 }}>
+    <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+    <line x1="16" y1="2" x2="16" y2="6" />
+    <line x1="8" y1="2" x2="8" y2="6" />
+    <line x1="3" y1="10" x2="21" y2="10" />
+  </svg>
+);
 const IconArchive = ({ width = 16, height = 16, style }: { width?: number; height?: number; style?: React.CSSProperties }) => (
   <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ ...style, width, height, flexShrink: 0 }}>
     <rect x="3" y="4" width="18" height="4" rx="1" /><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8" /><line x1="10" y1="12" x2="14" y2="12" />
@@ -1873,6 +1881,7 @@ export default function Home() {
           userName: userIdFromUrl ?? loggedInUser,
           sessionId: sid,
           group_name: selectedGroupName,
+          isSpaceBooking: (sid === sessionId ? isSpaceBooking : (chatSessions.find(s => s.id === sid)?.isSpaceBooking || false)) || valid.some(m => m.isSpaceBooking),
           chatHistory: valid.map(m => ({
             role: m.role,
             text: m.isAudio
@@ -2631,7 +2640,7 @@ export default function Home() {
       const data = await res.json();
       setChatSessions(prev => {
         const fetched: ChatSession[] = (data?.sessions ?? []).map(
-          (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; is_pinned?: boolean; is_archived?: boolean; group_name?: string }) => {
+          (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; is_pinned?: boolean; is_archived?: boolean; group_name?: string; is_space_booking?: boolean }) => {
             const existing = prev.find(p => p.id === s.session_id);
             return {
               id: s.session_id,
@@ -2641,6 +2650,7 @@ export default function Home() {
               isPinned: s.is_pinned || false,
               isArchived: s.is_archived || false,
               group_name: s.group_name,
+              isSpaceBooking: s.is_space_booking || false,
             };
           }
         );
@@ -2738,7 +2748,7 @@ export default function Home() {
     }, 3000);
   };
 
-  const handleNewChat = async () => {
+  const handleNewChat = async (initialMode?: 'space_booking' | 'complaints' | 'ask_ai') => {
     if (isLoading) {
       showWarningToast("Please wait, don't switch the chat!");
       console.log("⚠️ Chat creation blocked: Please wait, don't switch the chat!");
@@ -2752,8 +2762,8 @@ export default function Home() {
     setMessages([]);
     accRef.current = "";
     setIsLoading(false);
-    setIsSpaceBooking(false); // Reset space booking state when starting a new chat
-    setIsComplaints(false);
+    setIsSpaceBooking(initialMode === 'space_booking'); // Reset space booking state when starting a new chat
+    setIsComplaints(initialMode === 'complaints');
     setIsComplaintsModalOpen(false);
     setActiveBookingBubbleIndex(null);
 
@@ -2795,7 +2805,7 @@ export default function Home() {
         const data = await res.json();
         const currentSessions = chatSessions;
         const fetched: ChatSession[] = (data?.sessions ?? []).map(
-          (s: any) => {
+          (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; is_pinned?: boolean; is_archived?: boolean; group_name?: string; is_space_booking?: boolean }) => {
             const existing = currentSessions.find(p => p.id === s.session_id);
             return {
               id: s.session_id,
@@ -2805,6 +2815,7 @@ export default function Home() {
               isPinned: s.is_pinned || false,
               isArchived: s.is_archived || false,
               group_name: s.group_name,
+              isSpaceBooking: s.is_space_booking || false,
             };
           }
         );
@@ -2837,6 +2848,25 @@ export default function Home() {
       }
     };
     setTimeout(() => refetchSessions(), 400);
+  };
+
+  const handleSwitchMode = (newMode: 'space_booking' | 'complaints' | 'ask_ai') => {
+    const currentMode = isSpaceBooking ? 'space_booking' : isComplaints ? 'complaints' : 'ask_ai';
+    if (newMode === currentMode) {
+      return;
+    }
+
+    if (messages.length > 0) {
+      // Save current chat history to database in background
+      saveChatHistory(sessionId, messages);
+
+      // Start a new chat instantly
+      handleNewChat(newMode);
+    } else {
+      // If current chat is empty, just switch the mode of the current chat!
+      setIsSpaceBooking(newMode === 'space_booking');
+      setIsComplaints(newMode === 'complaints');
+    }
   };
 
 
@@ -3057,7 +3087,7 @@ export default function Home() {
         const data = await res.json();
         setChatSessions(prev => {
           const fetched: ChatSession[] = (data?.sessions ?? []).map(
-            (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; group_name?: string; is_pinned?: boolean; is_archived?: boolean }) => {
+            (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; group_name?: string; is_pinned?: boolean; is_archived?: boolean; is_space_booking?: boolean }) => {
               const existing = prev.find(p => p.id === s.session_id);
               return {
                 id: s.session_id,
@@ -3067,6 +3097,7 @@ export default function Home() {
                 isPinned: s.is_pinned || false,
                 isArchived: s.is_archived || false,
                 group_name: s.group_name,
+                isSpaceBooking: s.is_space_booking || false,
               };
             }
           );
@@ -3090,7 +3121,7 @@ export default function Home() {
     if (cached && cached.length > 0) {
       const processed = processLoadedMessages(cached);
       setMessages(processed);
-      const isBookingSession = processed.some(m => m.isSpaceBooking);
+      const isBookingSession = targetSession?.isSpaceBooking || processed.some(m => m.isSpaceBooking);
       setIsSpaceBooking(isBookingSession);
     } else {
       // Fetch from backend
@@ -3128,7 +3159,7 @@ export default function Home() {
         const processed = processLoadedMessages(history);
         sessionMessagesRef.current.set(targetSid, processed);
         setMessages(processed);
-        const isBookingSession = processed.some(m => m.isSpaceBooking);
+        const isBookingSession = targetSession?.isSpaceBooking || processed.some(m => m.isSpaceBooking);
         setIsSpaceBooking(isBookingSession);
       } catch (err) {
         console.warn("Failed to fetch session history:", err);
@@ -3342,13 +3373,14 @@ export default function Home() {
       const existing = prev.find(s => s.id === sessionId);
       const rest = prev.filter(s => s.id !== sessionId);
       if (existing) {
-        return [{ ...existing, updatedAt: now }, ...rest];
+        return [{ ...existing, updatedAt: now, isSpaceBooking: isSpaceBooking || existing.isSpaceBooking }, ...rest];
       }
       const newCapsule: ChatSession = {
         id: sessionId,
         title: "New Chat",
         createdAt: now,
         updatedAt: now,
+        isSpaceBooking: isSpaceBooking,
       };
       return [newCapsule, ...rest];
     });
@@ -3408,13 +3440,14 @@ export default function Home() {
       const existing = prev.find(s => s.id === sessionId);
       const rest = prev.filter(s => s.id !== sessionId);
       if (existing) {
-        return [{ ...existing, updatedAt: now }, ...rest];
+        return [{ ...existing, updatedAt: now, isSpaceBooking: isSpaceBooking || existing.isSpaceBooking }, ...rest];
       }
       const newCapsule: ChatSession = {
         id: sessionId,
         title: "New Chat",
         createdAt: now,
         updatedAt: now,
+        isSpaceBooking: isSpaceBooking,
       };
       return [newCapsule, ...rest];
     });
@@ -3551,6 +3584,7 @@ export default function Home() {
               isComplaints={isComplaints}
               setIsComplaints={setIsComplaints}
               isChatStarted={messages.length > 0}
+              onSwitchMode={handleSwitchMode}
             >
               {/* changes done by megnathan: Used correct CSS classes for perfect Ghost Text alignment */}
               <div className="main-input-stack" style={{ flexGrow: 1 }}>
@@ -3638,7 +3672,7 @@ export default function Home() {
             </SpaceBooking>
           </div>
         )}
-        {variant === "landing" && (
+        {variant === "landing" && !isSpaceBooking && !isComplaints && (
           <LandingSuggestedQueries
             onSelect={(q) => {
               if (inputDebounceRef.current) { clearTimeout(inputDebounceRef.current); inputDebounceRef.current = null; }
@@ -3864,7 +3898,7 @@ export default function Home() {
 
             {/* + New Chat Button */}
             <div className="new-chat-container-top" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-              <button className="new-chat-btn" onClick={handleNewChat} style={{ flex: 1 }}>
+              <button className="new-chat-btn" onClick={() => handleNewChat()} style={{ flex: 1 }}>
                 <IconChat width={16} height={16} />
                 <span>+ New Chat</span>
               </button>
@@ -4177,7 +4211,13 @@ export default function Home() {
                         style={{ cursor: "pointer", display: 'flex', alignItems: 'center', gap: 8 }}
                       >
                         <div className="content" style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
-                          {s.isPinned ? <IconPin size={16} style={{ color: 'var(--color-primary)' }} /> : <IconChat width={16} height={16} />}
+                          {s.isPinned ? (
+                            <IconPin size={16} style={{ color: 'var(--color-primary)' }} />
+                          ) : s.isSpaceBooking ? (
+                            <IconCalendar width={16} height={16} style={{ color: 'var(--color-primary, #d4af37)' }} />
+                          ) : (
+                            <IconChat width={16} height={16} />
+                          )}
                           {editingSessionId === s.id ? (
                             <input
                               ref={(el) => { editingInputRef.current = el; if (el) el.focus(); }}
@@ -4671,6 +4711,7 @@ export default function Home() {
                                   htmlTableContent={ds.html}
                                   totalCount={ds.totalCount}
                                   showOnlyTiles={msg.isSpaceBooking}
+                                  isSpaceBooking={msg.isSpaceBooking}
                                 />
                               </div>
                             ))}
@@ -4683,6 +4724,7 @@ export default function Home() {
                             title={msg.tableTitle || "Data"}
                             htmlTableContent={msg.text}
                             showOnlyTiles={msg.isSpaceBooking}
+                            isSpaceBooking={msg.isSpaceBooking}
                           />
 
                         ) : (
@@ -4772,8 +4814,12 @@ export default function Home() {
                             bookingFrom={`${bookingStartDate} ${bookingStartTime}`}
                             bookingTo={`${bookingEndDate} ${bookingEndTime}`}
                             onSave={(from, to) => {
-                              setBookingFrom(from);
-                              setBookingTo(to);
+                              const [fromDate, fromTime] = from.split(" ");
+                              const [toDate, toTime] = to.split(" ");
+                              setBookingStartDate(fromDate || "");
+                              setBookingStartTime(fromTime || "");
+                              setBookingEndDate(toDate || "");
+                              setBookingEndTime(toTime || "");
 
                               let bookingMsg = `${from} to ${to}`;
                               if (from.includes(" ") && to.includes(" ")) {
