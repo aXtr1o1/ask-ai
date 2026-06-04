@@ -797,6 +797,99 @@ function removeEmoji(text: string): string {
   return lines.join("\n");
 }
 
+// Inject calendar icon at the end of space booking time examples
+function injectCalendarIcon(text: string, msgIdx: number = -1): string {
+  if (!text) return text;
+  return text.replace(
+    /(\(e\.g\.[^)]*(?:10am|2pm|morning|all day|afternoon|evening)[^)]*)\)/gi,
+    (match, p1) => {
+      if (p1.includes("interactive-calendar-btn") || p1.includes("📅")) return match;
+      if (msgIdx !== -1) {
+        return `${p1} <button class="interactive-calendar-btn" data-msg-idx="${msgIdx}" style="background:none;border:none;cursor:pointer;padding:0;font-size:inherit;display:inline-flex;align-items:center;vertical-align:middle;outline:none;" title="Change date & time">📅</button>)`;
+      }
+      return p1 + " 📅)";
+    }
+  );
+}
+
+// Telemetry-logged date/time extraction from message text
+function parseDateTimeFromMessage(text: string): { date: string; fromTime: string; toTime: string } {
+  console.log("🔍 [Telemetry] Running parseDateTimeFromMessage on text:", text);
+  
+  let date = new Date().toISOString().split("T")[0];
+  let fromTime = "10:00";
+  let toTime = "11:00";
+
+  try {
+    // 1. Try to find a date like YYYY-MM-DD
+    const dateMatch = text.match(/\b(\d{4}-\d{2}-\d{2})\b/);
+    if (dateMatch) {
+      date = dateMatch[1];
+      console.log("📅 [Telemetry] Parsed date YYYY-MM-DD:", date);
+    } else {
+      // Check for tomorrow
+      if (/tomorrow/i.test(text)) {
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        date = tomorrow.toISOString().split("T")[0];
+        console.log("📅 [Telemetry] Parsed date (tomorrow):", date);
+      } else if (/today/i.test(text)) {
+        date = new Date().toISOString().split("T")[0];
+        console.log("📅 [Telemetry] Parsed date (today):", date);
+      }
+    }
+
+    // 2. Try to find times like "10am", "2pm", "10:00", "15:00"
+    const timeRegex = /\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i;
+    const timeMatches = [...text.matchAll(new RegExp(timeRegex, "gi"))];
+    
+    if (timeMatches.length >= 1) {
+      const parseMatch = (m: RegExpMatchArray) => {
+        let hour = parseInt(m[1], 10);
+        const min = m[2] ? m[2] : "00";
+        const ampm = m[3].toLowerCase();
+        if (ampm === "pm" && hour < 12) hour += 12;
+        if (ampm === "am" && hour === 12) hour = 0;
+        return `${String(hour).padStart(2, "0")}:${min}`;
+      };
+
+      fromTime = parseMatch(timeMatches[0]);
+      console.log("📅 [Telemetry] Parsed start time:", fromTime);
+
+      if (timeMatches.length >= 2) {
+        toTime = parseMatch(timeMatches[1]);
+        console.log("📅 [Telemetry] Parsed end time:", toTime);
+      } else {
+        // Default end time to start time + 1 hour
+        const [h, m] = fromTime.split(":").map(Number);
+        const endHour = (h + 1) % 24;
+        toTime = `${String(endHour).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+        console.log("📅 [Telemetry] Defaulted end time to start + 1h:", toTime);
+      }
+    } else {
+      // Look for 24h formats like 14:00 or 09:30
+      const time24Match = text.match(/\b(\d{2}):(\d{2})\b/g);
+      if (time24Match && time24Match.length >= 1) {
+        fromTime = time24Match[0];
+        console.log("📅 [Telemetry] Parsed 24h start time:", fromTime);
+        if (time24Match.length >= 2) {
+          toTime = time24Match[1];
+          console.log("📅 [Telemetry] Parsed 24h end time:", toTime);
+        } else {
+          const [h, m] = fromTime.split(":").map(Number);
+          const endHour = (h + 1) % 24;
+          toTime = `${String(endHour).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+          console.log("📅 [Telemetry] Defaulted 24h end time to start + 1h:", toTime);
+        }
+      }
+    }
+  } catch (err) {
+    console.error("⚠️ [Telemetry] Failed to parse date/time from message:", err);
+  }
+
+  return { date, fromTime, toTime };
+}
+
 function formatOutput(text: string): string {
   if (!text.trim()) return "";
 
@@ -1144,17 +1237,20 @@ export default function Home() {
 
   // SpaceBooking active feature states
   const [isSpaceBooking, setIsSpaceBooking] = useState<boolean>(false);
-  const [isSpaceBookingModalOpen, setIsSpaceBookingModalOpen] = useState<boolean>(false);
   const [isComplaints, setIsComplaints] = useState<boolean>(false);
   const [isComplaintsModalOpen, setIsComplaintsModalOpen] = useState<boolean>(false);
-  const [showLockedPopup, setShowLockedPopup] = useState<boolean>(false);
+  const [activeBookingEditIndex, setActiveBookingEditIndex] = useState<number | null>(null);
+  const [bookingFrom, setBookingFrom] = useState<string>("");
+  const [bookingTo, setBookingTo] = useState<string>("");
+  const [activeBookingBubbleIndex, setActiveBookingBubbleIndex] = useState<number | null>(null);
+  const [bookingStartDate, setBookingStartDate] = useState<string>("");
+  const [bookingEndDate, setBookingEndDate] = useState<string>("");
+  const [bookingStartTime, setBookingStartTime] = useState<string>("");
+  const [bookingEndTime, setBookingEndTime] = useState<string>("");
 
   const isSpaceBookingRef = useRef(isSpaceBooking);
   useEffect(() => {
     isSpaceBookingRef.current = isSpaceBooking;
-    if (isSpaceBooking) {
-      setIsSpaceBookingModalOpen(true);
-    }
   }, [isSpaceBooking]);
 
   useEffect(() => {
@@ -3412,7 +3508,6 @@ export default function Home() {
               isComplaints={isComplaints}
               setIsComplaints={setIsComplaints}
               isChatStarted={messages.length > 0}
-              onLockedClick={() => setShowLockedPopup(true)}
             >
               {/* changes done by megnathan: Used correct CSS classes for perfect Ghost Text alignment */}
               <div className="main-input-stack" style={{ flexGrow: 1 }}>
@@ -4319,7 +4414,30 @@ export default function Home() {
                   <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text)' }}>{selectedGroupName}</span>
                 </div>
               )}
-              <div className="messages-container">
+              <div
+                className="messages-container"
+                onClick={(e) => {
+                  const target = e.target as HTMLElement;
+                  const btn = target.closest(".interactive-calendar-btn");
+                  if (btn) {
+                    const msgIdxStr = btn.getAttribute("data-msg-idx");
+                    if (msgIdxStr !== null) {
+                      const idx = parseInt(msgIdxStr, 10);
+                      const msg = messages[idx];
+                      if (msg) {
+                        const parsed = parseDateTimeFromMessage(msg.text);
+                        console.log("📅 [Telemetry] Calendar button clicked. Message index:", idx, "Parsed details:", parsed);
+                        setBookingStartDate(parsed.date);
+                        setBookingEndDate(parsed.date);
+                        setBookingStartTime(parsed.fromTime);
+                        setBookingEndTime(parsed.toTime);
+                        setActiveBookingBubbleIndex(idx);
+                        setIsSpaceBooking(true);
+                      }
+                    }
+                  }
+                }}
+              >
                 {messages.map((msg, idx) => {
                   const isUser = msg.role === "user";
                   const isError = msg.role === "error";
@@ -4422,7 +4540,7 @@ export default function Home() {
                         ) : isStreaming ? (
                           /* ── Streaming: pre-wrap plain text + blinking cursor ── */
                           <div className="ai-bubble streaming-text">
-                            {msg.text}
+                            <span dangerouslySetInnerHTML={{ __html: injectCalendarIcon(msg.text, idx) }} />
                             <span className="stream-cursor" />
                           </div>
 
@@ -4487,7 +4605,7 @@ export default function Home() {
                                 borderRadius: '8px',
                                 borderLeft: '3px solid var(--color-accent, #D4AF37)',
                               }}>
-                                {msg.multiSummary}
+                                <span dangerouslySetInnerHTML={{ __html: injectCalendarIcon(msg.multiSummary, idx) }} />
                               </div>
                             )}
                             {msg.multipleDatasets.map((ds, dsIdx) => (
@@ -4522,7 +4640,7 @@ export default function Home() {
                             justifyContent: 'center',
                             alignItems: 'flex-start',
                           }}>
-                            <div dangerouslySetInnerHTML={{ __html: msg.text }} style={{
+                            <div dangerouslySetInnerHTML={{ __html: injectCalendarIcon(msg.text, idx) }} style={{
                               width: '100%',
                               textAlign: 'left',
                             }} />
@@ -4536,7 +4654,7 @@ export default function Home() {
                               className="copy-bubble-btn"
                               onClick={(e) => {
                                 // Extract plain text if it's HTML
-                                const textToCopy = msg.text.replace(/<[^>]*>?/gm, '');
+                                const textToCopy = injectCalendarIcon(msg.text, idx).replace(new RegExp('<[^>]*>?', 'gm'), '');
                                 navigator.clipboard.writeText(textToCopy);
 
                                 // Change icon to tick
@@ -4592,7 +4710,37 @@ export default function Home() {
                           </>
                         )}
 
-
+                        {/* Inline Booking Picker if active */}
+                        {activeBookingBubbleIndex === idx && (
+                          <SpaceBookingModal
+                            isInline={true}
+                            bookingFrom={`${bookingStartDate} ${bookingStartTime}`}
+                            bookingTo={`${bookingEndDate} ${bookingEndTime}`}
+                            onSave={(from, to) => {
+                              setBookingFrom(from);
+                              setBookingTo(to);
+                              
+                              let bookingMsg = `${from} to ${to}`;
+                              if (from.includes(" ") && to.includes(" ")) {
+                                const partsFrom = from.split(" ");
+                                const partsTo = to.split(" ");
+                                const date = partsFrom[0];
+                                const startTime = partsFrom[1];
+                                const endTime = partsTo[1];
+                                bookingMsg = `${date} from ${startTime} to ${endTime}`;
+                              }
+                              
+                              console.log("📅 [Telemetry] Inline saving booking times. Sending message:", bookingMsg);
+                              sendTextDirectly(bookingMsg);
+                              
+                              // Reset inline bubble index to close the inline picker
+                              setActiveBookingBubbleIndex(null);
+                            }}
+                            onClose={() => {
+                              setActiveBookingBubbleIndex(null);
+                            }}
+                          />
+                        )}
 
                       </div>
                     </div>
@@ -5068,93 +5216,9 @@ export default function Home() {
               </div>
             </div>
           )}
-          {isSpaceBookingModalOpen && (
-            <SpaceBookingModal onClose={() => setIsSpaceBookingModalOpen(false)} />
-          )}
+
           {isComplaintsModalOpen && (
             <ComplaintsModal onClose={() => setIsComplaintsModalOpen(false)} />
-          )}
-          {showLockedPopup && (
-            <div
-              style={{
-                position: "fixed",
-                inset: 0,
-                backgroundColor: "rgba(0, 0, 0, 0.55)",
-                backdropFilter: "blur(6px)",
-                WebkitBackdropFilter: "blur(6px)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                zIndex: 30000,
-                padding: "16px",
-              }}
-            >
-              <div
-                style={{
-                  width: "100%",
-                  maxWidth: "380px",
-                  background: "var(--glass-bg, #1a1a1a)",
-                  border: "1px solid rgba(255, 255, 255, 0.1)",
-                  borderRadius: "16px",
-                  boxShadow: "0 15px 35px rgba(0, 0, 0, 0.4)",
-                  padding: "20px",
-                  textAlign: "center",
-                  color: "#ffffff",
-                }}
-              >
-                <h4 style={{ margin: "0 0 8px 0", fontSize: "16px", fontWeight: 700 }}>
-                  Mode is Locked
-                </h4>
-                <p style={{ margin: "0 0 20px 0", fontSize: "13px", color: "rgba(255, 255, 255, 0.7)", lineHeight: "1.4" }}>
-                  This chat session is locked to your current mode. To switch modes, please start a new chat.
-                </p>
-                <div style={{ display: "flex", gap: "10px" }}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowLockedPopup(false);
-                      handleNewChat();
-                    }}
-                    style={{
-                      flex: 1,
-                      background: "var(--color-primary, #d4af37)",
-                      color: "#000000",
-                      border: "none",
-                      borderRadius: "8px",
-                      padding: "10px",
-                      fontSize: "13px",
-                      fontWeight: 700,
-                      cursor: "pointer",
-                      transition: "opacity 0.2s",
-                    }}
-                    onMouseEnter={(e) => { e.currentTarget.style.opacity = "0.9"; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
-                  >
-                    Create New Chat
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowLockedPopup(false)}
-                    style={{
-                      flex: 1,
-                      background: "transparent",
-                      color: "#ffffff",
-                      border: "1px solid rgba(255, 255, 255, 0.2)",
-                      borderRadius: "8px",
-                      padding: "10px",
-                      fontSize: "13px",
-                      fontWeight: 600,
-                      cursor: "pointer",
-                      transition: "background 0.2s",
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255, 255, 255, 0.05)"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            </div>
           )}
         </div>
       </div>

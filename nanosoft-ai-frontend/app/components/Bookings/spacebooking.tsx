@@ -338,11 +338,11 @@ export default function SpaceBooking({
           alignItems: "center",
           gap: "8px",
           width: "100%",
-          paddingLeft: (isSpaceBooking || isComplaints) ? "12px" : "0px",
+          paddingLeft: (isSpaceBooking || isComplaints || isChatStarted) ? "12px" : "0px",
         }}
       >
         {/* Plus Button */}
-        {!(isSpaceBooking || isComplaints) && (
+        {!(isSpaceBooking || isComplaints || isChatStarted) && (
           <button
             ref={buttonRef}
             type="button"
