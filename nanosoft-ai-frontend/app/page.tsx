@@ -2433,8 +2433,20 @@ export default function Home() {
               }
             } else {
               try {
-                processedText = formatOutput(cleanedText);
-                console.log("📝 [DONE] Formatted as text");
+                // ── Space booking plain-text: skip table-conversion formatting ──
+                // Booking confirmations and status messages have "Key: Value" lines
+                // that formatOutput() incorrectly converts into HTML tables.
+                // For space booking sessions, render as simple line-broken plain text.
+                if (isSpaceBookingRef.current) {
+                  processedText = cleanedText
+                    .split("\n")
+                    .map(line => line.trim() ? `<div>${line}</div>` : '<div style="height:6px"></div>')
+                    .join("");
+                  console.log("📝 [DONE] Space booking — rendered as plain text (no table conversion)");
+                } else {
+                  processedText = formatOutput(cleanedText);
+                  console.log("📝 [DONE] Formatted as text");
+                }
               } catch (err) {
                 console.log("📝 [DONE] Using raw text", err);
                 processedText = finalText;
@@ -2463,6 +2475,24 @@ export default function Home() {
             sessionMessagesRef.current.set(activeSid, u);
             return u;
           });
+
+          // ── Auto-open inline calendar picker on Phase 3 message ──────────
+          // Detect when AI asks user to pick a date/time via the calendar
+          const isCalendarPrompt = /use the calendar/i.test(finalText);
+          if (isCalendarPrompt && isSpaceBookingRef.current) {
+            setMessages(prev => {
+              const idx = prev.length - 1;
+              const parsed = parseDateTimeFromMessage(finalText);
+              setBookingStartDate(parsed.date);
+              setBookingEndDate(parsed.date);
+              setBookingStartTime(parsed.fromTime);
+              setBookingEndTime(parsed.toTime);
+              setActiveBookingBubbleIndex(idx);
+              console.log("📅 [Auto] Phase 3 detected — auto-opening inline booking picker on message index:", idx);
+              return prev;
+            });
+          }
+
           accRef.current = "";          // reset for next message
           setIsLoading(false);
           setTimeout(() => inputRef.current?.focus(), 50);
@@ -4749,10 +4779,17 @@ export default function Home() {
                               if (from.includes(" ") && to.includes(" ")) {
                                 const partsFrom = from.split(" ");
                                 const partsTo = to.split(" ");
-                                const date = partsFrom[0];
+                                const startDate = partsFrom[0];
                                 const startTime = partsFrom[1];
+                                const endDate = partsTo[0];
                                 const endTime = partsTo[1];
-                                bookingMsg = `${date} from ${startTime} to ${endTime}`;
+                                if (startDate === endDate) {
+                                  // Same day booking: "2026-06-10 from 10:00 to 14:00"
+                                  bookingMsg = `${startDate} from ${startTime} to ${endTime}`;
+                                } else {
+                                  // Multi-day booking: "2026-06-10 10:00 to 2026-06-11 14:00"
+                                  bookingMsg = `${startDate} ${startTime} to ${endDate} ${endTime}`;
+                                }
                               }
 
                               console.log("📅 [Telemetry] Inline saving booking times. Sending message:", bookingMsg);
