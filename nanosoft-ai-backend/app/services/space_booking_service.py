@@ -5,7 +5,7 @@ from typing import Optional
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage, AIMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 from app.config import settings
-from app.tools.space_booking_tool import GET_SPOTS, BOOK_SPOT, fetch_spots_api
+from app.tools.space_booking_tool import GET_SPOTS, BOOK_SPOT, GET_BOOKING_STATUS, fetch_spots_api
 from app.prompts.space_booking_prompt import SPACE_BOOKING_SYSTEM_PROMPT
 from app.state import memory_store
 
@@ -16,47 +16,64 @@ ch.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(me
 if not logger.handlers:
     logger.addHandler(ch)
 
-# ── How many turns of space booking history to keep in memory ──────────────────
 SB_THREAD_MAX_MESSAGES = 20
 
 
+# ── Slim record fields sent to the frontend table ──────────────────────────────
+_TABLE_FIELDS = ("SpotCode", "SpotName", "BuildingName", "FloorName")
+
+
+def _slim_records(p_list: list) -> list:
+    """Return only the 4 display fields — strip all raw API noise."""
+    return [{f: s.get(f) for f in _TABLE_FIELDS} for s in p_list]
+
+
+# ── Session cache helpers ──────────────────────────────────────────────────────
+
 def _cache_key(search_term: Optional[str]) -> str:
-    """Normalise a search term into a consistent cache key."""
     return (search_term or "__all__").strip().lower()
 
 
 def _get_cached_spots(session_id: str, search_term: Optional[str]) -> Optional[dict]:
-    """Return cached spot data for this session+search_term, or None."""
     cache = memory_store.get(session_id, {}).get("sb_spot_cache", {})
-    key = _cache_key(search_term)
-    result = cache.get(key)
+    result = cache.get(_cache_key(search_term))
     if result is not None:
         logger.info("✅ Cache HIT | session=%s | key=%s | spots=%d",
-                    session_id, key, result.get("TotalCount", 0))
+                    session_id, _cache_key(search_term), result.get("TotalCount", 0))
     return result
 
 
 def _set_cached_spots(session_id: str, search_term: Optional[str], data: dict):
-    """Store spot data in the session cache."""
     if session_id not in memory_store:
         memory_store[session_id] = {}
     if "sb_spot_cache" not in memory_store[session_id]:
         memory_store[session_id]["sb_spot_cache"] = {}
-    key = _cache_key(search_term)
-    memory_store[session_id]["sb_spot_cache"][key] = data
+    memory_store[session_id]["sb_spot_cache"][_cache_key(search_term)] = data
     logger.info("💾 Cache SET | session=%s | key=%s | spots=%d",
-                session_id, key, data.get("TotalCount", 0))
+                session_id, _cache_key(search_term), data.get("TotalCount", 0))
 
+
+def _lookup_spot_from_cache(session_id: Optional[str], spot_code: str) -> Optional[dict]:
+    """Find a spot's full details by SpotCode across all cached searches."""
+    if not session_id:
+        return None
+    sb_cache = memory_store.get(session_id, {}).get("sb_spot_cache", {})
+    for cached_data in sb_cache.values():
+        for spot in cached_data.get("p_list", []):
+            if spot.get("SpotCode") == spot_code:
+                return spot
+    return None
+
+
+# ── sb_thread helpers ──────────────────────────────────────────────────────────
 
 def _get_sb_thread(session_id: Optional[str]) -> list:
-    """Retrieve the per-session space booking conversation thread."""
     if not session_id:
         return []
     return list(memory_store.get(session_id, {}).get("sb_thread", []))
 
 
 def _save_sb_thread(session_id: Optional[str], thread: list):
-    """Persist the updated thread back to session memory (trimmed)."""
     if not session_id:
         return
     if session_id not in memory_store:
@@ -66,12 +83,15 @@ def _save_sb_thread(session_id: Optional[str], thread: list):
 
 
 def _clear_sb_thread(session_id: Optional[str]):
-    """Clear the thread after a completed booking so the next flow starts fresh."""
+    """Reset only the conversation thread after a completed booking.
+    The spot cache is intentionally kept so the next search in the same
+    session does not need to re-hit the API."""
     if session_id and session_id in memory_store:
         memory_store[session_id]["sb_thread"] = []
-        memory_store[session_id]["sb_spot_cache"] = {}
-        logger.info("🗑️ sb_thread + sb_spot_cache cleared | session=%s", session_id)
+        logger.info("🗑️ sb_thread reset (cache kept) | session=%s", session_id)
 
+
+# ── Service ────────────────────────────────────────────────────────────────────
 
 class SpaceBookingService:
     def __init__(self):
@@ -80,10 +100,10 @@ class SpaceBookingService:
                 model=settings.GOOGLE_AI_MODEL,
                 google_api_key=settings.GOOGLE_API_KEY,
                 temperature=0.0
-            ).bind_tools([GET_SPOTS, BOOK_SPOT])
+            ).bind_tools([GET_SPOTS, BOOK_SPOT, GET_BOOKING_STATUS])
 
             self.system_prompt = SPACE_BOOKING_SYSTEM_PROMPT
-            logger.info("🚀 SpaceBookingService initialized with tools")
+            logger.info("🚀 SpaceBookingService initialized with tools: GET_SPOTS, BOOK_SPOT, GET_BOOKING_STATUS")
         except Exception as e:
             logger.error(f"❌ SpaceBookingService init failed: {e}", exc_info=True)
             raise
@@ -96,67 +116,59 @@ class SpaceBookingService:
         session_id: str = None
     ) -> tuple[str, str, list]:
         try:
-            logger.info(f"🚀 Handling space booking for {user_name} | session={session_id}")
+            logger.info(f"🚀 Space booking | user={user_name} | session={session_id}")
 
-            # ── 1. Extract current user query from the incoming messages ──────────
+            # Extract current user query
             current_query = ""
             for msg in reversed(messages):
                 if isinstance(msg, HumanMessage):
                     current_query = msg.content
                     break
+            logger.info("📝 Query: %s", current_query[:120])
 
-            logger.info("📝 Current query: %s", current_query[:120])
-
-            # ── 2. Load per-session sb_thread (real HumanMessage/AIMessage chain) ─
+            # Load & extend the real per-session conversation thread
             sb_thread = _get_sb_thread(session_id)
             sb_thread.append(HumanMessage(content=current_query))
 
-            # ── 3. Build prompt: space booking system prompt + real thread ─────────
+            # Build prompt: system prompt + real thread only (no scoped memory noise)
             sys_msg = SystemMessage(
                 content=self.system_prompt.content + f"\n\nCURRENT USER_NAME: {user_name}"
             )
             prompt_messages = [sys_msg] + sb_thread
 
-            # ── 4. First model invoke ─────────────────────────────────────────────
+            # First model invoke
             ai_msg = await self.model.ainvoke(prompt_messages)
 
             tool_data = None
 
-            # ── 5. Tool handling ───────────────────────────────────────────────────
             if ai_msg.tool_calls:
                 prompt_messages.append(ai_msg)
 
                 for tc in ai_msg.tool_calls:
 
-                    # ── GET_SPOTS ─────────────────────────────────────────────────
+                    # ── GET_SPOTS ─────────────────────────────────────────────
                     if tc["name"] == "GET_SPOTS":
                         s_term = tc["args"].get("search_term")
 
                         cached = _get_cached_spots(session_id, s_term) if session_id else None
                         if cached is not None:
-                            logger.info("📦 Using cached spots — skipping API call")
+                            logger.info("📦 Cache HIT — skipping API")
                             tool_data = cached
                             tool_result_str = json.dumps(cached)
                         else:
-                            logger.info("🌐 Cache MISS — calling GET_SPOTS API")
+                            logger.info("🌐 Cache MISS — calling API")
                             tool_result_str = await fetch_spots_api(user_name, s_term)
                             try:
                                 tool_data = json.loads(tool_result_str)
                             except Exception:
-                                tool_data = {"error": "Invalid JSON response"}
-
+                                tool_data = {"error": "Invalid JSON"}
                             if session_id and isinstance(tool_data, dict) and "p_list" in tool_data:
                                 _set_cached_spots(session_id, s_term, tool_data)
 
-                        # Compress to 4 fields for LLM — saves tokens
+                        # Send only 4 compressed fields to LLM
                         if isinstance(tool_data, dict) and "p_list" in tool_data:
                             compressed = [
-                                {
-                                    "SpotCode": s.get("SpotCode"),
-                                    "SpotName": s.get("SpotName"),
-                                    "BuildingName": s.get("BuildingName"),
-                                    "FloorName": s.get("FloorName"),
-                                }
+                                {f: s.get(f) for f in _TABLE_FIELDS}
                                 for s in tool_data.get("p_list", [])
                             ]
                             llm_content = json.dumps({
@@ -167,80 +179,125 @@ class SpaceBookingService:
                             llm_content = tool_result_str
 
                         prompt_messages.append(ToolMessage(
-                            name=tc["name"],
-                            tool_call_id=tc["id"],
-                            content=llm_content
+                            name=tc["name"], tool_call_id=tc["id"], content=llm_content
                         ))
 
-                    # ── BOOK_SPOT ─────────────────────────────────────────────────
+                    # ── BOOK_SPOT ─────────────────────────────────────────────
                     elif tc["name"] == "BOOK_SPOT":
                         args = tc["args"]
                         args["user_name"] = user_name
                         if sub_user_name:
                             args["sub_user_name"] = sub_user_name
 
+                        # ── Verify spot details from cache (prevents hallucination) ─
+                        spot_code_req = args.get("spot_code", "")
+                        verified = _lookup_spot_from_cache(session_id, spot_code_req)
+                        if verified:
+                            args["spot_name"]     = verified.get("SpotName", args.get("spot_name"))
+                            args["building_name"] = verified.get("BuildingName", args.get("building_name"))
+                            args["floor_name"]    = verified.get("FloorName", args.get("floor_name"))
+                            logger.info("✅ Spot verified from cache: %s → %s", spot_code_req, args["spot_name"])
+
                         tool_result_str = await BOOK_SPOT.ainvoke(args)
 
                         try:
                             parsed_res = json.loads(tool_result_str)
 
-                            # ── Missing time — ask the user for it ────────────────
                             if parsed_res.get("error_type") == "missing_time":
                                 spot_code = parsed_res.get("spot_code", "the spot")
                                 building  = parsed_res.get("building_name", "the building")
 
                                 prompt_messages.append(ToolMessage(
-                                    name=tc["name"],
-                                    tool_call_id=tc["id"],
+                                    name=tc["name"], tool_call_id=tc["id"],
                                     content=json.dumps({
                                         "error_type": "missing_time",
                                         "instruction": (
-                                            f"Timing was not provided. Ask the user for their preferred time "
+                                            f"Time not provided. Ask the user warmly for their preferred time "
                                             f"for booking {spot_code} at {building}. "
-                                            f"Do NOT call BOOK_SPOT again until the user's next message contains an actual time."
+                                            f"Do NOT call BOOK_SPOT again until they reply with a time."
                                         )
                                     })
                                 ))
-
                                 ai_msg2 = await self.model.ainvoke(prompt_messages)
                                 time_ask = ai_msg2.content or (
-                                    f"What is your preferred time for booking **{spot_code}** at **{building}**? "
-                                    f"(e.g., 10am, 2pm–4pm, morning)"
+                                    f"When would you like to book **{spot_code}** at **{building}**? "
+                                    f"(e.g. 10am, 2pm–4pm, morning)"
                                 )
-                                logger.info("⏰ Missing time — asking user: %s", time_ask[:100])
-
-                                # Save thread with the time-ask so next turn has full context
+                                logger.info("⏰ Missing time — asking: %s", time_ask[:100])
                                 sb_thread.append(AIMessage(content=time_ask))
                                 _save_sb_thread(session_id, sb_thread)
                                 return time_ask, time_ask, messages
 
-                            # ── Booking succeeded — clear thread for next flow ─────
                             if parsed_res.get("success"):
-                                logger.info("✅ Booking success | booking_id=%s", parsed_res.get("booking_id"))
+                                logger.info("✅ Booking success | id=%s", parsed_res.get("booking_id"))
 
                         except json.JSONDecodeError:
                             pass
 
                         prompt_messages.append(ToolMessage(
-                            name=tc["name"],
-                            tool_call_id=tc["id"],
-                            content=tool_result_str
+                            name=tc["name"], tool_call_id=tc["id"], content=tool_result_str
                         ))
 
-                # ── Second invocation — generate final response ───────────────────
+                    # ── GET_BOOKING_STATUS ────────────────────────────────────
+                    elif tc["name"] == "GET_BOOKING_STATUS":
+                        args = tc["args"]
+                        args["user_name"] = user_name
+                        tool_result_str = await GET_BOOKING_STATUS.ainvoke(args)
+                        logger.info("🔍 GET_BOOKING_STATUS result: %s", tool_result_str[:200])
+
+                        try:
+                            status_data = json.loads(tool_result_str)
+                            if status_data.get("found"):
+                                bid   = status_data.get("booking_id", "—")
+                                sname = status_data.get("spot_name", "—")
+                                scode = status_data.get("spot_code", "—")
+                                bname = status_data.get("building_name", "—")
+                                fname = status_data.get("floor_name", "—")
+                                tming = status_data.get("timing", "—")
+                                status_reply = (
+                                    f"Here's the status of your booking:\n\n"
+                                    f"Booking ID: {bid}\n"
+                                    f"Space: {sname} ({scode})\n"
+                                    f"Location: {bname}, {fname}\n"
+                                    f"Time: {tming}\n"
+                                    f"Status: Confirmed ✅\n\n"
+                                    f"Let me know if there's anything else I can help you with!"
+                                )
+                            else:
+                                bid = args.get("booking_id", "?")
+                                status_reply = (
+                                    f"I couldn't find a booking with ID **{bid}**. "
+                                    f"Please double-check the ID and try again."
+                                )
+                        except (json.JSONDecodeError, Exception) as e:
+                            logger.error("GET_BOOKING_STATUS parse error: %s", e)
+                            status_reply = (
+                                "Something went wrong while fetching your booking. "
+                                "Please try again."
+                            )
+
+                        logger.info("📋 Booking status reply generated")
+                        sb_thread.append(AIMessage(content=status_reply))
+                        _save_sb_thread(session_id, sb_thread)
+                        return status_reply, status_reply, messages
+
+                # Final model response
                 ai_msg2 = await self.model.ainvoke(prompt_messages)
                 content = ai_msg2.content or ""
 
                 if not content.strip():
                     content = (
-                        "I'm sorry, something went wrong generating a response. "
+                        "I'm sorry, I couldn't generate a response. "
                         "Please try again or rephrase your request."
                     )
 
-                # After successful booking, reset the thread
+                # Manage thread after tool response
                 try:
-                    last_tool_result = json.loads(prompt_messages[-1].content)
-                    if last_tool_result.get("success"):
+                    last_result = json.loads(prompt_messages[-1].content)
+                    if last_result.get("success"):
+                        # Booking done — reset for next flow
+                        sb_thread.append(AIMessage(content=content))
+                        _save_sb_thread(session_id, sb_thread)
                         _clear_sb_thread(session_id)
                     else:
                         sb_thread.append(AIMessage(content=content))
@@ -249,32 +306,31 @@ class SpaceBookingService:
                     sb_thread.append(AIMessage(content=content))
                     _save_sb_thread(session_id, sb_thread)
 
-                # Return table response if multiple spots found
+                # ── Respond: table for multiple spots, conversational otherwise ──
                 if tool_data and "p_list" in tool_data and len(tool_data["p_list"]) > 1:
                     final_response = {
                         "type": "large_dataset",
                         "context_summary": content,
-                        "records": tool_data["p_list"]
+                        "records": _slim_records(tool_data["p_list"])  # ← 4 fields only
                     }
                     return json.dumps(final_response), content, messages
                 else:
                     return content, content, messages
 
-            # ── No tool called — pure conversational response ──────────────────────
+            # No tool called — pure conversational
             content = ai_msg.content or ""
             if not content.strip():
                 content = (
                     "I'm here to help you book a space! "
-                    "Could you tell me which building or Spot Code you're looking for?"
+                    "Which building or Spot Code are you looking for?"
                 )
-
             sb_thread.append(AIMessage(content=content))
             _save_sb_thread(session_id, sb_thread)
             return content, content, messages
 
         except Exception as e:
             logger.error(f"❌ Error in handle_space_booking: {e}", exc_info=True)
-            err_msg = "Sorry, something went wrong while processing your space booking request."
+            err_msg = "Sorry, something went wrong with your space booking request. Please try again."
             return err_msg, err_msg, messages
 
 

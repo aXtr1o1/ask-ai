@@ -343,3 +343,14 @@ class BookSpotInput(BaseModel):
     building_name: Optional[str] = Field(default="Unknown Building", description="The name of the building where the spot is located.")
     floor_name: Optional[str] = Field(default="Unknown Floor", description="The floor where the spot is located.")
     timing: Optional[str] = Field(default=None, description="The preferred time or duration for the booking explicitly provided by the user. If the user hasn't explicitly provided a time yet, leave this field EMPTY/NULL and ask them for it.")
+
+class GetSpotsInput(BaseModel):
+    user_name: str = Field(description="The client_name/user_name from the frontend context.")
+    search_term: Optional[str] = Field(
+        default=None,
+        description="The Spot Code (e.g. WRMF-NES) or Building Name to search for. Always extract this from the user's query."
+    )
+
+class GetBookingStatusInput(BaseModel):
+    user_name: str = Field(description="The client_name/user_name from the frontend context.")
+    booking_id: str = Field(description="The 4-digit booking ID provided by the user to check their booking status.")
