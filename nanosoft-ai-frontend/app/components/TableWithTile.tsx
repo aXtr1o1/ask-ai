@@ -14,6 +14,9 @@ interface TableWithTileProps {
   htmlTableContent?: string; // Old HTML table format
   /** When set, pagination shows "Showing X of totalCount" (preview of a larger result set). */
   totalCount?: number;
+  showOnlyTiles?: boolean;
+  /** Explicit flag: renders space booking bullet-list tiles instead of normal pill grid */
+  isSpaceBooking?: boolean;
 }
 
 const TableWithTile = React.memo(function TableWithTile({
@@ -22,6 +25,8 @@ const TableWithTile = React.memo(function TableWithTile({
   title = "Data",
   htmlTableContent,
   totalCount,
+  showOnlyTiles = false,
+  isSpaceBooking = false,
 }: TableWithTileProps) {
   const responsive = useResponsive();
   const tableConfig = getResponsiveTable(responsive.screen);
@@ -37,7 +42,14 @@ const TableWithTile = React.memo(function TableWithTile({
   const tileFieldBorder = "var(--tile-field-border, 1px solid rgba(148, 163, 184, 0.25))";
   const tileFieldLabelColor = "var(--tile-field-label, #0f172a)";
   const tileFieldValueColor = "var(--tile-field-value, #1f2937)";
-  const [viewMode, setViewMode] = useState<"table" | "tile">("table");
+  const [viewMode, setViewMode] = useState<"table" | "tile">(showOnlyTiles ? "tile" : "table");
+
+  useEffect(() => {
+    if (showOnlyTiles) {
+      setViewMode("tile");
+    }
+  }, [showOnlyTiles]);
+
   const [page, setPage] = useState(0);
   const LIMIT = 100;
 
@@ -65,6 +77,9 @@ const TableWithTile = React.memo(function TableWithTile({
     });
     return Array.from(cols);
   }, [columns, rows]);
+
+  // Use explicit prop — falls back to column sniffing if prop not provided
+  const isSpaceBookingData = isSpaceBooking;
 
   // Pagination: compute the slice of rows to display
   const totalPages = Math.max(1, Math.ceil(rows.length / LIMIT));
@@ -191,11 +206,11 @@ const TableWithTile = React.memo(function TableWithTile({
 
     // Show toast notification
     const isDark = document.documentElement.getAttribute("data-theme") !== "light";
-    const bg       = isDark ? "rgba(28, 28, 30, 0.97)"  : "rgba(255, 255, 255, 0.97)";
-    const border    = isDark ? "rgba(212, 175, 55, 0.5)" : "rgba(180, 140, 30, 0.4)";
-    const textColor = isDark ? "#ffffff"                  : "#1a1a1a";
-    const accent    = isDark ? "#D4AF37"                  : "#9A7B20";
-    const shadow    = isDark ? "0 8px 32px rgba(0,0,0,0.5)" : "0 8px 32px rgba(0,0,0,0.15)";
+    const bg = isDark ? "rgba(28, 28, 30, 0.97)" : "rgba(255, 255, 255, 0.97)";
+    const border = isDark ? "rgba(212, 175, 55, 0.5)" : "rgba(180, 140, 30, 0.4)";
+    const textColor = isDark ? "#ffffff" : "#1a1a1a";
+    const accent = isDark ? "#D4AF37" : "#9A7B20";
+    const shadow = isDark ? "0 8px 32px rgba(0,0,0,0.5)" : "0 8px 32px rgba(0,0,0,0.15)";
 
     const toast = document.createElement("div");
     toast.style.cssText = `
@@ -221,7 +236,7 @@ const TableWithTile = React.memo(function TableWithTile({
       white-space: nowrap;
       backdrop-filter: blur(8px);
     `;
-    
+
     /* changes done by megnathan: Vary toast message based on whether save is confirmed or just started */
     if (isFallback) {
       toast.innerHTML = `<span style="color:${accent};font-size:18px;">ℹ</span> <span>Download started...</span>`;
@@ -260,135 +275,137 @@ const TableWithTile = React.memo(function TableWithTile({
       {/* Table content with buttons inside */}
       <div className="table-with-tile" style={{ marginTop: 0, position: 'relative' }}>
         {/* Toggle buttons positioned at top - right corner INSIDE the border */}
-        <div style={toggleContainerStyle}>
-          {/* Table View Button (Left) - Toggle to Table */}
-          <button
-            onClick={() => setViewMode("table")}
-            title="Switch to Table View"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: '4px 8px',
-              borderRadius: '6px',
-              background: viewMode === "table"
-                ? 'linear-gradient(180deg, #ae8625 0%, #f7ef8a 35%, #d2ac47 65%, #edc967 100%)'
-                : 'rgba(174, 134, 37, 0.3)',
-              color: '#1f2937',
-              border: '1px solid #d4af37',
-              cursor: 'pointer',
-              fontSize: '11px',
-              fontWeight: 600,
-              transition: 'all 0.2s ease-in-out',
-              backdropFilter: 'blur(8px)',
-              transform: 'scale(1)',
-              opacity: viewMode === "table" ? 1 : 0.6,
-              boxShadow: viewMode === "table"
-                ? '0 0 12px rgba(212, 175, 55, 0.6), inset 0 0 8px rgba(255, 255, 255, 0.3)'
-                : 'none',
-            }}
-            onMouseDown={e => {
-              (e.target as HTMLElement).style.transform = 'scale(0.95)';
-            }}
-            onMouseUp={e => {
-              (e.target as HTMLElement).style.transform = 'scale(1)';
-            }}
-          >
-            <span style={{
-              display: 'flex',
-              alignItems: 'center',
-              textShadow: viewMode === "table" ? '0 0 8px rgba(255, 255, 255, 0.8)' : 'none',
-            }}>
-              <IconList size={14} />
-            </span>
-          </button>
+        {!showOnlyTiles && (
+          <div style={toggleContainerStyle}>
+            {/* Table View Button (Left) - Toggle to Table */}
+            <button
+              onClick={() => setViewMode("table")}
+              title="Switch to Table View"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '4px 8px',
+                borderRadius: '6px',
+                background: viewMode === "table"
+                  ? 'linear-gradient(180deg, #ae8625 0%, #f7ef8a 35%, #d2ac47 65%, #edc967 100%)'
+                  : 'rgba(174, 134, 37, 0.3)',
+                color: '#1f2937',
+                border: '1px solid #d4af37',
+                cursor: 'pointer',
+                fontSize: '11px',
+                fontWeight: 600,
+                transition: 'all 0.2s ease-in-out',
+                backdropFilter: 'blur(8px)',
+                transform: 'scale(1)',
+                opacity: viewMode === "table" ? 1 : 0.6,
+                boxShadow: viewMode === "table"
+                  ? '0 0 12px rgba(212, 175, 55, 0.6), inset 0 0 8px rgba(255, 255, 255, 0.3)'
+                  : 'none',
+              }}
+              onMouseDown={e => {
+                (e.target as HTMLElement).style.transform = 'scale(0.95)';
+              }}
+              onMouseUp={e => {
+                (e.target as HTMLElement).style.transform = 'scale(1)';
+              }}
+            >
+              <span style={{
+                display: 'flex',
+                alignItems: 'center',
+                textShadow: viewMode === "table" ? '0 0 8px rgba(255, 255, 255, 0.8)' : 'none',
+              }}>
+                <IconList size={14} />
+              </span>
+            </button>
 
-          {/* Tile View Button (Right) - Toggle to Tile */}
-          <button
-            onClick={() => setViewMode("tile")}
-            title="Switch to Tile View"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: '4px 8px',
-              borderRadius: '6px',
-              background: viewMode === "tile"
-                ? 'linear-gradient(180deg, #ae8625 0%, #f7ef8a 35%, #d2ac47 65%, #edc967 100%)'
-                : 'rgba(174, 134, 37, 0.3)',
-              color: '#1f2937',
-              border: '1px solid #d4af37',
-              cursor: 'pointer',
-              fontSize: '11px',
-              fontWeight: 600,
-              transition: 'all 0.2s ease-in-out',
-              backdropFilter: 'blur(8px)',
-              transform: 'scale(1)',
-              opacity: viewMode === "tile" ? 1 : 0.6,
-              boxShadow: viewMode === "tile"
-                ? '0 0 12px rgba(212, 175, 55, 0.6), inset 0 0 8px rgba(255, 255, 255, 0.3)'
-                : 'none',
-            }}
-            onMouseDown={e => {
-              (e.target as HTMLElement).style.transform = 'scale(0.95)';
-            }}
-            onMouseUp={e => {
-              (e.target as HTMLElement).style.transform = 'scale(1)';
-            }}
-          >
-            <span style={{
-              display: 'flex',
-              alignItems: 'center',
-              textShadow: viewMode === "tile" ? '0 0 8px rgba(255, 255, 255, 0.8)' : 'none',
-            }}>
-              <IconLayoutGrid size={14} />
-            </span>
-          </button>
+            {/* Tile View Button (Right) - Toggle to Tile */}
+            <button
+              onClick={() => setViewMode("tile")}
+              title="Switch to Tile View"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '4px 8px',
+                borderRadius: '6px',
+                background: viewMode === "tile"
+                  ? 'linear-gradient(180deg, #ae8625 0%, #f7ef8a 35%, #d2ac47 65%, #edc967 100%)'
+                  : 'rgba(174, 134, 37, 0.3)',
+                color: '#1f2937',
+                border: '1px solid #d4af37',
+                cursor: 'pointer',
+                fontSize: '11px',
+                fontWeight: 600,
+                transition: 'all 0.2s ease-in-out',
+                backdropFilter: 'blur(8px)',
+                transform: 'scale(1)',
+                opacity: viewMode === "tile" ? 1 : 0.6,
+                boxShadow: viewMode === "tile"
+                  ? '0 0 12px rgba(212, 175, 55, 0.6), inset 0 0 8px rgba(255, 255, 255, 0.3)'
+                  : 'none',
+              }}
+              onMouseDown={e => {
+                (e.target as HTMLElement).style.transform = 'scale(0.95)';
+              }}
+              onMouseUp={e => {
+                (e.target as HTMLElement).style.transform = 'scale(1)';
+              }}
+            >
+              <span style={{
+                display: 'flex',
+                alignItems: 'center',
+                textShadow: viewMode === "tile" ? '0 0 8px rgba(255, 255, 255, 0.8)' : 'none',
+              }}>
+                <IconLayoutGrid size={14} />
+              </span>
+            </button>
 
-          {/* Download Button */}
-          <button
-            onClick={handleDownload}
-            title="Download data"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: '4px 8px',
-              borderRadius: '6px',
-              background: 'rgba(174, 134, 37, 0.3)',
-              color: '#1f2937',
-              border: '1px solid #d4af37',
-              cursor: 'pointer',
-              fontSize: '11px',
-              fontWeight: 600,
-              transition: 'all 0.2s ease-in-out',
-              backdropFilter: 'blur(8px)',
-              transform: 'scale(1)',
-              opacity: 0.8,
-            }}
-            onMouseDown={e => {
-              (e.target as HTMLElement).style.transform = 'scale(0.95)';
-            }}
-            onMouseUp={e => {
-              (e.target as HTMLElement).style.transform = 'scale(1)';
-            }}
-            onMouseEnter={e => {
-              (e.currentTarget as HTMLElement).style.opacity = '1';
-              (e.currentTarget as HTMLElement).style.boxShadow = '0 0 12px rgba(212, 175, 55, 0.6)';
-            }}
-            onMouseLeave={e => {
-              (e.currentTarget as HTMLElement).style.opacity = '0.8';
-              (e.currentTarget as HTMLElement).style.boxShadow = 'none';
-            }}
-          >
-            <span style={{
-              display: 'flex',
-              alignItems: 'center',
-            }}>
-              <IconDownload size={14} />
-            </span>
-          </button>
-        </div>
+            {/* Download Button */}
+            <button
+              onClick={handleDownload}
+              title="Download data"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '4px 8px',
+                borderRadius: '6px',
+                background: 'rgba(174, 134, 37, 0.3)',
+                color: '#1f2937',
+                border: '1px solid #d4af37',
+                cursor: 'pointer',
+                fontSize: '11px',
+                fontWeight: 600,
+                transition: 'all 0.2s ease-in-out',
+                backdropFilter: 'blur(8px)',
+                transform: 'scale(1)',
+                opacity: 0.8,
+              }}
+              onMouseDown={e => {
+                (e.target as HTMLElement).style.transform = 'scale(0.95)';
+              }}
+              onMouseUp={e => {
+                (e.target as HTMLElement).style.transform = 'scale(1)';
+              }}
+              onMouseEnter={e => {
+                (e.currentTarget as HTMLElement).style.opacity = '1';
+                (e.currentTarget as HTMLElement).style.boxShadow = '0 0 12px rgba(212, 175, 55, 0.6)';
+              }}
+              onMouseLeave={e => {
+                (e.currentTarget as HTMLElement).style.opacity = '0.8';
+                (e.currentTarget as HTMLElement).style.boxShadow = 'none';
+              }}
+            >
+              <span style={{
+                display: 'flex',
+                alignItems: 'center',
+              }}>
+                <IconDownload size={14} />
+              </span>
+            </button>
+          </div>
+        )}
 
         <div className="content-shell" style={{ paddingTop: 0 }}>
           <div className="data-view-shell" style={{
@@ -466,7 +483,66 @@ const TableWithTile = React.memo(function TableWithTile({
                     padding: responsive.isMobile ? '8px' : '20px 24px',
                   }}>
                     {pagedRows.map((row, rowIdx) => {
-                      // Detect status from row data for status dot color
+                      if (isSpaceBookingData) {
+                        // ── Space Booking: bullet list layout ──────────────────
+                        return (
+                          <div key={startIdx + rowIdx} className="tile-card animate-fadeIn" style={{
+                            padding: responsive.isMobile ? '12px 16px' : '16px 20px',
+                            backgroundColor: tileBackground,
+                            border: tileBorder,
+                            color: tileText,
+                            boxShadow: isDark ? '0 8px 24px rgba(0,0,0,0.4)' : '0 8px 24px rgba(0,0,0,0.08)',
+                            borderRadius: '12px',
+                            transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+                            minWidth: 0,
+                            cursor: 'pointer',
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.borderColor = 'var(--color-primary, #d4af37)';
+                            e.currentTarget.style.transform = 'translateY(-2px)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.borderColor = '';
+                            e.currentTarget.style.transform = 'translateY(0)';
+                          }}
+                          >
+                            <ul style={{
+                              listStyle: 'none',
+                              margin: 0,
+                              padding: 0,
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '6px',
+                            }}>
+                              {detectedColumns.map((col) => {
+                                const val = formatCellValue(row[col]);
+                                return (
+                                  <li key={col} style={{ display: 'flex', alignItems: 'baseline', gap: '8px', minWidth: 0 }}>
+                                    <span style={{
+                                      width: '5px', height: '5px', borderRadius: '50%',
+                                      background: 'rgba(212,175,55,0.7)', flexShrink: 0, marginTop: '5px',
+                                    }} />
+                                    <span style={{
+                                      fontSize: '11px', fontWeight: 700, textTransform: 'uppercase',
+                                      letterSpacing: '0.5px', color: tileTextMuted, flexShrink: 0, whiteSpace: 'nowrap',
+                                    }}>
+                                      {col}:
+                                    </span>
+                                    <span style={{
+                                      fontSize: '13px', fontWeight: 500, color: tileFieldValueColor,
+                                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                                    }}>
+                                      {val}
+                                    </span>
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          </div>
+                        );
+                      }
+
+                      // ── Normal Ask AI: original pill grid layout ────────────
                       const statusValue = row.status || row.STATUS || row.condition || row.CONDITION || "neutral";
                       const isActive = ["active", "online", "good", "operational"].some(s => statusValue.toLowerCase().includes(s));
                       const statusColor = isActive ? "#10b981" : "#6b7280";
@@ -489,6 +565,7 @@ const TableWithTile = React.memo(function TableWithTile({
                         }
                       }
                       return (
+
                         <div key={startIdx + rowIdx} className="tile-card" style={{
                           padding: responsive.isMobile ? '8px' : '16px',
                           minHeight: 'auto',
@@ -529,7 +606,7 @@ const TableWithTile = React.memo(function TableWithTile({
                               title={isActive ? 'Active' : 'Inactive'}
                             />
 
-                            {/* Card Content - Horizontal Spread Layout */}
+                            {/* Card Content - Pill grid layout */}
                             <div style={{
                               flex: 1,
                               display: 'grid',
@@ -565,7 +642,7 @@ const TableWithTile = React.memo(function TableWithTile({
                                     overflow: 'hidden',
                                     textOverflow: 'ellipsis',
                                     color: tileTextMuted,
-                                    opacity: 0.8
+                                    opacity: 0.8,
                                   }}>{col}</div>
                                   <div className="tile-field-value" style={{
                                     fontSize: '13px',

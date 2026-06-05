@@ -75,7 +75,7 @@ def mock_database():
         patch("app.api.routes.assets.get_pool", return_value=mock_conn),
         patch("app.api.routes.ppm.get_pool", return_value=mock_conn),
         patch("app.api.routes.bdm.get_pool", return_value=mock_conn),
-        patch("app.main.get_pool", return_value=mock_conn),
+        patch("app.api.routes.app_endpoints.get_pool", return_value=mock_conn),
     ]
     
     for p in patches:

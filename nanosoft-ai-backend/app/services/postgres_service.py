@@ -103,7 +103,7 @@ async def generate_session_title(history: list) -> str:
 
 
 # ── Save session to PostgreSQL ──────────────────────────────────────────────
-async def save_session_to_postgres_service(session_id: str, user_name: str, history: list, group_name: str = None):
+async def save_session_to_postgres_service(session_id: str, user_name: str, history: list, group_name: str = None, is_space_booking: bool = False):
     """
     Saves chat session history + generated title to PostgreSQL (chat_sessions).
     Uses upsert on session_id (insert or update).
@@ -112,6 +112,14 @@ async def save_session_to_postgres_service(session_id: str, user_name: str, hist
     if not history:
         logger.info(f"⚠️ Empty history for session_id: {session_id} — skipping save")
         return
+
+    # Auto-detect space booking if not explicitly set
+    if not is_space_booking and history:
+        for msg in history:
+            assistant_text = msg.get("assistant") or msg.get("context") or ""
+            if isinstance(assistant_text, str) and ("SPOTIDPK" in assistant_text.upper() or "SPOTCODE" in assistant_text.upper()):
+                is_space_booking = True
+                break
 
     try:
         title        = await generate_session_title(history)
@@ -123,16 +131,17 @@ async def save_session_to_postgres_service(session_id: str, user_name: str, hist
             try:
                 cur.execute(
                     """
-                    INSERT INTO chat_sessions (session_id, user_name, chat_history, title, updated_at, group_name)
-                    VALUES (%s, %s, %s::jsonb, %s, NOW(), %s)
+                    INSERT INTO chat_sessions (session_id, user_name, chat_history, title, updated_at, group_name, is_space_booking)
+                    VALUES (%s, %s, %s::jsonb, %s, NOW(), %s, %s)
                     ON CONFLICT (session_id) DO UPDATE SET
                         user_name    = EXCLUDED.user_name,
                         chat_history = EXCLUDED.chat_history,
                         title        = EXCLUDED.title,
                         updated_at   = NOW(),
-                        group_name   = EXCLUDED.group_name
+                        group_name   = EXCLUDED.group_name,
+                        is_space_booking = COALESCE(chat_sessions.is_space_booking, FALSE) OR EXCLUDED.is_space_booking
                     """,
-                    (session_id, user_name, history_json, title, group_name),
+                    (session_id, user_name, history_json, title, group_name, is_space_booking),
                 )
             except Exception as conflict_err:
                 if "unique or exclusion constraint" in str(conflict_err).lower() or "on_conflict" in str(conflict_err).lower():
@@ -145,24 +154,24 @@ async def save_session_to_postgres_service(session_id: str, user_name: str, hist
                         cur.execute(
                             """
                             UPDATE chat_sessions
-                            SET user_name = %s, chat_history = %s::jsonb, title = %s, updated_at = NOW(), group_name = %s
+                            SET user_name = %s, chat_history = %s::jsonb, title = %s, updated_at = NOW(), group_name = %s, is_space_booking = COALESCE(is_space_booking, FALSE) OR %s
                             WHERE session_id = %s
                             """,
-                            (user_name, history_json, title, group_name, session_id),
+                            (user_name, history_json, title, group_name, is_space_booking, session_id),
                         )
                     else:
                         cur.execute(
                             """
-                            INSERT INTO chat_sessions (session_id, user_name, chat_history, title, updated_at, group_name)
-                            VALUES (%s, %s, %s::jsonb, %s, NOW(), %s)
+                            INSERT INTO chat_sessions (session_id, user_name, chat_history, title, updated_at, group_name, is_space_booking)
+                            VALUES (%s, %s, %s::jsonb, %s, NOW(), %s, %s)
                             """,
-                            (session_id, user_name, history_json, title, group_name),
+                            (session_id, user_name, history_json, title, group_name, is_space_booking),
                         )
                 else:
                     raise
             conn.commit()
 
-        logger.info(f"✅ PostgreSQL save successful | session_id={session_id} | title='{title}' | messages={len(history)}")
+        logger.info(f"✅ PostgreSQL save successful | session_id={session_id} | title='{title}' | messages={len(history)} | is_space_booking={is_space_booking}")
 
     except Exception as e:
         logger.error(f"❌ PostgreSQL save failed | session_id={session_id} | error={e}", exc_info=True)

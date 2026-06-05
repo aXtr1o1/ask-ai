@@ -21,6 +21,10 @@ import GroupsChat, { FolderListItem, ChatListItem } from "./components/GroupsCha
 /* changes done by megnathan: Added imports for the new Ghost Completion feature */
 import { useGhostInputCompletion } from "./hooks/useGhostInputCompletion";
 import { recordPromptForGhostHistory, ghostPromptHistoryStorageKey } from "./lib/ghostInputCompletion";
+import SpaceBooking from "./components/Bookings/spacebooking";
+import SpaceBookingModal from "./components/Bookings/SpaceBookingModal";
+import ComplaintsModal from "./components/Bookings/ComplaintsModal";
+
 /* changes done by megnathan: Cleaned up icon imports to avoid conflicts with local definitions */
 import {
   IconUser, IconMicrophone, IconPlayerPlay, IconPlayerPause,
@@ -54,9 +58,10 @@ interface Message {
   // ← Multiple datasets (type="multiple_datasets" from backend)
   multipleDatasets?: MultiDatasetView[];
   multiSummary?: string;  // ← context_summary from the backend
+  isSpaceBooking?: boolean;   // ← Track if message belongs to Space Booking session
 }
 
-interface ChatSession { id: string; title: string; createdAt: number; updatedAt?: number; isPinned?: boolean; isArchived?: boolean; group_name?: string; }
+interface ChatSession { id: string; title: string; createdAt: number; updatedAt?: number; isPinned?: boolean; isArchived?: boolean; group_name?: string; isSpaceBooking?: boolean; }
 interface Group {
   id: string;
   name: string;
@@ -792,6 +797,99 @@ function removeEmoji(text: string): string {
   return lines.join("\n");
 }
 
+// Inject calendar icon at the end of space booking time examples
+function injectCalendarIcon(text: string, msgIdx: number = -1): string {
+  if (!text) return text;
+  return text.replace(
+    /(\(e\.g\.[^)]*(?:10am|2pm|morning|all day|afternoon|evening)[^)]*)\)/gi,
+    (match, p1) => {
+      if (p1.includes("interactive-calendar-btn") || p1.includes("📅")) return match;
+      if (msgIdx !== -1) {
+        return `${p1} <button class="interactive-calendar-btn" data-msg-idx="${msgIdx}" style="background:none;border:none;cursor:pointer;padding:0;font-size:inherit;display:inline-flex;align-items:center;vertical-align:middle;outline:none;" title="Change date & time">📅</button>)`;
+      }
+      return p1 + " 📅)";
+    }
+  );
+}
+
+// Telemetry-logged date/time extraction from message text
+function parseDateTimeFromMessage(text: string): { date: string; fromTime: string; toTime: string } {
+  console.log("🔍 [Telemetry] Running parseDateTimeFromMessage on text:", text);
+
+  let date = new Date().toISOString().split("T")[0];
+  let fromTime = "10:00";
+  let toTime = "11:00";
+
+  try {
+    // 1. Try to find a date like YYYY-MM-DD
+    const dateMatch = text.match(/\b(\d{4}-\d{2}-\d{2})\b/);
+    if (dateMatch) {
+      date = dateMatch[1];
+      console.log("📅 [Telemetry] Parsed date YYYY-MM-DD:", date);
+    } else {
+      // Check for tomorrow
+      if (/tomorrow/i.test(text)) {
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        date = tomorrow.toISOString().split("T")[0];
+        console.log("📅 [Telemetry] Parsed date (tomorrow):", date);
+      } else if (/today/i.test(text)) {
+        date = new Date().toISOString().split("T")[0];
+        console.log("📅 [Telemetry] Parsed date (today):", date);
+      }
+    }
+
+    // 2. Try to find times like "10am", "2pm", "10:00", "15:00"
+    const timeRegex = /\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i;
+    const timeMatches = [...text.matchAll(new RegExp(timeRegex, "gi"))];
+
+    if (timeMatches.length >= 1) {
+      const parseMatch = (m: RegExpMatchArray) => {
+        let hour = parseInt(m[1], 10);
+        const min = m[2] ? m[2] : "00";
+        const ampm = m[3].toLowerCase();
+        if (ampm === "pm" && hour < 12) hour += 12;
+        if (ampm === "am" && hour === 12) hour = 0;
+        return `${String(hour).padStart(2, "0")}:${min}`;
+      };
+
+      fromTime = parseMatch(timeMatches[0]);
+      console.log("📅 [Telemetry] Parsed start time:", fromTime);
+
+      if (timeMatches.length >= 2) {
+        toTime = parseMatch(timeMatches[1]);
+        console.log("📅 [Telemetry] Parsed end time:", toTime);
+      } else {
+        // Default end time to start time + 1 hour
+        const [h, m] = fromTime.split(":").map(Number);
+        const endHour = (h + 1) % 24;
+        toTime = `${String(endHour).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+        console.log("📅 [Telemetry] Defaulted end time to start + 1h:", toTime);
+      }
+    } else {
+      // Look for 24h formats like 14:00 or 09:30
+      const time24Match = text.match(/\b(\d{2}):(\d{2})\b/g);
+      if (time24Match && time24Match.length >= 1) {
+        fromTime = time24Match[0];
+        console.log("📅 [Telemetry] Parsed 24h start time:", fromTime);
+        if (time24Match.length >= 2) {
+          toTime = time24Match[1];
+          console.log("📅 [Telemetry] Parsed 24h end time:", toTime);
+        } else {
+          const [h, m] = fromTime.split(":").map(Number);
+          const endHour = (h + 1) % 24;
+          toTime = `${String(endHour).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+          console.log("📅 [Telemetry] Defaulted 24h end time to start + 1h:", toTime);
+        }
+      }
+    }
+  } catch (err) {
+    console.error("⚠️ [Telemetry] Failed to parse date/time from message:", err);
+  }
+
+  return { date, fromTime, toTime };
+}
+
 function formatOutput(text: string): string {
   if (!text.trim()) return "";
 
@@ -984,7 +1082,6 @@ function generateSessionId(): string {
 // Chat history will be implemented later
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
-
 const IconPlus = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
     <path d="M12 5v14M5 12h14" />
@@ -1027,6 +1124,14 @@ const IconUser1 = () => (
 const IconChat = ({ width = 16, height = 16, style }: { width?: number; height?: number; style?: React.CSSProperties }) => (
   <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ ...style, width, height, flexShrink: 0 }}>
     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+  </svg>
+);
+const IconCalendar = ({ width = 16, height = 16, style }: { width?: number; height?: number; style?: React.CSSProperties }) => (
+  <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ ...style, width, height, flexShrink: 0 }}>
+    <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+    <line x1="16" y1="2" x2="16" y2="6" />
+    <line x1="8" y1="2" x2="8" y2="6" />
+    <line x1="3" y1="10" x2="21" y2="10" />
   </svg>
 );
 const IconArchive = ({ width = 16, height = 16, style }: { width?: number; height?: number; style?: React.CSSProperties }) => (
@@ -1137,6 +1242,27 @@ export default function Home() {
   const [wsConnectionState, setWsConnectionState] = useState<'connecting' | 'connected' | 'failed'>('connecting');
   const [isGraphMode, setIsGraphMode] = useState<boolean>(false);
   const [chartType, setChartType] = useState<ChartType>('vertical-bar');
+
+  // SpaceBooking active feature states
+  const [isSpaceBooking, setIsSpaceBooking] = useState<boolean>(false);
+  const [isComplaints, setIsComplaints] = useState<boolean>(false);
+  const [isComplaintsModalOpen, setIsComplaintsModalOpen] = useState<boolean>(false);
+  const [activeBookingBubbleIndex, setActiveBookingBubbleIndex] = useState<number | null>(null);
+  const [bookingStartDate, setBookingStartDate] = useState<string>("");
+  const [bookingEndDate, setBookingEndDate] = useState<string>("");
+  const [bookingStartTime, setBookingStartTime] = useState<string>("");
+  const [bookingEndTime, setBookingEndTime] = useState<string>("");
+
+  const isSpaceBookingRef = useRef(isSpaceBooking);
+  useEffect(() => {
+    isSpaceBookingRef.current = isSpaceBooking;
+  }, [isSpaceBooking]);
+
+  useEffect(() => {
+    if (isComplaints) {
+      setIsComplaintsModalOpen(true);
+    }
+  }, [isComplaints]);
   const [activeFeature, setActiveFeature] = useState<'chat' | 'archived' | 'groups'>('chat');
   const [showFeaturePlaceholder, setShowFeaturePlaceholder] = useState<boolean>(false);
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
@@ -1187,6 +1313,10 @@ export default function Home() {
     setSelectedGroupName(name);
     setMessages([]); // Clear messages for new group chat
     setSessionId(generateSessionId()); // New session for the group
+    setIsSpaceBooking(false);
+    setIsComplaints(false);
+    setIsComplaintsModalOpen(false);
+    setActiveBookingBubbleIndex(null);
 
     try {
       await fetch(`${baseUrl}/api/folder/create`, {
@@ -1573,7 +1703,9 @@ export default function Home() {
               }
             ]);
             setSessionId(sharedSid);
-            setMessages(processLoadedMessages(mappedHistory));
+            const processed = processLoadedMessages(mappedHistory);
+            setMessages(processed);
+            setIsSpaceBooking(processed.some(m => m.isSpaceBooking));
             console.log("[share] shared chat loaded and mapped");
             setAuthChecked(true);
           }
@@ -1749,6 +1881,7 @@ export default function Home() {
           userName: userIdFromUrl ?? loggedInUser,
           sessionId: sid,
           group_name: selectedGroupName,
+          isSpaceBooking: (sid === sessionId ? isSpaceBooking : (chatSessions.find(s => s.id === sid)?.isSpaceBooking || false)) || valid.some(m => m.isSpaceBooking),
           chatHistory: valid.map(m => ({
             role: m.role,
             text: m.isAudio
@@ -2038,7 +2171,6 @@ export default function Home() {
     setShareLink("");
     setShareModalOpen(true); // Open modal immediately
     setIsSharing(true);      // Show loading inside modal
-
     try {
       // 1. Force save the current history to DB first
       const currentMsgs = sessionMessagesRef.current.get(sid) || messages;
@@ -2281,6 +2413,7 @@ export default function Home() {
                       text: multiSummary!,
                       streaming: false,
                       originalText: finalText,
+                      isSpaceBooking: isSpaceBookingRef.current,
                       ...(multipleDatasets.length > 0 ? { multipleDatasets, multiSummary } : {}),
                     };
                   }
@@ -2309,8 +2442,20 @@ export default function Home() {
               }
             } else {
               try {
-                processedText = formatOutput(cleanedText);
-                console.log("📝 [DONE] Formatted as text");
+                // ── Space booking plain-text: skip table-conversion formatting ──
+                // Booking confirmations and status messages have "Key: Value" lines
+                // that formatOutput() incorrectly converts into HTML tables.
+                // For space booking sessions, render as simple line-broken plain text.
+                if (isSpaceBookingRef.current) {
+                  processedText = cleanedText
+                    .split("\n")
+                    .map(line => line.trim() ? `<div>${line}</div>` : '<div style="height:6px"></div>')
+                    .join("");
+                  console.log("📝 [DONE] Space booking — rendered as plain text (no table conversion)");
+                } else {
+                  processedText = formatOutput(cleanedText);
+                  console.log("📝 [DONE] Formatted as text");
+                }
               } catch (err) {
                 console.log("📝 [DONE] Using raw text", err);
                 processedText = finalText;
@@ -2330,7 +2475,8 @@ export default function Home() {
                 chartType: chartType,              // ← Store chart type
                 originalText: finalText,           // ← Store original raw response before HTML processing
                 tableData: tableData,              // ← Store table rows
-                tableTitle: tableTitle              // ← Store table title
+                tableTitle: tableTitle,             // ← Store table title
+                isSpaceBooking: isSpaceBookingRef.current // ← Store space booking state
               };
             }
             // Persist to per-session store so switching sessions keeps history
@@ -2338,6 +2484,24 @@ export default function Home() {
             sessionMessagesRef.current.set(activeSid, u);
             return u;
           });
+
+          // ── Auto-open inline calendar picker on Phase 3 message ──────────
+          // Detect when AI asks user to pick a date/time via the calendar
+          const isCalendarPrompt = /use the calendar/i.test(finalText);
+          if (isCalendarPrompt && isSpaceBookingRef.current) {
+            setMessages(prev => {
+              const idx = prev.length - 1;
+              const parsed = parseDateTimeFromMessage(finalText);
+              setBookingStartDate(parsed.date);
+              setBookingEndDate(parsed.date);
+              setBookingStartTime(parsed.fromTime);
+              setBookingEndTime(parsed.toTime);
+              setActiveBookingBubbleIndex(idx);
+              console.log("📅 [Auto] Phase 3 detected — auto-opening inline booking picker on message index:", idx);
+              return prev;
+            });
+          }
+
           accRef.current = "";          // reset for next message
           setIsLoading(false);
           setTimeout(() => inputRef.current?.focus(), 50);
@@ -2365,10 +2529,10 @@ export default function Home() {
             const l = u.length - 1;
             // If last message is already our streaming AI bubble → update it
             if (u[l]?.role === "ai" && u[l]?.streaming === true) {
-              u[l] = { ...u[l], text: displayText, streaming: true };  // ← Preserve chartType
+              u[l] = { ...u[l], text: displayText, streaming: true, isSpaceBooking: isSpaceBookingRef.current };  // ← Preserve chartType
             } else {
               // First chunk → create the AI bubble now (only once) with current chartType
-              u.push({ role: "ai", text: displayText, streaming: true, chartType: chartType });
+              u.push({ role: "ai", text: displayText, streaming: true, chartType: chartType, isSpaceBooking: isSpaceBookingRef.current });
             }
             return u;
           });
@@ -2476,7 +2640,7 @@ export default function Home() {
       const data = await res.json();
       setChatSessions(prev => {
         const fetched: ChatSession[] = (data?.sessions ?? []).map(
-          (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; is_pinned?: boolean; is_archived?: boolean; group_name?: string }) => {
+          (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; is_pinned?: boolean; is_archived?: boolean; group_name?: string; is_space_booking?: boolean }) => {
             const existing = prev.find(p => p.id === s.session_id);
             return {
               id: s.session_id,
@@ -2486,6 +2650,7 @@ export default function Home() {
               isPinned: s.is_pinned || false,
               isArchived: s.is_archived || false,
               group_name: s.group_name,
+              isSpaceBooking: s.is_space_booking || false,
             };
           }
         );
@@ -2583,7 +2748,7 @@ export default function Home() {
     }, 3000);
   };
 
-  const handleNewChat = async () => {
+  const handleNewChat = async (initialMode?: 'space_booking' | 'complaints' | 'ask_ai') => {
     if (isLoading) {
       showWarningToast("Please wait, don't switch the chat!");
       console.log("⚠️ Chat creation blocked: Please wait, don't switch the chat!");
@@ -2597,6 +2762,10 @@ export default function Home() {
     setMessages([]);
     accRef.current = "";
     setIsLoading(false);
+    setIsSpaceBooking(initialMode === 'space_booking'); // Reset space booking state when starting a new chat
+    setIsComplaints(initialMode === 'complaints');
+    setIsComplaintsModalOpen(false);
+    setActiveBookingBubbleIndex(null);
 
     const newSessionId = generateSessionId();
     setSessionId(newSessionId);
@@ -2636,7 +2805,7 @@ export default function Home() {
         const data = await res.json();
         const currentSessions = chatSessions;
         const fetched: ChatSession[] = (data?.sessions ?? []).map(
-          (s: any) => {
+          (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; is_pinned?: boolean; is_archived?: boolean; group_name?: string; is_space_booking?: boolean }) => {
             const existing = currentSessions.find(p => p.id === s.session_id);
             return {
               id: s.session_id,
@@ -2646,6 +2815,7 @@ export default function Home() {
               isPinned: s.is_pinned || false,
               isArchived: s.is_archived || false,
               group_name: s.group_name,
+              isSpaceBooking: s.is_space_booking || false,
             };
           }
         );
@@ -2678,6 +2848,25 @@ export default function Home() {
       }
     };
     setTimeout(() => refetchSessions(), 400);
+  };
+
+  const handleSwitchMode = (newMode: 'space_booking' | 'complaints' | 'ask_ai') => {
+    const currentMode = isSpaceBooking ? 'space_booking' : isComplaints ? 'complaints' : 'ask_ai';
+    if (newMode === currentMode) {
+      return;
+    }
+
+    if (messages.length > 0) {
+      // Save current chat history to database in background
+      saveChatHistory(sessionId, messages);
+
+      // Start a new chat instantly
+      handleNewChat(newMode);
+    } else {
+      // If current chat is empty, just switch the mode of the current chat!
+      setIsSpaceBooking(newMode === 'space_booking');
+      setIsComplaints(newMode === 'complaints');
+    }
   };
 
 
@@ -2729,10 +2918,21 @@ export default function Home() {
               };
             });
             const multipleDatasets = parsedMulti.filter((ds) => ds.rows.length > 0);
+            const isSpaceBooking = multipleDatasets.some(ds =>
+              ds.rows.some(row =>
+                Object.keys(row).some(col =>
+                  typeof col === 'string' && (
+                    col.toUpperCase() === "SPOTIDPK" ||
+                    col.toUpperCase() === "SPOTCODE"
+                  )
+                )
+              )
+            );
             return {
               ...m,
               text: multiSummary,
               originalText: text,
+              isSpaceBooking,
               ...(multipleDatasets.length > 0 ? { multipleDatasets, multiSummary } : {}),
             };
           }
@@ -2749,8 +2949,16 @@ export default function Home() {
             const tableHTML = renderLargeDataset(text);
             if (tableHTML) {
               const rows = extractTableRows(tableHTML);
+              const isSpaceBooking = rows.some(row =>
+                Object.keys(row).some(col =>
+                  typeof col === 'string' && (
+                    col.toUpperCase() === "SPOTIDPK" ||
+                    col.toUpperCase() === "SPOTCODE"
+                  )
+                )
+              );
               // ✅ Set originalText = raw JSON so future saves preserve it
-              return { ...m, text: tableHTML, originalText: text, tableData: rows, tableTitle: "Results" };
+              return { ...m, text: tableHTML, originalText: text, tableData: rows, tableTitle: "Results", isSpaceBooking };
             }
           }
         }
@@ -2767,8 +2975,16 @@ export default function Home() {
         console.log("✅ [HISTORY] Message already HTML formatted - extracting table data");
         const rows = extractTableRows(text);
         if (rows.length > 0) {
+          const isSpaceBooking = rows.some(row =>
+            Object.keys(row).some(col =>
+              typeof col === 'string' && (
+                col.toUpperCase() === "SPOTIDPK" ||
+                col.toUpperCase() === "SPOTCODE"
+              )
+            )
+          );
           // ✅ originalText stays as the HTML — no raw JSON available here
-          return { ...m, text, originalText: text, tableData: rows, tableTitle: "Results" };
+          return { ...m, text, originalText: text, tableData: rows, tableTitle: "Results", isSpaceBooking };
         }
         return { ...m, originalText: text };
       }
@@ -2783,8 +2999,16 @@ export default function Home() {
         console.log("✅ [HISTORY] Successfully rendered as table structure");
         const rows = extractTableRows(tableHTML);
         if (rows.length > 0) {
+          const isSpaceBooking = rows.some(row =>
+            Object.keys(row).some(col =>
+              typeof col === 'string' && (
+                col.toUpperCase() === "SPOTIDPK" ||
+                col.toUpperCase() === "SPOTCODE"
+              )
+            )
+          );
           // ✅ originalText = raw text from DB so future saves re-parse correctly
-          return { ...m, text: tableHTML, originalText: text, tableData: rows, tableTitle: "Results" };
+          return { ...m, text: tableHTML, originalText: text, tableData: rows, tableTitle: "Results", isSpaceBooking };
         }
         return { ...m, text: tableHTML, originalText: text };
       }
@@ -2795,7 +3019,15 @@ export default function Home() {
         // Check if formatOutput produced an HTML table
         const rows = extractTableRows(formattedText);
         if (rows.length > 0) {
-          return { ...m, text: formattedText, originalText: text, tableData: rows, tableTitle: "Results" };
+          const isSpaceBooking = rows.some(row =>
+            Object.keys(row).some(col =>
+              typeof col === 'string' && (
+                col.toUpperCase() === "SPOTIDPK" ||
+                col.toUpperCase() === "SPOTCODE"
+              )
+            )
+          );
+          return { ...m, text: formattedText, originalText: text, tableData: rows, tableTitle: "Results", isSpaceBooking };
         }
         // If the formatted text has raw HTML tags, decode them
         if (formattedText.includes('<div') || formattedText.includes('&lt;')) {
@@ -2822,6 +3054,11 @@ export default function Home() {
     if (responsive.isMobile) {
       setSidebarOpen(false);
     }
+
+    setIsSpaceBooking(false); // Reset space booking state when switching session
+    setIsComplaints(false);
+    setIsComplaintsModalOpen(false);
+    setActiveBookingBubbleIndex(null);
 
     // Capture the currently active session ID
     const currentSid = sessionIdRef.current;
@@ -2850,7 +3087,7 @@ export default function Home() {
         const data = await res.json();
         setChatSessions(prev => {
           const fetched: ChatSession[] = (data?.sessions ?? []).map(
-            (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; group_name?: string; is_pinned?: boolean; is_archived?: boolean }) => {
+            (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; group_name?: string; is_pinned?: boolean; is_archived?: boolean; is_space_booking?: boolean }) => {
               const existing = prev.find(p => p.id === s.session_id);
               return {
                 id: s.session_id,
@@ -2860,6 +3097,7 @@ export default function Home() {
                 isPinned: s.is_pinned || false,
                 isArchived: s.is_archived || false,
                 group_name: s.group_name,
+                isSpaceBooking: s.is_space_booking || false,
               };
             }
           );
@@ -2883,6 +3121,8 @@ export default function Home() {
     if (cached && cached.length > 0) {
       const processed = processLoadedMessages(cached);
       setMessages(processed);
+      const isBookingSession = targetSession?.isSpaceBooking || processed.some(m => m.isSpaceBooking);
+      setIsSpaceBooking(isBookingSession);
     } else {
       // Fetch from backend
       setHistoryLoading(true);
@@ -2919,6 +3159,8 @@ export default function Home() {
         const processed = processLoadedMessages(history);
         sessionMessagesRef.current.set(targetSid, processed);
         setMessages(processed);
+        const isBookingSession = targetSession?.isSpaceBooking || processed.some(m => m.isSpaceBooking);
+        setIsSpaceBooking(isBookingSession);
       } catch (err) {
         console.warn("Failed to fetch session history:", err);
         setMessages([]);
@@ -3131,13 +3373,14 @@ export default function Home() {
       const existing = prev.find(s => s.id === sessionId);
       const rest = prev.filter(s => s.id !== sessionId);
       if (existing) {
-        return [{ ...existing, updatedAt: now }, ...rest];
+        return [{ ...existing, updatedAt: now, isSpaceBooking: isSpaceBooking || existing.isSpaceBooking }, ...rest];
       }
       const newCapsule: ChatSession = {
         id: sessionId,
         title: "New Chat",
         createdAt: now,
         updatedAt: now,
+        isSpaceBooking: isSpaceBooking,
       };
       return [newCapsule, ...rest];
     });
@@ -3161,6 +3404,7 @@ export default function Home() {
       isAudio: false,
       isText: true,
       isGraph: isGraphMode,
+      isSpaceBooking,
       query: userText,
       userName: loggedInUser,
       subUserName: userIdFromUrl ?? loggedInUser,
@@ -3196,13 +3440,14 @@ export default function Home() {
       const existing = prev.find(s => s.id === sessionId);
       const rest = prev.filter(s => s.id !== sessionId);
       if (existing) {
-        return [{ ...existing, updatedAt: now }, ...rest];
+        return [{ ...existing, updatedAt: now, isSpaceBooking: isSpaceBooking || existing.isSpaceBooking }, ...rest];
       }
       const newCapsule: ChatSession = {
         id: sessionId,
         title: "New Chat",
         createdAt: now,
         updatedAt: now,
+        isSpaceBooking: isSpaceBooking,
       };
       return [newCapsule, ...rest];
     });
@@ -3231,6 +3476,7 @@ export default function Home() {
       isAudio: false,
       isText: true,
       isGraph: isGraphMode,
+      isSpaceBooking,
       query: userText,
       userName: loggedInUser,
       subUserName: userIdFromUrl ?? loggedInUser,
@@ -3331,90 +3577,102 @@ export default function Home() {
                 </span>
               </div>
             )}
-            {/* changes done by megnathan: Used correct CSS classes for perfect Ghost Text alignment */}
-            <div className="main-input-stack">
-              <div className="main-input-ghost-mirror">
-                <span ref={ghostUserSpanRef} className="ghost-mirror-user"></span>
-                <span ref={ghostSuffixSpanRef} className="ghost-mirror-suffix"></span>
-              </div>
-              <textarea
-                ref={inputRef}
-                className="main-input"
-                defaultValue={input}
-                onCompositionStart={() => { isComposingRef.current = true; }}
-                onCompositionEnd={(e) => {
-                  isComposingRef.current = false;
-                  syncGhostUserMirror();
-                  applyGhostSuffixFromInput();
-                }}
-                onChange={(e) => {
-                  // Update ref immediately (no re-render)
-                  rawInputRef.current = e.target.value;
-                  // Resize based on DOM measurements
-                  resizeTA();
-                  syncGhostUserMirror();
-                  applyGhostSuffixFromInput();
 
-                  // Debounce updating the heavier `input` state
-                  if (inputDebounceRef.current) {
-                    clearTimeout(inputDebounceRef.current);
-                    inputDebounceRef.current = null;
+            <SpaceBooking
+              isSpaceBooking={isSpaceBooking}
+              setIsSpaceBooking={setIsSpaceBooking}
+              isComplaints={isComplaints}
+              setIsComplaints={setIsComplaints}
+              isChatStarted={messages.length > 0}
+              onSwitchMode={handleSwitchMode}
+            >
+              {/* changes done by megnathan: Used correct CSS classes for perfect Ghost Text alignment */}
+              <div className="main-input-stack" style={{ flexGrow: 1 }}>
+                <div className="main-input-ghost-mirror">
+                  <span ref={ghostUserSpanRef} className="ghost-mirror-user"></span>
+                  <span ref={ghostSuffixSpanRef} className="ghost-mirror-suffix"></span>
+                </div>
+                <textarea
+                  ref={inputRef}
+                  className="main-input"
+                  defaultValue={input}
+                  onCompositionStart={() => { isComposingRef.current = true; }}
+                  onCompositionEnd={(e) => {
+                    isComposingRef.current = false;
+                    syncGhostUserMirror();
+                    applyGhostSuffixFromInput();
+                  }}
+                  onChange={(e) => {
+                    // Update ref immediately (no re-render)
+                    rawInputRef.current = e.target.value;
+                    // Resize based on DOM measurements
+                    resizeTA();
+                    syncGhostUserMirror();
+                    applyGhostSuffixFromInput();
+
+                    // Debounce updating the heavier `input` state
+                    if (inputDebounceRef.current) {
+                      clearTimeout(inputDebounceRef.current);
+                      inputDebounceRef.current = null;
+                    }
+                    inputDebounceRef.current = window.setTimeout(() => {
+                      setInput(rawInputRef.current);
+                      inputDebounceRef.current = null;
+                    }, DEBOUNCE_MS);
+                  }}
+                  onKeyDown={handleKeyDown}
+                  disabled={isLoading || wsConnectionState !== "connected" || isGuestOnShared}
+                  placeholder={
+                    isGuestOnShared ? "" : (wsConnectionState === "connected" ? "Ask Anything..." : "Waiting for connection…")
                   }
-                  inputDebounceRef.current = window.setTimeout(() => {
-                    setInput(rawInputRef.current);
-                    inputDebounceRef.current = null;
-                  }, DEBOUNCE_MS);
-                }}
-                onKeyDown={handleKeyDown}
-                disabled={isLoading || wsConnectionState !== "connected" || isGuestOnShared}
-                placeholder={
-                  isGuestOnShared ? "" : (wsConnectionState === "connected" ? "Ask Anything..." : "Waiting for connection…")
+                  rows={1}
+                />
+              </div>
+              <VoiceMicButton
+                forwardedRef={voiceRecorder.micButtonRef}
+                onClick={voiceRecorder.toggleRecording}
+                disabled={
+                  isLoading ||
+                  wsConnectionState !== "connected" ||
+                  voiceRecorder.recordedAudioBlob !== null ||
+                  isGuestOnShared
                 }
-                rows={1}
               />
-            </div>
-            <VoiceMicButton
-              forwardedRef={voiceRecorder.micButtonRef}
-              onClick={voiceRecorder.toggleRecording}
-              disabled={
-                isLoading ||
-                wsConnectionState !== "connected" ||
-                voiceRecorder.recordedAudioBlob !== null ||
-                isGuestOnShared
-              }
-            />
-            <button
-              onClick={() => setIsGraphMode((p) => !p)}
-              title={isGraphMode ? "Graph mode ON — click to turn off" : "Click for graph output"}
-              style={{
-                background: isGraphMode
-                  ? "linear-gradient(135deg, #d4af37, #f5c249)"
-                  : "transparent",
-                border: isGraphMode
-                  ? "1px solid #d4af37"
-                  : "1px solid rgba(255,255,255,0.15)",
-                borderRadius: 8,
-                padding: "6px 8px",
-                cursor: "pointer",
-                color: isGraphMode ? "#000" : "#9CA3AF",
-                transition: "all 0.2s ease",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <IconChartBar size={18} stroke={1.5} />
-            </button>
-            <button
-              className="send-btn"
-              onClick={sendMessage}
-              disabled={isLoading || wsConnectionState !== "connected" || !(inputRef.current?.value ?? "").trim() || isGuestOnShared}
-            >
-              <IconArrowUp size={16} color="white" stroke={2} />
-            </button>
+              <button
+                onClick={() => setIsGraphMode((p) => !p)}
+                title={isGraphMode ? "Graph mode ON — click to turn off" : "Click for graph output"}
+                style={{
+                  background: isGraphMode
+                    ? "linear-gradient(135deg, #d4af37, #f5c249)"
+                    : "transparent",
+                  border: isGraphMode
+                    ? "1px solid #d4af37"
+                    : "1px solid rgba(255,255,255,0.15)",
+                  borderRadius: 8,
+                  padding: "6px 8px",
+                  cursor: "pointer",
+                  color: isGraphMode ? "#000" : "#9CA3AF",
+                  transition: "all 0.2s ease",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <IconChartBar size={18} stroke={1.5} />
+              </button>
+              <button
+                className="send-btn"
+                onClick={sendMessage}
+                disabled={isLoading || wsConnectionState !== "connected" || !(inputRef.current?.value ?? "").trim() || isGuestOnShared}
+                style={{ flexShrink: 0 }}
+              >
+                <IconArrowUp size={16} color="white" stroke={2} />
+              </button>
+            </SpaceBooking>
           </div>
         )}
-        {variant === "landing" && (
+        {variant === "landing" && !isSpaceBooking && !isComplaints && (
           <LandingSuggestedQueries
             onSelect={(q) => {
               if (inputDebounceRef.current) { clearTimeout(inputDebounceRef.current); inputDebounceRef.current = null; }
@@ -3623,7 +3881,6 @@ export default function Home() {
                       <IconUser size={18} />
                       <span>Manage Account</span>
                     </button>
-
                   </div>
                 </div>
               </div>
@@ -3641,7 +3898,7 @@ export default function Home() {
 
             {/* + New Chat Button */}
             <div className="new-chat-container-top" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-              <button className="new-chat-btn" onClick={handleNewChat} style={{ flex: 1 }}>
+              <button className="new-chat-btn" onClick={() => handleNewChat()} style={{ flex: 1 }}>
                 <IconChat width={16} height={16} />
                 <span>+ New Chat</span>
               </button>
@@ -3676,6 +3933,10 @@ export default function Home() {
                   setSessionId(newSid);
                   sessionIdRef.current = newSid;
                   setMessages([]);
+                  setIsSpaceBooking(false);
+                  setIsComplaints(false);
+                  setIsComplaintsModalOpen(false);
+                  setActiveBookingBubbleIndex(null);
                 }}
               >
                 <IconChat />
@@ -3689,6 +3950,10 @@ export default function Home() {
                   handleFeatureClick('archived');
                   setSelectedGroupName(null);
                   setMessages([]); // Clear messages to show landing container
+                  setIsSpaceBooking(false);
+                  setIsComplaints(false);
+                  setIsComplaintsModalOpen(false);
+                  setActiveBookingBubbleIndex(null);
                 }}
               >
                 <IconArchive />
@@ -3700,6 +3965,10 @@ export default function Home() {
                   setSearchTerm("");
                   setActiveFeature('groups');
                   handleFeatureClick('groups');
+                  setIsSpaceBooking(false);
+                  setIsComplaints(false);
+                  setIsComplaintsModalOpen(false);
+                  setActiveBookingBubbleIndex(null);
                 }}
               >
                 <IconLibrary />
@@ -3942,7 +4211,13 @@ export default function Home() {
                         style={{ cursor: "pointer", display: 'flex', alignItems: 'center', gap: 8 }}
                       >
                         <div className="content" style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
-                          {s.isPinned ? <IconPin size={16} style={{ color: 'var(--color-primary)' }} /> : <IconChat width={16} height={16} />}
+                          {s.isPinned ? (
+                            <IconPin size={16} style={{ color: 'var(--color-primary)' }} />
+                          ) : s.isSpaceBooking ? (
+                            <IconCalendar width={16} height={16} style={{ color: 'var(--color-primary, #d4af37)' }} />
+                          ) : (
+                            <IconChat width={16} height={16} />
+                          )}
                           {editingSessionId === s.id ? (
                             <input
                               ref={(el) => { editingInputRef.current = el; if (el) el.focus(); }}
@@ -4205,9 +4480,19 @@ export default function Home() {
                       animation: "goldShine 3s ease-in-out infinite",
                     }}
                   >
-                    {selectedGroupName ? `📁 ${selectedGroupName}` : "Welcome to Ask AI"}
+                    {isSpaceBooking
+                      ? "Welcome to Space Booking"
+                      : selectedGroupName
+                        ? `📁 ${selectedGroupName}`
+                        : "Welcome to Ask AI"}
                   </h1>
-                  <p className="landing-subtitle">{selectedGroupName ? `Start a new chat in ${selectedGroupName}` : "Let's work together buddy"}</p>
+                  <p className="landing-subtitle">
+                    {isSpaceBooking
+                      ? "Let's book your space buddy"
+                      : selectedGroupName
+                        ? `Start a new chat in ${selectedGroupName}`
+                        : "Let's work together buddy"}
+                  </p>
                 </div>
               </div>
               {renderChatInputFooter("landing")}
@@ -4224,7 +4509,30 @@ export default function Home() {
                   <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text)' }}>{selectedGroupName}</span>
                 </div>
               )}
-              <div className="messages-container">
+              <div
+                className="messages-container"
+                onClick={(e) => {
+                  const target = e.target as HTMLElement;
+                  const btn = target.closest(".interactive-calendar-btn");
+                  if (btn) {
+                    const msgIdxStr = btn.getAttribute("data-msg-idx");
+                    if (msgIdxStr !== null) {
+                      const idx = parseInt(msgIdxStr, 10);
+                      const msg = messages[idx];
+                      if (msg) {
+                        const parsed = parseDateTimeFromMessage(msg.text);
+                        console.log("📅 [Telemetry] Calendar button clicked. Message index:", idx, "Parsed details:", parsed);
+                        setBookingStartDate(parsed.date);
+                        setBookingEndDate(parsed.date);
+                        setBookingStartTime(parsed.fromTime);
+                        setBookingEndTime(parsed.toTime);
+                        setActiveBookingBubbleIndex(idx);
+                        setIsSpaceBooking(true);
+                      }
+                    }
+                  }
+                }}
+              >
                 {messages.map((msg, idx) => {
                   const isUser = msg.role === "user";
                   const isError = msg.role === "error";
@@ -4327,7 +4635,7 @@ export default function Home() {
                         ) : isStreaming ? (
                           /* ── Streaming: pre-wrap plain text + blinking cursor ── */
                           <div className="ai-bubble streaming-text">
-                            {msg.text}
+                            <span dangerouslySetInnerHTML={{ __html: injectCalendarIcon(msg.text, idx) }} />
                             <span className="stream-cursor" />
                           </div>
 
@@ -4392,7 +4700,7 @@ export default function Home() {
                                 borderRadius: '8px',
                                 borderLeft: '3px solid var(--color-accent, #D4AF37)',
                               }}>
-                                {msg.multiSummary}
+                                <span dangerouslySetInnerHTML={{ __html: injectCalendarIcon(msg.multiSummary, idx) }} />
                               </div>
                             )}
                             {msg.multipleDatasets.map((ds, dsIdx) => (
@@ -4402,6 +4710,8 @@ export default function Home() {
                                   title={ds.name}
                                   htmlTableContent={ds.html}
                                   totalCount={ds.totalCount}
+                                  showOnlyTiles={msg.isSpaceBooking}
+                                  isSpaceBooking={msg.isSpaceBooking}
                                 />
                               </div>
                             ))}
@@ -4413,6 +4723,8 @@ export default function Home() {
                             rows={msg.tableData}
                             title={msg.tableTitle || "Data"}
                             htmlTableContent={msg.text}
+                            showOnlyTiles={msg.isSpaceBooking}
+                            isSpaceBooking={msg.isSpaceBooking}
                           />
 
                         ) : (
@@ -4425,7 +4737,7 @@ export default function Home() {
                             justifyContent: 'center',
                             alignItems: 'flex-start',
                           }}>
-                            <div dangerouslySetInnerHTML={{ __html: msg.text }} style={{
+                            <div dangerouslySetInnerHTML={{ __html: injectCalendarIcon(msg.text, idx) }} style={{
                               width: '100%',
                               textAlign: 'left',
                             }} />
@@ -4439,7 +4751,7 @@ export default function Home() {
                               className="copy-bubble-btn"
                               onClick={(e) => {
                                 // Extract plain text if it's HTML
-                                const textToCopy = msg.text.replace(/<[^>]*>?/gm, '');
+                                const textToCopy = injectCalendarIcon(msg.text, idx).replace(new RegExp('<[^>]*>?', 'gm'), '');
                                 navigator.clipboard.writeText(textToCopy);
 
                                 // Change icon to tick
@@ -4495,7 +4807,48 @@ export default function Home() {
                           </>
                         )}
 
+                        {/* Inline Booking Picker if active */}
+                        {activeBookingBubbleIndex === idx && (
+                          <SpaceBookingModal
+                            isInline={true}
+                            bookingFrom={`${bookingStartDate} ${bookingStartTime}`}
+                            bookingTo={`${bookingEndDate} ${bookingEndTime}`}
+                            onSave={(from, to) => {
+                              const [fromDate, fromTime] = from.split(" ");
+                              const [toDate, toTime] = to.split(" ");
+                              setBookingStartDate(fromDate || "");
+                              setBookingStartTime(fromTime || "");
+                              setBookingEndDate(toDate || "");
+                              setBookingEndTime(toTime || "");
 
+                              let bookingMsg = `${from} to ${to}`;
+                              if (from.includes(" ") && to.includes(" ")) {
+                                const partsFrom = from.split(" ");
+                                const partsTo = to.split(" ");
+                                const startDate = partsFrom[0];
+                                const startTime = partsFrom[1];
+                                const endDate = partsTo[0];
+                                const endTime = partsTo[1];
+                                if (startDate === endDate) {
+                                  // Same day booking: "2026-06-10 from 10:00 to 14:00"
+                                  bookingMsg = `${startDate} from ${startTime} to ${endTime}`;
+                                } else {
+                                  // Multi-day booking: "2026-06-10 10:00 to 2026-06-11 14:00"
+                                  bookingMsg = `${startDate} ${startTime} to ${endDate} ${endTime}`;
+                                }
+                              }
+
+                              console.log("📅 [Telemetry] Inline saving booking times. Sending message:", bookingMsg);
+                              sendTextDirectly(bookingMsg);
+
+                              // Reset inline bubble index to close the inline picker
+                              setActiveBookingBubbleIndex(null);
+                            }}
+                            onClose={() => {
+                              setActiveBookingBubbleIndex(null);
+                            }}
+                          />
+                        )}
 
                       </div>
                     </div>
@@ -4970,6 +5323,10 @@ export default function Home() {
                 </div>
               </div>
             </div>
+          )}
+
+          {isComplaintsModalOpen && (
+            <ComplaintsModal onClose={() => setIsComplaintsModalOpen(false)} />
           )}
         </div>
       </div>

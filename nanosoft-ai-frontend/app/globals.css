@@ -2121,7 +2121,7 @@ body {
   border: none;
   backdrop-filter: none;
   box-sizing: border-box;
-  overflow: hidden;
+  overflow: visible;
 }
 
 /* Centered empty-state input: no extra bottom margin (layout uses flex spacers) */

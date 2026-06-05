@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 def test_health_check():
     from app.main import chatbot_app
 
-    with patch("app.main.get_pool", return_value=MagicMock()):
+    with patch("app.api.routes.app_endpoints.get_pool", return_value=MagicMock()):
         client = TestClient(chatbot_app)
         response = client.get("/api/health")
 
@@ -30,8 +30,8 @@ def test_session_endpoint_fetch_sessions():
         {"session_id": "sess-001", "title": "Asset Query", "created_at": "2024-01-01T00:00:00", "updated_at": "2024-01-01T00:00:00"}
     ]
 
-    with patch("app.main.get_pool", return_value=MagicMock()), \
-         patch("app.main.get_sessions_for_user", new_callable=AsyncMock, return_value=mock_sessions):
+    with patch("app.api.routes.app_endpoints.get_pool", return_value=MagicMock()), \
+         patch("app.api.routes.app_endpoints.get_sessions_for_user", new_callable=AsyncMock, return_value=mock_sessions):
 
         client = TestClient(chatbot_app)
         response = client.post("/api/session", json={
@@ -52,8 +52,8 @@ def test_websocket_chat_text_message():
 
     mock_response = ("Here are your assets.", "Found assets.", [])
 
-    with patch("app.main.get_pool", return_value=MagicMock()), \
-         patch("app.main.langchain_service.process_query", new_callable=AsyncMock, return_value=mock_response):
+    with patch("app.api.routes.app_endpoints.get_pool", return_value=MagicMock()), \
+         patch("app.services.chat_websocket_handler.langchain_service.process_query", new_callable=AsyncMock, return_value=mock_response):
 
         client = TestClient(chatbot_app)
 

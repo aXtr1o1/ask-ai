@@ -319,13 +319,7 @@ class SessionRequest(BaseModel):
     chatHistory: Optional[List[FrontendChatMessage]] = None
     historyOnClick: bool = False
     group_name: Optional[str] = None
-
-class ClientInsertionRequest(BaseModel):
-    """Request schema for client insertion"""
-    userId: str
-    userName: str
-    service: str
-    token: str
+    isSpaceBooking: Optional[bool] = False
 
 class ClientInsertionRequest(BaseModel):
     """Request schema for client insertion"""
@@ -334,3 +328,24 @@ class ClientInsertionRequest(BaseModel):
     userName: str
     service: str
     token: str
+
+class BookSpotInput(BaseModel):
+    user_name: str = Field(description="The client_name/user_name from the frontend context.")
+    sub_user_name: Optional[str] = Field(default=None, description="The specific user making the booking, if any.")
+    spot_code: str = Field(description="The unique Spot Code being booked (e.g., WRMF-NES).")
+    spot_name: Optional[str] = Field(default="Unknown Spot", description="The name of the spot.")
+    building_name: Optional[str] = Field(default="Unknown Building", description="The name of the building where the spot is located.")
+    floor_name: Optional[str] = Field(default="Unknown Floor", description="The floor where the spot is located.")
+    start_time: Optional[str] = Field(default=None, description="Booking start datetime. Extracted from user input, e.g. '2026-06-04 10:00' or '10am'. If not provided, leave empty and ask the user.")
+    end_time: Optional[str] = Field(default=None, description="Booking end datetime. Extracted from user input, e.g. '2026-06-04 14:00' or '2pm'. If not provided, leave empty and ask the user.")
+
+class GetSpotsInput(BaseModel):
+    user_name: str = Field(description="The client_name/user_name from the frontend context.")
+    search_term: Optional[str] = Field(
+        default=None,
+        description="The Spot Code (e.g. WRMF-NES) or Building Name to search for. Always extract this from the user's query."
+    )
+
+class GetBookingStatusInput(BaseModel):
+    user_name: str = Field(description="The client_name/user_name from the frontend context.")
+    booking_id: str = Field(description="The 4-digit booking ID provided by the user to check their booking status.")

@@ -20,7 +20,7 @@ def test_assets_missing_user_name():
 # Test 2: Check ASSETS tool builds correct payload and calls get_assets successfully
 def test_assets_normal_call():
     # Fake get_assets returns empty result
-    with patch("app.tools.facility_tools.get_assets") as mock_get_assets:
+    with patch("app.tools.assets_tool.get_assets") as mock_get_assets:
         mock_get_assets.return_value = {"p_list": [], "p_count": 0}
 
         result = ASSETS.invoke({
@@ -40,7 +40,7 @@ def test_assets_normal_call():
 # Test 3: Check aggregate mode passes is_aggregate=True correctly to get_assets
 def test_assets_aggregate_mode():
     # Fake get_assets returns grouped summary
-    with patch("app.tools.facility_tools.get_assets") as mock_get_assets:
+    with patch("app.tools.assets_tool.get_assets") as mock_get_assets:
         mock_get_assets.return_value = {
             "p_list": [{"DivisionName": "Electrical", "result": 10}],
             "p_count": 1
