@@ -55,7 +55,7 @@ async def fetch_spots_api(user_name: str, search_term: Optional[str] = None) -> 
         "BuildingCode": None, "BuildingName": None,
         "FloorCode": None, "FloorName": None,
         "AssWingCode": None, "AssWingName": None,
-        "PageIndex": "1", "PageSize": "100",
+        "PageIndex": "1", "PageSize": "200",
         "Type": "SpotID", "UserGroupKey": "1", "UserAccessKey": "1"
     }
 

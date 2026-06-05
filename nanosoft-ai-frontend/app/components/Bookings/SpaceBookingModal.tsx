@@ -345,6 +345,7 @@ export default function SpaceBookingModal({
       setViewDate(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
     };
 
+
     const handleDateClick = (dateStr: string) => {
       if (!startDate || (startDate && endDate)) {
         setStartDate(dateStr);
