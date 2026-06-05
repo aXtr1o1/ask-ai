@@ -48,7 +48,7 @@ class LangChainToolPathsMixin:
                 return name.replace("get_", "").replace("_", " ").title()
 
             # Detect if a common limit is requested across datasets
-            _has_number = bool(_re.search(r'\b\d+\b', user_query))
+            _has_number = bool(re.search(r'\b\d+\b', user_query))
             _count_pats_multi = (
                 "how many", "total", "number of", "count of", "count ",
             )
