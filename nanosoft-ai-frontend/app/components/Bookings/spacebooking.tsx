@@ -253,6 +253,8 @@ export default function SpaceBooking({
               )}
             </button>
 
+            {/* Complaints menu item — hidden, preserved for future use */}
+            <span style={{ display: 'none' }}>
             <button
               type="button"
               onClick={() => {
@@ -328,6 +330,7 @@ export default function SpaceBooking({
                 />
               )}
             </button>
+            </span>
           </div>
         </div>
       )}
@@ -387,7 +390,8 @@ export default function SpaceBooking({
         </div>
       )}
 
-      {isComplaints && (
+      {/* Complaints badge — hidden, preserved for future use */}
+      {isComplaints && false && (
         <div
           style={{
             display: "flex",
