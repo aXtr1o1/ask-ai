@@ -23,6 +23,19 @@ SB_THREAD_MAX_MESSAGES = 20
 _TABLE_FIELDS = ("SpotCode", "SpotName", "BuildingName", "FloorName")
 
 
+def _extract_content(msg) -> str:
+    """Safely extract plain text from an AI message.
+    Gemini can return content as a list of parts instead of a bare string.
+    """
+    c = msg.content
+    if isinstance(c, list):
+        return " ".join(
+            part.get("text", "") if isinstance(part, dict) else str(part)
+            for part in c
+        ).strip()
+    return c or ""
+
+
 def _slim_records(p_list: list) -> list:
     """Return only the 4 display fields — strip all raw API noise."""
     return [{f: s.get(f) for f in _TABLE_FIELDS} for s in p_list]
@@ -132,7 +145,7 @@ class SpaceBookingService:
 
             # Build prompt: system prompt + real thread only (no scoped memory noise)
             sys_msg = SystemMessage(
-                content=self.system_prompt.content + f"\n\nCURRENT USER_NAME: {user_name}"
+                content=self.system_prompt.content + f"\n\nCURRENT USER_NAME: {user_name}. If the user provides a Spot Code, do NOT call GET_SPOTS again; proceed directly to booking or providing details."
             )
             prompt_messages = [sys_msg] + sb_thread
 
@@ -156,14 +169,34 @@ class SpaceBookingService:
                             tool_data = cached
                             tool_result_str = json.dumps(cached)
                         else:
-                            logger.info("🌐 Cache MISS — calling API")
-                            tool_result_str = await fetch_spots_api(user_name, s_term)
-                            try:
-                                tool_data = json.loads(tool_result_str)
-                            except Exception:
-                                tool_data = {"error": "Invalid JSON"}
-                            if session_id and isinstance(tool_data, dict) and "p_list" in tool_data:
-                                _set_cached_spots(session_id, s_term, tool_data)
+                            # ── Before hitting the API, try filtering the __all__ cache locally ──
+                            # Prevents a second API call when the model searches with a spot code
+                            # or building name after already fetching all spots in the session.
+                            all_cached = _get_cached_spots(session_id, None) if session_id else None
+                            if all_cached is not None and s_term and str(s_term).strip():
+                                import re as _re
+                                clean_search = _re.sub(r'[^a-z0-9]', '', str(s_term).lower())
+                                p_list_all = all_cached.get("p_list", [])
+                                filtered = [
+                                    spot for spot in p_list_all
+                                    if clean_search in _re.sub(r'[^a-z0-9]', '', str(spot.get("BuildingName", "")).lower())
+                                    or clean_search in _re.sub(r'[^a-z0-9]', '', str(spot.get("SpotCode", "")).lower())
+                                    or clean_search in _re.sub(r'[^a-z0-9]', '', str(spot.get("SpotName", "")).lower())
+                                ]
+                                tool_data = {"TotalCount": len(filtered), "p_list": filtered}
+                                tool_result_str = json.dumps(tool_data)
+                                if session_id:
+                                    _set_cached_spots(session_id, s_term, tool_data)
+                                logger.info("📦 Filtered from __all__ cache (no API call) | matches=%d", len(filtered))
+                            else:
+                                logger.info("🌐 Cache MISS — calling API")
+                                tool_result_str = await fetch_spots_api(user_name, s_term)
+                                try:
+                                    tool_data = json.loads(tool_result_str)
+                                except Exception:
+                                    tool_data = {"error": "Invalid JSON"}
+                                if session_id and isinstance(tool_data, dict) and "p_list" in tool_data:
+                                    _set_cached_spots(session_id, s_term, tool_data)
 
                         # Send only 4 compressed fields to LLM
                         if isinstance(tool_data, dict) and "p_list" in tool_data:
@@ -181,6 +214,8 @@ class SpaceBookingService:
                         prompt_messages.append(ToolMessage(
                             name=tc["name"], tool_call_id=tc["id"], content=llm_content
                         ))
+
+
 
                     # ── BOOK_SPOT ─────────────────────────────────────────────
                     elif tc["name"] == "BOOK_SPOT":
@@ -250,7 +285,7 @@ class SpaceBookingService:
 
                 # Final model response
                 ai_msg2 = await self.model.ainvoke(prompt_messages)
-                content = ai_msg2.content or ""
+                content = _extract_content(ai_msg2)
 
                 # ── Handle the case where the model makes ANOTHER tool call instead of replying ──
                 # This happens when the LLM skips Phase 2 and tries to call BOOK_SPOT immediately
@@ -321,7 +356,7 @@ class SpaceBookingService:
 
                     # Get final content after handling round-2 tool calls
                     ai_msg3 = await self.model.ainvoke(prompt_messages)
-                    content = ai_msg3.content or ""
+                    content = _extract_content(ai_msg3)
 
                 if not content.strip():
                     # Last-resort fallback — build a sensible message from context
@@ -382,7 +417,7 @@ class SpaceBookingService:
 
 
             # No tool called — pure conversational
-            content = ai_msg.content or ""
+            content = _extract_content(ai_msg)
             if not content.strip():
                 content = (
                     "I'm here to help you book a space! "
