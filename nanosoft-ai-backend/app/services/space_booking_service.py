@@ -252,11 +252,92 @@ class SpaceBookingService:
                 ai_msg2 = await self.model.ainvoke(prompt_messages)
                 content = ai_msg2.content or ""
 
+                # ── Handle the case where the model makes ANOTHER tool call instead of replying ──
+                # This happens when the LLM skips Phase 2 and tries to call BOOK_SPOT immediately
+                # after GET_SPOTS, resulting in empty .content.
+                if not content.strip() and ai_msg2.tool_calls:
+                    logger.info("⚡ ai_msg2 has tool_calls but no content — handling inline")
+                    prompt_messages.append(ai_msg2)
+
+                    for tc2 in ai_msg2.tool_calls:
+                        if tc2["name"] == "BOOK_SPOT":
+                            args2 = tc2["args"]
+                            args2["user_name"] = user_name
+                            if sub_user_name:
+                                args2["sub_user_name"] = sub_user_name
+
+                            # Verify spot from cache to prevent hallucination
+                            spot_code_req2 = args2.get("spot_code", "")
+                            verified2 = _lookup_spot_from_cache(session_id, spot_code_req2)
+                            if verified2:
+                                args2["spot_name"]     = verified2.get("SpotName", args2.get("spot_name"))
+                                args2["building_name"] = verified2.get("BuildingName", args2.get("building_name"))
+                                args2["floor_name"]    = verified2.get("FloorName", args2.get("floor_name"))
+                                logger.info("✅ Spot verified from cache (round-2): %s → %s", spot_code_req2, args2["spot_name"])
+
+                            tool_result2_str = await BOOK_SPOT.ainvoke(args2)
+                            try:
+                                parsed2 = json.loads(tool_result2_str)
+                                if parsed2.get("error_type") == "missing_time":
+                                    spot_code2   = parsed2.get("spot_code", args2.get("spot_code", "the spot"))
+                                    building2    = parsed2.get("building_name", args2.get("building_name", "the building"))
+                                    prompt_messages.append(ToolMessage(
+                                        name=tc2["name"], tool_call_id=tc2["id"],
+                                        content=json.dumps({
+                                            "error_type": "missing_time",
+                                            "instruction": (
+                                                f"Time not provided. Ask the user warmly for their preferred time "
+                                                f"for booking {spot_code2} at {building2}. "
+                                                f"Do NOT call BOOK_SPOT again until they reply with a time."
+                                            )
+                                        })
+                                    ))
+                                    ai_msg3 = await self.model.ainvoke(prompt_messages)
+                                    time_ask = ai_msg3.content or (
+                                        f"Almost there! Just let me know your preferred start and end time "
+                                        f"for {spot_code2} at {building2} and I will get it confirmed."
+                                    )
+                                    logger.info("⏰ Round-2 missing time — asking: %s", time_ask[:100])
+                                    sb_thread.append(AIMessage(content=time_ask))
+                                    _save_sb_thread(session_id, sb_thread)
+                                    return time_ask, time_ask, messages
+
+                                if parsed2.get("success"):
+                                    logger.info("✅ Round-2 booking success | id=%s", parsed2.get("booking_id"))
+                            except json.JSONDecodeError:
+                                pass
+
+                            prompt_messages.append(ToolMessage(
+                                name=tc2["name"], tool_call_id=tc2["id"], content=tool_result2_str
+                            ))
+
+                        elif tc2["name"] == "GET_SPOTS":
+                            # Shouldn't re-call GET_SPOTS, but handle gracefully
+                            logger.warning("⚠️ Unexpected second GET_SPOTS call — skipping")
+                            prompt_messages.append(ToolMessage(
+                                name=tc2["name"], tool_call_id=tc2["id"],
+                                content=json.dumps({"info": "Spots already retrieved. Use the previous results."})
+                            ))
+
+                    # Get final content after handling round-2 tool calls
+                    ai_msg3 = await self.model.ainvoke(prompt_messages)
+                    content = ai_msg3.content or ""
+
                 if not content.strip():
+                    # Last-resort fallback — build a sensible message from context
+                    spot_hint = ""
+                    if tool_data and "p_list" in tool_data and tool_data["p_list"]:
+                        spot = tool_data["p_list"][0]
+                        spot_hint = (
+                            f" for {spot.get('SpotName', '')} ({spot.get('SpotCode', '')}) "
+                            f"at {spot.get('BuildingName', '')}"
+                        )
                     content = (
-                        "I'm sorry, I couldn't generate a response. "
-                        "Please try again or rephrase your request."
+                        f"Great news! I have found the space{spot_hint}. "
+                        f"Would you like me to go ahead and book it? "
+                        f"If so, please share your preferred start and end time."
                     )
+                    logger.warning("⚠️ Empty content fallback used — check model output")
 
                 # Manage thread after tool response
                 try:

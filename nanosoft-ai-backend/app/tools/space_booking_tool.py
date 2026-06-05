@@ -142,8 +142,16 @@ def _fetch_booking_sync(booking_id: str, user_name: str) -> str:
 @tool("GET_BOOKING_STATUS", args_schema=GetBookingStatusInput)
 async def GET_BOOKING_STATUS(user_name: str, booking_id: str) -> str:
     """Look up an existing booking by its 4-digit booking ID and return its status."""
+    # Guard: if the model passed a blank/None booking_id, return an actionable error
+    if not booking_id or not str(booking_id).strip():
+        logger.warning("⚠️ GET_BOOKING_STATUS called with empty booking_id")
+        return json.dumps({
+            "found": False,
+            "error": "booking_id_missing",
+            "message": "No booking ID was provided. Please ask the user to share their booking ID."
+        })
     logger.info(f"🛠️ GET_BOOKING_STATUS: booking_id={booking_id}, user_name={user_name}")
-    return await asyncio.to_thread(_fetch_booking_sync, booking_id, user_name)
+    return await asyncio.to_thread(_fetch_booking_sync, str(booking_id).strip(), user_name)
 
 
 def _insert_booking(booking_data: dict) -> str:
