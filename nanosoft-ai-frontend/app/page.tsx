@@ -143,6 +143,32 @@ function md(text: string): string {
   return text;
 }
 
+// ── Format Multi-line Context Summary (safely render markdown & newlines) ──
+function formatContextSummary(text: string): string {
+  if (!text) return "";
+  return text
+    .split("\n")
+    .map(line => {
+      const trimmed = line.trim();
+      if (!trimmed) return '<div style="height:6px"></div>';
+      
+      // Check for bullet list
+      const bulletMatch = line.match(/^[\s]*([-*•])\s+(.*)/);
+      if (bulletMatch) {
+        return `<div style="display:flex;align-items:baseline;gap:8px;margin-left:12px;margin-top:2px;margin-bottom:2px"><span style="color:#D2AC47;font-size:10px;flex-shrink:0">•</span><span style="color:#F3F4F6">${md(bulletMatch[2])}</span></div>`;
+      }
+      
+      // Check for numbered list
+      const numberMatch = line.match(/^[\s]*(\d+[.)])\s+(.*)/);
+      if (numberMatch) {
+        return `<div style="display:flex;align-items:baseline;gap:8px;margin-left:12px;margin-top:2px;margin-bottom:2px"><span style="color:#D2AC47;font-size:12px;font-weight:600;flex-shrink:0">${numberMatch[1]}</span><span style="color:#F3F4F6">${md(numberMatch[2])}</span></div>`;
+      }
+      
+      return `<div style="line-height:1.6;margin:2px 0;color:#F3F4F6">${md(line)}</div>`;
+    })
+    .join("");
+}
+
 // ── Strip bullet/number prefix + strip **bold** and *italic* from a line ──────
 function cleanLine(raw: string): string {
   let s = raw.replace(/^[\s]*(?:[-*•]|\d+[.)]):?\s?/, "").trim();
@@ -449,7 +475,7 @@ function renderLargeDataset(text: string): string | null {
   }
 
   if (!records.length) {
-    const contextDiv = context.trim() ? `<div class="large-dataset-context">${escapeHTML(context)}</div>` : "";
+    const contextDiv = context.trim() ? `<div class="large-dataset-context">${formatContextSummary(context)}</div>` : "";
     return `${searchBanner}${contextDiv}`;
   }
 
@@ -529,7 +555,7 @@ function renderLargeDataset(text: string): string | null {
   // ─────────────────────────────────────────
   // Final HTML
   // ─────────────────────────────────────────
-  const contextDiv = context.trim() ? `<div class="large-dataset-context">${escapeHTML(context)}</div>` : "";
+  const contextDiv = context.trim() ? `<div class="large-dataset-context">${formatContextSummary(context)}</div>` : "";
   const table = `
   ${searchBanner}
   ${contextDiv}
@@ -558,7 +584,7 @@ function formatLargeDatasetTable(largeDataData: any): string {
 
 
   if (records.length === 0) {
-    return `<div class="large-dataset-context"><strong>Summary:</strong> ${esc(context)}</div>`;
+    return `<div class="large-dataset-context"><strong>Summary:</strong> ${formatContextSummary(context)}</div>`;
   }
 
 
@@ -666,7 +692,7 @@ function formatLargeDatasetTable(largeDataData: any): string {
   // const contextHTML = context 
   //   ? `<div class="large-dataset-context">${esc(context)}</div>` 
   const contextHTML = context
-    ? `<div class="large-dataset-context">${esc(context)}</div>`
+    ? `<div class="large-dataset-context">${formatContextSummary(context)}</div>`
     : "";
 
 
@@ -1704,8 +1730,10 @@ export default function Home() {
             ]);
             setSessionId(sharedSid);
             const processed = processLoadedMessages(mappedHistory);
-            setMessages(processed);
-            setIsSpaceBooking(processed.some(m => m.isSpaceBooking));
+            const isBooking = processed.some(m => m.isSpaceBooking);
+            const finalProcessed = isBooking ? processLoadedMessages(mappedHistory, true) : processed;
+            setMessages(finalProcessed);
+            setIsSpaceBooking(isBooking);
             console.log("[share] shared chat loaded and mapped");
             setAuthChecked(true);
           }
@@ -2447,10 +2475,7 @@ export default function Home() {
                 // that formatOutput() incorrectly converts into HTML tables.
                 // For space booking sessions, render as simple line-broken plain text.
                 if (isSpaceBookingRef.current) {
-                  processedText = cleanedText
-                    .split("\n")
-                    .map(line => line.trim() ? `<div>${line}</div>` : '<div style="height:6px"></div>')
-                    .join("");
+                  processedText = formatContextSummary(cleanedText);
                   console.log("📝 [DONE] Space booking — rendered as plain text (no table conversion)");
                 } else {
                   processedText = formatOutput(cleanedText);
@@ -2872,7 +2897,7 @@ export default function Home() {
 
 
   // ── Process loaded messages: convert raw JSON to formatted tables ─────────
-  function processLoadedMessages(msgs: Message[]): Message[] {
+  function processLoadedMessages(msgs: Message[], isSpaceBookingSession?: boolean): Message[] {
     return msgs.map(m => {
       if (m.role !== "ai") return m;
 
@@ -2882,7 +2907,7 @@ export default function Home() {
       const graphData = parseGraphData(text);
       if (graphData) {
         console.log("📊 [HISTORY] Graph response detected — keeping as raw JSON for chart");
-        return { ...m, text, originalText: text, isGraphResponse: true };
+        return { ...m, text, originalText: text, isGraphResponse: true, isSpaceBooking: isSpaceBookingSession };
       }
 
       // 🔑 Check if this is a MULTIPLE_DATASETS response
@@ -2918,7 +2943,7 @@ export default function Home() {
               };
             });
             const multipleDatasets = parsedMulti.filter((ds) => ds.rows.length > 0);
-            const isSpaceBooking = multipleDatasets.some(ds =>
+            const isSpaceBooking = isSpaceBookingSession || multipleDatasets.some(ds =>
               ds.rows.some(row =>
                 Object.keys(row).some(col =>
                   typeof col === 'string' && (
@@ -2949,7 +2974,7 @@ export default function Home() {
             const tableHTML = renderLargeDataset(text);
             if (tableHTML) {
               const rows = extractTableRows(tableHTML);
-              const isSpaceBooking = rows.some(row =>
+              const isSpaceBooking = isSpaceBookingSession || rows.some(row =>
                 Object.keys(row).some(col =>
                   typeof col === 'string' && (
                     col.toUpperCase() === "SPOTIDPK" ||
@@ -2975,7 +3000,7 @@ export default function Home() {
         console.log("✅ [HISTORY] Message already HTML formatted - extracting table data");
         const rows = extractTableRows(text);
         if (rows.length > 0) {
-          const isSpaceBooking = rows.some(row =>
+          const isSpaceBooking = isSpaceBookingSession || rows.some(row =>
             Object.keys(row).some(col =>
               typeof col === 'string' && (
                 col.toUpperCase() === "SPOTIDPK" ||
@@ -2986,7 +3011,7 @@ export default function Home() {
           // ✅ originalText stays as the HTML — no raw JSON available here
           return { ...m, text, originalText: text, tableData: rows, tableTitle: "Results", isSpaceBooking };
         }
-        return { ...m, originalText: text };
+        return { ...m, originalText: text, isSpaceBooking: isSpaceBookingSession };
       }
 
       // Extract response content (removes session_id wrapper)
@@ -2999,7 +3024,7 @@ export default function Home() {
         console.log("✅ [HISTORY] Successfully rendered as table structure");
         const rows = extractTableRows(tableHTML);
         if (rows.length > 0) {
-          const isSpaceBooking = rows.some(row =>
+          const isSpaceBooking = isSpaceBookingSession || rows.some(row =>
             Object.keys(row).some(col =>
               typeof col === 'string' && (
                 col.toUpperCase() === "SPOTIDPK" ||
@@ -3010,16 +3035,16 @@ export default function Home() {
           // ✅ originalText = raw text from DB so future saves re-parse correctly
           return { ...m, text: tableHTML, originalText: text, tableData: rows, tableTitle: "Results", isSpaceBooking };
         }
-        return { ...m, text: tableHTML, originalText: text };
+        return { ...m, text: tableHTML, originalText: text, isSpaceBooking: isSpaceBookingSession };
       }
 
       // Not tabular data → try to format as text
       try {
-        const formattedText = formatOutput(cleanedText);
+        const formattedText = isSpaceBookingSession ? formatContextSummary(cleanedText) : formatOutput(cleanedText);
         // Check if formatOutput produced an HTML table
         const rows = extractTableRows(formattedText);
         if (rows.length > 0) {
-          const isSpaceBooking = rows.some(row =>
+          const isSpaceBooking = isSpaceBookingSession || rows.some(row =>
             Object.keys(row).some(col =>
               typeof col === 'string' && (
                 col.toUpperCase() === "SPOTIDPK" ||
@@ -3031,12 +3056,12 @@ export default function Home() {
         }
         // If the formatted text has raw HTML tags, decode them
         if (formattedText.includes('<div') || formattedText.includes('&lt;')) {
-          return { ...m, text: decodeEntities(formattedText), originalText: text };
+          return { ...m, text: decodeEntities(formattedText), originalText: text, isSpaceBooking: isSpaceBookingSession };
         }
-        return { ...m, text: formattedText, originalText: text };
+        return { ...m, text: formattedText, originalText: text, isSpaceBooking: isSpaceBookingSession };
       } catch (err) {
         console.log("📝 [HISTORY] Fallback to raw text");
-        return { ...m, text: decodeEntities(text), originalText: text };
+        return { ...m, text: decodeEntities(text), originalText: text, isSpaceBooking: isSpaceBookingSession };
       }
     });
   };
@@ -3119,10 +3144,11 @@ export default function Home() {
     // Check local cache first
     const cached = sessionMessagesRef.current.get(targetSid);
     if (cached && cached.length > 0) {
-      const processed = processLoadedMessages(cached);
+      const isBookingSession = targetSession?.isSpaceBooking || false;
+      const processed = processLoadedMessages(cached, isBookingSession);
       setMessages(processed);
-      const isBookingSession = targetSession?.isSpaceBooking || processed.some(m => m.isSpaceBooking);
-      setIsSpaceBooking(isBookingSession);
+      const finalIsBooking = isBookingSession || processed.some(m => m.isSpaceBooking);
+      setIsSpaceBooking(finalIsBooking);
     } else {
       // Fetch from backend
       setHistoryLoading(true);
@@ -3156,11 +3182,12 @@ export default function Home() {
             history.push({ role: "ai", text: entry.assistant });
           }
         }
-        const processed = processLoadedMessages(history);
+        const isBookingSession = targetSession?.isSpaceBooking || false;
+        const processed = processLoadedMessages(history, isBookingSession);
         sessionMessagesRef.current.set(targetSid, processed);
         setMessages(processed);
-        const isBookingSession = targetSession?.isSpaceBooking || processed.some(m => m.isSpaceBooking);
-        setIsSpaceBooking(isBookingSession);
+        const finalIsBooking = isBookingSession || processed.some(m => m.isSpaceBooking);
+        setIsSpaceBooking(finalIsBooking);
       } catch (err) {
         console.warn("Failed to fetch session history:", err);
         setMessages([]);
@@ -3207,7 +3234,8 @@ export default function Home() {
                     history.push({ role: "ai", text: entry.assistant });
                   }
                 }
-                const processed = processLoadedMessages(history);
+                const isBookingSession = s.isSpaceBooking || false;
+                const processed = processLoadedMessages(history, isBookingSession);
                 sessionMessagesRef.current.set(s.id, processed);
               }
             } catch (err) {
@@ -3415,6 +3443,27 @@ export default function Home() {
     }));
 
     setIsLoading(true);
+  };
+
+  // Helper to handle Space Booking tile selection clicks (sends all 4 fields to backend)
+  const handleTileClickForSpaceBooking = (row: Record<string, any>) => {
+    const getField = (keys: string[]) => {
+      for (const k of keys) {
+        const foundKey = Object.keys(row).find(rk => rk.toLowerCase() === k.toLowerCase());
+        if (foundKey) return row[foundKey];
+      }
+      return "";
+    };
+
+    const spotCode = getField(["SpotCode", "SPOTCODE", "SpotIdPK", "SPOTIDPK"]);
+    const spotName = getField(["SpotName", "SPOTNAME"]);
+    const buildingName = getField(["BuildingName", "BUILDINGNAME"]);
+    const floorName = getField(["FloorName", "FLOORNAME"]);
+
+    if (spotCode) {
+      const messageText = `SpotCode: ${spotCode}, SpotName: ${spotName}, BuildingName: ${buildingName}, FloorName: ${floorName}`;
+      sendTextDirectly(messageText);
+    }
   };
 
   // ── Send message over the persistent WebSocket ────────────────────────────
@@ -4712,6 +4761,7 @@ export default function Home() {
                                   totalCount={ds.totalCount}
                                   showOnlyTiles={msg.isSpaceBooking}
                                   isSpaceBooking={msg.isSpaceBooking}
+                                  onTileClick={handleTileClickForSpaceBooking}
                                 />
                               </div>
                             ))}
@@ -4725,6 +4775,7 @@ export default function Home() {
                             htmlTableContent={msg.text}
                             showOnlyTiles={msg.isSpaceBooking}
                             isSpaceBooking={msg.isSpaceBooking}
+                            onTileClick={handleTileClickForSpaceBooking}
                           />
 
                         ) : (

@@ -68,17 +68,72 @@ async def fetch_spots_api(user_name: str, search_term: Optional[str] = None) -> 
             json_resp = response.json()
             p_list = json_resp.get("data", [])
 
-            # Fuzzy matching — handles spelling variations
+            # Similarity-based fuzzy matching to handle typos and spelling variations dynamically without hardcoding
             if search_term and str(search_term).strip():
                 import re
-                clean_search = re.sub(r'[^a-z0-9]', '', str(search_term).lower())
+                from difflib import SequenceMatcher
+
+                # Tokenize and normalize text helper
+                def tokenize(text):
+                    cleaned = re.sub(r'[^a-z0-9\s]', ' ', str(text).lower())
+                    return [w for w in cleaned.split() if w]
+
+                q_tokens = tokenize(search_term)
+
                 fuzzy_matches = []
                 for s in p_list:
-                    b_name = re.sub(r'[^a-z0-9]', '', str(s.get("BuildingName", "")).lower())
-                    s_code = re.sub(r'[^a-z0-9]', '', str(s.get("SpotCode", "")).lower())
-                    s_name = re.sub(r'[^a-z0-9]', '', str(s.get("SpotName", "")).lower())
-                    if clean_search in b_name or clean_search in s_code or clean_search in s_name:
+                    # Combine target fields for matching (includes Building, Code, Name, and Floor)
+                    combined_target = f"{s.get('BuildingName', '')} {s.get('SpotCode', '')} {s.get('SpotName', '')} {s.get('FloorName', '')}"
+                    t_tokens = tokenize(combined_target)
+
+                    if not q_tokens or not t_tokens:
+                        continue
+
+                    # 1. Token Set Ratio
+                    intersection = set(q_tokens).intersection(set(t_tokens))
+                    diff_q = set(q_tokens).difference(set(t_tokens))
+                    diff_t = set(t_tokens).difference(set(q_tokens))
+
+                    sorted_inter = sorted(list(intersection))
+                    sorted_diff_q = sorted(list(diff_q))
+                    sorted_diff_t = sorted(list(diff_t))
+
+                    base_inter = " ".join(sorted_inter)
+                    base_q = base_inter + " " + " ".join(sorted_diff_q) if sorted_diff_q else base_inter
+                    base_t = base_inter + " " + " ".join(sorted_diff_t) if sorted_diff_t else base_inter
+
+                    r1 = SequenceMatcher(None, base_q.strip(), base_t.strip()).ratio()
+                    r2 = SequenceMatcher(None, base_inter.strip(), base_q.strip()).ratio()
+                    r3 = SequenceMatcher(None, base_inter.strip(), base_t.strip()).ratio()
+                    token_ratio = max(r1, r2, r3)
+
+                    # 2. Substring / Typo matching ratio
+                    sub_ratios = []
+                    q_squished = "".join(q_tokens)
+                    t_squished = "".join(t_tokens)
+                    sub_ratios.append(SequenceMatcher(None, q_squished, t_squished).ratio())
+
+                    for qw in q_tokens:
+                        best_sub = 0.0
+                        for tw in t_tokens:
+                            if qw == tw:
+                                best_sub = 1.0
+                            elif qw in tw or tw in qw:
+                                best_sub = max(best_sub, min(len(qw), len(tw)) / max(len(qw), len(tw)))
+                            else:
+                                # character-level similarity between individual words
+                                best_sub = max(best_sub, SequenceMatcher(None, qw, tw).ratio())
+                        sub_ratios.append(best_sub)
+
+                    avg_sub_ratio = sum(sub_ratios) / len(sub_ratios) if sub_ratios else 0.0
+
+                    # Overall similarity score
+                    similarity_score = max(token_ratio, avg_sub_ratio)
+
+                    # Include matching spot if it meets the similarity threshold of 0.60
+                    if similarity_score >= 0.60:
                         fuzzy_matches.append(s)
+
                 if fuzzy_matches:
                     p_list = fuzzy_matches
 

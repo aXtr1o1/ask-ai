@@ -17,6 +17,7 @@ interface TableWithTileProps {
   showOnlyTiles?: boolean;
   /** Explicit flag: renders space booking bullet-list tiles instead of normal pill grid */
   isSpaceBooking?: boolean;
+  onTileClick?: (row: TableWithTileRow) => void;
 }
 
 const TableWithTile = React.memo(function TableWithTile({
@@ -27,6 +28,7 @@ const TableWithTile = React.memo(function TableWithTile({
   totalCount,
   showOnlyTiles = false,
   isSpaceBooking = false,
+  onTileClick,
 }: TableWithTileProps) {
   const responsive = useResponsive();
   const tableConfig = getResponsiveTable(responsive.screen);
@@ -496,6 +498,11 @@ const TableWithTile = React.memo(function TableWithTile({
                             transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
                             minWidth: 0,
                             cursor: 'pointer',
+                          }}
+                          onClick={() => {
+                            if (onTileClick) {
+                              onTileClick(row);
+                            }
                           }}
                           onMouseEnter={(e) => {
                             e.currentTarget.style.borderColor = 'var(--color-primary, #d4af37)';

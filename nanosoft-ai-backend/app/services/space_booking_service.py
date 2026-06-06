@@ -143,21 +143,55 @@ class SpaceBookingService:
             sb_thread = _get_sb_thread(session_id)
             sb_thread.append(HumanMessage(content=current_query))
 
-            # Build prompt: system prompt + real thread only (no scoped memory noise)
-            sys_msg = SystemMessage(
-                content=self.system_prompt.content + f"\n\nCURRENT USER_NAME: {user_name}. If the user provides a Spot Code, do NOT call GET_SPOTS again; proceed directly to booking or providing details."
+            # ── Just-in-Time (JIT) Dynamic Prompt Hydration ──
+            # Fetch active buildings dynamically from cache or API to load into LLM system prompt context
+            cached_all = _get_cached_spots(session_id, None) if session_id else None
+            if cached_all is None:
+                logger.info("🌐 JIT Context Hydration: Fetching spots list to extract active buildings")
+                try:
+                    all_spots_str = await fetch_spots_api(user_name, None)
+                    all_spots_data = json.loads(all_spots_str)
+                    if session_id and isinstance(all_spots_data, dict) and "p_list" in all_spots_data:
+                        _set_cached_spots(session_id, None, all_spots_data)
+                    cached_all = all_spots_data
+                except Exception as e:
+                    logger.error(f"❌ Failed JIT fetching: {e}")
+                    cached_all = {}
+
+            unique_buildings = []
+            if cached_all and isinstance(cached_all, dict) and "p_list" in cached_all:
+                unique_buildings = sorted(list(set(
+                    str(s.get("BuildingName")) for s in cached_all.get("p_list", []) if s.get("BuildingName")
+                )))
+
+            # Build prompt dynamically with injected live directory and strict guardrails
+            hydrated_content = (
+                self.system_prompt.content + 
+                f"\n\nCURRENT USER_NAME: {user_name}."
+                "\nCRITICAL: If the user provides a Spot Code, do NOT call GET_SPOTS again; proceed directly to booking or providing details."
+                "\nCRITICAL: If the user searches for any kind of space, keyword, or tries to refine the list (such as by specifying a building name, spot name, or floor), you MUST call GET_SPOTS immediately with their query as the search_term to fetch matching spots. Do not ask questions, just call the tool."
+                "\nCRITICAL: If the user's message is a conversational affirmation, confirmation, or agreement in response to your suggestion, do NOT call GET_SPOTS. Instead, ask them to specify which building or floor they would like to search or try."
+                "\nCRITICAL: If the user's message is a greeting or general conversational text that does not request a specific space, floor, or building, do NOT call GET_SPOTS. Respond warmly and ask them how you can assist with booking a space."
+                "\nCRITICAL: When asking the user for their booking times, you MUST include the exact phrase 'use the calendar' in your response. Do NOT ask the user to type, share, write, or tell you their start and end time manually."
             )
+            if unique_buildings:
+                hydrated_content += f"\n\nLIVE ACTIVE BUILDINGS DIRECTORY TODAY (DYNAMIC): {', '.join(unique_buildings)}"
+
+            sys_msg = SystemMessage(content=hydrated_content)
             prompt_messages = [sys_msg] + sb_thread
 
             # First model invoke
             ai_msg = await self.model.ainvoke(prompt_messages)
 
             tool_data = None
+            last_tool_called = None
+            booking_status_data = None
 
             if ai_msg.tool_calls:
                 prompt_messages.append(ai_msg)
 
                 for tc in ai_msg.tool_calls:
+                    last_tool_called = tc["name"]
 
                     # ── GET_SPOTS ─────────────────────────────────────────────
                     if tc["name"] == "GET_SPOTS":
@@ -198,16 +232,24 @@ class SpaceBookingService:
                                 if session_id and isinstance(tool_data, dict) and "p_list" in tool_data:
                                     _set_cached_spots(session_id, s_term, tool_data)
 
-                        # Send only 4 compressed fields to LLM
+                        # Send only 4 compressed fields to LLM (Stateless In-Context Retrieval / Ephemeral RAG)
                         if isinstance(tool_data, dict) and "p_list" in tool_data:
                             compressed = [
                                 {f: s.get(f) for f in _TABLE_FIELDS}
                                 for s in tool_data.get("p_list", [])
                             ]
-                            llm_content = json.dumps({
+                            llm_payload = {
                                 "TotalCount": tool_data.get("TotalCount"),
                                 "spots": compressed
-                            })
+                            }
+                            # If search term doesn't match any spots, dynamically inject the unique buildings directory
+                            if tool_data.get("TotalCount") == 0:
+                                all_spots_cache = _get_cached_spots(session_id, None) if session_id else None
+                                if all_spots_cache and "p_list" in all_spots_cache:
+                                    llm_payload["available_buildings"] = sorted(list(set(
+                                        str(s.get("BuildingName")) for s in all_spots_cache.get("p_list", []) if s.get("BuildingName")
+                                    )))
+                            llm_content = json.dumps(llm_payload)
                         else:
                             llm_content = tool_result_str
 
@@ -278,6 +320,10 @@ class SpaceBookingService:
                         args["user_name"] = user_name
                         tool_result_str = await GET_BOOKING_STATUS.ainvoke(args)
                         logger.info("🔍 GET_BOOKING_STATUS result: %s", tool_result_str[:200])
+                        try:
+                            booking_status_data = json.loads(tool_result_str)
+                        except Exception as e:
+                            logger.error("Failed to parse GET_BOOKING_STATUS result: %s", e)
 
                         prompt_messages.append(ToolMessage(
                             name=tc["name"], tool_call_id=tc["id"], content=tool_result_str
@@ -359,20 +405,37 @@ class SpaceBookingService:
                     content = _extract_content(ai_msg3)
 
                 if not content.strip():
-                    # Last-resort fallback — build a sensible message from context
-                    spot_hint = ""
-                    if tool_data and "p_list" in tool_data and tool_data["p_list"]:
-                        spot = tool_data["p_list"][0]
-                        spot_hint = (
-                            f" for {spot.get('SpotName', '')} ({spot.get('SpotCode', '')}) "
-                            f"at {spot.get('BuildingName', '')}"
-                        )
-                    content = (
-                        f"Great news! I have found the space{spot_hint}. "
-                        f"Would you like me to go ahead and book it? "
-                        f"If so, please share your preferred start and end time."
-                    )
-                    logger.warning("⚠️ Empty content fallback used — check model output")
+                    logger.warning("⚠️ Empty content from model. Retrying dynamic generation...")
+                    try:
+                        retry_messages = prompt_messages + [
+                            SystemMessage(content="Please respond to the user's query or guide them to the next step using the tool outputs above. Write a helpful, natural sentence response.")
+                        ]
+                        retry_ai = await self.model.ainvoke(retry_messages)
+                        content = _extract_content(retry_ai)
+                    except Exception as re_err:
+                        logger.error("Failed to generate retry response: %s", re_err)
+                    
+                    if not content.strip():
+                        content = "I found the details for your request. How would you like to proceed?"
+                        logger.warning("⚠️ Empty content fallback used: generic response")
+
+                # Write execution debug info to scratch/debug_booking.txt
+                try:
+                    import os
+                    os.makedirs("e:/nanosoft_clone/ask-ai/nanosoft-ai-backend/scratch", exist_ok=True)
+                    with open("e:/nanosoft_clone/ask-ai/nanosoft-ai-backend/scratch/debug_booking.txt", "w", encoding="utf-8") as df:
+                        df.write("=== DEBUG SPACE BOOKING EXECUTION ===\n")
+                        df.write(f"User Query: {current_query}\n")
+                        df.write(f"Hydrated System Message:\n{sys_msg.content}\n\n")
+                        df.write(f"First AI Message content: {ai_msg.content}\n")
+                        df.write(f"First AI Message tool calls: {getattr(ai_msg, 'tool_calls', [])}\n\n")
+                        df.write(f"Final prompt messages count: {len(prompt_messages)}\n")
+                        df.write(f"Final AI Message content (ai_msg2): {ai_msg2.content}\n")
+                        df.write(f"Final AI Message tool calls (ai_msg2): {getattr(ai_msg2, 'tool_calls', [])}\n")
+                        df.write(f"Extracted content: {content}\n")
+                        df.write(f"Tool Data details: {tool_data}\n")
+                except Exception as de:
+                    logger.error("Failed to write debug file: %s", de)
 
                 # Manage thread after tool response
                 try:
@@ -397,9 +460,13 @@ class SpaceBookingService:
                     # For large result sets (>8), override the AI summary with a short message
                     # so the AI doesn't dump the full list into the text — the tiles handle display
                     if total > 8:
-                        building_name = p_list[0].get("BuildingName", "this building") if p_list else "this building"
+                        unique_bldgs = sorted(list(set(s.get("BuildingName") for s in p_list if s.get("BuildingName"))))
+                        if len(unique_bldgs) == 1:
+                            building_label = f"at {unique_bldgs[0]}"
+                        else:
+                            building_label = "across our locations"
                         summary = (
-                            f"You've got {total} spaces available at {building_name}. "
+                            f"You've got {total} spaces available {building_label}. "
                             f"Browse the options below and let me know which Spot Code you'd like — "
                             f"I'll get it booked for you right away!"
                         )
@@ -419,10 +486,17 @@ class SpaceBookingService:
             # No tool called — pure conversational
             content = _extract_content(ai_msg)
             if not content.strip():
-                content = (
-                    "I'm here to help you book a space! "
-                    "Which building or Spot Code are you looking for?"
-                )
+                logger.warning("⚠️ Empty content from model. Retrying conversational generation...")
+                try:
+                    retry_messages = [SystemMessage(content=hydrated_content)] + sb_thread[:-1] + [
+                        SystemMessage(content="Please provide a helpful, natural response to the user's query.")
+                    ]
+                    retry_ai = await self.model.ainvoke(retry_messages)
+                    content = _extract_content(retry_ai)
+                except Exception as ce:
+                    logger.error("Failed to generate retry response: %s", ce)
+                if not content.strip():
+                    content = "How can I help you with booking a space today?"
             sb_thread.append(AIMessage(content=content))
             _save_sb_thread(session_id, sb_thread)
             return content, content, messages
