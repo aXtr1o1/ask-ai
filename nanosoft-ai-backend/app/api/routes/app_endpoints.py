@@ -7,6 +7,7 @@ from app.services.postgres_service import save_session_to_postgres_service
 from app.state import frontend_saved_sessions
 from app.api.database.postgres_client import get_pool
 from app.services.sync.migrate_user import migrate_user
+from app.services.user_profile_service import get_user_usage_stats
 
 logger = logging.getLogger('app_endpoints')
 app_endpoints_router = APIRouter()
