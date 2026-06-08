@@ -17,6 +17,8 @@ interface TableWithTileProps {
   showOnlyTiles?: boolean;
   /** Explicit flag: renders space booking bullet-list tiles instead of normal pill grid */
   isSpaceBooking?: boolean;
+  /** Called when the user clicks a space-booking tile — receives the full row data */
+  onTileClick?: (row: TableWithTileRow) => void;
 }
 
 const TableWithTile = React.memo(function TableWithTile({
@@ -27,6 +29,7 @@ const TableWithTile = React.memo(function TableWithTile({
   totalCount,
   showOnlyTiles = false,
   isSpaceBooking = false,
+  onTileClick,
 }: TableWithTileProps) {
   const responsive = useResponsive();
   const tableConfig = getResponsiveTable(responsive.screen);
@@ -486,25 +489,39 @@ const TableWithTile = React.memo(function TableWithTile({
                       if (isSpaceBookingData) {
                         // ── Space Booking: bullet list layout ──────────────────
                         return (
-                          <div key={startIdx + rowIdx} className="tile-card animate-fadeIn" style={{
-                            padding: responsive.isMobile ? '12px 16px' : '16px 20px',
-                            backgroundColor: tileBackground,
-                            border: tileBorder,
-                            color: tileText,
-                            boxShadow: isDark ? '0 8px 24px rgba(0,0,0,0.4)' : '0 8px 24px rgba(0,0,0,0.08)',
-                            borderRadius: '12px',
-                            transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
-                            minWidth: 0,
-                            cursor: 'pointer',
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.borderColor = 'var(--color-primary, #d4af37)';
-                            e.currentTarget.style.transform = 'translateY(-2px)';
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.borderColor = '';
-                            e.currentTarget.style.transform = 'translateY(0)';
-                          }}
+                          <div
+                            key={startIdx + rowIdx}
+                            className="tile-card animate-fadeIn"
+                            role={onTileClick ? 'button' : undefined}
+                            tabIndex={onTileClick ? 0 : undefined}
+                            onClick={() => onTileClick?.(row)}
+                            onKeyDown={(e) => { if (onTileClick && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onTileClick(row); } }}
+                            style={{
+                              padding: responsive.isMobile ? '12px 16px' : '16px 20px',
+                              backgroundColor: tileBackground,
+                              border: tileBorder,
+                              color: tileText,
+                              boxShadow: isDark ? '0 8px 24px rgba(0,0,0,0.4)' : '0 8px 24px rgba(0,0,0,0.08)',
+                              borderRadius: '12px',
+                              transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+                              minWidth: 0,
+                              cursor: onTileClick ? 'pointer' : 'default',
+                              outline: 'none',
+                            }}
+                            onMouseEnter={(e) => {
+                              if (onTileClick) {
+                                e.currentTarget.style.borderColor = 'var(--color-primary, #d4af37)';
+                                e.currentTarget.style.transform = 'translateY(-2px)';
+                                e.currentTarget.style.boxShadow = isDark
+                                  ? '0 12px 32px rgba(212,175,55,0.25)'
+                                  : '0 12px 32px rgba(212,175,55,0.15)';
+                              }
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.borderColor = '';
+                              e.currentTarget.style.transform = 'translateY(0)';
+                              e.currentTarget.style.boxShadow = isDark ? '0 8px 24px rgba(0,0,0,0.4)' : '0 8px 24px rgba(0,0,0,0.08)';
+                            }}
                           >
                             <ul style={{
                               listStyle: 'none',
@@ -661,6 +678,51 @@ const TableWithTile = React.memo(function TableWithTile({
                     })}
                   </div>
                 </div>
+
+                {/* Tile View Pagination */}
+                {totalPages > 1 && (
+                  <div style={{ display: 'flex', gap: responsive.isMobile ? 6 : 8, justifyContent: 'center', alignItems: 'center', marginTop: responsive.isMobile ? 8 : 12 }}>
+                    {(() => {
+                      const disabledPrev = page <= 0;
+                      const disabledNext = page >= totalPages - 1;
+                      const tileNavBtnStyle = (disabled: boolean) => ({
+                        padding: responsive.isMobile ? '4px 8px' : '6px 12px',
+                        borderRadius: responsive.isMobile ? 6 : 8,
+                        border: disabled ? '1px solid rgba(212,175,55,0.28)' : '1px solid rgba(212,175,55,0.9)',
+                        cursor: disabled ? 'not-allowed' : 'pointer',
+                        background: disabled
+                          ? 'linear-gradient(180deg, rgba(212,175,55,0.14) 0%, rgba(212,175,55,0.08) 100%)'
+                          : 'linear-gradient(180deg, #ae8625 0%, #f7ef8a 35%, #d2ac47 65%, #edc967 100%)',
+                        color: disabled ? 'rgba(255,255,255,0.4)' : '#1f2937',
+                        fontWeight: 700,
+                        fontSize: responsive.isMobile ? 12 : 13,
+                        boxShadow: disabled ? 'none' : (isDark ? '0 6px 20px rgba(212,175,55,0.22)' : '0 6px 14px rgba(212,175,55,0.12)'),
+                        transition: 'transform 0.08s ease, box-shadow 0.12s ease',
+                      } as React.CSSProperties);
+                      return (
+                        <>
+                          <button
+                            onClick={() => setPage(Math.max(0, page - 1))}
+                            disabled={disabledPrev}
+                            style={tileNavBtnStyle(disabledPrev)}
+                          >
+                            Prev
+                          </button>
+                          <div style={{ fontSize: responsive.isMobile ? 11 : 12, color: tileTextMuted, padding: '0 6px' }}>
+                            Page {page + 1} / {totalPages} — Showing {visibleCount} of {displayTotal}
+                          </div>
+                          <button
+                            onClick={() => setPage(Math.min(totalPages - 1, page + 1))}
+                            disabled={disabledNext}
+                            style={tileNavBtnStyle(disabledNext)}
+                          >
+                            Next
+                          </button>
+                        </>
+                      );
+                    })()}
+                  </div>
+                )}
               </div>
             )}
           </div>

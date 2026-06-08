@@ -3417,6 +3417,71 @@ export default function Home() {
     setIsLoading(true);
   };
 
+  // ── Space Booking: handle tile click — auto-send selected spot as chat msg ──
+  const handleSpotSelection = (row: Record<string, any>) => {
+    if (isLoading) return;
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      console.warn("[SpotTile] Socket not ready");
+      return;
+    }
+
+    // Build a natural-language selection message from the tile data
+    const spotCode = row.SpotCode || row.spotCode || "";
+    const spotName = row.SpotName || row.spotName || "";
+    const building = row.BuildingName || row.buildingName || "";
+    const floor    = row.FloorName  || row.floorName  || "";
+
+    const parts: string[] = [];
+    if (spotCode) parts.push(`SpotCode: ${spotCode}`);
+    if (spotName && spotName !== building) parts.push(`SpotName: ${spotName}`);
+    if (building) parts.push(`Building: ${building}`);
+    if (floor)    parts.push(`Floor: ${floor}`);
+
+    const userText = parts.length > 0
+      ? `I'd like to book this spot — ${parts.join(", ")}`
+      : "I'd like to book this spot.";
+
+    console.log("🏢 [SpotTile] Sending selection:", userText);
+
+    // Persist the session as a space-booking session
+    const now = Date.now();
+    setChatSessions(prev => {
+      const existing = prev.find(s => s.id === sessionId);
+      const rest = prev.filter(s => s.id !== sessionId);
+      if (existing) {
+        return [{ ...existing, updatedAt: now, isSpaceBooking: true }, ...rest];
+      }
+      return [{ id: sessionId, title: "New Chat", createdAt: now, updatedAt: now, isSpaceBooking: true }, ...rest];
+    });
+
+    setShowFeaturePlaceholder(false);
+    setMessages(prev => {
+      const updated = [...prev, { role: "user" as const, text: userText }];
+      sessionMessagesRef.current.set(sessionId, updated);
+      return updated;
+    });
+
+    setIsLoading(true);
+    accRef.current = "";
+
+    ws.send(JSON.stringify({
+      type: "message",
+      messageType: "text",
+      isAudio: false,
+      isText: true,
+      isGraph: false,
+      isSpaceBooking: true,
+      query: userText,
+      userName: loggedInUser,
+      subUserName: userIdFromUrl ?? loggedInUser,
+      userId: userIdInt !== null ? String(userIdInt) : undefined,
+      sessionId,
+      group_name: selectedGroupName,
+      timestamp: Date.now(),
+    }));
+  };
+
   // ── Send message over the persistent WebSocket ────────────────────────────
   const sendMessage = () => {
     const domVal = inputRef.current?.value ?? "";
@@ -4712,6 +4777,7 @@ export default function Home() {
                                   totalCount={ds.totalCount}
                                   showOnlyTiles={msg.isSpaceBooking}
                                   isSpaceBooking={msg.isSpaceBooking}
+                                  onTileClick={msg.isSpaceBooking ? handleSpotSelection : undefined}
                                 />
                               </div>
                             ))}
@@ -4725,6 +4791,7 @@ export default function Home() {
                             htmlTableContent={msg.text}
                             showOnlyTiles={msg.isSpaceBooking}
                             isSpaceBooking={msg.isSpaceBooking}
+                            onTileClick={msg.isSpaceBooking ? handleSpotSelection : undefined}
                           />
 
                         ) : (

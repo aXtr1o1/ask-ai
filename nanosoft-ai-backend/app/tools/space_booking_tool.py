@@ -26,25 +26,34 @@ def _get_client_config_sync(user_name: str):
     return None
 
 
-async def fetch_spots_api(user_name: str, search_term: Optional[str] = None) -> str:
+async def _fetch_all_spots_from_api(user_name: str) -> list:
+    """
+    Fetch ALL spot records from the API using pagination (PageSize=200).
+    Uses the same fetching pattern as services/sync/fetcher.py.
+    Returns a flat list of raw spot dicts.
+    Called only when the vector store is not yet loaded for this client.
+    """
     row = await asyncio.to_thread(_get_client_config_sync, user_name)
     if not row:
-        return json.dumps({"error": f"Configuration not found for user {user_name}."})
-    base_url = row['base_url'].rstrip('/')
-    jwt_token = row['jwt_token']
+        logger.error(f"❌ No config found for '{user_name}' — cannot fetch spots")
+        return []
 
-    if base_url.endswith('askmeapi'):
+    base_url  = row["base_url"].rstrip("/")
+    jwt_token = row["jwt_token"]
+
+    if base_url.endswith("askmeapi"):
         api_url = f"{base_url}/getSpot"
     else:
         api_url = f"{base_url}/askmeapi/getSpot"
 
     headers = {
-        "x-auth": jwt_token,
-        "userid": "101",
-        "Content-Type": "application/json"
+        "x-auth":       jwt_token,
+        "userid":       "101",
+        "Content-Type": "application/json",
     }
-    # Always fetch all spots then filter client-side (RAG-like)
-    payload = {
+
+    # Base payload — all filters null, only pagination changes per page
+    base_payload = {
         "SpotCode": None, "SpotName": None, "SpotNo": None,
         "SpotTypeCode": None, "SpotTypeName": None,
         "LocalityGroupCode": None, "LocalityGroupName": None,
@@ -55,50 +64,144 @@ async def fetch_spots_api(user_name: str, search_term: Optional[str] = None) -> 
         "BuildingCode": None, "BuildingName": None,
         "FloorCode": None, "FloorName": None,
         "AssWingCode": None, "AssWingName": None,
-        "PageIndex": "1", "PageSize": "200",
-        "Type": "SpotID", "UserGroupKey": "1", "UserAccessKey": "1"
+        "PageSize": "200",
+        "Type": "SpotID", "UserGroupKey": "1", "UserAccessKey": "1",
     }
 
-    logger.info(f"🚀 POST request to {api_url}")
-    try:
-        response = await asyncio.to_thread(
-            requests.post, api_url, headers=headers, json=payload, timeout=15
-        )
-        if response.status_code == 200:
+    all_spots  = []
+    page_index = 1
+
+    while True:
+        payload = {**base_payload, "PageIndex": str(page_index)}
+        logger.info(f"📄 Fetching spot page {page_index} from {api_url} ...")
+
+        try:
+            response = await asyncio.to_thread(
+                requests.post, api_url, headers=headers, json=payload, timeout=30
+            )
+        except Exception as e:
+            logger.error(f"❌ Network error fetching spot page {page_index}: {e}", exc_info=True)
+            break
+
+        if response.status_code != 200:
+            logger.error(
+                f"❌ Spot fetch page {page_index} returned HTTP {response.status_code}: "
+                f"{response.text[:200]}"
+            )
+            break
+
+        try:
             json_resp = response.json()
-            p_list = json_resp.get("data", [])
+        except Exception as e:
+            logger.error(f"❌ Invalid JSON on spot page {page_index}: {e}")
+            break
 
-            # Fuzzy matching — handles spelling variations
-            if search_term and str(search_term).strip():
-                import re
-                clean_search = re.sub(r'[^a-z0-9]', '', str(search_term).lower())
-                fuzzy_matches = []
-                for s in p_list:
-                    b_name = re.sub(r'[^a-z0-9]', '', str(s.get("BuildingName", "")).lower())
-                    s_code = re.sub(r'[^a-z0-9]', '', str(s.get("SpotCode", "")).lower())
-                    s_name = re.sub(r'[^a-z0-9]', '', str(s.get("SpotName", "")).lower())
-                    if clean_search in b_name or clean_search in s_code or clean_search in s_name:
-                        fuzzy_matches.append(s)
-                if fuzzy_matches:
-                    p_list = fuzzy_matches
+        records = json_resp.get("data", [])
+        if not records:
+            logger.info(
+                f"✅ Spot pagination complete at page {page_index} — "
+                f"total fetched: {len(all_spots)}"
+            )
+            break
 
-            total_count = len(p_list)
-            logger.info(f"✅ Spots fetched: {total_count}")
-            return json.dumps({"TotalCount": total_count, "p_list": p_list})
+        all_spots.extend(records)
+        logger.info(
+            f"   Page {page_index} → {len(records)} records | running total: {len(all_spots)}"
+        )
+
+        # Early-exit: if TotalCount is embedded in records, use it
+        total_count = records[0].get("TotalCount", 0) if records else 0
+        if total_count and len(all_spots) >= int(total_count):
+            logger.info(f"✅ All {total_count} spots fetched (TotalCount reached)")
+            break
+
+        page_index += 1
+
+    return all_spots
+
+
+async def fetch_spots_api(user_name: str, search_term: Optional[str] = None, list_buildings_only: bool = False) -> str:
+    """
+    Semantic spot search backed by an in-memory TF-IDF vector store.
+
+    Lifecycle:
+      1. First call for a client  → paginate API to fetch ALL spots
+                                  → build TF-IDF index in SpotVectorStore
+      2. Subsequent calls         → query the in-memory index (no API call)
+
+    search_term handling:
+      - Provided  → top-15 semantically closest spots (handles typos, partial)
+      - Empty     → return all spots (user wants to browse everything)
+    list_buildings_only:
+      - True → return unique building names only (no spot detail tiles)
+    """
+    from app.services.spot_vector_store import spot_store
+
+    # ── Load vector store on first call for this client ───────────────────────
+    if not spot_store.is_loaded(user_name):
+        logger.info(
+            f"🔄 Vector store not loaded for '{user_name}' — "
+            f"fetching all spots from API ..."
+        )
+        raw_spots = await _fetch_all_spots_from_api(user_name)
+        if not raw_spots:
+            return json.dumps({"error": f"No spots available for {user_name}."})
+        spot_store.load(user_name, raw_spots)
+    else:
+        logger.info(f"⚡ Vector store already loaded for '{user_name}' — skipping API call")
+
+    # ── Buildings-only mode ────────────────────────────────────────────────────
+    if list_buildings_only:
+        all_spots = spot_store.get_all(user_name)  # full list
+        seen = set()
+        unique_buildings = []
+        for spot in all_spots:
+            b = spot.get("BuildingName", "").strip()
+            if b and b not in seen:
+                seen.add(b)
+                unique_buildings.append({"BuildingName": b})
+        logger.info(f"🏢 Buildings-only mode | client='{user_name}' | unique_buildings={len(unique_buildings)}")
+        return json.dumps({"type": "buildings_list", "p_list": unique_buildings})
+
+    # ── Semantic search ────────────────────────────────────────────────────────
+    # For empty query: return ALL spots (user wants to browse everything).
+    # For specific query: get ALL spots then filter locally so every matching
+    # result is returned — not just the top-15 similarity hits.
+    import re as _re
+
+    if not search_term or not str(search_term).strip():
+        # Browse all: return full list
+        results = spot_store.get_all(user_name)
+        total_count = len(results)
+        logger.info(f"📋 No search_term — returning all {total_count} spots for '{user_name}'")
+    else:
+        # Filtered search: get ALL spots, filter by search term across key fields
+        all_spots = spot_store.get_all(user_name)
+        clean_q = _re.sub(r'[^a-z0-9]', '', str(search_term).lower())
+        results = [
+            s for s in all_spots
+            if clean_q in _re.sub(r'[^a-z0-9]', '', str(s.get("BuildingName", "")).lower())
+            or clean_q in _re.sub(r'[^a-z0-9]', '', str(s.get("SpotCode", "")).lower())
+            or clean_q in _re.sub(r'[^a-z0-9]', '', str(s.get("SpotName", "")).lower())
+            or clean_q in _re.sub(r'[^a-z0-9]', '', str(s.get("FloorName", "")).lower())
+        ]
+        # If no exact substring match, fall back to top-15 vector similarity search
+        if not results:
+            results = spot_store.search(user_name, search_term, top_k=15)
+            logger.info(f"🔍 Fallback vector search | query='{search_term}' | hits={len(results)}")
         else:
-            logger.error(f"❌ API error: {response.text}")
-            return json.dumps({"error": f"Error fetching spots (HTTP {response.status_code})"})
+            logger.info(f"🔎 Local filter | query='{search_term}' | matches={len(results)}")
+        total_count = len(results)
 
-    except Exception as e:
-        logger.error(f"❌ Error in API call: {e}", exc_info=True)
-        return json.dumps({"error": str(e)})
+    logger.info(f"✅ Spot search done | user='{user_name}' | query='{search_term}' | results={total_count}")
+    return json.dumps({"TotalCount": total_count, "p_list": results})
 
 
 @tool("GET_SPOTS", args_schema=GetSpotsInput)
-async def GET_SPOTS(user_name: str, search_term: Optional[str] = None) -> str:
-    """Fetch available spots by building name or spot code."""
-    logger.info(f"🛠️ GET_SPOTS: user_name={user_name}, search_term={search_term}")
-    return await fetch_spots_api(user_name, search_term)
+async def GET_SPOTS(user_name: str, search_term: Optional[str] = None, list_buildings_only: Optional[bool] = False) -> str:
+    """Fetch available spots by building name or spot code, or list unique buildings."""
+    logger.info(f"🛠️ GET_SPOTS: user_name={user_name}, search_term={search_term}, list_buildings_only={list_buildings_only}")
+    return await fetch_spots_api(user_name, search_term, list_buildings_only=bool(list_buildings_only))
 
 
 def _fetch_booking_sync(booking_id: str, user_name: str) -> str:

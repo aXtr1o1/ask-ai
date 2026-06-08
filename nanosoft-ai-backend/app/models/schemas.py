@@ -343,7 +343,11 @@ class GetSpotsInput(BaseModel):
     user_name: str = Field(description="The client_name/user_name from the frontend context.")
     search_term: Optional[str] = Field(
         default=None,
-        description="The Spot Code (e.g. WRMF-NES) or Building Name to search for. Always extract this from the user's query."
+        description="The Spot Code, Building Name, Floor Name, or Space Name to search for. Pass whatever the user mentioned. Leave empty if user wants to browse all or see building list."
+    )
+    list_buildings_only: Optional[bool] = Field(
+        default=False,
+        description="Set to True ONLY when the user explicitly asks to see the list of available buildings. This returns unique building names only, not individual spots."
     )
 
 class GetBookingStatusInput(BaseModel):
