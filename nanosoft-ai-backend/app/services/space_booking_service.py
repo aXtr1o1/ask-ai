@@ -333,6 +333,38 @@ class SpaceBookingService:
                 ai_msg2 = await self.model.ainvoke(prompt_messages)
                 content = _extract_content(ai_msg2)
 
+                # ── Fast-path: single-spot GET_SPOTS result + empty ai_msg2 ──────────────────
+                # When the user says "book this GPRF-KFC" (spot code without SpotCode: prefix),
+                # the LLM correctly finds the spot via GET_SPOTS but then returns empty content.
+                # Instead of hitting the generic fallback, synthesize the Stage 3 calendar
+                # confirmation directly from the cached spot data — no extra LLM call needed.
+                if (
+                    not content.strip()
+                    and not ai_msg2.tool_calls
+                    and last_tool_called == "GET_SPOTS"
+                    and tool_data
+                    and isinstance(tool_data.get("p_list"), list)
+                    and len(tool_data["p_list"]) == 1
+                ):
+                    spot = tool_data["p_list"][0]
+                    s_code  = spot.get("SpotCode", "")
+                    s_name  = spot.get("SpotName", "the spot")
+                    s_bldg  = spot.get("BuildingName", "the building")
+                    s_floor = spot.get("FloorName", "")
+                    floor_part = f", {s_floor}" if s_floor else ""
+                    content = (
+                        f"Great choice! I have found {s_name} (Spot Code: {s_code}) "
+                        f"at {s_bldg}{floor_part}. "
+                        f"To complete your booking, please use the calendar to select "
+                        f"your preferred start and end date and time."
+                    )
+                    logger.info(
+                        "⚡ Fast-path Stage-3: single-spot GET_SPOTS → calendar prompt | spot=%s", s_code
+                    )
+                    sb_thread.append(AIMessage(content=content))
+                    _save_sb_thread(session_id, sb_thread)
+                    return content, content, messages
+
                 # ── Handle the case where the model makes ANOTHER tool call instead of replying ──
                 # This happens when the LLM skips Phase 2 and tries to call BOOK_SPOT immediately
                 # after GET_SPOTS, resulting in empty .content.

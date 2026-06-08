@@ -4889,6 +4889,22 @@ export default function Home() {
                                 }
                               }
 
+                              // ── Prepend spot context so the backend has all booking info
+                              // even if the server restarted and sb_thread memory was cleared.
+                              // Search backwards through messages for the last SpotCode user message.
+                              const currentMessages = messages;
+                              let spotContext = "";
+                              for (let mi = idx - 1; mi >= 0; mi--) {
+                                const m = currentMessages[mi];
+                                if (m?.role === "user" && typeof m.text === "string" && m.text.includes("SpotCode:")) {
+                                  spotContext = m.text.trim();
+                                  break;
+                                }
+                              }
+                              if (spotContext) {
+                                bookingMsg = `${spotContext} | Book from ${bookingMsg}`;
+                              }
+
                               console.log("📅 [Telemetry] Inline saving booking times. Sending message:", bookingMsg);
                               sendTextDirectly(bookingMsg);
 
