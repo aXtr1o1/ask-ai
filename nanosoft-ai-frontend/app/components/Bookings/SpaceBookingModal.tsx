@@ -261,7 +261,12 @@ export default function SpaceBookingModal({
   const [endDate, setEndDate] = useState<string>("");
   const [startTime, setStartTime] = useState<string>("");
   const [endTime, setEndTime] = useState<string>("");
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [viewDate, setViewDate] = useState<Date>(() => new Date());
+
+  useEffect(() => {
+    setErrorMsg(null);
+  }, [startDate, endDate, startTime, endTime]);
 
   useEffect(() => {
     // Determine defaults
@@ -314,9 +319,28 @@ export default function SpaceBookingModal({
   }, [bookingFrom, bookingTo]);
 
   const handleConfirm = () => {
+    setErrorMsg(null);
     const finalEndDate = endDate || startDate;
     const fromStr = `${startDate} ${startTime}`;
     const toStr = `${finalEndDate} ${endTime}`;
+
+    // Bug 4 Fix: Reject past dates on confirm
+    const todayStr = new Date().toISOString().split("T")[0];
+    if (startDate < todayStr) {
+      setErrorMsg("Bookings cannot be made for past dates. Please select today or a future date.");
+      return; // keep modal open
+    }
+
+    // Bug 6 & 7 Fix: Reject same or reversed start/end time
+    const startDT = new Date(`${startDate}T${startTime}`);
+    const endDT   = new Date(`${finalEndDate}T${endTime}`);
+    if (!isNaN(startDT.getTime()) && !isNaN(endDT.getTime())) {
+      if (startDT >= endDT) {
+        setErrorMsg("End time must be later than start time. Please select a valid time range.");
+        return; // keep modal open for correction
+      }
+    }
+
     console.log("📅 [SpaceBookingModal] Confirming date/time:", { fromStr, toStr });
     if (onSave) {
       onSave(fromStr, toStr);
@@ -347,6 +371,10 @@ export default function SpaceBookingModal({
 
 
     const handleDateClick = (dateStr: string) => {
+      // Bug 4 Fix: Reject clicks on past dates
+      const todayStr = new Date().toISOString().split("T")[0];
+      if (dateStr < todayStr) return;
+
       if (!startDate || (startDate && endDate)) {
         setStartDate(dateStr);
         setEndDate("");
@@ -369,6 +397,9 @@ export default function SpaceBookingModal({
       const dd = String(day).padStart(2, '0');
       const dateStr = `${yyyy}-${mm}-${dd}`;
 
+      // Bug 4 Fix: Visual state for past dates
+      const todayStr = new Date().toISOString().split("T")[0];
+      const isPastDate = dateStr < todayStr;
       const isSelectedStart = startDate === dateStr;
       const isSelectedEnd = endDate === dateStr;
       const isInRange = endDate && dateStr > startDate && dateStr < endDate;
@@ -379,13 +410,20 @@ export default function SpaceBookingModal({
           key={day}
           type="button"
           onClick={() => handleDateClick(dateStr)}
+          disabled={isPastDate}
           style={{
-            background: isHighlighted
-              ? "var(--color-primary, #d4af37)"
-              : isInRange
-                ? "rgba(212, 175, 55, 0.2)"
-                : "transparent",
-            color: isHighlighted ? "#000000" : "var(--color-text, #ffffff)",
+            background: isPastDate
+              ? "transparent"
+              : isHighlighted
+                ? "var(--color-primary, #d4af37)"
+                : isInRange
+                  ? "rgba(212, 175, 55, 0.2)"
+                  : "transparent",
+            color: isPastDate
+              ? "rgba(255, 255, 255, 0.2)"
+              : isHighlighted
+                ? "#000000"
+                : "var(--color-text, #ffffff)",
             border: "none",
             borderRadius: isSelectedStart && !endDate
               ? "6px"
@@ -401,17 +439,19 @@ export default function SpaceBookingModal({
             padding: 0,
             fontSize: "13px",
             fontWeight: isHighlighted || isInRange ? 700 : 500,
-            cursor: "pointer",
+            cursor: isPastDate ? "not-allowed" : "pointer",
             transition: "all 0.15s ease",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
+            textDecoration: isPastDate ? "line-through" : "none",
+            opacity: isPastDate ? 0.35 : 1,
           }}
           onMouseEnter={(e) => {
-            if (!isHighlighted && !isInRange) e.currentTarget.style.background = "rgba(255, 255, 255, 0.08)";
+            if (!isHighlighted && !isInRange && !isPastDate) e.currentTarget.style.background = "rgba(255, 255, 255, 0.08)";
           }}
           onMouseLeave={(e) => {
-            if (!isHighlighted && !isInRange) e.currentTarget.style.background = "transparent";
+            if (!isHighlighted && !isInRange && !isPastDate) e.currentTarget.style.background = "transparent";
           }}
         >
           {day}
@@ -526,6 +566,25 @@ export default function SpaceBookingModal({
             />
           </div>
         </div>
+
+        {/* Error Message */}
+        {errorMsg && (
+          <div style={{
+            background: "rgba(220, 53, 69, 0.15)",
+            border: "1px solid rgba(220, 53, 69, 0.3)",
+            color: "#ff6b6b",
+            padding: "10px 12px",
+            borderRadius: "8px",
+            fontSize: "13px",
+            marginBottom: "12px",
+            display: "flex",
+            alignItems: "flex-start",
+            gap: "8px"
+          }}>
+            <span style={{ fontSize: "16px" }}>⚠️</span>
+            <span style={{ lineHeight: "1.4" }}>{errorMsg}</span>
+          </div>
+        )}
 
         {/* Actions */}
         <div style={{ display: "flex", gap: "10px", marginTop: "8px" }}>

@@ -340,6 +340,40 @@ class SpaceBookingService:
                             args["building_name"] = verified.get("BuildingName", args.get("building_name"))
                             args["floor_name"]    = verified.get("FloorName", args.get("floor_name"))
                             logger.info("✅ Spot verified from cache: %s → %s", spot_code_req, args["spot_name"])
+
+                        # ── Bug 8 Fix: Reject ambiguous / partial SpotCode ───────
+                        # Count how many cached spots EXACTLY match the given SpotCode.
+                        # If the code is partial (e.g. just "W"), multiple spots will match
+                        # and the system must not book the wrong one.
+                        sb_cache = memory_store.get(session_id, {}).get("sb_spot_cache", {})
+                        all_cached_spots = []
+                        for cached_data in sb_cache.values():
+                            all_cached_spots.extend(cached_data.get("p_list", []))
+                        exact_matches = [
+                            s for s in all_cached_spots
+                            if s.get("SpotCode", "").strip().upper() == spot_code_req.strip().upper()
+                        ]
+                        if all_cached_spots and len(exact_matches) == 0:
+                            # The LLM hallucinated a SpotCode that doesn't exist in cache
+                            logger.warning("⚠️ SpotCode '%s' not found in cache — rejecting BOOK_SPOT", spot_code_req)
+                            prompt_messages.append(ToolMessage(
+                                name=tc["name"], tool_call_id=tc["id"],
+                                content=json.dumps({
+                                    "error": (
+                                        f"SpotCode '{spot_code_req}' was not found in the available spaces. "
+                                        "Please ask the user to select a space from the list by clicking a tile."
+                                    )
+                                })
+                            ))
+                            ai_msg2 = await self.model.ainvoke(prompt_messages)
+                            ambig_reply = _extract_content(ai_msg2) or (
+                                f"I couldn't find spot '{spot_code_req}' in the available spaces. "
+                                "Please click one of the space tiles to select your spot."
+                            )
+                            sb_thread.append(AIMessage(content=ambig_reply))
+                            _save_sb_thread(session_id, sb_thread)
+                            return ambig_reply, ambig_reply, messages
+
                         tool_result_str = await BOOK_SPOT.ainvoke(args)
 
                         try:

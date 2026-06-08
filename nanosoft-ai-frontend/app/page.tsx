@@ -2486,8 +2486,10 @@ export default function Home() {
           });
 
           // ── Auto-open inline calendar picker on Phase 3 message ──────────
-          // Detect when AI asks user to pick a date/time via the calendar
-          const isCalendarPrompt = /use the calendar/i.test(finalText);
+          // Bug 2 Fix: Also re-open when AI sends time-validation errors so the
+          // user can immediately pick a corrected date/time without having to
+          // manually reopen the picker.
+          const isCalendarPrompt = /use the calendar|please select a valid time|select.*date.*time|pick.*date|choose.*time|end time must be|cannot be made for past|past date|invalid time|valid time range|start time.*before|end time.*after/i.test(finalText);
           if (isCalendarPrompt && isSpaceBookingRef.current) {
             setMessages(prev => {
               const idx = prev.length - 1;
@@ -2497,7 +2499,7 @@ export default function Home() {
               setBookingStartTime(parsed.fromTime);
               setBookingEndTime(parsed.toTime);
               setActiveBookingBubbleIndex(idx);
-              console.log("📅 [Auto] Phase 3 detected — auto-opening inline booking picker on message index:", idx);
+              console.log("📅 [Auto] Phase 3 / validation detected — auto-opening inline booking picker on message index:", idx);
               return prev;
             });
           }

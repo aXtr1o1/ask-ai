@@ -258,48 +258,104 @@ async def GET_BOOKING_STATUS(user_name: str, booking_id: str) -> str:
 
 
 def _insert_booking(booking_data: dict) -> str:
+    """Insert a booking with:
+    - Bug 1 fix: retry loop to avoid duplicate booking_id collision
+    - Bug 3 fix: overlap check — prevent double-booking the same spot at same time
+    """
     import random
-    booking_id = str(random.randint(1000, 9999))
     try:
-        conn = get_pool()
-        if not conn:
-            return json.dumps({"error": "Database connection failed."})
+        import psycopg2.errors as _pg_errors
+    except ImportError:
+        _pg_errors = None
 
+    conn = get_pool()
+    if not conn:
+        return json.dumps({"error": "Database connection failed."})
+
+    spot_code  = booking_data.get("spot_code")
+    start_time = booking_data.get("start_time")
+    end_time   = booking_data.get("end_time")
+
+    # ── Bug 3 Fix: Overlap check ─────────────────────────────────────────────
+    # Reject if another booking for the same spot overlaps the requested window.
+    try:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO space_bookings
-                (booking_id, client_name, sub_user_name, spot_code, spot_name, building_name, floor_name, start_time, end_time)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                SELECT booking_id FROM space_bookings
+                WHERE spot_code = %s
+                  AND NOT (end_time <= %s OR start_time >= %s)
+                LIMIT 1
                 """,
-                (
-                    booking_id,
-                    booking_data.get("user_name"),
-                    booking_data.get("sub_user_name", "user"),
-                    booking_data.get("spot_code"),
-                    booking_data.get("spot_name"),
-                    booking_data.get("building_name"),
-                    booking_data.get("floor_name"),
-                    booking_data.get("start_time"),
-                    booking_data.get("end_time"),
-                )
+                (spot_code, start_time, end_time)
             )
-            conn.commit()
+            conflict = cur.fetchone()
+        if conflict:
+            logger.warning(
+                "⚠️ Overlap conflict for spot %s (%s → %s) — existing booking %s",
+                spot_code, start_time, end_time, conflict[0]
+            )
+            return json.dumps({
+                "error": (
+                    f"Sorry, {spot_code} is already booked during that time slot. "
+                    "Please choose a different time or spot."
+                )
+            })
+    except Exception as overlap_err:
+        logger.error(f"❌ Overlap check failed: {overlap_err}", exc_info=True)
 
-        logger.info(f"✅ Booking saved. ID: {booking_id}")
-        return json.dumps({
-            "success": True,
-            "booking_id": booking_id,
-            "spot_code": booking_data.get("spot_code"),
-            "spot_name": booking_data.get("spot_name"),
-            "building_name": booking_data.get("building_name"),
-            "floor_name": booking_data.get("floor_name"),
-            "start_time": booking_data.get("start_time"),
-            "end_time": booking_data.get("end_time"),
-        })
-    except Exception as e:
-        logger.error(f"❌ Failed to insert booking: {e}", exc_info=True)
-        return json.dumps({"error": f"Failed to save booking: {e}"})
+    # ── Bug 1 Fix: Retry loop for unique booking_id ──────────────────────────
+    for attempt in range(10):
+        booking_id = str(random.randint(1000, 9999))
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO space_bookings
+                    (booking_id, client_name, sub_user_name, spot_code, spot_name,
+                     building_name, floor_name, start_time, end_time)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        booking_id,
+                        booking_data.get("user_name"),
+                        booking_data.get("sub_user_name", "user"),
+                        spot_code,
+                        booking_data.get("spot_name"),
+                        booking_data.get("building_name"),
+                        booking_data.get("floor_name"),
+                        start_time,
+                        end_time,
+                    )
+                )
+                conn.commit()
+            logger.info(f"✅ Booking saved. ID: {booking_id} (attempt {attempt + 1})")
+            return json.dumps({
+                "success": True,
+                "booking_id": booking_id,
+                "spot_code": spot_code,
+                "spot_name": booking_data.get("spot_name"),
+                "building_name": booking_data.get("building_name"),
+                "floor_name": booking_data.get("floor_name"),
+                "start_time": start_time,
+                "end_time": end_time,
+            })
+        except Exception as e:
+            # Check for unique-constraint violation on booking_id
+            err_str = str(e).lower()
+            if "unique" in err_str or "duplicate" in err_str:
+                logger.warning(
+                    f"⚠️ Booking ID {booking_id} already exists — retrying (attempt {attempt + 1})"
+                )
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                continue  # retry with a new ID
+            logger.error(f"❌ Failed to insert booking: {e}", exc_info=True)
+            return json.dumps({"error": f"Failed to save booking: {e}"})
+
+    return json.dumps({"error": "Could not generate a unique Booking ID after 10 attempts. Please try again."})
 
 
 @tool("BOOK_SPOT", args_schema=BookSpotInput)
@@ -314,14 +370,56 @@ async def BOOK_SPOT(
     sub_user_name: Optional[str] = None
 ) -> str:
     """Book a space after the user has confirmed the spot and provided their start and end time."""
+    from datetime import datetime as _dt
     logger.info(f"🛠️ BOOK_SPOT: spot_code={spot_code}, start_time={start_time}, end_time={end_time}")
 
+    # ── Bug 6 & 7 Fix: start_time required ───────────────────────────────────
     if not start_time or start_time.strip() == "" or start_time.lower() in ("none", "unknown"):
         return json.dumps({
             "error_type": "missing_time",
             "spot_code": spot_code,
             "building_name": building_name
         })
+
+    # ── Bug 6 & 7 Fix: end_time required (no silent fallback) ────────────────
+    if not end_time or end_time.strip() == "" or end_time.lower() in ("none", "unknown"):
+        return json.dumps({
+            "error_type": "missing_time",
+            "message": "End time is required. Please provide a valid end time.",
+            "spot_code": spot_code,
+            "building_name": building_name
+        })
+
+    # ── Bug 4 Fix: Reject past dates ─────────────────────────────────────────
+    try:
+        # Attempt to parse the start_time as a datetime (supports "YYYY-MM-DD HH:MM" format)
+        start_dt = _dt.fromisoformat(start_time.replace("T", " ").strip())
+        if start_dt < _dt.now():
+            return json.dumps({
+                "error": (
+                    "Bookings cannot be made for past dates or times. "
+                    "Please select today or a future date and time."
+                )
+            })
+    except ValueError:
+        # If parsing fails, fall through — the DB constraint will catch it
+        logger.warning(f"⚠️ Could not parse start_time '{start_time}' for past-date check")
+
+    # ── Bug 6 & 7 Fix: start_time must be strictly before end_time ───────────
+    try:
+        start_dt_cmp = _dt.fromisoformat(start_time.replace("T", " ").strip())
+        end_dt_cmp   = _dt.fromisoformat(end_time.replace("T", " ").strip())
+        if start_dt_cmp >= end_dt_cmp:
+            return json.dumps({
+                "error": (
+                    "End time must be later than start time. "
+                    "Please select a valid time range where the end time comes after the start time."
+                )
+            })
+    except ValueError:
+        logger.warning(
+            f"⚠️ Could not compare start_time '{start_time}' and end_time '{end_time}'"
+        )
 
     booking_data = {
         "user_name": user_name,
@@ -331,7 +429,7 @@ async def BOOK_SPOT(
         "building_name": building_name,
         "floor_name": floor_name,
         "start_time": start_time,
-        "end_time": end_time or start_time,  # fallback: same as start if end not given
+        "end_time": end_time,           # Bug 6 fix: no longer silently falls back to start_time
     }
     return await asyncio.to_thread(_insert_booking, booking_data)
 
