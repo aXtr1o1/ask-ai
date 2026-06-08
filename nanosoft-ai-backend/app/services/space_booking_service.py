@@ -168,8 +168,8 @@ class SpaceBookingService:
             hydrated_content = (
                 self.system_prompt.content + 
                 f"\n\nCURRENT USER_NAME: {user_name}."
-                "\nCRITICAL: If the user provides a Spot Code, do NOT call GET_SPOTS again; proceed directly to booking or providing details."
-                "\nCRITICAL: If the user searches for any kind of space, keyword, or tries to refine the list (such as by specifying a building name, spot name, or floor), you MUST call GET_SPOTS immediately with their query as the search_term to fetch matching spots. Do not ask questions, just call the tool."
+                "\nCRITICAL: If the user's message contains a specific Spot Code (e.g. indicated by 'SpotCode:'), you MUST NOT call GET_SPOTS under any circumstances. You must immediately confirm the spot details (SpotCode, SpotName, BuildingName, FloorName) to the user and ask them to 'use the calendar' to select a time."
+                "\nCRITICAL: If the user searches for any kind of space, keyword, or tries to refine the list (such as by specifying a building name, spot name, or floor), you MUST call GET_SPOTS immediately with their query as the search_term to fetch matching spots, EXCEPT when the user's message also contains a specific Spot Code. If a Spot Code is present, do NOT call GET_SPOTS."
                 "\nCRITICAL: If the user's message is a conversational affirmation, confirmation, or agreement in response to your suggestion, do NOT call GET_SPOTS. Instead, ask them to specify which building or floor they would like to search or try."
                 "\nCRITICAL: If the user's message is a greeting or general conversational text that does not request a specific space, floor, or building, do NOT call GET_SPOTS. Respond warmly and ask them how you can assist with booking a space."
                 "\nCRITICAL: When asking the user for their booking times, you MUST include the exact phrase 'use the calendar' in your response. Do NOT ask the user to type, share, write, or tell you their start and end time manually."

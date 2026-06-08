@@ -55,7 +55,7 @@ async def fetch_spots_api(user_name: str, search_term: Optional[str] = None) -> 
         "BuildingCode": None, "BuildingName": None,
         "FloorCode": None, "FloorName": None,
         "AssWingCode": None, "AssWingName": None,
-        "PageIndex": "1", "PageSize": "200",
+        "PageIndex": "1", "PageSize": "5000",
         "Type": "SpotID", "UserGroupKey": "1", "UserAccessKey": "1"
     }
 
@@ -273,6 +273,12 @@ async def BOOK_SPOT(
             "error_type": "missing_time",
             "spot_code": spot_code,
             "building_name": building_name
+        })
+
+    if start_time and end_time and start_time.strip() == end_time.strip():
+        logger.warning(f"⚠️ BOOK_SPOT: start_time and end_time are identical: {start_time}")
+        return json.dumps({
+            "error": "The start and end times cannot be the same. Please use the calendar to select a valid time range."
         })
 
     booking_data = {
