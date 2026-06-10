@@ -4859,63 +4859,78 @@ export default function Home() {
                         )}
 
                         {/* Inline Booking Picker if active */}
-                        {activeBookingBubbleIndex === idx && (
-                          <SpaceBookingModal
-                            isInline={true}
-                            bookingFrom={`${bookingStartDate} ${bookingStartTime}`}
-                            bookingTo={`${bookingEndDate} ${bookingEndTime}`}
-                            onSave={(from, to) => {
-                              const [fromDate, fromTime] = from.split(" ");
-                              const [toDate, toTime] = to.split(" ");
-                              setBookingStartDate(fromDate || "");
-                              setBookingStartTime(fromTime || "");
-                              setBookingEndDate(toDate || "");
-                              setBookingEndTime(toTime || "");
+                        {activeBookingBubbleIndex === idx && (() => {
+                          const currentMessages = messages;
+                          let extractedSpotCode = "";
+                          for (let mi = idx - 1; mi >= 0; mi--) {
+                            const m = currentMessages[mi];
+                            if (m?.role === "user" && typeof m.text === "string" && m.text.includes("SpotCode:")) {
+                              const match = m.text.match(/SpotCode:\s*([^\s,|]+)/i);
+                              if (match) {
+                                extractedSpotCode = match[1].trim();
+                                break;
+                              }
+                            }
+                          }
+                          return (
+                            <SpaceBookingModal
+                              isInline={true}
+                              bookingFrom={`${bookingStartDate} ${bookingStartTime}`}
+                              bookingTo={`${bookingEndDate} ${bookingEndTime}`}
+                              spotCode={extractedSpotCode}
+                              onSave={(from, to) => {
+                                const [fromDate, fromTime] = from.split(" ");
+                                const [toDate, toTime] = to.split(" ");
+                                setBookingStartDate(fromDate || "");
+                                setBookingStartTime(fromTime || "");
+                                setBookingEndDate(toDate || "");
+                                setBookingEndTime(toTime || "");
 
-                              let bookingMsg = `${from} to ${to}`;
-                              if (from.includes(" ") && to.includes(" ")) {
-                                const partsFrom = from.split(" ");
-                                const partsTo = to.split(" ");
-                                const startDate = partsFrom[0];
-                                const startTime = partsFrom[1];
-                                const endDate = partsTo[0];
-                                const endTime = partsTo[1];
-                                if (startDate === endDate) {
-                                  // Same day booking: "2026-06-10 from 10:00 to 14:00"
-                                  bookingMsg = `${startDate} from ${startTime} to ${endTime}`;
-                                } else {
-                                  // Multi-day booking: "2026-06-10 10:00 to 2026-06-11 14:00"
-                                  bookingMsg = `${startDate} ${startTime} to ${endDate} ${endTime}`;
+                                let bookingMsg = `${from} to ${to}`;
+                                if (from.includes(" ") && to.includes(" ")) {
+                                  const partsFrom = from.split(" ");
+                                  const partsTo = to.split(" ");
+                                  const startDate = partsFrom[0];
+                                  const startTime = partsFrom[1];
+                                  const endDate = partsTo[0];
+                                  const endTime = partsTo[1];
+                                  if (startDate === endDate) {
+                                    // Same day booking: "2026-06-10 from 10:00 to 14:00"
+                                    bookingMsg = `${startDate} from ${startTime} to ${endTime}`;
+                                  } else {
+                                    // Multi-day booking: "2026-06-10 10:00 to 2026-06-11 14:00"
+                                    bookingMsg = `${startDate} ${startTime} to ${endDate} ${endTime}`;
+                                  }
                                 }
-                              }
 
-                              // ── Prepend spot context so the backend has all booking info
-                              // even if the server restarted and sb_thread memory was cleared.
-                              // Search backwards through messages for the last SpotCode user message.
-                              const currentMessages = messages;
-                              let spotContext = "";
-                              for (let mi = idx - 1; mi >= 0; mi--) {
-                                const m = currentMessages[mi];
-                                if (m?.role === "user" && typeof m.text === "string" && m.text.includes("SpotCode:")) {
-                                  spotContext = m.text.trim();
-                                  break;
+                                // ── Prepend spot context so the backend has all booking info
+                                // even if the server restarted and sb_thread memory was cleared.
+                                // Search backwards through messages for the last SpotCode user message.
+                                const currentMessagesInner = messages;
+                                let spotContext = "";
+                                for (let mi = idx - 1; mi >= 0; mi--) {
+                                  const m = currentMessagesInner[mi];
+                                  if (m?.role === "user" && typeof m.text === "string" && m.text.includes("SpotCode:")) {
+                                    spotContext = m.text.trim();
+                                    break;
+                                  }
                                 }
-                              }
-                              if (spotContext) {
-                                bookingMsg = `${spotContext} | Book from ${bookingMsg}`;
-                              }
+                                if (spotContext) {
+                                  bookingMsg = `${spotContext} | Book from ${bookingMsg}`;
+                                }
 
-                              console.log("📅 [Telemetry] Inline saving booking times. Sending message:", bookingMsg);
-                              sendTextDirectly(bookingMsg);
+                                console.log("📅 [Telemetry] Inline saving booking times. Sending message:", bookingMsg);
+                                sendTextDirectly(bookingMsg);
 
-                              // Reset inline bubble index to close the inline picker
-                              setActiveBookingBubbleIndex(null);
-                            }}
-                            onClose={() => {
-                              setActiveBookingBubbleIndex(null);
-                            }}
-                          />
-                        )}
+                                // Reset inline bubble index to close the inline picker
+                                setActiveBookingBubbleIndex(null);
+                              }}
+                              onClose={() => {
+                                setActiveBookingBubbleIndex(null);
+                              }}
+                            />
+                          );
+                        })()}
 
                       </div>
                     </div>

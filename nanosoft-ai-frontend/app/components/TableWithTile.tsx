@@ -671,8 +671,8 @@ const TableWithTile = React.memo(function TableWithTile({
               </div>
             )}
           </div>
-          {/* Pagination Controls (table view only) */}
-          {viewMode === "table" && (
+          {/* Pagination Controls (table view or space booking tile view) */}
+          {(viewMode === "table" || (isSpaceBookingData && viewMode === "tile")) && (
             <div style={{ display: 'flex', gap: responsive.isMobile ? 6 : 8, justifyContent: 'center', alignItems: 'center', marginTop: responsive.isMobile ? 6 : 8 }}>
               {(() => {
                 const disabledPrev = page <= 0;

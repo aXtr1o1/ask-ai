@@ -43,9 +43,17 @@ interface CustomTimePickerProps {
   onChange: (val: string) => void;
   popoverPosition?: "left" | "right" | "top";
   selectedDate?: string;
+  existingBookings?: Array<{ start_time: string; end_time: string }>;
 }
 
-function CustomTimePicker({ label, value, onChange, popoverPosition = "top", selectedDate }: CustomTimePickerProps) {
+function CustomTimePicker({
+  label,
+  value,
+  onChange,
+  popoverPosition = "top",
+  selectedDate,
+  existingBookings = [],
+}: CustomTimePickerProps) {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -63,51 +71,93 @@ function CustomTimePicker({ label, value, onChange, popoverPosition = "top", sel
   }, [isOpen]);
 
   const hoursList = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
-  const minutesList = ["00", "05", "10", "15", "20", "25", "30", "35", "40", "45", "50", "55"];
+  const minutesList = ["00", "15", "30", "45"];
   const periodsList = ["AM", "PM"];
 
   const todayStr = new Date().toISOString().split("T")[0];
   const isToday = selectedDate === todayStr;
 
+  const isDateTimeBooked = (dateStr: string, timeStr24: string) => {
+    if (!existingBookings || existingBookings.length === 0) return false;
+    const targetTime = new Date(`${dateStr}T${timeStr24}:00`).getTime();
+    if (isNaN(targetTime)) return false;
+
+    return existingBookings.some((b) => {
+      const bStartStr = b.start_time.includes(" ") ? b.start_time.replace(" ", "T") : b.start_time;
+      const bEndStr = b.end_time.includes(" ") ? b.end_time.replace(" ", "T") : b.end_time;
+      const bStart = new Date(bStartStr).getTime();
+      const bEnd = new Date(bEndStr).getTime();
+      if (isNaN(bStart) || isNaN(bEnd)) return false;
+      return targetTime >= bStart && targetTime < bEnd;
+    });
+  };
+
   const isHourDisabled = (h: string) => {
-    if (!isToday) return false;
-    const now = new Date();
-    const currentHour24 = now.getHours();
-    
-    let h24 = parseInt(h, 10);
-    if (period === "PM" && h24 < 12) h24 += 12;
-    if (period === "AM" && h24 === 12) h24 = 0;
-    
-    return h24 < currentHour24;
+    if (isToday) {
+      const now = new Date();
+      const currentHour24 = now.getHours();
+      let h24 = parseInt(h, 10);
+      if (period === "PM" && h24 < 12) h24 += 12;
+      if (period === "AM" && h24 === 12) h24 = 0;
+      if (h24 < currentHour24) return true;
+    }
+
+    if (selectedDate && existingBookings && existingBookings.length > 0) {
+      return minutesList.every((m) => {
+        let h24 = parseInt(h, 10);
+        if (period === "PM" && h24 < 12) h24 += 12;
+        if (period === "AM" && h24 === 12) h24 = 0;
+        const time24 = `${String(h24).padStart(2, "0")}:${m}`;
+        return isDateTimeBooked(selectedDate, time24);
+      });
+    }
+    return false;
   };
 
   const isMinuteDisabled = (m: string) => {
-    if (!isToday) return false;
-    const now = new Date();
-    const currentHour24 = now.getHours();
-    const currentMin = now.getMinutes();
-    
-    let selectedH24 = parseInt(hour, 10);
-    if (period === "PM" && selectedH24 < 12) selectedH24 += 12;
-    if (period === "AM" && selectedH24 === 12) selectedH24 = 0;
-    
-    if (selectedH24 < currentHour24) return true;
-    if (selectedH24 === currentHour24) {
-      return parseInt(m, 10) < currentMin;
+    if (isToday) {
+      const now = new Date();
+      const currentHour24 = now.getHours();
+      const currentMin = now.getMinutes();
+      let selectedH24 = parseInt(hour, 10);
+      if (period === "PM" && selectedH24 < 12) selectedH24 += 12;
+      if (period === "AM" && selectedH24 === 12) selectedH24 = 0;
+      if (selectedH24 < currentHour24) return true;
+      if (selectedH24 === currentHour24 && parseInt(m, 10) < currentMin) return true;
+    }
+
+    if (selectedDate && existingBookings && existingBookings.length > 0) {
+      let selectedH24 = parseInt(hour, 10);
+      if (period === "PM" && selectedH24 < 12) selectedH24 += 12;
+      if (period === "AM" && selectedH24 === 12) selectedH24 = 0;
+      const time24 = `${String(selectedH24).padStart(2, "0")}:${m}`;
+      return isDateTimeBooked(selectedDate, time24);
     }
     return false;
   };
 
   const isPeriodDisabled = (p: string) => {
-    if (!isToday) return false;
-    const now = new Date();
-    const currentHour24 = now.getHours();
-    
-    let selectedH24 = parseInt(hour, 10);
-    if (p === "PM" && selectedH24 < 12) selectedH24 += 12;
-    if (p === "AM" && selectedH24 === 12) selectedH24 = 0;
-    
-    return selectedH24 < currentHour24;
+    if (isToday) {
+      const now = new Date();
+      const currentHour24 = now.getHours();
+      let selectedH24 = parseInt(hour, 10);
+      if (p === "PM" && selectedH24 < 12) selectedH24 += 12;
+      if (p === "AM" && selectedH24 === 12) selectedH24 = 0;
+      if (selectedH24 < currentHour24) return true;
+    }
+
+    if (selectedDate && existingBookings && existingBookings.length > 0) {
+      return hoursList.every((h) => {
+        return minutesList.every((m) => {
+          let h24 = parseInt(h, 10);
+          if (p === "PM" && h24 < 12) h24 += 12;
+          if (p === "AM" && h24 === 12) h24 = 0;
+          const time24 = `${String(h24).padStart(2, "0")}:${m}`;
+          return isDateTimeBooked(selectedDate, time24);
+        });
+      });
+    }
+    return false;
   };
 
   const selectHour = (newHour: string) => {
@@ -317,6 +367,7 @@ interface SpaceBookingModalProps {
   bookingTo?: string;
   onSave?: (from: string, to: string) => void;
   isInline?: boolean;
+  spotCode?: string;
 }
 
 export default function SpaceBookingModal({
@@ -325,6 +376,7 @@ export default function SpaceBookingModal({
   bookingTo = "",
   onSave,
   isInline = false,
+  spotCode,
 }: SpaceBookingModalProps) {
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
@@ -333,10 +385,61 @@ export default function SpaceBookingModal({
   const [viewDate, setViewDate] = useState<Date>(() => new Date());
   const [error, setError] = useState<string>("");
   const [mounted, setMounted] = useState<boolean>(false);
+  const [existingBookings, setExistingBookings] = useState<Array<{ start_time: string; end_time: string }>>([]);
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  useEffect(() => {
+    if (!spotCode) return;
+    const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || "";
+    fetch(`${baseUrl}/api/bookings/${spotCode}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.status === "ok" && Array.isArray(data.bookings)) {
+          setExistingBookings(data.bookings);
+        }
+      })
+      .catch((err) => console.error("Failed to fetch bookings for spot", err));
+  }, [spotCode]);
+
+  const isDateFullyBooked = (dateStr: string) => {
+    if (!existingBookings || existingBookings.length === 0) return false;
+    const slots = [];
+    for (let h = 0; h < 24; h++) {
+      for (const m of ["00", "15", "30", "45"]) {
+        slots.push(`${String(h).padStart(2, "0")}:${m}`);
+      }
+    }
+    return slots.every((time24) => {
+      const targetTime = new Date(`${dateStr}T${time24}:00`).getTime();
+      if (isNaN(targetTime)) return false;
+      return existingBookings.some((b) => {
+        const bStartStr = b.start_time.includes(" ") ? b.start_time.replace(" ", "T") : b.start_time;
+        const bEndStr = b.end_time.includes(" ") ? b.end_time.replace(" ", "T") : b.end_time;
+        const bStart = new Date(bStartStr).getTime();
+        const bEnd = new Date(bEndStr).getTime();
+        if (isNaN(bStart) || isNaN(bEnd)) return false;
+        return targetTime >= bStart && targetTime < bEnd;
+      });
+    });
+  };
+
+  const hasAnyBooking = (dateStr: string) => {
+    if (!existingBookings || existingBookings.length === 0) return false;
+    const dayStart = new Date(`${dateStr}T00:00:00`).getTime();
+    const dayEnd = new Date(`${dateStr}T23:59:59`).getTime();
+    if (isNaN(dayStart) || isNaN(dayEnd)) return false;
+    return existingBookings.some((b) => {
+      const bStartStr = b.start_time.includes(" ") ? b.start_time.replace(" ", "T") : b.start_time;
+      const bEndStr = b.end_time.includes(" ") ? b.end_time.replace(" ", "T") : b.end_time;
+      const bStart = new Date(bStartStr).getTime();
+      const bEnd = new Date(bEndStr).getTime();
+      if (isNaN(bStart) || isNaN(bEnd)) return false;
+      return bStart <= dayEnd && bEnd >= dayStart;
+    });
+  };
 
   useEffect(() => {
     setError("");
@@ -474,6 +577,8 @@ export default function SpaceBookingModal({
 
       const todayStr = mounted ? new Date().toISOString().split("T")[0] : "";
       const isPastDate = mounted && dateStr < todayStr;
+      const isFullyBooked = mounted && isDateFullyBooked(dateStr);
+      const isDisabled = isPastDate || isFullyBooked;
 
       const isSelectedStart = startDate === dateStr;
       const isSelectedEnd = endDate === dateStr;
@@ -484,7 +589,7 @@ export default function SpaceBookingModal({
         <button
           key={day}
           type="button"
-          disabled={isPastDate}
+          disabled={isDisabled}
           onClick={() => handleDateClick(dateStr)}
           style={{
             background: isHighlighted
@@ -492,7 +597,7 @@ export default function SpaceBookingModal({
               : isInRange
                 ? "rgba(212, 175, 55, 0.2)"
                 : "transparent",
-            color: isPastDate
+            color: isDisabled
               ? "rgba(255, 255, 255, 0.2)"
               : isHighlighted
                 ? "#000000"
@@ -512,21 +617,33 @@ export default function SpaceBookingModal({
             padding: 0,
             fontSize: "13px",
             fontWeight: isHighlighted || isInRange ? 700 : 500,
-            cursor: isPastDate ? "not-allowed" : "pointer",
-            opacity: isPastDate ? 0.5 : 1,
+            cursor: isDisabled ? "not-allowed" : "pointer",
+            opacity: isDisabled ? 0.5 : 1,
             transition: "all 0.15s ease",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
           }}
           onMouseEnter={(e) => {
-            if (!isHighlighted && !isInRange && !isPastDate) e.currentTarget.style.background = "rgba(255, 255, 255, 0.08)";
+            if (!isHighlighted && !isInRange && !isDisabled) e.currentTarget.style.background = "rgba(255, 255, 255, 0.08)";
           }}
           onMouseLeave={(e) => {
-            if (!isHighlighted && !isInRange && !isPastDate) e.currentTarget.style.background = "transparent";
+            if (!isHighlighted && !isInRange && !isDisabled) e.currentTarget.style.background = "transparent";
           }}
         >
-          {day}
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", position: "relative" }}>
+            <span style={{ transform: hasAnyBooking(dateStr) && !isFullyBooked ? "translateY(-1px)" : "none" }}>{day}</span>
+            {hasAnyBooking(dateStr) && !isFullyBooked && (
+              <div style={{
+                width: "4px",
+                height: "4px",
+                borderRadius: "50%",
+                background: isHighlighted ? "#000000" : "var(--color-primary, #d4af37)",
+                position: "absolute",
+                bottom: "-6px"
+              }} />
+            )}
+          </div>
         </button>
       );
     }
@@ -631,12 +748,14 @@ export default function SpaceBookingModal({
               value={startTime}
               onChange={setStartTime}
               selectedDate={startDate}
+              existingBookings={existingBookings}
             />
             <CustomTimePicker
               label="End Time"
               value={endTime}
               onChange={setEndTime}
               selectedDate={endDate || startDate}
+              existingBookings={existingBookings}
             />
           </div>
         </div>
@@ -877,6 +996,7 @@ export default function SpaceBookingModal({
                 value={startTime}
                 onChange={setStartTime}
                 selectedDate={startDate}
+                existingBookings={existingBookings}
               />
             </div>
             <div style={{ flex: 1 }}>
@@ -885,6 +1005,7 @@ export default function SpaceBookingModal({
                 value={endTime}
                 onChange={setEndTime}
                 selectedDate={endDate || startDate}
+                existingBookings={existingBookings}
               />
             </div>
           </div>

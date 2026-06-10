@@ -218,6 +218,29 @@ def _insert_booking(booking_data: dict) -> str:
             return json.dumps({"error": "Database connection failed."})
 
         with conn.cursor() as cur:
+            # ── Check for duplicate / overlapping booking ──
+            cur.execute(
+                """
+                SELECT booking_id, start_time, end_time
+                FROM space_bookings
+                WHERE spot_code = %s
+                  AND (start_time::timestamp < %s::timestamp)
+                  AND (end_time::timestamp > %s::timestamp)
+                """,
+                (
+                    booking_data.get("spot_code"),
+                    booking_data.get("end_time"),
+                    booking_data.get("start_time"),
+                )
+            )
+            overlap = cur.fetchone()
+            if overlap:
+                logger.warning(f"⚠️ Booking clash: spot {booking_data.get('spot_code')} overlaps with booking {overlap[0]} ({overlap[1]} to {overlap[2]})")
+                return json.dumps({
+                    "success": False,
+                    "error": f"The spot is already booked from {overlap[1]} to {overlap[2]} (Booking ID: {overlap[0]}). Please choose a different spot or select another time range."
+                })
+
             cur.execute(
                 """
                 INSERT INTO space_bookings
@@ -280,6 +303,27 @@ async def BOOK_SPOT(
         return json.dumps({
             "error": "The start and end times cannot be the same. Please use the calendar to select a valid time range."
         })
+
+    # ── Check if start_time is in the past ──
+    try:
+        from datetime import datetime
+        cleaned_time_str = start_time.strip()
+        if len(cleaned_time_str) == 16:
+            start_dt = datetime.strptime(cleaned_time_str, "%Y-%m-%d %H:%M")
+        elif len(cleaned_time_str) == 19:
+            start_dt = datetime.strptime(cleaned_time_str, "%Y-%m-%d %H:%M:%S")
+        else:
+            start_dt = datetime.fromisoformat(cleaned_time_str)
+            
+        now_naive = datetime.now()
+        if start_dt < now_naive:
+            logger.warning(f"⚠️ BOOK_SPOT: Blocked booking for past date/time: {start_time}")
+            return json.dumps({
+                "success": False,
+                "error": f"Bookings for past dates or times are not permitted. Current server time is {now_naive.strftime('%Y-%m-%d %H:%M')}. Please select a current or future time."
+            })
+    except Exception as e:
+        logger.error(f"Failed to parse or validate start_time '{start_time}': {e}")
 
     booking_data = {
         "user_name": user_name,
