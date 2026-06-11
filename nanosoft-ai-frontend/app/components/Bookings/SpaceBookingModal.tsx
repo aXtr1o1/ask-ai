@@ -37,6 +37,14 @@ const format24hTime = (hour: string, minute: string, period: string) => {
   return `${hStr}:${minute}`;
 };
 
+// Helper to format local Date object to YYYY-MM-DD string
+const getLocalYYYYMMDD = (d: Date = new Date()): string => {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+};
+
 interface CustomTimePickerProps {
   label: string;
   value: string;
@@ -44,6 +52,8 @@ interface CustomTimePickerProps {
   popoverPosition?: "left" | "right" | "top";
   selectedDate?: string;
   existingBookings?: Array<{ start_time: string; end_time: string }>;
+  isOpen?: boolean;
+  onToggle?: (open: boolean) => void;
 }
 
 function CustomTimePicker({
@@ -53,8 +63,16 @@ function CustomTimePicker({
   popoverPosition = "top",
   selectedDate,
   existingBookings = [],
+  isOpen: controlledIsOpen,
+  onToggle,
 }: CustomTimePickerProps) {
-  const [isOpen, setIsOpen] = useState(false);
+  const [localIsOpen, setLocalIsOpen] = useState(false);
+  const isOpen = controlledIsOpen !== undefined ? controlledIsOpen : localIsOpen;
+
+  const setIsOpen = (val: boolean) => {
+    if (onToggle) onToggle(val);
+    setLocalIsOpen(val);
+  };
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const { hour, minute, period } = parse24hTime(value);
@@ -74,7 +92,7 @@ function CustomTimePicker({
   const minutesList = ["00", "15", "30", "45"];
   const periodsList = ["AM", "PM"];
 
-  const todayStr = new Date().toISOString().split("T")[0];
+  const todayStr = getLocalYYYYMMDD();
   const isToday = selectedDate === todayStr;
 
   const isDateTimeBooked = (dateStr: string, timeStr24: string) => {
@@ -386,6 +404,7 @@ export default function SpaceBookingModal({
   const [error, setError] = useState<string>("");
   const [mounted, setMounted] = useState<boolean>(false);
   const [existingBookings, setExistingBookings] = useState<Array<{ start_time: string; end_time: string }>>([]);
+  const [activePicker, setActivePicker] = useState<"start" | "end" | null>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -443,11 +462,26 @@ export default function SpaceBookingModal({
 
   useEffect(() => {
     setError("");
-    // Determine defaults
-    let initialStartDate = new Date().toISOString().split("T")[0];
-    let initialEndDate = new Date().toISOString().split("T")[0];
-    let initialStart = "10:00";
-    let initialEnd = "11:00";
+    // Determine defaults dynamically (future-proof next hour)
+    const now = new Date();
+    let initialStartDate = getLocalYYYYMMDD(now);
+    let initialEndDate = getLocalYYYYMMDD(now);
+    
+    let fromHour = now.getHours() + 1;
+    let toHour = fromHour + 1;
+    if (fromHour >= 24) {
+      fromHour = fromHour % 24;
+      toHour = fromHour + 1;
+      const tomorrow = new Date(now);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      initialStartDate = getLocalYYYYMMDD(tomorrow);
+      initialEndDate = initialStartDate;
+    } else if (toHour >= 24) {
+      toHour = toHour % 24;
+    }
+    
+    let initialStart = `${String(fromHour).padStart(2, "0")}:00`;
+    let initialEnd = `${String(toHour).padStart(2, "0")}:00`;
 
     // Try to parse bookingFrom: e.g. "2026-06-04 10:00"
     if (bookingFrom) {
@@ -556,11 +590,14 @@ export default function SpaceBookingModal({
       if (!startDate || (startDate && endDate)) {
         setStartDate(dateStr);
         setEndDate("");
+        setActivePicker("start");
       } else {
         if (dateStr < startDate) {
           setStartDate(dateStr);
+          setActivePicker("start");
         } else {
           setEndDate(dateStr);
+          setActivePicker("end");
         }
       }
     };
@@ -575,7 +612,7 @@ export default function SpaceBookingModal({
       const dd = String(day).padStart(2, '0');
       const dateStr = `${yyyy}-${mm}-${dd}`;
 
-      const todayStr = mounted ? new Date().toISOString().split("T")[0] : "";
+      const todayStr = mounted ? getLocalYYYYMMDD() : "";
       const isPastDate = mounted && dateStr < todayStr;
       const isFullyBooked = mounted && isDateFullyBooked(dateStr);
       const isDisabled = isPastDate || isFullyBooked;
@@ -632,8 +669,8 @@ export default function SpaceBookingModal({
           }}
         >
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", position: "relative" }}>
-            <span style={{ transform: hasAnyBooking(dateStr) && !isFullyBooked ? "translateY(-1px)" : "none" }}>{day}</span>
-            {hasAnyBooking(dateStr) && !isFullyBooked && (
+            <span style={{ transform: hasAnyBooking(dateStr) && !isFullyBooked && !isPastDate ? "translateY(-1px)" : "none" }}>{day}</span>
+            {hasAnyBooking(dateStr) && !isFullyBooked && !isPastDate && (
               <div style={{
                 width: "4px",
                 height: "4px",
@@ -749,6 +786,8 @@ export default function SpaceBookingModal({
               onChange={setStartTime}
               selectedDate={startDate}
               existingBookings={existingBookings}
+              isOpen={activePicker === "start"}
+              onToggle={(open) => setActivePicker(open ? "start" : null)}
             />
             <CustomTimePicker
               label="End Time"
@@ -756,6 +795,8 @@ export default function SpaceBookingModal({
               onChange={setEndTime}
               selectedDate={endDate || startDate}
               existingBookings={existingBookings}
+              isOpen={activePicker === "end"}
+              onToggle={(open) => setActivePicker(open ? "end" : null)}
             />
           </div>
         </div>
@@ -965,7 +1006,7 @@ export default function SpaceBookingModal({
                 type="date"
                 className="modal-input-field theme-dark-date-picker"
                 value={startDate}
-                min={mounted ? new Date().toISOString().split("T")[0] : undefined}
+                min={mounted ? getLocalYYYYMMDD() : undefined}
                 onChange={(e) => {
                   setError("");
                   setStartDate(e.target.value);
@@ -980,7 +1021,7 @@ export default function SpaceBookingModal({
                 type="date"
                 className="modal-input-field theme-dark-date-picker"
                 value={endDate}
-                min={startDate || (mounted ? new Date().toISOString().split("T")[0] : undefined)}
+                min={startDate || (mounted ? getLocalYYYYMMDD() : undefined)}
                 onChange={(e) => {
                   setError("");
                   setEndDate(e.target.value);

@@ -305,14 +305,28 @@ async def BOOK_SPOT(
         })
 
     # ── Check if start_time is in the past ──
+    start_dt = None
     try:
         from datetime import datetime
         cleaned_time_str = start_time.strip()
-        if len(cleaned_time_str) == 16:
-            start_dt = datetime.strptime(cleaned_time_str, "%Y-%m-%d %H:%M")
-        elif len(cleaned_time_str) == 19:
-            start_dt = datetime.strptime(cleaned_time_str, "%Y-%m-%d %H:%M:%S")
-        else:
+        
+        # Try multiple common formats including DD/MM/YYYY
+        formats = [
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%d %H:%M",
+            "%d/%m/%Y %H:%M:%S",
+            "%d/%m/%Y %H:%M",
+            "%m/%d/%Y %H:%M:%S",
+            "%m/%d/%Y %H:%M",
+        ]
+        for fmt in formats:
+            try:
+                start_dt = datetime.strptime(cleaned_time_str, fmt)
+                break
+            except ValueError:
+                continue
+        
+        if start_dt is None:
             start_dt = datetime.fromisoformat(cleaned_time_str)
             
         now_naive = datetime.now()
@@ -320,10 +334,14 @@ async def BOOK_SPOT(
             logger.warning(f"⚠️ BOOK_SPOT: Blocked booking for past date/time: {start_time}")
             return json.dumps({
                 "success": False,
-                "error": f"Bookings for past dates or times are not permitted. Current server time is {now_naive.strftime('%Y-%m-%d %H:%M')}. Please select a current or future time."
+                "error": "You cannot create a booking for a past date. Please select a present or future date."
             })
     except Exception as e:
         logger.error(f"Failed to parse or validate start_time '{start_time}': {e}")
+        return json.dumps({
+            "success": False,
+            "error": "You cannot create a booking for a past date. Please select a present or future date."
+        })
 
     booking_data = {
         "user_name": user_name,

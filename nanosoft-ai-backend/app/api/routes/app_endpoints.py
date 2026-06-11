@@ -408,11 +408,6 @@ async def startup_event():
         if conn:
             conn.rollback()
 
-@app_endpoints_router.get("/health", tags=["Health"])
-def health():
-    return {"status": "ok", "service": "Facility Management AI Assistant"}
-
-
 @app_endpoints_router.get("/bookings/{spot_code}")
 async def get_bookings_for_spot(spot_code: str):
     if not spot_code:
@@ -444,4 +439,8 @@ async def get_bookings_for_spot(spot_code: str):
     except Exception as e:
         logger.error(f"Failed to fetch bookings for spot {spot_code}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Database query failed: {e}")
+
+@app_endpoints_router.get("/health", tags=["Health"])
+def health():
+    return {"status": "ok", "service": "Facility Management AI Assistant"}
 

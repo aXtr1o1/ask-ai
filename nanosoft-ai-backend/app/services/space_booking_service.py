@@ -164,15 +164,22 @@ class SpaceBookingService:
                     str(s.get("BuildingName")) for s in cached_all.get("p_list", []) if s.get("BuildingName")
                 )))
 
+            from datetime import datetime
+            current_date_str = datetime.now().strftime("%Y-%m-%d")
+
             # Build prompt dynamically with injected live directory and strict guardrails
             hydrated_content = (
                 self.system_prompt.content + 
-                f"\n\nCURRENT USER_NAME: {user_name}."
+                f"\n\nTODAY'S DATE: {current_date_str}."
+                f"\nCURRENT USER_NAME: {user_name}."
                 "\nCRITICAL: If the user's message contains a specific Spot Code (e.g. indicated by 'SpotCode:'), you MUST NOT call GET_SPOTS under any circumstances. You must immediately confirm the spot details (SpotCode, SpotName, BuildingName, FloorName) to the user and ask them to 'use the calendar' to select a time."
                 "\nCRITICAL: If the user searches for any kind of space, keyword, or tries to refine the list (such as by specifying a building name, spot name, or floor), you MUST call GET_SPOTS immediately with their query as the search_term to fetch matching spots, EXCEPT when the user's message also contains a specific Spot Code. If a Spot Code is present, do NOT call GET_SPOTS."
                 "\nCRITICAL: If the user's message is a conversational affirmation, confirmation, or agreement in response to your suggestion, do NOT call GET_SPOTS. Instead, ask them to specify which building or floor they would like to search or try."
                 "\nCRITICAL: If the user's message is a greeting or general conversational text that does not request a specific space, floor, or building, do NOT call GET_SPOTS. Respond warmly and ask them how you can assist with booking a space."
                 "\nCRITICAL: When asking the user for their booking times, you MUST include the exact phrase 'use the calendar' in your response. Do NOT ask the user to type, share, write, or tell you their start and end time manually."
+                "\nCRITICAL: Never call BOOK_SPOT unless BOTH the date and the time have been explicitly specified by the user in their latest message (e.g., specifying both a date and a time range) or via a structured calendar message. If the user's latest query only specifies a time without explicitly stating the date, you MUST NOT call BOOK_SPOT. Instead, ask the user to select the date and time using the calendar, or ask them to explicitly provide the date."
+                f"\nCRITICAL: If the user requests a booking for a date or time that is in the past (before {current_date_str}), you MUST NOT call BOOK_SPOT. Instead, reply immediately: 'You cannot create a booking for a past date. Please select a present or future date.'"
+                "\nCRITICAL: If the user's message already contains the spot code, date, and time (or if the message contains 'Book from'), you MUST call BOOK_SPOT immediately to execute the booking without asking for further confirmation or telling the user to use the calendar. Bypass any confirmation stage in this scenario."
             )
             if unique_buildings:
                 hydrated_content += f"\n\nLIVE ACTIVE BUILDINGS DIRECTORY TODAY (DYNAMIC): {', '.join(unique_buildings)}"

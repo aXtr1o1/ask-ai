@@ -823,28 +823,43 @@ function removeEmoji(text: string): string {
   return lines.join("\n");
 }
 
-// Inject calendar icon at the end of space booking time examples
+// Inject calendar icon at the end of space booking time examples (disabled now)
 function injectCalendarIcon(text: string, msgIdx: number = -1): string {
   if (!text) return text;
-  return text.replace(
-    /(\(e\.g\.[^)]*(?:10am|2pm|morning|all day|afternoon|evening)[^)]*)\)/gi,
-    (match, p1) => {
-      if (p1.includes("interactive-calendar-btn") || p1.includes("📅")) return match;
-      if (msgIdx !== -1) {
-        return `${p1} <button class="interactive-calendar-btn" data-msg-idx="${msgIdx}" style="background:none;border:none;cursor:pointer;padding:0;font-size:inherit;display:inline-flex;align-items:center;vertical-align:middle;outline:none;" title="Change date & time">📅</button>)`;
-      }
-      return p1 + " 📅)";
-    }
-  );
+  // Remove calendar emoji if present in the text to avoid double icons / unwanted icons
+  return text.replace(/📅/g, "");
 }
 
 // Telemetry-logged date/time extraction from message text
 function parseDateTimeFromMessage(text: string): { date: string; fromTime: string; toTime: string } {
   console.log("🔍 [Telemetry] Running parseDateTimeFromMessage on text:", text);
 
-  let date = new Date().toISOString().split("T")[0];
-  let fromTime = "10:00";
-  let toTime = "11:00";
+  const getLocalYYYYMMDD = (d: Date = new Date()): string => {
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
+  const now = new Date();
+  let date = getLocalYYYYMMDD(now);
+  
+  // Future defaults: next hour
+  let fromHour = now.getHours() + 1;
+  let toHour = fromHour + 1;
+  
+  if (fromHour >= 24) {
+    fromHour = fromHour % 24;
+    toHour = fromHour + 1;
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    date = getLocalYYYYMMDD(tomorrow);
+  } else if (toHour >= 24) {
+    toHour = toHour % 24;
+  }
+  
+  let fromTime = `${String(fromHour).padStart(2, "0")}:00`;
+  let toTime = `${String(toHour).padStart(2, "0")}:00`;
 
   try {
     // 1. Try to find a date like YYYY-MM-DD
@@ -855,12 +870,12 @@ function parseDateTimeFromMessage(text: string): { date: string; fromTime: strin
     } else {
       // Check for tomorrow
       if (/tomorrow/i.test(text)) {
-        const tomorrow = new Date();
+        const tomorrow = new Date(now);
         tomorrow.setDate(tomorrow.getDate() + 1);
-        date = tomorrow.toISOString().split("T")[0];
+        date = getLocalYYYYMMDD(tomorrow);
         console.log("📅 [Telemetry] Parsed date (tomorrow):", date);
       } else if (/today/i.test(text)) {
-        date = new Date().toISOString().split("T")[0];
+        date = getLocalYYYYMMDD(now);
         console.log("📅 [Telemetry] Parsed date (today):", date);
       }
     }
@@ -893,13 +908,19 @@ function parseDateTimeFromMessage(text: string): { date: string; fromTime: strin
         console.log("📅 [Telemetry] Defaulted end time to start + 1h:", toTime);
       }
     } else {
-      // Look for 24h formats like 14:00 or 09:30
-      const time24Match = text.match(/\b(\d{2}):(\d{2})\b/g);
+      // Look for 24h formats like 14:00 or 9:30 or 09:30 (handles 1-digit hours too)
+      const time24Match = text.match(/\b(\d{1,2}):(\d{2})\b/g);
       if (time24Match && time24Match.length >= 1) {
-        fromTime = time24Match[0];
+        const format24 = (tStr: string) => {
+          const parts = tStr.split(":");
+          const hr = String(parseInt(parts[0], 10)).padStart(2, "0");
+          const mn = parts[1];
+          return `${hr}:${mn}`;
+        };
+        fromTime = format24(time24Match[0]);
         console.log("📅 [Telemetry] Parsed 24h start time:", fromTime);
         if (time24Match.length >= 2) {
-          toTime = time24Match[1];
+          toTime = format24(time24Match[1]);
           console.log("📅 [Telemetry] Parsed 24h end time:", toTime);
         } else {
           const [h, m] = fromTime.split(":").map(Number);
@@ -2511,8 +2532,8 @@ export default function Home() {
           });
 
           // ── Auto-open inline calendar picker on Phase 3 message ──────────
-          // Detect when AI asks user to pick a date/time via the calendar
-          const isCalendarPrompt = /use the calendar/i.test(finalText);
+          // Detect when AI asks user to pick a date/time via the calendar or matches example formats
+          const isCalendarPrompt = /use the calendar/i.test(finalText) || /(\(e\.g\.[^)]*(?:10am|2pm|morning|all day|afternoon|evening)[^)]*)\)/gi.test(finalText);
           if (isCalendarPrompt && isSpaceBookingRef.current) {
             setMessages(prev => {
               const idx = prev.length - 1;
@@ -3066,6 +3087,32 @@ export default function Home() {
     });
   };
 
+  // Auto-opens calendar if the last assistant message contains "use the calendar" or example formats
+  const autoOpenCalendarIfApplicable = (processed: Message[]) => {
+    let lastAiIdx = -1;
+    for (let i = processed.length - 1; i >= 0; i--) {
+      if (processed[i].role === "ai") {
+        lastAiIdx = i;
+        break;
+      }
+    }
+    const hasPrompt = lastAiIdx !== -1 && (
+      /use the calendar/i.test(processed[lastAiIdx].text || "") ||
+      /(\(e\.g\.[^)]*(?:10am|2pm|morning|all day|afternoon|evening)[^)]*)\)/gi.test(processed[lastAiIdx].text || "")
+    );
+    if (hasPrompt) {
+      const parsed = parseDateTimeFromMessage(processed[lastAiIdx].text || "");
+      setBookingStartDate(parsed.date);
+      setBookingEndDate(parsed.date);
+      setBookingStartTime(parsed.fromTime);
+      setBookingEndTime(parsed.toTime);
+      setActiveBookingBubbleIndex(lastAiIdx);
+      console.log("📅 [Auto-Open] Found last AI message with calendar prompt at index:", lastAiIdx, parsed);
+    } else {
+      setActiveBookingBubbleIndex(null);
+    }
+  };
+
   // ── Switch to an existing session ─────────────────────────────────────────
   const switchSession = async (targetSid: string) => {
     if (targetSid === sessionId) return; // already active
@@ -3149,6 +3196,7 @@ export default function Home() {
       setMessages(processed);
       const finalIsBooking = isBookingSession || processed.some(m => m.isSpaceBooking);
       setIsSpaceBooking(finalIsBooking);
+      autoOpenCalendarIfApplicable(processed);
     } else {
       // Fetch from backend
       setHistoryLoading(true);
@@ -3188,6 +3236,7 @@ export default function Home() {
         setMessages(processed);
         const finalIsBooking = isBookingSession || processed.some(m => m.isSpaceBooking);
         setIsSpaceBooking(finalIsBooking);
+        autoOpenCalendarIfApplicable(processed);
       } catch (err) {
         console.warn("Failed to fetch session history:", err);
         setMessages([]);
@@ -4862,13 +4911,28 @@ export default function Home() {
                         {activeBookingBubbleIndex === idx && (() => {
                           const currentMessages = messages;
                           let extractedSpotCode = "";
-                          for (let mi = idx - 1; mi >= 0; mi--) {
-                            const m = currentMessages[mi];
-                            if (m?.role === "user" && typeof m.text === "string" && m.text.includes("SpotCode:")) {
-                              const match = m.text.match(/SpotCode:\s*([^\s,|]+)/i);
-                              if (match) {
-                                extractedSpotCode = match[1].trim();
-                                break;
+                          
+                          // 1. Try to find in the assistant message itself (which is at idx)
+                          const aiMsg = currentMessages[idx];
+                          if (aiMsg && typeof aiMsg.text === "string") {
+                            const match = aiMsg.text.match(/(?:Spot\s*Code|SpotCode):\s*([^\s,)|]+)/i);
+                            if (match) {
+                              extractedSpotCode = match[1].trim();
+                              console.log("🔍 [Inline Calendar] Extracted SpotCode from assistant message:", extractedSpotCode);
+                            }
+                          }
+                          
+                          // 2. If not found, try to search backwards in user or AI messages
+                          if (!extractedSpotCode) {
+                            for (let mi = idx - 1; mi >= 0; mi--) {
+                              const m = currentMessages[mi];
+                              if (m && typeof m.text === "string") {
+                                const match = m.text.match(/(?:Spot\s*Code|SpotCode):\s*([^\s,)|]+)/i);
+                                if (match) {
+                                  extractedSpotCode = match[1].trim();
+                                  console.log("🔍 [Inline Calendar] Extracted SpotCode backwards from message:", mi, extractedSpotCode);
+                                  break;
+                                }
                               }
                             }
                           }
