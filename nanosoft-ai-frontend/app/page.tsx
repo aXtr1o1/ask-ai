@@ -4912,12 +4912,25 @@ export default function Home() {
                           const currentMessages = messages;
                           let extractedSpotCode = "";
                           
+                          // Helper: extract SpotCode from text using multiple patterns
+                          const extractSpotCodeFromText = (text: string): string => {
+                            // Pattern 1: "Spot Code: WRMF-SCR" or "SpotCode: WRMF-SCR"
+                            const m1 = text.match(/(?:Spot\s*Code|SpotCode):\s*([^\s,)|\)]+)/i);
+                            if (m1) return m1[1].trim();
+                            // Pattern 2: "(Spot Code: WRMF-SCR)" — label inside parens
+                            const m2 = text.match(/\((?:Spot\s*Code|SpotCode):\s*([^)]+)\)/i);
+                            if (m2) return m2[1].trim();
+                            // Pattern 3: bare SpotCode like WRMF-SCR or GPRF-KFC
+                            const m3 = text.match(/\b([A-Z]{2,6}-[A-Z0-9]{2,10})\b/);
+                            if (m3) return m3[1].trim();
+                            return "";
+                          };
+
                           // 1. Try to find in the assistant message itself (which is at idx)
                           const aiMsg = currentMessages[idx];
                           if (aiMsg && typeof aiMsg.text === "string") {
-                            const match = aiMsg.text.match(/(?:Spot\s*Code|SpotCode):\s*([^\s,)|]+)/i);
-                            if (match) {
-                              extractedSpotCode = match[1].trim();
+                            extractedSpotCode = extractSpotCodeFromText(aiMsg.text);
+                            if (extractedSpotCode) {
                               console.log("🔍 [Inline Calendar] Extracted SpotCode from assistant message:", extractedSpotCode);
                             }
                           }
@@ -4927,9 +4940,9 @@ export default function Home() {
                             for (let mi = idx - 1; mi >= 0; mi--) {
                               const m = currentMessages[mi];
                               if (m && typeof m.text === "string") {
-                                const match = m.text.match(/(?:Spot\s*Code|SpotCode):\s*([^\s,)|]+)/i);
-                                if (match) {
-                                  extractedSpotCode = match[1].trim();
+                                const code = extractSpotCodeFromText(m.text);
+                                if (code) {
+                                  extractedSpotCode = code;
                                   console.log("🔍 [Inline Calendar] Extracted SpotCode backwards from message:", mi, extractedSpotCode);
                                   break;
                                 }
@@ -4980,7 +4993,9 @@ export default function Home() {
                                   }
                                 }
                                 if (spotContext) {
-                                  bookingMsg = `${spotContext} | Book from ${bookingMsg}`;
+                                  // Strip any previous " | Book from" additions so we don't chain them
+                                  const cleanContext = spotContext.split("| Book from")[0].trim();
+                                  bookingMsg = `${cleanContext} | Book from ${bookingMsg}`;
                                 }
 
                                 console.log("📅 [Telemetry] Inline saving booking times. Sending message:", bookingMsg);

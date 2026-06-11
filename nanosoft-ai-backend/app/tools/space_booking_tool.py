@@ -281,11 +281,11 @@ def _insert_booking(booking_data: dict) -> str:
 async def BOOK_SPOT(
     user_name: str,
     spot_code: str,
+    start_time: str,
+    end_time: str,
     spot_name: Optional[str] = "Unknown Spot",
     building_name: Optional[str] = "Unknown Building",
     floor_name: Optional[str] = "Unknown Floor",
-    start_time: Optional[str] = None,
-    end_time: Optional[str] = None,
     sub_user_name: Optional[str] = None
 ) -> str:
     """Book a space after the user has confirmed the spot and provided their start and end time."""
@@ -306,6 +306,7 @@ async def BOOK_SPOT(
 
     # ── Check if start_time is in the past ──
     start_dt = None
+    end_dt = None
     try:
         from datetime import datetime
         cleaned_time_str = start_time.strip()
@@ -314,10 +315,22 @@ async def BOOK_SPOT(
         formats = [
             "%Y-%m-%d %H:%M:%S",
             "%Y-%m-%d %H:%M",
+            "%Y-%m-%d %I:%M %p",
+            "%Y-%m-%d %I:%M%p",
+            "%Y-%m-%d %I %p",
+            "%Y-%m-%d %I%p",
             "%d/%m/%Y %H:%M:%S",
             "%d/%m/%Y %H:%M",
+            "%d/%m/%Y %I:%M %p",
+            "%d/%m/%Y %I:%M%p",
+            "%d/%m/%Y %I %p",
+            "%d/%m/%Y %I%p",
             "%m/%d/%Y %H:%M:%S",
             "%m/%d/%Y %H:%M",
+            "%m/%d/%Y %I:%M %p",
+            "%m/%d/%Y %I:%M%p",
+            "%m/%d/%Y %I %p",
+            "%m/%d/%Y %I%p",
         ]
         for fmt in formats:
             try:
@@ -336,6 +349,68 @@ async def BOOK_SPOT(
                 "success": False,
                 "error": "You cannot create a booking for a past date. Please select a present or future date."
             })
+            
+        if end_time and end_time.strip() and end_time.lower() not in ("none", "unknown"):
+            # Full datetime formats (do NOT strip spaces — they are part of "YYYY-MM-DD HH:MM")
+            for fmt in formats:
+                try:
+                    end_dt = datetime.strptime(end_time.strip(), fmt)
+                    break
+                except ValueError:
+                    continue
+            
+            # Time-only formats (use cleaned of spaces for patterns like "10:00AM")
+            if end_dt is None:
+                cleaned_end_time_str = end_time.strip().replace(" ", "")
+                time_formats = ["%I:%M%p", "%H:%M", "%H:%M:%S", "%I%p"]
+                for t_fmt in time_formats:
+                    try:
+                        parsed_t = datetime.strptime(cleaned_end_time_str, t_fmt).time()
+                        end_dt = datetime.combine(start_dt.date(), parsed_t)
+                        break
+                    except ValueError:
+                        continue
+
+            if end_dt is None:
+                try:
+                    end_dt = datetime.fromisoformat(end_time.strip())
+                except ValueError:
+                    pass
+        
+        if end_dt is None:
+            logger.warning(f"⚠️ BOOK_SPOT: Could not parse end_time '{end_time}', rejecting booking")
+            return json.dumps({
+                "error_type": "missing_time",
+                "spot_code": spot_code,
+                "building_name": building_name,
+                "message": "Could not determine the end time. Please use the calendar to select a valid end time."
+            })
+            
+        # Reject if end is before or equal to start — do NOT silently swap
+        if end_dt <= start_dt:
+            return json.dumps({
+                "success": False,
+                "error": "The end time must be after the start time. Please select a valid time range."
+            })
+            
+        import os
+        min_duration_str = os.getenv("MIN_BOOKING_DURATION_MINUTES", "15")
+        try:
+            min_duration = int(min_duration_str)
+        except ValueError:
+            min_duration = 15
+            
+        # Enforce minimum booking duration dynamically
+        duration_minutes = (end_dt - start_dt).total_seconds() / 60
+        if duration_minutes < min_duration:
+            return json.dumps({
+                "success": False,
+                "error": f"Bookings must be for a minimum duration of {min_duration} minutes. Please select a longer time range."
+            })
+            
+        standard_start_time = start_dt.strftime("%Y-%m-%d %H:%M:%S")
+        standard_end_time = end_dt.strftime("%Y-%m-%d %H:%M:%S")
+            
     except Exception as e:
         logger.error(f"Failed to parse or validate start_time '{start_time}': {e}")
         return json.dumps({
@@ -350,8 +425,8 @@ async def BOOK_SPOT(
         "spot_name": spot_name,
         "building_name": building_name,
         "floor_name": floor_name,
-        "start_time": start_time,
-        "end_time": end_time or start_time,  # fallback: same as start if end not given
+        "start_time": standard_start_time,
+        "end_time": standard_end_time,
     }
     return await asyncio.to_thread(_insert_booking, booking_data)
 
