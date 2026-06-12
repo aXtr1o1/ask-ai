@@ -252,7 +252,7 @@ def _insert_booking(booking_data: dict) -> str:
                 SELECT booking_id, start_time, end_time
                 FROM space_bookings
                 WHERE client_name = %s 
-                  AND TRIM(LOWER(spot_code)) = TRIM(LOWER(%s))
+                  AND spot_code = %s
                   AND (start_time::timestamp < %s::timestamp)
                   AND (end_time::timestamp > %s::timestamp)
                 """,
@@ -372,7 +372,9 @@ async def BOOK_SPOT(
         if start_dt is None:
             start_dt = datetime.fromisoformat(cleaned_time_str)
             
-        now_naive = datetime.now()
+        # UAE is UTC+4. timedelta avoids ZoneInfo KeyError on Windows (no tzdata).
+        from datetime import timezone, timedelta
+        now_naive = (datetime.now(timezone.utc) + timedelta(hours=4)).replace(tzinfo=None)
         if start_dt < now_naive:
             logger.warning(f"⚠️ BOOK_SPOT: Blocked booking for past date/time: {start_time}")
             return json.dumps({
