@@ -227,6 +227,7 @@ class SpaceBookingService:
                                     if clean_search in _re.sub(r'[^a-z0-9]', '', str(spot.get("BuildingName", "")).lower())
                                     or clean_search in _re.sub(r'[^a-z0-9]', '', str(spot.get("SpotCode", "")).lower())
                                     or clean_search in _re.sub(r'[^a-z0-9]', '', str(spot.get("SpotName", "")).lower())
+                                    or clean_search in _re.sub(r'[^a-z0-9]', '', str(spot.get("FloorName", "")).lower())
                                 ]
                                 tool_data = {"TotalCount": len(filtered), "p_list": filtered}
                                 tool_result_str = json.dumps(tool_data)
@@ -301,14 +302,14 @@ class SpaceBookingService:
                                         "instruction": (
                                             f"Time not provided. Ask the user warmly for their preferred time "
                                             f"for booking {spot_code} at {building}. "
-                                            f"Do NOT call BOOK_SPOT again until they reply with a time."
+                                            f"CRITICAL: You MUST include the exact phrase 'use the calendar' in your response."
                                         )
                                     })
                                 ))
                                 ai_msg2 = await self.model.ainvoke(prompt_messages)
                                 time_ask = ai_msg2.content or (
                                     f"When would you like to book **{spot_code}** at **{building}**? "
-                                    f"(e.g. 10am, 2pm–4pm, morning)"
+                                    f"Please use the calendar to select your preferred start and end time."
                                 )
                                 logger.info("⏰ Missing time — asking: %s", time_ask[:100])
                                 sb_thread.append(AIMessage(content=time_ask))
@@ -412,13 +413,13 @@ class SpaceBookingService:
                                             "instruction": (
                                                 f"Time not provided. Ask the user warmly for their preferred time "
                                                 f"for booking {spot_code2} at {building2}. "
-                                                f"Do NOT call BOOK_SPOT again until they reply with a time."
+                                                f"CRITICAL: You MUST include the exact phrase 'use the calendar' in your response."
                                             )
                                         })
                                     ))
                                     ai_msg3 = await self.model.ainvoke(prompt_messages)
                                     time_ask = ai_msg3.content or (
-                                        f"Almost there! Just let me know your preferred start and end time "
+                                        f"Almost there! Please use the calendar to select your preferred start and end time "
                                         f"for {spot_code2} at {building2} and I will get it confirmed."
                                     )
                                     logger.info("⏰ Round-2 missing time — asking: %s", time_ask[:100])
@@ -448,19 +449,7 @@ class SpaceBookingService:
                     content = _extract_content(ai_msg3)
 
                 if not content.strip():
-                    logger.warning("⚠️ Empty content from model. Retrying dynamic generation...")
-                    try:
-                        retry_messages = prompt_messages + [
-                            SystemMessage(content="Please respond to the user's query or guide them to the next step using the tool outputs above. Write a helpful, natural sentence response.")
-                        ]
-                        retry_ai = await self.model.ainvoke(retry_messages)
-                        content = _extract_content(retry_ai)
-                    except Exception as re_err:
-                        logger.error("Failed to generate retry response: %s", re_err)
-                    
-                    if not content.strip():
-                        content = "I found the details for your request. How would you like to proceed?"
-                        logger.warning("⚠️ Empty content fallback used: generic response")
+                    content = "Here are the details for your request."
 
                 # Write execution debug info to scratch/debug_booking.txt
                 try:
@@ -528,18 +517,10 @@ class SpaceBookingService:
 
             # No tool called — pure conversational
             content = _extract_content(ai_msg)
+            
             if not content.strip():
-                logger.warning("⚠️ Empty content from model. Retrying conversational generation...")
-                try:
-                    retry_messages = [SystemMessage(content=hydrated_content)] + sb_thread[:-1] + [
-                        SystemMessage(content="Please provide a helpful, natural response to the user's query.")
-                    ]
-                    retry_ai = await self.model.ainvoke(retry_messages)
-                    content = _extract_content(retry_ai)
-                except Exception as ce:
-                    logger.error("Failed to generate retry response: %s", ce)
-                if not content.strip():
-                    content = "How can I help you with booking a space today?"
+                content = "How can I help you today?"
+
             sb_thread.append(AIMessage(content=content))
             _save_sb_thread(session_id, sb_thread)
             return content, content, messages

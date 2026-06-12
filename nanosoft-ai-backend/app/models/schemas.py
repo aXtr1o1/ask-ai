@@ -343,7 +343,7 @@ class GetSpotsInput(BaseModel):
     user_name: str = Field(description="The client_name/user_name from the frontend context.")
     search_term: Optional[str] = Field(
         default=None,
-        description="The Spot Code, Spot Name, Building Name, or Floor Name to search for. Always extract this from the user's query."
+        description="The Spot Code, Spot Name, or Building Name to search for. Always extract this from the user's query."
     )
 
 class GetBookingStatusInput(BaseModel):

@@ -82,8 +82,15 @@ async def fetch_spots_api(user_name: str, search_term: Optional[str] = None) -> 
 
                 fuzzy_matches = []
                 for s in p_list:
+                    # Helper for case-insensitive value extraction
+                    def get_val(s_dict, key):
+                        for k, v in s_dict.items():
+                            if k.lower() == key.lower() and v:
+                                return str(v)
+                        return ''
+
                     # Combine target fields for matching (includes Building, Code, Name, and Floor)
-                    combined_target = f"{s.get('BuildingName', '')} {s.get('SpotCode', '')} {s.get('SpotName', '')} {s.get('FloorName', '')}"
+                    combined_target = f"{get_val(s, 'BuildingName')} {get_val(s, 'SpotCode')} {get_val(s, 'SpotName')} {get_val(s, 'FloorName')}"
                     t_tokens = tokenize(combined_target)
 
                     if not q_tokens or not t_tokens:

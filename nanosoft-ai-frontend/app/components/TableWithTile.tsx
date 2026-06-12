@@ -17,6 +17,7 @@ interface TableWithTileProps {
   showOnlyTiles?: boolean;
   /** Explicit flag: renders space booking bullet-list tiles instead of normal pill grid */
   isSpaceBooking?: boolean;
+  forceDisable?: boolean;
   onTileClick?: (row: TableWithTileRow) => void;
 }
 
@@ -28,6 +29,7 @@ const TableWithTile = React.memo(function TableWithTile({
   totalCount,
   showOnlyTiles = false,
   isSpaceBooking = false,
+  forceDisable = false,
   onTileClick,
 }: TableWithTileProps) {
   const responsive = useResponsive();
@@ -45,12 +47,18 @@ const TableWithTile = React.memo(function TableWithTile({
   const tileFieldLabelColor = "var(--tile-field-label, #0f172a)";
   const tileFieldValueColor = "var(--tile-field-value, #1f2937)";
   const [viewMode, setViewMode] = useState<"table" | "tile">(showOnlyTiles ? "tile" : "table");
+  const [hasClicked, setHasClicked] = useState(false);
 
   useEffect(() => {
     if (showOnlyTiles) {
       setViewMode("tile");
     }
   }, [showOnlyTiles]);
+
+  // Reset hasClicked when rows change so new filtered lists aren't disabled
+  useEffect(() => {
+    setHasClicked(false);
+  }, [rows]);
 
   const [page, setPage] = useState(0);
   const LIMIT = 100;
@@ -497,10 +505,14 @@ const TableWithTile = React.memo(function TableWithTile({
                             borderRadius: '12px',
                             transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
                             minWidth: 0,
-                            cursor: 'pointer',
+                            cursor: (hasClicked || forceDisable) ? 'not-allowed' : 'pointer',
+                            opacity: (hasClicked || forceDisable) ? 0.6 : 1,
+                            pointerEvents: (hasClicked || forceDisable) ? 'none' : 'auto',
                           }}
                           onClick={() => {
+                            if (hasClicked || forceDisable) return;
                             if (onTileClick) {
+                              setHasClicked(true);
                               onTileClick(row);
                             }
                           }}

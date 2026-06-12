@@ -4631,7 +4631,11 @@ export default function Home() {
                   }
                 }}
               >
-                {messages.map((msg, idx) => {
+                {(() => {
+                  const latestTableIdx = messages.reduce((last, m, i) => {
+                    return ((m.tableData && m.tableData.length > 0) || (m.multipleDatasets && m.multipleDatasets.length > 0)) ? i : last;
+                  }, -1);
+                  return messages.map((msg, idx) => {
                   const isUser = msg.role === "user";
                   const isError = msg.role === "error";
                   const isStreaming = msg.streaming === true;
@@ -4810,6 +4814,7 @@ export default function Home() {
                                   totalCount={ds.totalCount}
                                   showOnlyTiles={msg.isSpaceBooking}
                                   isSpaceBooking={msg.isSpaceBooking}
+                                  forceDisable={msg.isSpaceBooking ? idx !== latestTableIdx : false}
                                   onTileClick={handleTileClickForSpaceBooking}
                                 />
                               </div>
@@ -4824,6 +4829,7 @@ export default function Home() {
                             htmlTableContent={msg.text}
                             showOnlyTiles={msg.isSpaceBooking}
                             isSpaceBooking={msg.isSpaceBooking}
+                            forceDisable={msg.isSpaceBooking ? idx !== latestTableIdx : false}
                             onTileClick={handleTileClickForSpaceBooking}
                           />
 
@@ -5014,7 +5020,8 @@ export default function Home() {
                       </div>
                     </div>
                   );
-                })}
+                });
+              })()}
 
                 {isLoading && !(messages[messages.length - 1]?.role === "ai" && messages[messages.length - 1]?.streaming) && (() => {
                   const isDarkTheme = typeof window !== 'undefined' ? document.documentElement.getAttribute('data-theme') === 'dark' : (theme === 'dark');
