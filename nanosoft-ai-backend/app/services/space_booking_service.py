@@ -68,13 +68,16 @@ def _set_cached_spots(session_id: str, search_term: Optional[str], data: dict):
 
 
 def _lookup_spot_from_cache(session_id: Optional[str], spot_code: str) -> Optional[dict]:
-    """Find a spot's full details by SpotCode across all cached searches."""
-    if not session_id:
+    """Find a spot's full details by SpotCode across all cached searches (case-insensitive)."""
+    if not session_id or not spot_code:
         return None
+    
+    target_code = str(spot_code).strip().lower()
     sb_cache = memory_store.get(session_id, {}).get("sb_spot_cache", {})
     for cached_data in sb_cache.values():
         for spot in cached_data.get("p_list", []):
-            if spot.get("SpotCode") == spot_code:
+            cached_code = str(spot.get("SpotCode", "")).strip().lower()
+            if cached_code == target_code:
                 return spot
     return None
 
@@ -145,7 +148,13 @@ class SpaceBookingService:
 
 
 
-            sb_thread.append(HumanMessage(content=current_query))
+            # Inject strict instruction to prevent the LLM from hallucinating bullet points from memory
+            injected_query = (
+                f"{current_query}\n\n"
+                f"[SYSTEM: If this message is a search or location query, YOU MUST CALL GET_SPOTS NOW. "
+                f"DO NOT output bullet points or lists in text. The UI table relies entirely on the tool call.]"
+            )
+            sb_thread.append(HumanMessage(content=injected_query))
 
             # ── Just-in-Time (JIT) Dynamic Prompt Hydration ──
             # Fetch active buildings dynamically from cache or API to load into LLM system prompt context
@@ -176,8 +185,8 @@ class SpaceBookingService:
                 self.system_prompt.content + 
                 f"\n\nTODAY'S DATE: {current_date_str}."
                 f"\nCURRENT USER_NAME: {user_name}."
-                "\nCRITICAL: If the user's message contains a specific Spot Code, you MUST NOT call GET_SPOTS under any circumstances. You must immediately confirm the spot details to the user and ask them to 'use the calendar' to select a time. Do NOT ask 'How would you like to proceed?' or pause for confirmation. Just ask them to select a time."
-                "\nCRITICAL: If the user searches for any kind of space, keyword, or tries to refine the list, you MUST call GET_SPOTS immediately with their query as the search_term. Do NOT ask the user to narrow down their search before calling GET_SPOTS. The only exception is if the user's LATEST message contains a specific Spot Code."
+                "\nCRITICAL: If the user's message contains a specific Spot Code, you MUST call GET_SPOTS to verify it exists and retrieve its building and floor details. NEVER call BOOK_SPOT with unknown or hallucinated spot details. Once verified, ask them to 'use the calendar' to select a time."
+                "\nCRITICAL: If the user searches for any kind of space, keyword, or tries to refine the list, you MUST call GET_SPOTS immediately with their query as the search_term. Do NOT ask the user to narrow down their search before calling GET_SPOTS."
                 "\nCRITICAL: If the user's message is a conversational affirmation, confirmation, or agreement in response to your suggestion, do NOT call GET_SPOTS. Instead, ask them to specify which building or floor they would like to search or try."
                 "\nCRITICAL: If the user's message is a general intent to book, you MUST call GET_SPOTS immediately to show them the available options. Do NOT respond with conversational clarification questions. Just call the tool."
                 "\nCRITICAL: When asking the user for their booking times, you MUST include the exact phrase 'use the calendar' in your response. Do NOT ask the user to type, share, write, or tell you their start and end time manually."
@@ -219,15 +228,14 @@ class SpaceBookingService:
                             # or building name after already fetching all spots in the session.
                             all_cached = _get_cached_spots(session_id, None) if session_id else None
                             if all_cached is not None and s_term and str(s_term).strip():
-                                import re as _re
-                                clean_search = _re.sub(r'[^a-z0-9]', '', str(s_term).lower())
+                                clean_search = str(s_term).strip().lower()
                                 p_list_all = all_cached.get("p_list", [])
                                 filtered = [
                                     spot for spot in p_list_all
-                                    if clean_search in _re.sub(r'[^a-z0-9]', '', str(spot.get("BuildingName", "")).lower())
-                                    or clean_search in _re.sub(r'[^a-z0-9]', '', str(spot.get("SpotCode", "")).lower())
-                                    or clean_search in _re.sub(r'[^a-z0-9]', '', str(spot.get("SpotName", "")).lower())
-                                    or clean_search in _re.sub(r'[^a-z0-9]', '', str(spot.get("FloorName", "")).lower())
+                                    if clean_search in str(spot.get("BuildingName", "")).lower()
+                                    or clean_search in str(spot.get("SpotCode", "")).lower()
+                                    or clean_search in str(spot.get("SpotName", "")).lower()
+                                    or clean_search in str(spot.get("FloorName", "")).lower()
                                 ]
                                 tool_data = {"TotalCount": len(filtered), "p_list": filtered}
                                 tool_result_str = json.dumps(tool_data)
@@ -286,7 +294,13 @@ class SpaceBookingService:
                             args["building_name"] = verified.get("BuildingName", args.get("building_name"))
                             args["floor_name"]    = verified.get("FloorName", args.get("floor_name"))
                             logger.info("✅ Spot verified from cache: %s → %s", spot_code_req, args["spot_name"])
-                        tool_result_str = await BOOK_SPOT.ainvoke(args)
+                            tool_result_str = await BOOK_SPOT.ainvoke(args)
+                        else:
+                            logger.warning("❌ Spot hallucinated or invalid: %s", spot_code_req)
+                            tool_result_str = json.dumps({
+                                "success": False,
+                                "error": "Invalid SpotCode. You MUST search and verify the spot using GET_SPOTS first before booking."
+                            })
 
                         try:
                             parsed_res = json.loads(tool_result_str)
@@ -399,8 +413,13 @@ class SpaceBookingService:
                                 args2["building_name"] = verified2.get("BuildingName", args2.get("building_name"))
                                 args2["floor_name"]    = verified2.get("FloorName", args2.get("floor_name"))
                                 logger.info("✅ Spot verified from cache (round-2): %s → %s", spot_code_req2, args2["spot_name"])
-
-                            tool_result2_str = await BOOK_SPOT.ainvoke(args2)
+                                tool_result2_str = await BOOK_SPOT.ainvoke(args2)
+                            else:
+                                logger.warning("❌ Spot hallucinated or invalid (round-2): %s", spot_code_req2)
+                                tool_result2_str = json.dumps({
+                                    "success": False,
+                                    "error": "Invalid SpotCode. You MUST search and verify the spot using GET_SPOTS first before booking."
+                                })
                             try:
                                 parsed2 = json.loads(tool_result2_str)
                                 if parsed2.get("error_type") == "missing_time":

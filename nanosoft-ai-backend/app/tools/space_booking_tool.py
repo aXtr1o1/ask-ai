@@ -164,56 +164,77 @@ async def GET_SPOTS(user_name: str, search_term: Optional[str] = None) -> str:
 
 
 def _fetch_booking_sync(booking_id: str, user_name: str) -> str:
-    """Query space_bookings table for a given booking_id."""
+    """Query space_bookings table for a given booking_id, or all bookings if ID is empty."""
     try:
         conn = get_pool()
         if not conn:
             return json.dumps({"error": "Database connection failed."})
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT booking_id, client_name, sub_user_name,
-                       spot_code, spot_name, building_name, floor_name, start_time, end_time
-                FROM space_bookings
-                WHERE booking_id = %s
-                """,
-                (booking_id,)
-            )
-            row = cur.fetchone()
-            if row:
-                return json.dumps({
-                    "found": True,
-                    "booking_id":    row[0],
-                    "client_name":   row[1],
-                    "sub_user_name": row[2],
-                    "spot_code":     row[3],
-                    "spot_name":     row[4],
-                    "building_name": row[5],
-                    "floor_name":    row[6],
-                    "start_time":    row[7],
-                    "end_time":      row[8],
-                    "status":        "Confirmed"
-                })
+            if booking_id:
+                cur.execute(
+                    """
+                    SELECT booking_id, client_name, sub_user_name,
+                           spot_code, spot_name, building_name, floor_name, start_time, end_time
+                    FROM space_bookings
+                    WHERE booking_id = %s AND client_name = %s
+                    """,
+                    (booking_id, user_name)
+                )
+                row = cur.fetchone()
+                if row:
+                    return json.dumps({
+                        "found": True,
+                        "booking_id":    row[0],
+                        "client_name":   row[1],
+                        "sub_user_name": row[2],
+                        "spot_code":     row[3],
+                        "spot_name":     row[4],
+                        "building_name": row[5],
+                        "floor_name":    row[6],
+                        "start_time":    row[7],
+                        "end_time":      row[8],
+                        "status":        "Confirmed"
+                    })
+                else:
+                    return json.dumps({"found": False, "booking_id": booking_id})
             else:
-                return json.dumps({"found": False, "booking_id": booking_id})
+                cur.execute(
+                    """
+                    SELECT booking_id, client_name, sub_user_name,
+                           spot_code, spot_name, building_name, floor_name, start_time, end_time
+                    FROM space_bookings
+                    WHERE client_name = %s AND end_time::timestamp >= CURRENT_TIMESTAMP
+                    ORDER BY start_time ASC
+                    """,
+                    (user_name,)
+                )
+                rows = cur.fetchall()
+                bookings = []
+                for row in rows:
+                    bookings.append({
+                        "booking_id":    row[0],
+                        "client_name":   row[1],
+                        "sub_user_name": row[2],
+                        "spot_code":     row[3],
+                        "spot_name":     row[4],
+                        "building_name": row[5],
+                        "floor_name":    row[6],
+                        "start_time":    row[7],
+                        "end_time":      row[8],
+                        "status":        "Confirmed"
+                    })
+                return json.dumps({"found": True, "bookings": bookings, "total": len(bookings)})
     except Exception as e:
-        logger.error(f"❌ Failed to fetch booking {booking_id}: {e}", exc_info=True)
+        logger.error(f"❌ Failed to fetch booking(s): {e}", exc_info=True)
         return json.dumps({"error": str(e)})
 
 
 @tool("GET_BOOKING_STATUS", args_schema=GetBookingStatusInput)
-async def GET_BOOKING_STATUS(user_name: str, booking_id: str) -> str:
-    """Look up an existing booking by its 4-digit booking ID and return its status."""
-    # Guard: if the model passed a blank/None booking_id, return an actionable error
-    if not booking_id or not str(booking_id).strip():
-        logger.warning("⚠️ GET_BOOKING_STATUS called with empty booking_id")
-        return json.dumps({
-            "found": False,
-            "error": "booking_id_missing",
-            "message": "No booking ID was provided. Please ask the user to share their booking ID."
-        })
-    logger.info(f"🛠️ GET_BOOKING_STATUS: booking_id={booking_id}, user_name={user_name}")
-    return await asyncio.to_thread(_fetch_booking_sync, str(booking_id).strip(), user_name)
+async def GET_BOOKING_STATUS(user_name: str, booking_id: Optional[str] = None) -> str:
+    """Look up an existing booking by its 4-digit booking ID, or list all bookings if no ID is provided."""
+    booking_id_val = str(booking_id).strip() if booking_id else ""
+    logger.info(f"🛠️ GET_BOOKING_STATUS: booking_id={booking_id_val}, user_name={user_name}")
+    return await asyncio.to_thread(_fetch_booking_sync, booking_id_val, user_name)
 
 
 def _insert_booking(booking_data: dict) -> str:
@@ -230,11 +251,13 @@ def _insert_booking(booking_data: dict) -> str:
                 """
                 SELECT booking_id, start_time, end_time
                 FROM space_bookings
-                WHERE spot_code = %s
+                WHERE client_name = %s 
+                  AND TRIM(LOWER(spot_code)) = TRIM(LOWER(%s))
                   AND (start_time::timestamp < %s::timestamp)
                   AND (end_time::timestamp > %s::timestamp)
                 """,
                 (
+                    booking_data.get("user_name"),
                     booking_data.get("spot_code"),
                     booking_data.get("end_time"),
                     booking_data.get("start_time"),
@@ -245,7 +268,7 @@ def _insert_booking(booking_data: dict) -> str:
                 logger.warning(f"⚠️ Booking clash: spot {booking_data.get('spot_code')} overlaps with booking {overlap[0]} ({overlap[1]} to {overlap[2]})")
                 return json.dumps({
                     "success": False,
-                    "error": f"The spot is already booked from {overlap[1]} to {overlap[2]} (Booking ID: {overlap[0]}). Please choose a different spot or select another time range."
+                    "error": f"The spot is already booked from {overlap[1]} to {overlap[2]}. Please choose a different spot or select another time range."
                 })
 
             cur.execute(

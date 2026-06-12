@@ -348,4 +348,4 @@ class GetSpotsInput(BaseModel):
 
 class GetBookingStatusInput(BaseModel):
     user_name: str = Field(description="The client_name/user_name from the frontend context.")
-    booking_id: str = Field(description="The 4-digit booking ID provided by the user to check their booking status.")
+    booking_id: Optional[str] = Field(default=None, description="The 4-digit booking ID provided by the user. If omitted, returns all bookings for the user.")
