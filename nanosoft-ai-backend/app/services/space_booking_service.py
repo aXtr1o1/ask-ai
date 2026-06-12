@@ -152,7 +152,7 @@ class SpaceBookingService:
             injected_query = (
                 f"{current_query}\n\n"
                 f"[SYSTEM: If this message is a search or location query, YOU MUST CALL GET_SPOTS NOW. "
-                f"DO NOT output bullet points or lists in text. The UI table relies entirely on the tool call.]"
+                f"If you do not call a tool, you MUST output a conversational response explaining what you need from the user.]"
             )
             sb_thread.append(HumanMessage(content=injected_query))
 
@@ -467,31 +467,17 @@ class SpaceBookingService:
                     ai_msg3 = await self.model.ainvoke(prompt_messages)
                     content = _extract_content(ai_msg3)
 
-                if not content.strip():
-                    content = "Here are the details for your request."
 
-                # Write execution debug info to scratch/debug_booking.txt
-                try:
-                    import os
-                    os.makedirs("e:/nanosoft_clone/ask-ai/nanosoft-ai-backend/scratch", exist_ok=True)
-                    with open("e:/nanosoft_clone/ask-ai/nanosoft-ai-backend/scratch/debug_booking.txt", "w", encoding="utf-8") as df:
-                        df.write("=== DEBUG SPACE BOOKING EXECUTION ===\n")
-                        df.write(f"User Query: {current_query}\n")
-                        df.write(f"Hydrated System Message:\n{sys_msg.content}\n\n")
-                        df.write(f"First AI Message content: {ai_msg.content}\n")
-                        df.write(f"First AI Message tool calls: {getattr(ai_msg, 'tool_calls', [])}\n\n")
-                        df.write(f"Final prompt messages count: {len(prompt_messages)}\n")
-                        df.write(f"Final AI Message content (ai_msg2): {ai_msg2.content}\n")
-                        df.write(f"Final AI Message tool calls (ai_msg2): {getattr(ai_msg2, 'tool_calls', [])}\n")
-                        df.write(f"Extracted content: {content}\n")
-                        df.write(f"Tool Data details: {tool_data}\n")
-                except Exception as de:
-                    logger.error("Failed to write debug file: %s", de)
 
                 # Manage thread after tool response
                 try:
                     last_result = json.loads(prompt_messages[-1].content)
                     if last_result.get("success"):
+                        # If LLM didn't generate a conversational confirmation, provide one
+                        if not content.strip():
+                            b_id = last_result.get('booking_id', '')
+                            content = f"Your spot has been successfully booked! (Booking ID: {b_id})" if b_id else "Your spot has been successfully booked!"
+                            
                         # Booking done — reset for next flow
                         sb_thread.append(AIMessage(content=content))
                         _save_sb_thread(session_id, sb_thread)
@@ -537,8 +523,7 @@ class SpaceBookingService:
             # No tool called — pure conversational
             content = _extract_content(ai_msg)
             
-            if not content.strip():
-                content = "How can I help you today?"
+
 
             sb_thread.append(AIMessage(content=content))
             _save_sb_thread(session_id, sb_thread)

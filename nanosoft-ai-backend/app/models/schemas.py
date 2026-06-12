@@ -337,7 +337,7 @@ class BookSpotInput(BaseModel):
     building_name: Optional[str] = Field(default="Unknown Building", description="The name of the building where the spot is located.")
     floor_name: Optional[str] = Field(default="Unknown Floor", description="The floor where the spot is located.")
     start_time: str = Field(description="Booking start datetime. MUST be explicitly extracted from user input or calendar (e.g. '2026-06-04 10:00:00'). NEVER guess or omit.")
-    end_time: str = Field(description="Booking end datetime. MUST be explicitly extracted from user input or calendar (e.g. '2026-06-04 14:00:00'). NEVER guess or omit.")
+    end_time: str = Field(description="Booking end datetime (e.g. '2026-06-04 14:00:00'). If the user provides an end time but no end date, assume the end date is the same as the start date.")
 
 class GetSpotsInput(BaseModel):
     user_name: str = Field(description="The client_name/user_name from the frontend context.")

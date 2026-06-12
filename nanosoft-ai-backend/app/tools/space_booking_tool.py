@@ -141,8 +141,7 @@ async def fetch_spots_api(user_name: str, search_term: Optional[str] = None) -> 
                     if similarity_score >= 0.60:
                         fuzzy_matches.append(s)
 
-                if fuzzy_matches:
-                    p_list = fuzzy_matches
+                p_list = fuzzy_matches
 
             total_count = len(p_list)
             logger.info(f"✅ Spots fetched: {total_count}")

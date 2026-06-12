@@ -2509,6 +2509,24 @@ export default function Home() {
             }
           }
 
+          // ── Handle Empty LLM Responses without hardcoding text ──
+          if (!processedText || !processedText.trim()) {
+            setMessages(prev => {
+              const u = [...prev];
+              // Remove the loading AI bubble completely since there's no response
+              if (u[u.length - 1]?.role === "ai") {
+                u.pop();
+              }
+              const activeSid = sessionIdRef.current;
+              sessionMessagesRef.current.set(activeSid, u);
+              return u;
+            });
+            accRef.current = "";
+            setIsLoading(false);
+            setTimeout(() => inputRef.current?.focus(), 50);
+            return; // Abort further processing
+          }
+
           setMessages(prev => {
             const u = [...prev];
             const l = u.length - 1;
@@ -4732,7 +4750,17 @@ export default function Home() {
                           })()
                         ) : isUser || isError ? (
                           /* ── User / Error: plain text ── */
-                          <>{msg.text}</>
+                          <>{(() => {
+                            if (isUser && msg.text.includes("[CALENDAR_PAYLOAD]")) {
+                              const match = msg.text.match(/start_time:\s*"([^"]+)",\s*end_time:\s*"([^"]+)"/);
+                              const context = msg.text.split("| Book from")[0].trim();
+                              if (match) {
+                                return `${context} | Book from ${match[1]} to ${match[2]}`;
+                              }
+                              return msg.text.split("[CALENDAR_PAYLOAD]")[0].trim();
+                            }
+                            return msg.text;
+                          })()}</>
 
                         ) : isStreaming ? (
                           /* ── Streaming: pre-wrap plain text + blinking cursor ── */
@@ -4977,13 +5005,9 @@ export default function Home() {
                                   const startTime = partsFrom[1];
                                   const endDate = partsTo[0];
                                   const endTime = partsTo[1];
-                                  if (startDate === endDate) {
-                                    // Same day booking: "2026-06-10 from 10:00 to 14:00"
-                                    bookingMsg = `${startDate} from ${startTime} to ${endTime}`;
-                                  } else {
-                                    // Multi-day booking: "2026-06-10 10:00 to 2026-06-11 14:00"
-                                    bookingMsg = `${startDate} ${startTime} to ${endDate} ${endTime}`;
-                                  }
+                                  // ALWAYS use the full YYYY-MM-DD HH:MM:00 format.
+                                  // The backend LLM schema STRICTLY requires the end date to be present and parsable.
+                                  bookingMsg = `[CALENDAR_PAYLOAD] start_time: "${startDate} ${startTime}:00", end_time: "${endDate} ${endTime}:00"`;
                                 }
 
                                 // ── Prepend spot context so the backend has all booking info
