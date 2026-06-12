@@ -334,12 +334,12 @@ function extractResponseContent(text: string): string {
     const parsed = JSON.parse(text);
 
     // If wrapper has session_id + response, extract just the response
-    if (parsed.session_id && parsed.response) {
+    if (parsed.session_id !== undefined && parsed.response !== undefined) {
       return String(parsed.response);
     }
 
     // If it has a response field, use it
-    if (parsed.response) {
+    if (parsed.response !== undefined) {
       return String(parsed.response);
     }
 

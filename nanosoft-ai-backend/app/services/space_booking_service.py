@@ -82,6 +82,30 @@ def _lookup_spot_from_cache(session_id: Optional[str], spot_code: str) -> Option
     return None
 
 
+async def _verify_spot_async(session_id: Optional[str], spot_code: str, user_name: str) -> Optional[dict]:
+    """Verify spot from cache first. If not found, hit the DB (API) to get full data."""
+    if not spot_code:
+        return None
+    
+    # 1. Check cache
+    verified = _lookup_spot_from_cache(session_id, spot_code)
+    if verified:
+        return verified
+        
+    # 2. Not in cache -> hit the DB
+    logger.info("🔍 Spot %s not in cache, hitting DB for verification...", spot_code)
+    try:
+        api_result_str = await fetch_spots_api(user_name, spot_code)
+        api_result = json.loads(api_result_str)
+        target_code = str(spot_code).strip().lower()
+        for spot in api_result.get("p_list", []):
+            if str(spot.get("SpotCode", "")).strip().lower() == target_code:
+                return spot
+    except Exception as e:
+        logger.error("❌ Failed DB verification for spot %s: %s", spot_code, e)
+    return None
+
+
 # ── sb_thread helpers ──────────────────────────────────────────────────────────
 
 def _get_sb_thread(session_id: Optional[str]) -> list:
@@ -114,7 +138,7 @@ class SpaceBookingService:
     def __init__(self):
         try:
             self.model = ChatGoogleGenerativeAI(
-                model=settings.GOOGLE_AI_MODEL,
+                model=settings.GOOGLE_SPACE_BOOKING_MODEL,
                 google_api_key=settings.GOOGLE_API_KEY,
                 temperature=0.0
             ).bind_tools([GET_SPOTS, BOOK_SPOT, GET_BOOKING_STATUS])
@@ -151,7 +175,10 @@ class SpaceBookingService:
             # Inject strict instruction to prevent the LLM from hallucinating bullet points from memory
             injected_query = (
                 f"{current_query}\n\n"
-                f"[SYSTEM: If this message is a search or location query, YOU MUST CALL GET_SPOTS NOW. "
+                f"[SYSTEM: EVERY SINGLE search or location query from the user MUST hit the cache by calling GET_SPOTS immediately. "
+                f"Even if they are just refining a previous search, you MUST call GET_SPOTS again. "
+                f"NEVER output bullet points or lists of spaces in your text response! The UI will render the list for you. "
+                f"Only GET_BOOKING_STATUS is allowed to use bullet points. "
                 f"If you do not call a tool, you MUST output a conversational response explaining what you need from the user.]"
             )
             sb_thread.append(HumanMessage(content=injected_query))
@@ -286,14 +313,14 @@ class SpaceBookingService:
                         if sub_user_name:
                             args["sub_user_name"] = sub_user_name
 
-                        # ── Verify spot details from cache (prevents hallucination) ─
+                        # ── Verify spot details from cache or DB (prevents hallucination) ─
                         spot_code_req = args.get("spot_code", "")
-                        verified = _lookup_spot_from_cache(session_id, spot_code_req)
+                        verified = await _verify_spot_async(session_id, spot_code_req, user_name)
                         if verified:
                             args["spot_name"]     = verified.get("SpotName", args.get("spot_name"))
                             args["building_name"] = verified.get("BuildingName", args.get("building_name"))
                             args["floor_name"]    = verified.get("FloorName", args.get("floor_name"))
-                            logger.info("✅ Spot verified from cache: %s → %s", spot_code_req, args["spot_name"])
+                            logger.info("✅ Spot verified: %s → %s", spot_code_req, args["spot_name"])
                             tool_result_str = await BOOK_SPOT.ainvoke(args)
                         else:
                             logger.warning("❌ Spot hallucinated or invalid: %s", spot_code_req)
@@ -405,14 +432,14 @@ class SpaceBookingService:
                             if sub_user_name:
                                 args2["sub_user_name"] = sub_user_name
 
-                            # Verify spot from cache to prevent hallucination
+                            # Verify spot from cache or DB to prevent hallucination
                             spot_code_req2 = args2.get("spot_code", "")
-                            verified2 = _lookup_spot_from_cache(session_id, spot_code_req2)
+                            verified2 = await _verify_spot_async(session_id, spot_code_req2, user_name)
                             if verified2:
                                 args2["spot_name"]     = verified2.get("SpotName", args2.get("spot_name"))
                                 args2["building_name"] = verified2.get("BuildingName", args2.get("building_name"))
                                 args2["floor_name"]    = verified2.get("FloorName", args2.get("floor_name"))
-                                logger.info("✅ Spot verified from cache (round-2): %s → %s", spot_code_req2, args2["spot_name"])
+                                logger.info("✅ Spot verified (round-2): %s → %s", spot_code_req2, args2["spot_name"])
                                 tool_result2_str = await BOOK_SPOT.ainvoke(args2)
                             else:
                                 logger.warning("❌ Spot hallucinated or invalid (round-2): %s", spot_code_req2)
@@ -517,13 +544,17 @@ class SpaceBookingService:
                     }
                     return json.dumps(final_response), summary, messages
                 else:
+                    # Final fallback if LLM is completely silent
+                    if not content.strip():
+                        content = "I'm sorry, I couldn't find any spots matching that description. Could you try a different name or area?"
                     return content, content, messages
 
 
             # No tool called — pure conversational
             content = _extract_content(ai_msg)
             
-
+            if not content.strip():
+                content = "I'm sorry, I couldn't find any spots matching that description. Could you try a different name or area?"
 
             sb_thread.append(AIMessage(content=content))
             _save_sb_thread(session_id, sb_thread)
