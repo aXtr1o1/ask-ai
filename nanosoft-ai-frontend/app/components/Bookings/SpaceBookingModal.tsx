@@ -37,15 +37,42 @@ const format24hTime = (hour: string, minute: string, period: string) => {
   return `${hStr}:${minute}`;
 };
 
+// Helper to format local Date object to YYYY-MM-DD string
+const getLocalYYYYMMDD = (d: Date = new Date()): string => {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+};
+
 interface CustomTimePickerProps {
   label: string;
   value: string;
   onChange: (val: string) => void;
   popoverPosition?: "left" | "right" | "top";
+  selectedDate?: string;
+  existingBookings?: Array<{ start_time: string; end_time: string }>;
+  isOpen?: boolean;
+  onToggle?: (open: boolean) => void;
 }
 
-function CustomTimePicker({ label, value, onChange, popoverPosition = "top" }: CustomTimePickerProps) {
-  const [isOpen, setIsOpen] = useState(false);
+function CustomTimePicker({
+  label,
+  value,
+  onChange,
+  popoverPosition = "top",
+  selectedDate,
+  existingBookings = [],
+  isOpen: controlledIsOpen,
+  onToggle,
+}: CustomTimePickerProps) {
+  const [localIsOpen, setLocalIsOpen] = useState(false);
+  const isOpen = controlledIsOpen !== undefined ? controlledIsOpen : localIsOpen;
+
+  const setIsOpen = (val: boolean) => {
+    if (onToggle) onToggle(val);
+    setLocalIsOpen(val);
+  };
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const { hour, minute, period } = parse24hTime(value);
@@ -62,8 +89,94 @@ function CustomTimePicker({ label, value, onChange, popoverPosition = "top" }: C
   }, [isOpen]);
 
   const hoursList = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
-  const minutesList = ["00", "05", "10", "15", "20", "25", "30", "35", "40", "45", "50", "55"];
+  const minutesList = ["00", "15", "30", "45"];
   const periodsList = ["AM", "PM"];
+
+  const todayStr = getLocalYYYYMMDD();
+  const isToday = selectedDate === todayStr;
+
+  const isDateTimeBooked = (dateStr: string, timeStr24: string) => {
+    if (!existingBookings || existingBookings.length === 0) return false;
+    const targetTime = new Date(`${dateStr}T${timeStr24}:00`).getTime();
+    if (isNaN(targetTime)) return false;
+
+    return existingBookings.some((b) => {
+      const bStartStr = b.start_time.includes(" ") ? b.start_time.replace(" ", "T") : b.start_time;
+      const bEndStr = b.end_time.includes(" ") ? b.end_time.replace(" ", "T") : b.end_time;
+      const bStart = new Date(bStartStr).getTime();
+      const bEnd = new Date(bEndStr).getTime();
+      if (isNaN(bStart) || isNaN(bEnd)) return false;
+      return targetTime >= bStart && targetTime < bEnd;
+    });
+  };
+
+  const isHourDisabled = (h: string) => {
+    if (isToday) {
+      const now = new Date();
+      const currentHour24 = now.getHours();
+      let h24 = parseInt(h, 10);
+      if (period === "PM" && h24 < 12) h24 += 12;
+      if (period === "AM" && h24 === 12) h24 = 0;
+      if (h24 < currentHour24) return true;
+    }
+
+    if (selectedDate && existingBookings && existingBookings.length > 0) {
+      return minutesList.every((m) => {
+        let h24 = parseInt(h, 10);
+        if (period === "PM" && h24 < 12) h24 += 12;
+        if (period === "AM" && h24 === 12) h24 = 0;
+        const time24 = `${String(h24).padStart(2, "0")}:${m}`;
+        return isDateTimeBooked(selectedDate, time24);
+      });
+    }
+    return false;
+  };
+
+  const isMinuteDisabled = (m: string) => {
+    if (isToday) {
+      const now = new Date();
+      const currentHour24 = now.getHours();
+      const currentMin = now.getMinutes();
+      let selectedH24 = parseInt(hour, 10);
+      if (period === "PM" && selectedH24 < 12) selectedH24 += 12;
+      if (period === "AM" && selectedH24 === 12) selectedH24 = 0;
+      if (selectedH24 < currentHour24) return true;
+      if (selectedH24 === currentHour24 && parseInt(m, 10) < currentMin) return true;
+    }
+
+    if (selectedDate && existingBookings && existingBookings.length > 0) {
+      let selectedH24 = parseInt(hour, 10);
+      if (period === "PM" && selectedH24 < 12) selectedH24 += 12;
+      if (period === "AM" && selectedH24 === 12) selectedH24 = 0;
+      const time24 = `${String(selectedH24).padStart(2, "0")}:${m}`;
+      return isDateTimeBooked(selectedDate, time24);
+    }
+    return false;
+  };
+
+  const isPeriodDisabled = (p: string) => {
+    if (isToday) {
+      const now = new Date();
+      const currentHour24 = now.getHours();
+      let selectedH24 = parseInt(hour, 10);
+      if (p === "PM" && selectedH24 < 12) selectedH24 += 12;
+      if (p === "AM" && selectedH24 === 12) selectedH24 = 0;
+      if (selectedH24 < currentHour24) return true;
+    }
+
+    if (selectedDate && existingBookings && existingBookings.length > 0) {
+      return hoursList.every((h) => {
+        return minutesList.every((m) => {
+          let h24 = parseInt(h, 10);
+          if (p === "PM" && h24 < 12) h24 += 12;
+          if (p === "AM" && h24 === 12) h24 = 0;
+          const time24 = `${String(h24).padStart(2, "0")}:${m}`;
+          return isDateTimeBooked(selectedDate, time24);
+        });
+      });
+    }
+    return false;
+  };
 
   const selectHour = (newHour: string) => {
     onChange(format24hTime(newHour, minute, period));
@@ -188,16 +301,24 @@ function CustomTimePicker({ label, value, onChange, popoverPosition = "top" }: C
           <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
             <span style={{ fontSize: "10px", fontWeight: 700, color: "rgba(255,255,255,0.4)", textAlign: "center", textTransform: "uppercase" }}>Hr</span>
             <div className="time-column">
-              {hoursList.map(h => (
-                <button
-                  key={h}
-                  type="button"
-                  className={`time-item ${hour === h ? "active" : ""}`}
-                  onClick={() => selectHour(h)}
-                >
-                  {h}
-                </button>
-              ))}
+              {hoursList.map(h => {
+                const disabled = isHourDisabled(h);
+                return (
+                  <button
+                    key={h}
+                    type="button"
+                    disabled={disabled}
+                    className={`time-item ${hour === h ? "active" : ""}`}
+                    onClick={() => selectHour(h)}
+                    style={{
+                      opacity: disabled ? 0.3 : 1,
+                      cursor: disabled ? "not-allowed" : "pointer"
+                    }}
+                  >
+                    {h}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -206,16 +327,24 @@ function CustomTimePicker({ label, value, onChange, popoverPosition = "top" }: C
           <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
             <span style={{ fontSize: "10px", fontWeight: 700, color: "rgba(255,255,255,0.4)", textAlign: "center", textTransform: "uppercase" }}>Min</span>
             <div className="time-column">
-              {minutesList.map(m => (
-                <button
-                  key={m}
-                  type="button"
-                  className={`time-item ${minute === m ? "active" : ""}`}
-                  onClick={() => selectMinute(m)}
-                >
-                  {m}
-                </button>
-              ))}
+              {minutesList.map(m => {
+                const disabled = isMinuteDisabled(m);
+                return (
+                  <button
+                    key={m}
+                    type="button"
+                    disabled={disabled}
+                    className={`time-item ${minute === m ? "active" : ""}`}
+                    onClick={() => selectMinute(m)}
+                    style={{
+                      opacity: disabled ? 0.3 : 1,
+                      cursor: disabled ? "not-allowed" : "pointer"
+                    }}
+                  >
+                    {m}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -224,16 +353,24 @@ function CustomTimePicker({ label, value, onChange, popoverPosition = "top" }: C
           <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
             <span style={{ fontSize: "10px", fontWeight: 700, color: "rgba(255,255,255,0.4)", textAlign: "center", textTransform: "uppercase" }}>Per</span>
             <div className="time-column" style={{ justifyContent: "center" }}>
-              {periodsList.map(p => (
-                <button
-                  key={p}
-                  type="button"
-                  className={`time-item ${period === p ? "active" : ""}`}
-                  onClick={() => selectPeriod(p)}
-                >
-                  {p}
-                </button>
-              ))}
+              {periodsList.map(p => {
+                const disabled = isPeriodDisabled(p);
+                return (
+                  <button
+                    key={p}
+                    type="button"
+                    disabled={disabled}
+                    className={`time-item ${period === p ? "active" : ""}`}
+                    onClick={() => selectPeriod(p)}
+                    style={{
+                      opacity: disabled ? 0.3 : 1,
+                      cursor: disabled ? "not-allowed" : "pointer"
+                    }}
+                  >
+                    {p}
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -248,6 +385,7 @@ interface SpaceBookingModalProps {
   bookingTo?: string;
   onSave?: (from: string, to: string) => void;
   isInline?: boolean;
+  spotCode?: string;
 }
 
 export default function SpaceBookingModal({
@@ -256,19 +394,94 @@ export default function SpaceBookingModal({
   bookingTo = "",
   onSave,
   isInline = false,
+  spotCode,
 }: SpaceBookingModalProps) {
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
   const [startTime, setStartTime] = useState<string>("");
   const [endTime, setEndTime] = useState<string>("");
   const [viewDate, setViewDate] = useState<Date>(() => new Date());
+  const [error, setError] = useState<string>("");
+  const [mounted, setMounted] = useState<boolean>(false);
+  const [existingBookings, setExistingBookings] = useState<Array<{ start_time: string; end_time: string }>>([]);
+  const [activePicker, setActivePicker] = useState<"start" | "end" | null>(null);
 
   useEffect(() => {
-    // Determine defaults
-    let initialStartDate = new Date().toISOString().split("T")[0];
-    let initialEndDate = new Date().toISOString().split("T")[0];
-    let initialStart = "10:00";
-    let initialEnd = "11:00";
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!spotCode) return;
+    const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || "";
+    fetch(`${baseUrl}/api/bookings/${spotCode}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.status === "ok" && Array.isArray(data.bookings)) {
+          setExistingBookings(data.bookings);
+        }
+      })
+      .catch((err) => console.error("Failed to fetch bookings for spot", err));
+  }, [spotCode]);
+
+  const isDateFullyBooked = (dateStr: string) => {
+    if (!existingBookings || existingBookings.length === 0) return false;
+    const slots = [];
+    for (let h = 0; h < 24; h++) {
+      for (const m of ["00", "15", "30", "45"]) {
+        slots.push(`${String(h).padStart(2, "0")}:${m}`);
+      }
+    }
+    return slots.every((time24) => {
+      const targetTime = new Date(`${dateStr}T${time24}:00`).getTime();
+      if (isNaN(targetTime)) return false;
+      return existingBookings.some((b) => {
+        const bStartStr = b.start_time.includes(" ") ? b.start_time.replace(" ", "T") : b.start_time;
+        const bEndStr = b.end_time.includes(" ") ? b.end_time.replace(" ", "T") : b.end_time;
+        const bStart = new Date(bStartStr).getTime();
+        const bEnd = new Date(bEndStr).getTime();
+        if (isNaN(bStart) || isNaN(bEnd)) return false;
+        return targetTime >= bStart && targetTime < bEnd;
+      });
+    });
+  };
+
+  const hasAnyBooking = (dateStr: string) => {
+    if (!existingBookings || existingBookings.length === 0) return false;
+    const dayStart = new Date(`${dateStr}T00:00:00`).getTime();
+    const dayEnd = new Date(`${dateStr}T23:59:59`).getTime();
+    if (isNaN(dayStart) || isNaN(dayEnd)) return false;
+    return existingBookings.some((b) => {
+      const bStartStr = b.start_time.includes(" ") ? b.start_time.replace(" ", "T") : b.start_time;
+      const bEndStr = b.end_time.includes(" ") ? b.end_time.replace(" ", "T") : b.end_time;
+      const bStart = new Date(bStartStr).getTime();
+      const bEnd = new Date(bEndStr).getTime();
+      if (isNaN(bStart) || isNaN(bEnd)) return false;
+      return bStart <= dayEnd && bEnd >= dayStart;
+    });
+  };
+
+  useEffect(() => {
+    setError("");
+    // Determine defaults dynamically (future-proof next hour)
+    const now = new Date();
+    let initialStartDate = getLocalYYYYMMDD(now);
+    let initialEndDate = getLocalYYYYMMDD(now);
+    
+    let fromHour = now.getHours() + 1;
+    let toHour = fromHour + 1;
+    if (fromHour >= 24) {
+      fromHour = fromHour % 24;
+      toHour = fromHour + 1;
+      const tomorrow = new Date(now);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      initialStartDate = getLocalYYYYMMDD(tomorrow);
+      initialEndDate = initialStartDate;
+    } else if (toHour >= 24) {
+      toHour = toHour % 24;
+    }
+    
+    let initialStart = `${String(fromHour).padStart(2, "0")}:00`;
+    let initialEnd = `${String(toHour).padStart(2, "0")}:00`;
 
     // Try to parse bookingFrom: e.g. "2026-06-04 10:00"
     if (bookingFrom) {
@@ -314,10 +527,36 @@ export default function SpaceBookingModal({
   }, [bookingFrom, bookingTo]);
 
   const handleConfirm = () => {
+    setError("");
     const finalEndDate = endDate || startDate;
     const fromStr = `${startDate} ${startTime}`;
     const toStr = `${finalEndDate} ${endTime}`;
     console.log("📅 [SpaceBookingModal] Confirming date/time:", { fromStr, toStr });
+
+    const now = new Date();
+    const startDateTime = new Date(`${startDate}T${startTime}`);
+    const endDateTime = new Date(`${finalEndDate}T${endTime}`);
+
+    if (isNaN(startDateTime.getTime())) {
+      setError("Please select a valid start date and time.");
+      return;
+    }
+
+    if (startDateTime < now) {
+      setError("Bookings for past dates or times are not permitted. Please select a current or future time.");
+      return;
+    }
+
+    if (!isNaN(endDateTime.getTime()) && endDateTime.getTime() === startDateTime.getTime()) {
+      setError("The start and end times cannot be the same. Please select a valid time range.");
+      return;
+    }
+
+    if (!isNaN(endDateTime.getTime()) && endDateTime < startDateTime) {
+      setError("The end time cannot be before the start time. Please select a valid time range.");
+      return;
+    }
+
     if (onSave) {
       onSave(fromStr, toStr);
     }
@@ -347,14 +586,18 @@ export default function SpaceBookingModal({
 
 
     const handleDateClick = (dateStr: string) => {
+      setError("");
       if (!startDate || (startDate && endDate)) {
         setStartDate(dateStr);
         setEndDate("");
+        setActivePicker("start");
       } else {
         if (dateStr < startDate) {
           setStartDate(dateStr);
+          setActivePicker("start");
         } else {
           setEndDate(dateStr);
+          setActivePicker("end");
         }
       }
     };
@@ -369,6 +612,11 @@ export default function SpaceBookingModal({
       const dd = String(day).padStart(2, '0');
       const dateStr = `${yyyy}-${mm}-${dd}`;
 
+      const todayStr = mounted ? getLocalYYYYMMDD() : "";
+      const isPastDate = mounted && dateStr < todayStr;
+      const isFullyBooked = mounted && isDateFullyBooked(dateStr);
+      const isDisabled = isPastDate || isFullyBooked;
+
       const isSelectedStart = startDate === dateStr;
       const isSelectedEnd = endDate === dateStr;
       const isInRange = endDate && dateStr > startDate && dateStr < endDate;
@@ -378,6 +626,7 @@ export default function SpaceBookingModal({
         <button
           key={day}
           type="button"
+          disabled={isDisabled}
           onClick={() => handleDateClick(dateStr)}
           style={{
             background: isHighlighted
@@ -385,7 +634,11 @@ export default function SpaceBookingModal({
               : isInRange
                 ? "rgba(212, 175, 55, 0.2)"
                 : "transparent",
-            color: isHighlighted ? "#000000" : "var(--color-text, #ffffff)",
+            color: isDisabled
+              ? "rgba(255, 255, 255, 0.2)"
+              : isHighlighted
+                ? "#000000"
+                : "var(--color-text, #ffffff)",
             border: "none",
             borderRadius: isSelectedStart && !endDate
               ? "6px"
@@ -401,20 +654,33 @@ export default function SpaceBookingModal({
             padding: 0,
             fontSize: "13px",
             fontWeight: isHighlighted || isInRange ? 700 : 500,
-            cursor: "pointer",
+            cursor: isDisabled ? "not-allowed" : "pointer",
+            opacity: isDisabled ? 0.5 : 1,
             transition: "all 0.15s ease",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
           }}
           onMouseEnter={(e) => {
-            if (!isHighlighted && !isInRange) e.currentTarget.style.background = "rgba(255, 255, 255, 0.08)";
+            if (!isHighlighted && !isInRange && !isDisabled) e.currentTarget.style.background = "rgba(255, 255, 255, 0.08)";
           }}
           onMouseLeave={(e) => {
-            if (!isHighlighted && !isInRange) e.currentTarget.style.background = "transparent";
+            if (!isHighlighted && !isInRange && !isDisabled) e.currentTarget.style.background = "transparent";
           }}
         >
-          {day}
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", position: "relative" }}>
+            <span style={{ transform: hasAnyBooking(dateStr) && !isFullyBooked && !isPastDate ? "translateY(-1px)" : "none" }}>{day}</span>
+            {hasAnyBooking(dateStr) && !isFullyBooked && !isPastDate && (
+              <div style={{
+                width: "4px",
+                height: "4px",
+                borderRadius: "50%",
+                background: isHighlighted ? "#000000" : "var(--color-primary, #d4af37)",
+                position: "absolute",
+                bottom: "-6px"
+              }} />
+            )}
+          </div>
         </button>
       );
     }
@@ -518,14 +784,38 @@ export default function SpaceBookingModal({
               label="Start Time"
               value={startTime}
               onChange={setStartTime}
+              selectedDate={startDate}
+              existingBookings={existingBookings}
+              isOpen={activePicker === "start"}
+              onToggle={(open) => setActivePicker(open ? "start" : null)}
             />
             <CustomTimePicker
               label="End Time"
               value={endTime}
               onChange={setEndTime}
+              selectedDate={endDate || startDate}
+              existingBookings={existingBookings}
+              isOpen={activePicker === "end"}
+              onToggle={(open) => setActivePicker(open ? "end" : null)}
             />
           </div>
         </div>
+
+        {error && (
+          <div style={{
+            background: "rgba(239, 68, 68, 0.15)",
+            border: "1px solid rgba(239, 68, 68, 0.3)",
+            color: "#ef4444",
+            padding: "10px 14px",
+            borderRadius: "8px",
+            fontSize: "13px",
+            fontWeight: 500,
+            marginBottom: "16px",
+            textAlign: "center"
+          }}>
+            {error}
+          </div>
+        )}
 
         {/* Actions */}
         <div style={{ display: "flex", gap: "10px", marginTop: "8px" }}>
@@ -689,6 +979,22 @@ export default function SpaceBookingModal({
           </div>
         </div>
 
+        {error && (
+          <div style={{
+            background: "rgba(239, 68, 68, 0.15)",
+            border: "1px solid rgba(239, 68, 68, 0.3)",
+            color: "#ef4444",
+            padding: "10px 14px",
+            borderRadius: "8px",
+            fontSize: "13px",
+            fontWeight: 500,
+            marginTop: "16px",
+            textAlign: "center"
+          }}>
+            {error}
+          </div>
+        )}
+
         {/* Date & Time Selectors */}
         <div style={{ display: "flex", flexDirection: "column", gap: "16px", margin: "24px 0" }}>
           <div style={{ display: "flex", gap: "16px" }}>
@@ -700,7 +1006,11 @@ export default function SpaceBookingModal({
                 type="date"
                 className="modal-input-field theme-dark-date-picker"
                 value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
+                min={mounted ? getLocalYYYYMMDD() : undefined}
+                onChange={(e) => {
+                  setError("");
+                  setStartDate(e.target.value);
+                }}
               />
             </div>
             <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "6px" }}>
@@ -711,7 +1021,11 @@ export default function SpaceBookingModal({
                 type="date"
                 className="modal-input-field theme-dark-date-picker"
                 value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
+                min={startDate || (mounted ? getLocalYYYYMMDD() : undefined)}
+                onChange={(e) => {
+                  setError("");
+                  setEndDate(e.target.value);
+                }}
               />
             </div>
           </div>
@@ -722,6 +1036,8 @@ export default function SpaceBookingModal({
                 label="Start Time"
                 value={startTime}
                 onChange={setStartTime}
+                selectedDate={startDate}
+                existingBookings={existingBookings}
               />
             </div>
             <div style={{ flex: 1 }}>
@@ -729,6 +1045,8 @@ export default function SpaceBookingModal({
                 label="End Time"
                 value={endTime}
                 onChange={setEndTime}
+                selectedDate={endDate || startDate}
+                existingBookings={existingBookings}
               />
             </div>
           </div>

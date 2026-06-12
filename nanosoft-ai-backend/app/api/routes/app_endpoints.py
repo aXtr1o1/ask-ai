@@ -408,6 +408,39 @@ async def startup_event():
         if conn:
             conn.rollback()
 
+@app_endpoints_router.get("/bookings/{spot_code}")
+async def get_bookings_for_spot(spot_code: str):
+    if not spot_code:
+        raise HTTPException(status_code=400, detail="spot_code is required")
+
+    conn = get_pool()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT start_time, end_time, booking_id
+                FROM space_bookings
+                WHERE spot_code = %s
+                """,
+                (spot_code,)
+            )
+            rows = cur.fetchall()
+            bookings = []
+            for row in rows:
+                bookings.append({
+                    "start_time": str(row[0]),
+                    "end_time": str(row[1]),
+                    "booking_id": str(row[2])
+                })
+            return {"status": "ok", "bookings": bookings}
+    except Exception as e:
+        logger.error(f"Failed to fetch bookings for spot {spot_code}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Database query failed: {e}")
+
 @app_endpoints_router.get("/health", tags=["Health"])
 def health():
     return {"status": "ok", "service": "Facility Management AI Assistant"}
+

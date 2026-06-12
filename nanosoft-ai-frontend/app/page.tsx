@@ -143,6 +143,32 @@ function md(text: string): string {
   return text;
 }
 
+// ── Format Multi-line Context Summary (safely render markdown & newlines) ──
+function formatContextSummary(text: string): string {
+  if (!text) return "";
+  return text
+    .split("\n")
+    .map(line => {
+      const trimmed = line.trim();
+      if (!trimmed) return '<div style="height:6px"></div>';
+      
+      // Check for bullet list
+      const bulletMatch = line.match(/^[\s]*([-*•])\s+(.*)/);
+      if (bulletMatch) {
+        return `<div style="display:flex;align-items:baseline;gap:8px;margin-left:12px;margin-top:2px;margin-bottom:2px"><span style="color:#D2AC47;font-size:10px;flex-shrink:0">•</span><span style="color:#F3F4F6">${md(bulletMatch[2])}</span></div>`;
+      }
+      
+      // Check for numbered list
+      const numberMatch = line.match(/^[\s]*(\d+[.)])\s+(.*)/);
+      if (numberMatch) {
+        return `<div style="display:flex;align-items:baseline;gap:8px;margin-left:12px;margin-top:2px;margin-bottom:2px"><span style="color:#D2AC47;font-size:12px;font-weight:600;flex-shrink:0">${numberMatch[1]}</span><span style="color:#F3F4F6">${md(numberMatch[2])}</span></div>`;
+      }
+      
+      return `<div style="line-height:1.6;margin:2px 0;color:#F3F4F6">${md(line)}</div>`;
+    })
+    .join("");
+}
+
 // ── Strip bullet/number prefix + strip **bold** and *italic* from a line ──────
 function cleanLine(raw: string): string {
   let s = raw.replace(/^[\s]*(?:[-*•]|\d+[.)]):?\s?/, "").trim();
@@ -308,12 +334,12 @@ function extractResponseContent(text: string): string {
     const parsed = JSON.parse(text);
 
     // If wrapper has session_id + response, extract just the response
-    if (parsed.session_id && parsed.response) {
+    if (parsed.session_id !== undefined && parsed.response !== undefined) {
       return String(parsed.response);
     }
 
     // If it has a response field, use it
-    if (parsed.response) {
+    if (parsed.response !== undefined) {
       return String(parsed.response);
     }
 
@@ -449,7 +475,7 @@ function renderLargeDataset(text: string): string | null {
   }
 
   if (!records.length) {
-    const contextDiv = context.trim() ? `<div class="large-dataset-context">${escapeHTML(context)}</div>` : "";
+    const contextDiv = context.trim() ? `<div class="large-dataset-context">${formatContextSummary(context)}</div>` : "";
     return `${searchBanner}${contextDiv}`;
   }
 
@@ -529,7 +555,7 @@ function renderLargeDataset(text: string): string | null {
   // ─────────────────────────────────────────
   // Final HTML
   // ─────────────────────────────────────────
-  const contextDiv = context.trim() ? `<div class="large-dataset-context">${escapeHTML(context)}</div>` : "";
+  const contextDiv = context.trim() ? `<div class="large-dataset-context">${formatContextSummary(context)}</div>` : "";
   const table = `
   ${searchBanner}
   ${contextDiv}
@@ -558,7 +584,7 @@ function formatLargeDatasetTable(largeDataData: any): string {
 
 
   if (records.length === 0) {
-    return `<div class="large-dataset-context"><strong>Summary:</strong> ${esc(context)}</div>`;
+    return `<div class="large-dataset-context"><strong>Summary:</strong> ${formatContextSummary(context)}</div>`;
   }
 
 
@@ -666,7 +692,7 @@ function formatLargeDatasetTable(largeDataData: any): string {
   // const contextHTML = context 
   //   ? `<div class="large-dataset-context">${esc(context)}</div>` 
   const contextHTML = context
-    ? `<div class="large-dataset-context">${esc(context)}</div>`
+    ? `<div class="large-dataset-context">${formatContextSummary(context)}</div>`
     : "";
 
 
@@ -797,28 +823,43 @@ function removeEmoji(text: string): string {
   return lines.join("\n");
 }
 
-// Inject calendar icon at the end of space booking time examples
+// Inject calendar icon at the end of space booking time examples (disabled now)
 function injectCalendarIcon(text: string, msgIdx: number = -1): string {
   if (!text) return text;
-  return text.replace(
-    /(\(e\.g\.[^)]*(?:10am|2pm|morning|all day|afternoon|evening)[^)]*)\)/gi,
-    (match, p1) => {
-      if (p1.includes("interactive-calendar-btn") || p1.includes("📅")) return match;
-      if (msgIdx !== -1) {
-        return `${p1} <button class="interactive-calendar-btn" data-msg-idx="${msgIdx}" style="background:none;border:none;cursor:pointer;padding:0;font-size:inherit;display:inline-flex;align-items:center;vertical-align:middle;outline:none;" title="Change date & time">📅</button>)`;
-      }
-      return p1 + " 📅)";
-    }
-  );
+  // Remove calendar emoji if present in the text to avoid double icons / unwanted icons
+  return text.replace(/📅/g, "");
 }
 
 // Telemetry-logged date/time extraction from message text
 function parseDateTimeFromMessage(text: string): { date: string; fromTime: string; toTime: string } {
   console.log("🔍 [Telemetry] Running parseDateTimeFromMessage on text:", text);
 
-  let date = new Date().toISOString().split("T")[0];
-  let fromTime = "10:00";
-  let toTime = "11:00";
+  const getLocalYYYYMMDD = (d: Date = new Date()): string => {
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
+  const now = new Date();
+  let date = getLocalYYYYMMDD(now);
+  
+  // Future defaults: next hour
+  let fromHour = now.getHours() + 1;
+  let toHour = fromHour + 1;
+  
+  if (fromHour >= 24) {
+    fromHour = fromHour % 24;
+    toHour = fromHour + 1;
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    date = getLocalYYYYMMDD(tomorrow);
+  } else if (toHour >= 24) {
+    toHour = toHour % 24;
+  }
+  
+  let fromTime = `${String(fromHour).padStart(2, "0")}:00`;
+  let toTime = `${String(toHour).padStart(2, "0")}:00`;
 
   try {
     // 1. Try to find a date like YYYY-MM-DD
@@ -829,12 +870,12 @@ function parseDateTimeFromMessage(text: string): { date: string; fromTime: strin
     } else {
       // Check for tomorrow
       if (/tomorrow/i.test(text)) {
-        const tomorrow = new Date();
+        const tomorrow = new Date(now);
         tomorrow.setDate(tomorrow.getDate() + 1);
-        date = tomorrow.toISOString().split("T")[0];
+        date = getLocalYYYYMMDD(tomorrow);
         console.log("📅 [Telemetry] Parsed date (tomorrow):", date);
       } else if (/today/i.test(text)) {
-        date = new Date().toISOString().split("T")[0];
+        date = getLocalYYYYMMDD(now);
         console.log("📅 [Telemetry] Parsed date (today):", date);
       }
     }
@@ -867,13 +908,19 @@ function parseDateTimeFromMessage(text: string): { date: string; fromTime: strin
         console.log("📅 [Telemetry] Defaulted end time to start + 1h:", toTime);
       }
     } else {
-      // Look for 24h formats like 14:00 or 09:30
-      const time24Match = text.match(/\b(\d{2}):(\d{2})\b/g);
+      // Look for 24h formats like 14:00 or 9:30 or 09:30 (handles 1-digit hours too)
+      const time24Match = text.match(/\b(\d{1,2}):(\d{2})\b/g);
       if (time24Match && time24Match.length >= 1) {
-        fromTime = time24Match[0];
+        const format24 = (tStr: string) => {
+          const parts = tStr.split(":");
+          const hr = String(parseInt(parts[0], 10)).padStart(2, "0");
+          const mn = parts[1];
+          return `${hr}:${mn}`;
+        };
+        fromTime = format24(time24Match[0]);
         console.log("📅 [Telemetry] Parsed 24h start time:", fromTime);
         if (time24Match.length >= 2) {
-          toTime = time24Match[1];
+          toTime = format24(time24Match[1]);
           console.log("📅 [Telemetry] Parsed 24h end time:", toTime);
         } else {
           const [h, m] = fromTime.split(":").map(Number);
@@ -1704,8 +1751,10 @@ export default function Home() {
             ]);
             setSessionId(sharedSid);
             const processed = processLoadedMessages(mappedHistory);
-            setMessages(processed);
-            setIsSpaceBooking(processed.some(m => m.isSpaceBooking));
+            const isBooking = processed.some(m => m.isSpaceBooking);
+            const finalProcessed = isBooking ? processLoadedMessages(mappedHistory, true) : processed;
+            setMessages(finalProcessed);
+            setIsSpaceBooking(isBooking);
             console.log("[share] shared chat loaded and mapped");
             setAuthChecked(true);
           }
@@ -2447,10 +2496,7 @@ export default function Home() {
                 // that formatOutput() incorrectly converts into HTML tables.
                 // For space booking sessions, render as simple line-broken plain text.
                 if (isSpaceBookingRef.current) {
-                  processedText = cleanedText
-                    .split("\n")
-                    .map(line => line.trim() ? `<div>${line}</div>` : '<div style="height:6px"></div>')
-                    .join("");
+                  processedText = formatContextSummary(cleanedText);
                   console.log("📝 [DONE] Space booking — rendered as plain text (no table conversion)");
                 } else {
                   processedText = formatOutput(cleanedText);
@@ -2461,6 +2507,24 @@ export default function Home() {
                 processedText = finalText;
               }
             }
+          }
+
+          // ── Handle Empty LLM Responses without hardcoding text ──
+          if (!processedText || !processedText.trim()) {
+            setMessages(prev => {
+              const u = [...prev];
+              // Remove the loading AI bubble completely since there's no response
+              if (u[u.length - 1]?.role === "ai") {
+                u.pop();
+              }
+              const activeSid = sessionIdRef.current;
+              sessionMessagesRef.current.set(activeSid, u);
+              return u;
+            });
+            accRef.current = "";
+            setIsLoading(false);
+            setTimeout(() => inputRef.current?.focus(), 50);
+            return; // Abort further processing
           }
 
           setMessages(prev => {
@@ -2486,8 +2550,8 @@ export default function Home() {
           });
 
           // ── Auto-open inline calendar picker on Phase 3 message ──────────
-          // Detect when AI asks user to pick a date/time via the calendar
-          const isCalendarPrompt = /use the calendar/i.test(finalText);
+          // Detect when AI asks user to pick a date/time via the calendar or matches example formats
+          const isCalendarPrompt = /use the calendar/i.test(finalText) || /(\(e\.g\.[^)]*(?:10am|2pm|morning|all day|afternoon|evening)[^)]*)\)/gi.test(finalText);
           if (isCalendarPrompt && isSpaceBookingRef.current) {
             setMessages(prev => {
               const idx = prev.length - 1;
@@ -2872,7 +2936,7 @@ export default function Home() {
 
 
   // ── Process loaded messages: convert raw JSON to formatted tables ─────────
-  function processLoadedMessages(msgs: Message[]): Message[] {
+  function processLoadedMessages(msgs: Message[], isSpaceBookingSession?: boolean): Message[] {
     return msgs.map(m => {
       if (m.role !== "ai") return m;
 
@@ -2882,7 +2946,7 @@ export default function Home() {
       const graphData = parseGraphData(text);
       if (graphData) {
         console.log("📊 [HISTORY] Graph response detected — keeping as raw JSON for chart");
-        return { ...m, text, originalText: text, isGraphResponse: true };
+        return { ...m, text, originalText: text, isGraphResponse: true, isSpaceBooking: isSpaceBookingSession };
       }
 
       // 🔑 Check if this is a MULTIPLE_DATASETS response
@@ -2918,7 +2982,7 @@ export default function Home() {
               };
             });
             const multipleDatasets = parsedMulti.filter((ds) => ds.rows.length > 0);
-            const isSpaceBooking = multipleDatasets.some(ds =>
+            const isSpaceBooking = isSpaceBookingSession || multipleDatasets.some(ds =>
               ds.rows.some(row =>
                 Object.keys(row).some(col =>
                   typeof col === 'string' && (
@@ -2949,7 +3013,7 @@ export default function Home() {
             const tableHTML = renderLargeDataset(text);
             if (tableHTML) {
               const rows = extractTableRows(tableHTML);
-              const isSpaceBooking = rows.some(row =>
+              const isSpaceBooking = isSpaceBookingSession || rows.some(row =>
                 Object.keys(row).some(col =>
                   typeof col === 'string' && (
                     col.toUpperCase() === "SPOTIDPK" ||
@@ -2975,7 +3039,7 @@ export default function Home() {
         console.log("✅ [HISTORY] Message already HTML formatted - extracting table data");
         const rows = extractTableRows(text);
         if (rows.length > 0) {
-          const isSpaceBooking = rows.some(row =>
+          const isSpaceBooking = isSpaceBookingSession || rows.some(row =>
             Object.keys(row).some(col =>
               typeof col === 'string' && (
                 col.toUpperCase() === "SPOTIDPK" ||
@@ -2986,7 +3050,7 @@ export default function Home() {
           // ✅ originalText stays as the HTML — no raw JSON available here
           return { ...m, text, originalText: text, tableData: rows, tableTitle: "Results", isSpaceBooking };
         }
-        return { ...m, originalText: text };
+        return { ...m, originalText: text, isSpaceBooking: isSpaceBookingSession };
       }
 
       // Extract response content (removes session_id wrapper)
@@ -2999,7 +3063,7 @@ export default function Home() {
         console.log("✅ [HISTORY] Successfully rendered as table structure");
         const rows = extractTableRows(tableHTML);
         if (rows.length > 0) {
-          const isSpaceBooking = rows.some(row =>
+          const isSpaceBooking = isSpaceBookingSession || rows.some(row =>
             Object.keys(row).some(col =>
               typeof col === 'string' && (
                 col.toUpperCase() === "SPOTIDPK" ||
@@ -3010,16 +3074,16 @@ export default function Home() {
           // ✅ originalText = raw text from DB so future saves re-parse correctly
           return { ...m, text: tableHTML, originalText: text, tableData: rows, tableTitle: "Results", isSpaceBooking };
         }
-        return { ...m, text: tableHTML, originalText: text };
+        return { ...m, text: tableHTML, originalText: text, isSpaceBooking: isSpaceBookingSession };
       }
 
       // Not tabular data → try to format as text
       try {
-        const formattedText = formatOutput(cleanedText);
+        const formattedText = isSpaceBookingSession ? formatContextSummary(cleanedText) : formatOutput(cleanedText);
         // Check if formatOutput produced an HTML table
         const rows = extractTableRows(formattedText);
         if (rows.length > 0) {
-          const isSpaceBooking = rows.some(row =>
+          const isSpaceBooking = isSpaceBookingSession || rows.some(row =>
             Object.keys(row).some(col =>
               typeof col === 'string' && (
                 col.toUpperCase() === "SPOTIDPK" ||
@@ -3031,14 +3095,40 @@ export default function Home() {
         }
         // If the formatted text has raw HTML tags, decode them
         if (formattedText.includes('<div') || formattedText.includes('&lt;')) {
-          return { ...m, text: decodeEntities(formattedText), originalText: text };
+          return { ...m, text: decodeEntities(formattedText), originalText: text, isSpaceBooking: isSpaceBookingSession };
         }
-        return { ...m, text: formattedText, originalText: text };
+        return { ...m, text: formattedText, originalText: text, isSpaceBooking: isSpaceBookingSession };
       } catch (err) {
         console.log("📝 [HISTORY] Fallback to raw text");
-        return { ...m, text: decodeEntities(text), originalText: text };
+        return { ...m, text: decodeEntities(text), originalText: text, isSpaceBooking: isSpaceBookingSession };
       }
     });
+  };
+
+  // Auto-opens calendar if the last assistant message contains "use the calendar" or example formats
+  const autoOpenCalendarIfApplicable = (processed: Message[]) => {
+    let lastAiIdx = -1;
+    for (let i = processed.length - 1; i >= 0; i--) {
+      if (processed[i].role === "ai") {
+        lastAiIdx = i;
+        break;
+      }
+    }
+    const hasPrompt = lastAiIdx !== -1 && (
+      /use the calendar/i.test(processed[lastAiIdx].text || "") ||
+      /(\(e\.g\.[^)]*(?:10am|2pm|morning|all day|afternoon|evening)[^)]*)\)/gi.test(processed[lastAiIdx].text || "")
+    );
+    if (hasPrompt) {
+      const parsed = parseDateTimeFromMessage(processed[lastAiIdx].text || "");
+      setBookingStartDate(parsed.date);
+      setBookingEndDate(parsed.date);
+      setBookingStartTime(parsed.fromTime);
+      setBookingEndTime(parsed.toTime);
+      setActiveBookingBubbleIndex(lastAiIdx);
+      console.log("📅 [Auto-Open] Found last AI message with calendar prompt at index:", lastAiIdx, parsed);
+    } else {
+      setActiveBookingBubbleIndex(null);
+    }
   };
 
   // ── Switch to an existing session ─────────────────────────────────────────
@@ -3119,10 +3209,12 @@ export default function Home() {
     // Check local cache first
     const cached = sessionMessagesRef.current.get(targetSid);
     if (cached && cached.length > 0) {
-      const processed = processLoadedMessages(cached);
+      const isBookingSession = targetSession?.isSpaceBooking || false;
+      const processed = processLoadedMessages(cached, isBookingSession);
       setMessages(processed);
-      const isBookingSession = targetSession?.isSpaceBooking || processed.some(m => m.isSpaceBooking);
-      setIsSpaceBooking(isBookingSession);
+      const finalIsBooking = isBookingSession || processed.some(m => m.isSpaceBooking);
+      setIsSpaceBooking(finalIsBooking);
+      autoOpenCalendarIfApplicable(processed);
     } else {
       // Fetch from backend
       setHistoryLoading(true);
@@ -3156,11 +3248,13 @@ export default function Home() {
             history.push({ role: "ai", text: entry.assistant });
           }
         }
-        const processed = processLoadedMessages(history);
+        const isBookingSession = targetSession?.isSpaceBooking || false;
+        const processed = processLoadedMessages(history, isBookingSession);
         sessionMessagesRef.current.set(targetSid, processed);
         setMessages(processed);
-        const isBookingSession = targetSession?.isSpaceBooking || processed.some(m => m.isSpaceBooking);
-        setIsSpaceBooking(isBookingSession);
+        const finalIsBooking = isBookingSession || processed.some(m => m.isSpaceBooking);
+        setIsSpaceBooking(finalIsBooking);
+        autoOpenCalendarIfApplicable(processed);
       } catch (err) {
         console.warn("Failed to fetch session history:", err);
         setMessages([]);
@@ -3207,7 +3301,8 @@ export default function Home() {
                     history.push({ role: "ai", text: entry.assistant });
                   }
                 }
-                const processed = processLoadedMessages(history);
+                const isBookingSession = s.isSpaceBooking || false;
+                const processed = processLoadedMessages(history, isBookingSession);
                 sessionMessagesRef.current.set(s.id, processed);
               }
             } catch (err) {
@@ -3415,6 +3510,27 @@ export default function Home() {
     }));
 
     setIsLoading(true);
+  };
+
+  // Helper to handle Space Booking tile selection clicks (sends all 4 fields to backend)
+  const handleTileClickForSpaceBooking = (row: Record<string, any>) => {
+    const getField = (keys: string[]) => {
+      for (const k of keys) {
+        const foundKey = Object.keys(row).find(rk => rk.toLowerCase() === k.toLowerCase());
+        if (foundKey) return row[foundKey];
+      }
+      return "";
+    };
+
+    const spotCode = getField(["SpotCode", "SPOTCODE", "SpotIdPK", "SPOTIDPK"]);
+    const spotName = getField(["SpotName", "SPOTNAME"]);
+    const buildingName = getField(["BuildingName", "BUILDINGNAME"]);
+    const floorName = getField(["FloorName", "FLOORNAME"]);
+
+    if (spotCode) {
+      const messageText = `SpotCode: ${spotCode}, SpotName: ${spotName}, BuildingName: ${buildingName}, FloorName: ${floorName}`;
+      sendTextDirectly(messageText);
+    }
   };
 
   // ── Send message over the persistent WebSocket ────────────────────────────
@@ -4533,7 +4649,11 @@ export default function Home() {
                   }
                 }}
               >
-                {messages.map((msg, idx) => {
+                {(() => {
+                  const latestTableIdx = messages.reduce((last, m, i) => {
+                    return ((m.tableData && m.tableData.length > 0) || (m.multipleDatasets && m.multipleDatasets.length > 0)) ? i : last;
+                  }, -1);
+                  return messages.map((msg, idx) => {
                   const isUser = msg.role === "user";
                   const isError = msg.role === "error";
                   const isStreaming = msg.streaming === true;
@@ -4630,7 +4750,17 @@ export default function Home() {
                           })()
                         ) : isUser || isError ? (
                           /* ── User / Error: plain text ── */
-                          <>{msg.text}</>
+                          <>{(() => {
+                            if (isUser && msg.text.includes("[CALENDAR_PAYLOAD]")) {
+                              const match = msg.text.match(/start_time:\s*"([^"]+)",\s*end_time:\s*"([^"]+)"/);
+                              const prefix = msg.text.split("[CALENDAR_PAYLOAD]")[0].trim();
+                              if (match) {
+                                return prefix ? `${prefix} | Book from ${match[1]} to ${match[2]}` : `Book from ${match[1]} to ${match[2]}`;
+                              }
+                              return prefix;
+                            }
+                            return msg.text;
+                          })()}</>
 
                         ) : isStreaming ? (
                           /* ── Streaming: pre-wrap plain text + blinking cursor ── */
@@ -4712,6 +4842,8 @@ export default function Home() {
                                   totalCount={ds.totalCount}
                                   showOnlyTiles={msg.isSpaceBooking}
                                   isSpaceBooking={msg.isSpaceBooking}
+                                  forceDisable={msg.isSpaceBooking ? idx !== latestTableIdx : false}
+                                  onTileClick={handleTileClickForSpaceBooking}
                                 />
                               </div>
                             ))}
@@ -4725,6 +4857,8 @@ export default function Home() {
                             htmlTableContent={msg.text}
                             showOnlyTiles={msg.isSpaceBooking}
                             isSpaceBooking={msg.isSpaceBooking}
+                            forceDisable={msg.isSpaceBooking ? idx !== latestTableIdx : false}
+                            onTileClick={handleTileClickForSpaceBooking}
                           />
 
                         ) : (
@@ -4808,52 +4942,110 @@ export default function Home() {
                         )}
 
                         {/* Inline Booking Picker if active */}
-                        {activeBookingBubbleIndex === idx && (
-                          <SpaceBookingModal
-                            isInline={true}
-                            bookingFrom={`${bookingStartDate} ${bookingStartTime}`}
-                            bookingTo={`${bookingEndDate} ${bookingEndTime}`}
-                            onSave={(from, to) => {
-                              const [fromDate, fromTime] = from.split(" ");
-                              const [toDate, toTime] = to.split(" ");
-                              setBookingStartDate(fromDate || "");
-                              setBookingStartTime(fromTime || "");
-                              setBookingEndDate(toDate || "");
-                              setBookingEndTime(toTime || "");
+                        {activeBookingBubbleIndex === idx && (() => {
+                          const currentMessages = messages;
+                          let extractedSpotCode = "";
+                          
+                          // Helper: extract SpotCode from text using multiple patterns
+                          const extractSpotCodeFromText = (text: string): string => {
+                            // Pattern 1: "Spot Code: WRMF-SCR" or "SpotCode: WRMF-SCR"
+                            const m1 = text.match(/(?:Spot\s*Code|SpotCode):\s*([^\s,)|\)]+)/i);
+                            if (m1) return m1[1].trim();
+                            // Pattern 2: "(Spot Code: WRMF-SCR)" — label inside parens
+                            const m2 = text.match(/\((?:Spot\s*Code|SpotCode):\s*([^)]+)\)/i);
+                            if (m2) return m2[1].trim();
+                            // Pattern 3: bare SpotCode like WRMF-SCR or GPRF-KFC
+                            const m3 = text.match(/\b([A-Z]{2,6}-[A-Z0-9]{2,10})\b/);
+                            if (m3) return m3[1].trim();
+                            return "";
+                          };
 
-                              let bookingMsg = `${from} to ${to}`;
-                              if (from.includes(" ") && to.includes(" ")) {
-                                const partsFrom = from.split(" ");
-                                const partsTo = to.split(" ");
-                                const startDate = partsFrom[0];
-                                const startTime = partsFrom[1];
-                                const endDate = partsTo[0];
-                                const endTime = partsTo[1];
-                                if (startDate === endDate) {
-                                  // Same day booking: "2026-06-10 from 10:00 to 14:00"
-                                  bookingMsg = `${startDate} from ${startTime} to ${endTime}`;
-                                } else {
-                                  // Multi-day booking: "2026-06-10 10:00 to 2026-06-11 14:00"
-                                  bookingMsg = `${startDate} ${startTime} to ${endDate} ${endTime}`;
+                          // 1. Try to find in the assistant message itself (which is at idx)
+                          const aiMsg = currentMessages[idx];
+                          if (aiMsg && typeof aiMsg.text === "string") {
+                            extractedSpotCode = extractSpotCodeFromText(aiMsg.text);
+                            if (extractedSpotCode) {
+                              console.log("🔍 [Inline Calendar] Extracted SpotCode from assistant message:", extractedSpotCode);
+                            }
+                          }
+                          
+                          // 2. If not found, try to search backwards in user or AI messages
+                          if (!extractedSpotCode) {
+                            for (let mi = idx - 1; mi >= 0; mi--) {
+                              const m = currentMessages[mi];
+                              if (m && typeof m.text === "string") {
+                                const code = extractSpotCodeFromText(m.text);
+                                if (code) {
+                                  extractedSpotCode = code;
+                                  console.log("🔍 [Inline Calendar] Extracted SpotCode backwards from message:", mi, extractedSpotCode);
+                                  break;
                                 }
                               }
+                            }
+                          }
+                          return (
+                            <SpaceBookingModal
+                              isInline={true}
+                              bookingFrom={`${bookingStartDate} ${bookingStartTime}`}
+                              bookingTo={`${bookingEndDate} ${bookingEndTime}`}
+                              spotCode={extractedSpotCode}
+                              onSave={(from, to) => {
+                                const [fromDate, fromTime] = from.split(" ");
+                                const [toDate, toTime] = to.split(" ");
+                                setBookingStartDate(fromDate || "");
+                                setBookingStartTime(fromTime || "");
+                                setBookingEndDate(toDate || "");
+                                setBookingEndTime(toTime || "");
 
-                              console.log("📅 [Telemetry] Inline saving booking times. Sending message:", bookingMsg);
-                              sendTextDirectly(bookingMsg);
+                                let bookingMsg = `${from} to ${to}`;
+                                if (from.includes(" ") && to.includes(" ")) {
+                                  const partsFrom = from.split(" ");
+                                  const partsTo = to.split(" ");
+                                  const startDate = partsFrom[0];
+                                  const startTime = partsFrom[1];
+                                  const endDate = partsTo[0];
+                                  const endTime = partsTo[1];
+                                  // ALWAYS use the full YYYY-MM-DD HH:MM:00 format.
+                                  // The backend LLM schema STRICTLY requires the end date to be present and parsable.
+                                  bookingMsg = `[CALENDAR_PAYLOAD] start_time: "${startDate} ${startTime}:00", end_time: "${endDate} ${endTime}:00"`;
+                                }
 
-                              // Reset inline bubble index to close the inline picker
-                              setActiveBookingBubbleIndex(null);
-                            }}
-                            onClose={() => {
-                              setActiveBookingBubbleIndex(null);
-                            }}
-                          />
-                        )}
+                                // ── Prepend spot context so the backend has all booking info
+                                // even if the server restarted and sb_thread memory was cleared.
+                                // Search backwards through messages for the last SpotCode user message.
+                                const currentMessagesInner = messages;
+                                let spotContext = "";
+                                for (let mi = idx - 1; mi >= 0; mi--) {
+                                  const m = currentMessagesInner[mi];
+                                  if (m?.role === "user" && typeof m.text === "string" && m.text.includes("SpotCode:")) {
+                                    spotContext = m.text.trim();
+                                    break;
+                                  }
+                                }
+                                if (spotContext) {
+                                  // Strip any previous " | Book from" additions so we don't chain them
+                                  const cleanContext = spotContext.split("| Book from")[0].trim();
+                                  bookingMsg = `${cleanContext} | Book from ${bookingMsg}`;
+                                }
+
+                                console.log("📅 [Telemetry] Inline saving booking times. Sending message:", bookingMsg);
+                                sendTextDirectly(bookingMsg);
+
+                                // Reset inline bubble index to close the inline picker
+                                setActiveBookingBubbleIndex(null);
+                              }}
+                              onClose={() => {
+                                setActiveBookingBubbleIndex(null);
+                              }}
+                            />
+                          );
+                        })()}
 
                       </div>
                     </div>
                   );
-                })}
+                });
+              })()}
 
                 {isLoading && !(messages[messages.length - 1]?.role === "ai" && messages[messages.length - 1]?.streaming) && (() => {
                   const isDarkTheme = typeof window !== 'undefined' ? document.documentElement.getAttribute('data-theme') === 'dark' : (theme === 'dark');

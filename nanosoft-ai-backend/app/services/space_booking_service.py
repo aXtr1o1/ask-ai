@@ -1,6 +1,7 @@
 import logging
 import json
 import asyncio
+import re
 from typing import Optional
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage, AIMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -67,14 +68,41 @@ def _set_cached_spots(session_id: str, search_term: Optional[str], data: dict):
 
 
 def _lookup_spot_from_cache(session_id: Optional[str], spot_code: str) -> Optional[dict]:
-    """Find a spot's full details by SpotCode across all cached searches."""
-    if not session_id:
+    """Find a spot's full details by SpotCode across all cached searches (case-insensitive)."""
+    if not session_id or not spot_code:
         return None
+    
+    target_code = str(spot_code).strip().lower()
     sb_cache = memory_store.get(session_id, {}).get("sb_spot_cache", {})
     for cached_data in sb_cache.values():
         for spot in cached_data.get("p_list", []):
-            if spot.get("SpotCode") == spot_code:
+            cached_code = str(spot.get("SpotCode", "")).strip().lower()
+            if cached_code == target_code:
                 return spot
+    return None
+
+
+async def _verify_spot_async(session_id: Optional[str], spot_code: str, user_name: str) -> Optional[dict]:
+    """Verify spot from cache first. If not found, hit the DB (API) to get full data."""
+    if not spot_code:
+        return None
+    
+    # 1. Check cache
+    verified = _lookup_spot_from_cache(session_id, spot_code)
+    if verified:
+        return verified
+        
+    # 2. Not in cache -> hit the DB
+    logger.info("🔍 Spot %s not in cache, hitting DB for verification...", spot_code)
+    try:
+        api_result_str = await fetch_spots_api(user_name, spot_code)
+        api_result = json.loads(api_result_str)
+        target_code = str(spot_code).strip().lower()
+        for spot in api_result.get("p_list", []):
+            if str(spot.get("SpotCode", "")).strip().lower() == target_code:
+                return spot
+    except Exception as e:
+        logger.error("❌ Failed DB verification for spot %s: %s", spot_code, e)
     return None
 
 
@@ -110,7 +138,7 @@ class SpaceBookingService:
     def __init__(self):
         try:
             self.model = ChatGoogleGenerativeAI(
-                model=settings.GOOGLE_AI_MODEL,
+                model=settings.GOOGLE_SPACE_BOOKING_MODEL,
                 google_api_key=settings.GOOGLE_API_KEY,
                 temperature=0.0
             ).bind_tools([GET_SPOTS, BOOK_SPOT, GET_BOOKING_STATUS])
@@ -141,23 +169,76 @@ class SpaceBookingService:
 
             # Load & extend the real per-session conversation thread
             sb_thread = _get_sb_thread(session_id)
-            sb_thread.append(HumanMessage(content=current_query))
 
-            # Build prompt: system prompt + real thread only (no scoped memory noise)
-            sys_msg = SystemMessage(
-                content=self.system_prompt.content + f"\n\nCURRENT USER_NAME: {user_name}. If the user provides a Spot Code, do NOT call GET_SPOTS again; proceed directly to booking or providing details."
+
+
+            # Inject strict instruction to prevent the LLM from hallucinating bullet points from memory
+            injected_query = (
+                f"{current_query}\n\n"
+                f"[SYSTEM: EVERY SINGLE search or location query from the user MUST hit the cache by calling GET_SPOTS immediately. "
+                f"Even if they are just refining a previous search, you MUST call GET_SPOTS again. "
+                f"NEVER output bullet points or lists of spaces in your text response! The UI will render the list for you. "
+                f"Only GET_BOOKING_STATUS is allowed to use bullet points. "
+                f"If you do not call a tool, you MUST output a conversational response explaining what you need from the user.]"
             )
+            sb_thread.append(HumanMessage(content=injected_query))
+
+            # ── Just-in-Time (JIT) Dynamic Prompt Hydration ──
+            # Fetch active buildings dynamically from cache or API to load into LLM system prompt context
+            cached_all = _get_cached_spots(session_id, None) if session_id else None
+            if cached_all is None:
+                logger.info("🌐 JIT Context Hydration: Fetching spots list to extract active buildings")
+                try:
+                    all_spots_str = await fetch_spots_api(user_name, None)
+                    all_spots_data = json.loads(all_spots_str)
+                    if session_id and isinstance(all_spots_data, dict) and "p_list" in all_spots_data:
+                        _set_cached_spots(session_id, None, all_spots_data)
+                    cached_all = all_spots_data
+                except Exception as e:
+                    logger.error(f"❌ Failed JIT fetching: {e}")
+                    cached_all = {}
+
+            unique_buildings = []
+            if cached_all and isinstance(cached_all, dict) and "p_list" in cached_all:
+                unique_buildings = sorted(list(set(
+                    str(s.get("BuildingName")) for s in cached_all.get("p_list", []) if s.get("BuildingName")
+                )))
+
+            from datetime import datetime
+            current_date_str = datetime.now().strftime("%Y-%m-%d")
+
+            # Build prompt dynamically with injected live directory and strict guardrails
+            hydrated_content = (
+                self.system_prompt.content + 
+                f"\n\nTODAY'S DATE: {current_date_str}."
+                f"\nCURRENT USER_NAME: {user_name}."
+                "\nCRITICAL: If the user's message contains a specific Spot Code, you MUST call GET_SPOTS to verify it exists and retrieve its building and floor details. NEVER call BOOK_SPOT with unknown or hallucinated spot details. Once verified, ask them to 'use the calendar' to select a time."
+                "\nCRITICAL: If the user searches for any kind of space, keyword, or tries to refine the list, you MUST call GET_SPOTS immediately with their query as the search_term. Do NOT ask the user to narrow down their search before calling GET_SPOTS."
+                "\nCRITICAL: If the user's message is a conversational affirmation, confirmation, or agreement in response to your suggestion, do NOT call GET_SPOTS. Instead, ask them to specify which building or floor they would like to search or try."
+                "\nCRITICAL: If the user's message is a general intent to book, you MUST call GET_SPOTS immediately to show them the available options. Do NOT respond with conversational clarification questions. Just call the tool."
+                "\nCRITICAL: When asking the user for their booking times, you MUST include the exact phrase 'use the calendar' in your response. Do NOT ask the user to type, share, write, or tell you their start and end time manually."
+                "\nCRITICAL: Never call BOOK_SPOT unless the COMPLETE date (including the year) and the time have been provided by the user (either in their latest message, or established in the recent conversation history) or via a structured calendar message. If the user provides a month and day but NOT the year, you MUST NOT call BOOK_SPOT. Instead, ask the user to confirm the year for their booking."
+                f"\nCRITICAL: If the user requests a booking for a date or time that is in the past (before {current_date_str}), you MUST NOT call BOOK_SPOT. Instead, reply immediately: 'You cannot create a booking for a past date. Please select a present or future date.'"
+                "\nCRITICAL: If the user's message contains all required details (spot code, date, and time), or if the user gives a confirmation like 'book it', 'yes', or 'proceed' and the details are already in the conversation history, you MUST call BOOK_SPOT immediately. Do NOT ask 'How would you like to proceed?' or ask for further confirmation in this scenario."
+            )
+            if unique_buildings:
+                hydrated_content += f"\n\nLIVE ACTIVE BUILDINGS DIRECTORY TODAY (DYNAMIC): {', '.join(unique_buildings)}"
+
+            sys_msg = SystemMessage(content=hydrated_content)
             prompt_messages = [sys_msg] + sb_thread
 
             # First model invoke
             ai_msg = await self.model.ainvoke(prompt_messages)
 
             tool_data = None
+            last_tool_called = None
+            booking_status_data = None
 
             if ai_msg.tool_calls:
                 prompt_messages.append(ai_msg)
 
                 for tc in ai_msg.tool_calls:
+                    last_tool_called = tc["name"]
 
                     # ── GET_SPOTS ─────────────────────────────────────────────
                     if tc["name"] == "GET_SPOTS":
@@ -174,14 +255,14 @@ class SpaceBookingService:
                             # or building name after already fetching all spots in the session.
                             all_cached = _get_cached_spots(session_id, None) if session_id else None
                             if all_cached is not None and s_term and str(s_term).strip():
-                                import re as _re
-                                clean_search = _re.sub(r'[^a-z0-9]', '', str(s_term).lower())
+                                clean_search = str(s_term).strip().lower()
                                 p_list_all = all_cached.get("p_list", [])
                                 filtered = [
                                     spot for spot in p_list_all
-                                    if clean_search in _re.sub(r'[^a-z0-9]', '', str(spot.get("BuildingName", "")).lower())
-                                    or clean_search in _re.sub(r'[^a-z0-9]', '', str(spot.get("SpotCode", "")).lower())
-                                    or clean_search in _re.sub(r'[^a-z0-9]', '', str(spot.get("SpotName", "")).lower())
+                                    if clean_search in str(spot.get("BuildingName", "")).lower()
+                                    or clean_search in str(spot.get("SpotCode", "")).lower()
+                                    or clean_search in str(spot.get("SpotName", "")).lower()
+                                    or clean_search in str(spot.get("FloorName", "")).lower()
                                 ]
                                 tool_data = {"TotalCount": len(filtered), "p_list": filtered}
                                 tool_result_str = json.dumps(tool_data)
@@ -198,16 +279,24 @@ class SpaceBookingService:
                                 if session_id and isinstance(tool_data, dict) and "p_list" in tool_data:
                                     _set_cached_spots(session_id, s_term, tool_data)
 
-                        # Send only 4 compressed fields to LLM
+                        # Send only 4 compressed fields to LLM (Stateless In-Context Retrieval / Ephemeral RAG)
                         if isinstance(tool_data, dict) and "p_list" in tool_data:
                             compressed = [
                                 {f: s.get(f) for f in _TABLE_FIELDS}
                                 for s in tool_data.get("p_list", [])
                             ]
-                            llm_content = json.dumps({
+                            llm_payload = {
                                 "TotalCount": tool_data.get("TotalCount"),
                                 "spots": compressed
-                            })
+                            }
+                            # If search term doesn't match any spots, dynamically inject the unique buildings directory
+                            if tool_data.get("TotalCount") == 0:
+                                all_spots_cache = _get_cached_spots(session_id, None) if session_id else None
+                                if all_spots_cache and "p_list" in all_spots_cache:
+                                    llm_payload["available_buildings"] = sorted(list(set(
+                                        str(s.get("BuildingName")) for s in all_spots_cache.get("p_list", []) if s.get("BuildingName")
+                                    )))
+                            llm_content = json.dumps(llm_payload)
                         else:
                             llm_content = tool_result_str
 
@@ -224,15 +313,21 @@ class SpaceBookingService:
                         if sub_user_name:
                             args["sub_user_name"] = sub_user_name
 
-                        # ── Verify spot details from cache (prevents hallucination) ─
+                        # ── Verify spot details from cache or DB (prevents hallucination) ─
                         spot_code_req = args.get("spot_code", "")
-                        verified = _lookup_spot_from_cache(session_id, spot_code_req)
+                        verified = await _verify_spot_async(session_id, spot_code_req, user_name)
                         if verified:
                             args["spot_name"]     = verified.get("SpotName", args.get("spot_name"))
                             args["building_name"] = verified.get("BuildingName", args.get("building_name"))
                             args["floor_name"]    = verified.get("FloorName", args.get("floor_name"))
-                            logger.info("✅ Spot verified from cache: %s → %s", spot_code_req, args["spot_name"])
-                        tool_result_str = await BOOK_SPOT.ainvoke(args)
+                            logger.info("✅ Spot verified: %s → %s", spot_code_req, args["spot_name"])
+                            tool_result_str = await BOOK_SPOT.ainvoke(args)
+                        else:
+                            logger.warning("❌ Spot hallucinated or invalid: %s", spot_code_req)
+                            tool_result_str = json.dumps({
+                                "success": False,
+                                "error": "Invalid SpotCode. You MUST search and verify the spot using GET_SPOTS first before booking."
+                            })
 
                         try:
                             parsed_res = json.loads(tool_result_str)
@@ -248,14 +343,14 @@ class SpaceBookingService:
                                         "instruction": (
                                             f"Time not provided. Ask the user warmly for their preferred time "
                                             f"for booking {spot_code} at {building}. "
-                                            f"Do NOT call BOOK_SPOT again until they reply with a time."
+                                            f"CRITICAL: You MUST include the exact phrase 'use the calendar' in your response."
                                         )
                                     })
                                 ))
                                 ai_msg2 = await self.model.ainvoke(prompt_messages)
                                 time_ask = ai_msg2.content or (
                                     f"When would you like to book **{spot_code}** at **{building}**? "
-                                    f"(e.g. 10am, 2pm–4pm, morning)"
+                                    f"Please use the calendar to select your preferred start and end time."
                                 )
                                 logger.info("⏰ Missing time — asking: %s", time_ask[:100])
                                 sb_thread.append(AIMessage(content=time_ask))
@@ -278,6 +373,10 @@ class SpaceBookingService:
                         args["user_name"] = user_name
                         tool_result_str = await GET_BOOKING_STATUS.ainvoke(args)
                         logger.info("🔍 GET_BOOKING_STATUS result: %s", tool_result_str[:200])
+                        try:
+                            booking_status_data = json.loads(tool_result_str)
+                        except Exception as e:
+                            logger.error("Failed to parse GET_BOOKING_STATUS result: %s", e)
 
                         prompt_messages.append(ToolMessage(
                             name=tc["name"], tool_call_id=tc["id"], content=tool_result_str
@@ -286,6 +385,38 @@ class SpaceBookingService:
                 # Final model response
                 ai_msg2 = await self.model.ainvoke(prompt_messages)
                 content = _extract_content(ai_msg2)
+
+                # ── Fast-path: single-spot GET_SPOTS result + empty ai_msg2 ──────────────────
+                # When the user says "book this GPRF-KFC" (spot code without SpotCode: prefix),
+                # the LLM correctly finds the spot via GET_SPOTS but then returns empty content.
+                # Instead of hitting the generic fallback, synthesize the Stage 3 calendar
+                # confirmation directly from the cached spot data — no extra LLM call needed.
+                if (
+                    not content.strip()
+                    and not ai_msg2.tool_calls
+                    and last_tool_called == "GET_SPOTS"
+                    and tool_data
+                    and isinstance(tool_data.get("p_list"), list)
+                    and len(tool_data["p_list"]) == 1
+                ):
+                    spot = tool_data["p_list"][0]
+                    s_code  = spot.get("SpotCode", "")
+                    s_name  = spot.get("SpotName", "the spot")
+                    s_bldg  = spot.get("BuildingName", "the building")
+                    s_floor = spot.get("FloorName", "")
+                    floor_part = f", {s_floor}" if s_floor else ""
+                    content = (
+                        f"Great choice! I have found {s_name} (Spot Code: {s_code}) "
+                        f"at {s_bldg}{floor_part}. "
+                        f"To complete your booking, please use the calendar to select "
+                        f"your preferred start and end date and time."
+                    )
+                    logger.info(
+                        "⚡ Fast-path Stage-3: single-spot GET_SPOTS → calendar prompt | spot=%s", s_code
+                    )
+                    sb_thread.append(AIMessage(content=content))
+                    _save_sb_thread(session_id, sb_thread)
+                    return content, content, messages
 
                 # ── Handle the case where the model makes ANOTHER tool call instead of replying ──
                 # This happens when the LLM skips Phase 2 and tries to call BOOK_SPOT immediately
@@ -301,16 +432,21 @@ class SpaceBookingService:
                             if sub_user_name:
                                 args2["sub_user_name"] = sub_user_name
 
-                            # Verify spot from cache to prevent hallucination
+                            # Verify spot from cache or DB to prevent hallucination
                             spot_code_req2 = args2.get("spot_code", "")
-                            verified2 = _lookup_spot_from_cache(session_id, spot_code_req2)
+                            verified2 = await _verify_spot_async(session_id, spot_code_req2, user_name)
                             if verified2:
                                 args2["spot_name"]     = verified2.get("SpotName", args2.get("spot_name"))
                                 args2["building_name"] = verified2.get("BuildingName", args2.get("building_name"))
                                 args2["floor_name"]    = verified2.get("FloorName", args2.get("floor_name"))
-                                logger.info("✅ Spot verified from cache (round-2): %s → %s", spot_code_req2, args2["spot_name"])
-
-                            tool_result2_str = await BOOK_SPOT.ainvoke(args2)
+                                logger.info("✅ Spot verified (round-2): %s → %s", spot_code_req2, args2["spot_name"])
+                                tool_result2_str = await BOOK_SPOT.ainvoke(args2)
+                            else:
+                                logger.warning("❌ Spot hallucinated or invalid (round-2): %s", spot_code_req2)
+                                tool_result2_str = json.dumps({
+                                    "success": False,
+                                    "error": "Invalid SpotCode. You MUST search and verify the spot using GET_SPOTS first before booking."
+                                })
                             try:
                                 parsed2 = json.loads(tool_result2_str)
                                 if parsed2.get("error_type") == "missing_time":
@@ -323,13 +459,13 @@ class SpaceBookingService:
                                             "instruction": (
                                                 f"Time not provided. Ask the user warmly for their preferred time "
                                                 f"for booking {spot_code2} at {building2}. "
-                                                f"Do NOT call BOOK_SPOT again until they reply with a time."
+                                                f"CRITICAL: You MUST include the exact phrase 'use the calendar' in your response."
                                             )
                                         })
                                     ))
                                     ai_msg3 = await self.model.ainvoke(prompt_messages)
                                     time_ask = ai_msg3.content or (
-                                        f"Almost there! Just let me know your preferred start and end time "
+                                        f"Almost there! Please use the calendar to select your preferred start and end time "
                                         f"for {spot_code2} at {building2} and I will get it confirmed."
                                     )
                                     logger.info("⏰ Round-2 missing time — asking: %s", time_ask[:100])
@@ -358,26 +494,17 @@ class SpaceBookingService:
                     ai_msg3 = await self.model.ainvoke(prompt_messages)
                     content = _extract_content(ai_msg3)
 
-                if not content.strip():
-                    # Last-resort fallback — build a sensible message from context
-                    spot_hint = ""
-                    if tool_data and "p_list" in tool_data and tool_data["p_list"]:
-                        spot = tool_data["p_list"][0]
-                        spot_hint = (
-                            f" for {spot.get('SpotName', '')} ({spot.get('SpotCode', '')}) "
-                            f"at {spot.get('BuildingName', '')}"
-                        )
-                    content = (
-                        f"Great news! I have found the space{spot_hint}. "
-                        f"Would you like me to go ahead and book it? "
-                        f"If so, please share your preferred start and end time."
-                    )
-                    logger.warning("⚠️ Empty content fallback used — check model output")
+
 
                 # Manage thread after tool response
                 try:
                     last_result = json.loads(prompt_messages[-1].content)
                     if last_result.get("success"):
+                        # If LLM didn't generate a conversational confirmation, provide one
+                        if not content.strip():
+                            b_id = last_result.get('booking_id', '')
+                            content = f"Your spot has been successfully booked! (Booking ID: {b_id})" if b_id else "Your spot has been successfully booked!"
+                            
                         # Booking done — reset for next flow
                         sb_thread.append(AIMessage(content=content))
                         _save_sb_thread(session_id, sb_thread)
@@ -397,9 +524,13 @@ class SpaceBookingService:
                     # For large result sets (>8), override the AI summary with a short message
                     # so the AI doesn't dump the full list into the text — the tiles handle display
                     if total > 8:
-                        building_name = p_list[0].get("BuildingName", "this building") if p_list else "this building"
+                        unique_bldgs = sorted(list(set(s.get("BuildingName") for s in p_list if s.get("BuildingName"))))
+                        if len(unique_bldgs) == 1:
+                            building_label = f"at {unique_bldgs[0]}"
+                        else:
+                            building_label = "across our locations"
                         summary = (
-                            f"You've got {total} spaces available at {building_name}. "
+                            f"You've got {total} spaces available {building_label}. "
                             f"Browse the options below and let me know which Spot Code you'd like — "
                             f"I'll get it booked for you right away!"
                         )
@@ -413,16 +544,18 @@ class SpaceBookingService:
                     }
                     return json.dumps(final_response), summary, messages
                 else:
+                    # Final fallback if LLM is completely silent
+                    if not content.strip():
+                        content = "I'm sorry, I couldn't find any spots matching that description. Could you try a different name or area?"
                     return content, content, messages
 
 
             # No tool called — pure conversational
             content = _extract_content(ai_msg)
+            
             if not content.strip():
-                content = (
-                    "I'm here to help you book a space! "
-                    "Which building or Spot Code are you looking for?"
-                )
+                content = "I'm sorry, I couldn't find any spots matching that description. Could you try a different name or area?"
+
             sb_thread.append(AIMessage(content=content))
             _save_sb_thread(session_id, sb_thread)
             return content, content, messages

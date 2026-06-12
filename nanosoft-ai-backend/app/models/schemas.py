@@ -336,16 +336,16 @@ class BookSpotInput(BaseModel):
     spot_name: Optional[str] = Field(default="Unknown Spot", description="The name of the spot.")
     building_name: Optional[str] = Field(default="Unknown Building", description="The name of the building where the spot is located.")
     floor_name: Optional[str] = Field(default="Unknown Floor", description="The floor where the spot is located.")
-    start_time: Optional[str] = Field(default=None, description="Booking start datetime. Extracted from user input, e.g. '2026-06-04 10:00' or '10am'. If not provided, leave empty and ask the user.")
-    end_time: Optional[str] = Field(default=None, description="Booking end datetime. Extracted from user input, e.g. '2026-06-04 14:00' or '2pm'. If not provided, leave empty and ask the user.")
+    start_time: str = Field(description="Booking start datetime. MUST be explicitly extracted from user input or calendar (e.g. '2026-06-04 10:00:00'). NEVER guess or omit.")
+    end_time: str = Field(description="Booking end datetime (e.g. '2026-06-04 14:00:00'). If the user provides an end time but no end date, assume the end date is the same as the start date.")
 
 class GetSpotsInput(BaseModel):
     user_name: str = Field(description="The client_name/user_name from the frontend context.")
     search_term: Optional[str] = Field(
-        default=None,
-        description="The Spot Code (e.g. WRMF-NES) or Building Name to search for. Always extract this from the user's query."
+        default="",
+        description="The Spot Code, Spot Name, or Building Name. If the user does not specify a location, pass an empty string '' to show all options."
     )
 
 class GetBookingStatusInput(BaseModel):
     user_name: str = Field(description="The client_name/user_name from the frontend context.")
-    booking_id: str = Field(description="The 4-digit booking ID provided by the user to check their booking status.")
+    booking_id: Optional[str] = Field(default=None, description="The 4-digit booking ID provided by the user. If omitted, returns all bookings for the user.")
