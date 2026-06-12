@@ -4753,11 +4753,11 @@ export default function Home() {
                           <>{(() => {
                             if (isUser && msg.text.includes("[CALENDAR_PAYLOAD]")) {
                               const match = msg.text.match(/start_time:\s*"([^"]+)",\s*end_time:\s*"([^"]+)"/);
-                              const context = msg.text.split("| Book from")[0].trim();
+                              const prefix = msg.text.split("[CALENDAR_PAYLOAD]")[0].trim();
                               if (match) {
-                                return `${context} | Book from ${match[1]} to ${match[2]}`;
+                                return prefix ? `${prefix} | Book from ${match[1]} to ${match[2]}` : `Book from ${match[1]} to ${match[2]}`;
                               }
-                              return msg.text.split("[CALENDAR_PAYLOAD]")[0].trim();
+                              return prefix;
                             }
                             return msg.text;
                           })()}</>

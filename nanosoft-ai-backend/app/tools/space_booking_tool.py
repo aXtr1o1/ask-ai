@@ -197,15 +197,17 @@ def _fetch_booking_sync(booking_id: str, user_name: str) -> str:
                 else:
                     return json.dumps({"found": False, "booking_id": booking_id})
             else:
+                from datetime import datetime
+                current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 cur.execute(
                     """
                     SELECT booking_id, client_name, sub_user_name,
                            spot_code, spot_name, building_name, floor_name, start_time, end_time
                     FROM space_bookings
-                    WHERE client_name = %s AND end_time::timestamp >= CURRENT_TIMESTAMP
+                    WHERE client_name = %s AND end_time >= %s
                     ORDER BY start_time ASC
                     """,
-                    (user_name,)
+                    (user_name, current_time_str)
                 )
                 rows = cur.fetchall()
                 bookings = []
@@ -252,8 +254,8 @@ def _insert_booking(booking_data: dict) -> str:
                 FROM space_bookings
                 WHERE client_name = %s 
                   AND spot_code = %s
-                  AND (start_time::timestamp < %s::timestamp)
-                  AND (end_time::timestamp > %s::timestamp)
+                  AND (start_time < %s)
+                  AND (end_time > %s)
                 """,
                 (
                     booking_data.get("user_name"),
