@@ -281,14 +281,14 @@ class SpaceBookingService:
                 f"\nCURRENT INDIA TIME: {current_time_str}."
                 f"\nCRITICAL: You are operating in India Time. If the user asks for a time that has ALREADY PASSED according to the CURRENT INDIA TIME, you MUST NOT call BOOK_SPOT. Tell them they cannot book in the past."
                 f"\nCURRENT USER_NAME: {user_name}."
-                "\nCRITICAL: If the user's message contains a specific Spot Code, you MUST call GET_SPOTS to verify it exists and retrieve its building and floor details. NEVER call BOOK_SPOT with unknown or hallucinated spot details. Once verified, ask them to 'use the calendar' to select a time."
-                "\nCRITICAL: If the user searches for any kind of space, keyword, or tries to refine the list, you MUST call GET_SPOTS immediately with their query as the search_term. Do NOT ask the user to narrow down their search before calling GET_SPOTS."
+                "\nCRITICAL: If the user's message contains a specific Spot Code but does NOT contain the calendar booking payload ([CALENDAR_PAYLOAD]), you MUST call GET_SPOTS to verify it exists and retrieve its building and floor details. NEVER call BOOK_SPOT with unknown or hallucinated spot details. Once verified, ask them to 'use the calendar' to select a time."
+                "\nCRITICAL: If the user searches for any kind of space, keyword, floor name, or tries to refine the list (e.g., 'floor 6', 'floor6', 'Building 1'), you MUST call GET_SPOTS immediately. You MUST pass the user's query exactly as entered (including single squished words like 'floor6') as the search_term. Do NOT pass an empty string, None, or modify the query before calling GET_SPOTS."
                 "\nCRITICAL: If the user's message is a conversational affirmation, confirmation, or agreement in response to your suggestion, do NOT call GET_SPOTS. Instead, ask them to specify which building or floor they would like to search or try."
                 "\nCRITICAL: If the user's message is a general intent to book, you MUST call GET_SPOTS immediately to show them the available options. Do NOT respond with conversational clarification questions. Just call the tool."
                 "\nCRITICAL: When asking the user for their booking times, you MUST include the exact phrase 'use the calendar' in your response. Do NOT ask the user to type, share, write, or tell you their start and end time manually."
                 "\nCRITICAL: Never call BOOK_SPOT unless the COMPLETE date (including the year) and the time have been provided by the user (either in their latest message, or established in the recent conversation history) or via a structured calendar message. If the user provides a month and day but NOT the year, you MUST NOT call BOOK_SPOT. Instead, ask the user to confirm the year for their booking."
                 f"\nCRITICAL: If the user requests a booking for a date or time that is in the past (before {current_date_str}), you MUST NOT call BOOK_SPOT. Instead, reply immediately: 'You cannot create a booking for a past date. Please select a present or future date.'"
-                "\nCRITICAL: If the user's message contains all required details (spot code, date, and time), or if the user gives a confirmation like 'book it', 'yes', or 'proceed' and the details are already in the conversation history, you MUST call BOOK_SPOT immediately. Do NOT ask 'How would you like to proceed?' or ask for further confirmation in this scenario."
+                "\nCRITICAL: If the calendar booking payload ([CALENDAR_PAYLOAD]) is present in the user message (e.g. '[CALENDAR_PAYLOAD] start_time: ...'), this means the user used the calendar UI. You MUST call BOOK_SPOT immediately using the start_time and end_time from the payload (even if they are in 24-hour format). You MUST NOT ask for AM/PM confirmation, and you MUST NOT call GET_SPOTS. Only ask for AM/PM confirmation if the user typed dates/times via conversational text without any '[CALENDAR_PAYLOAD]' present."
             )
             if unique_buildings:
                 hydrated_content += f"\n\nLIVE ACTIVE BUILDINGS DIRECTORY TODAY (DYNAMIC): {', '.join(unique_buildings)}"
@@ -313,34 +313,42 @@ class SpaceBookingService:
                     if tc["name"] == "GET_SPOTS":
                         s_term = tc["args"].get("search_term")
 
-                        cached = _get_cached_spots(session_id, s_term) if session_id else None
-                        if cached is not None:
-                            logger.info("📦 Cache HIT — skipping API")
-                            tool_data = cached
-                            tool_result_str = json.dumps(cached)
+                        if "[CALENDAR_PAYLOAD]" in current_query:
+                            logger.warning("⚠️ Programmatically blocked GET_SPOTS call during [CALENDAR_PAYLOAD] processing")
+                            tool_data = {"TotalCount": 0, "p_list": []}
+                            tool_result_str = json.dumps({
+                                "success": False,
+                                "error": "GET_SPOTS is disabled when a booking calendar payload is present. You MUST call BOOK_SPOT immediately."
+                            })
                         else:
-                            # ── Before hitting the API, try filtering the __all__ cache locally ──
-                            # Prevents a second API call when the model searches with a spot code
-                            # or building name after already fetching all spots in the session.
-                            all_cached = _get_cached_spots(session_id, None) if session_id else None
-                            if all_cached is not None and s_term and str(s_term).strip():
-                                from app.tools.space_booking_tool import fuzzy_filter_spots
-                                p_list_all = all_cached.get("p_list", [])
-                                filtered = fuzzy_filter_spots(s_term, p_list_all)
-                                tool_data = {"TotalCount": len(filtered), "p_list": filtered}
-                                tool_result_str = json.dumps(tool_data)
-                                if session_id:
-                                    _set_cached_spots(session_id, s_term, tool_data)
-                                logger.info("📦 Filtered from __all__ cache (no API call) | matches=%d", len(filtered))
+                            cached = _get_cached_spots(session_id, s_term) if session_id else None
+                            if cached is not None:
+                                logger.info("📦 Cache HIT — skipping API")
+                                tool_data = cached
+                                tool_result_str = json.dumps(cached)
                             else:
-                                logger.info("🌐 Cache MISS — calling API")
-                                tool_result_str = await fetch_spots_api(user_name, s_term)
-                                try:
-                                    tool_data = json.loads(tool_result_str)
-                                except Exception:
-                                    tool_data = {"error": "Invalid JSON"}
-                                if session_id and isinstance(tool_data, dict) and "p_list" in tool_data:
-                                    _set_cached_spots(session_id, s_term, tool_data)
+                                # ── Before hitting the API, try filtering the __all__ cache locally ──
+                                # Prevents a second API call when the model searches with a spot code
+                                # or building name after already fetching all spots in the session.
+                                all_cached = _get_cached_spots(session_id, None) if session_id else None
+                                if all_cached is not None and s_term and str(s_term).strip():
+                                    from app.tools.space_booking_tool import fuzzy_filter_spots
+                                    p_list_all = all_cached.get("p_list", [])
+                                    filtered = fuzzy_filter_spots(s_term, p_list_all)
+                                    tool_data = {"TotalCount": len(filtered), "p_list": filtered}
+                                    tool_result_str = json.dumps(tool_data)
+                                    if session_id:
+                                        _set_cached_spots(session_id, s_term, tool_data)
+                                    logger.info("📦 Filtered from __all__ cache (no API call) | matches=%d", len(filtered))
+                                else:
+                                    logger.info("🌐 Cache MISS — calling API")
+                                    tool_result_str = await fetch_spots_api(user_name, s_term)
+                                    try:
+                                        tool_data = json.loads(tool_result_str)
+                                    except Exception:
+                                        tool_data = {"error": "Invalid JSON"}
+                                    if session_id and isinstance(tool_data, dict) and "p_list" in tool_data:
+                                        _set_cached_spots(session_id, s_term, tool_data)
 
                         # Send only 4 compressed fields to LLM (Stateless In-Context Retrieval / Ephemeral RAG)
                         if isinstance(tool_data, dict) and "p_list" in tool_data:

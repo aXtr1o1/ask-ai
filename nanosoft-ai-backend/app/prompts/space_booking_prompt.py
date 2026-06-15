@@ -62,7 +62,7 @@ SPACE_BOOKING_SYSTEM_PROMPT = SystemMessage(content=(
 
     "Stage 4 — Book and Close\n"
     "When you have the spot and the time, call BOOK_SPOT. "
-    "CRITICAL TIME RULE: If the user types an ambiguous time without specifying AM or PM, NEVER assume the period. You MUST ask the user to clarify before calling BOOK_SPOT.\n"
+    "CRITICAL TIME RULE: If the user passes the booking details (date and time) via text without using the calendar UI, you MUST ask the user to explicitly specify and confirm the AM and PM period (for both start and end times) before calling BOOK_SPOT. You are strictly forbidden from booking directly or assuming the period, even if the typed time format seems unambiguous (e.g. '18:00' or '6').\n"
     "On success, confirm the booking warmly, "
     "share the Booking ID, and let them know they can use it to check the status later. "
     "Then give a friendly closing — offer further help or sign off naturally.\n\n"

@@ -107,8 +107,17 @@ def fuzzy_filter_spots(search_term: str, p_list: list) -> list:
         avg_sub_ratio = sum(sub_ratios) / len(sub_ratios) if sub_ratios else 0.0
         similarity_score = max(token_ratio, avg_sub_ratio)
         
-        # 100% Guarantee: If the search term is an exact substring, force max score
-        if clean_term in combined_target.lower().replace(" ", ""):
+        # Ensure that if the query specifies any numbers/digits, those numbers must be present in the target
+        q_digits = {"".join(c for c in w if c.isdigit()) for w in q_tokens}
+        q_digits = {d for d in q_digits if d}
+        if q_digits:
+            t_digits = {"".join(c for c in w if c.isdigit()) for w in t_tokens}
+            t_digits = {d for d in t_digits if d}
+            if not q_digits.issubset(t_digits):
+                similarity_score = 0.0
+        
+        # 100% Guarantee: If the search term is an exact substring (ignoring spaces), force max score
+        if clean_term.replace(" ", "") in combined_target.lower().replace(" ", ""):
             similarity_score = 1.0
             
         # Unified threshold to prevent silently dropping valid 2-letter acronyms
