@@ -167,8 +167,72 @@ class SpaceBookingService:
                     break
             logger.info("📝 Query: %s", current_query[:120])
 
+            # ── Dynamic Spot Cache Injection for Direct/Metadata Queries ──
+            if "SpotCode: " in current_query and session_id:
+                import re
+                s_code_match = re.search(r"SpotCode:\s*([^,|]+)", current_query)
+                if s_code_match:
+                    s_code = s_code_match.group(1).strip()
+                    s_name_match = re.search(r"SpotName:\s*([^,|]+)", current_query)
+                    s_name = s_name_match.group(1).strip() if s_name_match else "the spot"
+                    s_bldg_match = re.search(r"BuildingName:\s*([^,|]+)", current_query)
+                    s_bldg = s_bldg_match.group(1).strip() if s_bldg_match else "the building"
+                    s_floor_match = re.search(r"FloorName:\s*([^,|]+)", current_query)
+                    s_floor = s_floor_match.group(1).strip() if s_floor_match else ""
+                    
+                    spot_dict = {
+                        "SpotCode": s_code,
+                        "SpotName": s_name,
+                        "BuildingName": s_bldg,
+                        "FloorName": s_floor
+                    }
+                    
+                    # Inject into both __all__ cache and term-specific cache to bypass API verification
+                    cache_all = _get_cached_spots(session_id, None)
+                    if not cache_all:
+                        cache_all = {"TotalCount": 0, "p_list": []}
+                    
+                    exists = False
+                    for existing_spot in cache_all.get("p_list", []):
+                        if str(existing_spot.get("SpotCode")).strip().lower() == s_code.lower():
+                            exists = True
+                            break
+                    if not exists:
+                        cache_all["p_list"].append(spot_dict)
+                        cache_all["TotalCount"] = len(cache_all["p_list"])
+                        _set_cached_spots(session_id, None, cache_all)
+                    
+                    _set_cached_spots(session_id, s_code, {"TotalCount": 1, "p_list": [spot_dict]})
+                    logger.info("✅ Dynamically cached clicked spot metadata: SpotCode=%s, SpotName=%s", s_code, s_name)
+
             # Load & extend the real per-session conversation thread
             sb_thread = _get_sb_thread(session_id)
+
+            # ── Fast-path for direct tile clicks ──
+            if current_query.startswith("SpotCode: ") and "[CALENDAR_PAYLOAD]" not in current_query:
+                import re
+                s_code_match = re.search(r"SpotCode:\s*([^,]+)", current_query)
+                if s_code_match:
+                    s_code = s_code_match.group(1).strip()
+                    s_name_match = re.search(r"SpotName:\s*([^,]+)", current_query)
+                    s_name = s_name_match.group(1).strip() if s_name_match else "the spot"
+                    s_bldg_match = re.search(r"BuildingName:\s*([^,]+)", current_query)
+                    s_bldg = s_bldg_match.group(1).strip() if s_bldg_match else "the building"
+                    s_floor_match = re.search(r"FloorName:\s*(.*)", current_query)
+                    s_floor = s_floor_match.group(1).strip() if s_floor_match else ""
+                    
+                    floor_part = f", {s_floor}" if s_floor else ""
+                    content = (
+                        f"Great choice! You've selected {s_name} (Spot Code: {s_code}) "
+                        f"at {s_bldg}{floor_part}. "
+                        f"To complete your booking, please use the calendar to select "
+                        f"your preferred start and end time."
+                    )
+                    logger.info("⚡ Fast-path (Direct Click): bypassing LLM for spot=%s", s_code)
+                    sb_thread.append(HumanMessage(content=current_query))
+                    sb_thread.append(AIMessage(content=content))
+                    _save_sb_thread(session_id, sb_thread)
+                    return content, content, messages
 
 
 
@@ -204,13 +268,18 @@ class SpaceBookingService:
                     str(s.get("BuildingName")) for s in cached_all.get("p_list", []) if s.get("BuildingName")
                 )))
 
-            from datetime import datetime
-            current_date_str = datetime.now().strftime("%Y-%m-%d")
+            from datetime import datetime, timezone, timedelta
+            # Calculate current India time (UTC+5:30)
+            current_ist_time = datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)
+            current_date_str = current_ist_time.strftime("%Y-%m-%d")
+            current_time_str = current_ist_time.strftime("%Y-%m-%d %I:%M %p (India Time)")
 
             # Build prompt dynamically with injected live directory and strict guardrails
             hydrated_content = (
                 self.system_prompt.content + 
-                f"\n\nTODAY'S DATE: {current_date_str}."
+                f"\n\nCURRENT DATE: {current_date_str}."
+                f"\nCURRENT INDIA TIME: {current_time_str}."
+                f"\nCRITICAL: You are operating in India Time. If the user asks for a time that has ALREADY PASSED according to the CURRENT INDIA TIME, you MUST NOT call BOOK_SPOT. Tell them they cannot book in the past."
                 f"\nCURRENT USER_NAME: {user_name}."
                 "\nCRITICAL: If the user's message contains a specific Spot Code, you MUST call GET_SPOTS to verify it exists and retrieve its building and floor details. NEVER call BOOK_SPOT with unknown or hallucinated spot details. Once verified, ask them to 'use the calendar' to select a time."
                 "\nCRITICAL: If the user searches for any kind of space, keyword, or tries to refine the list, you MUST call GET_SPOTS immediately with their query as the search_term. Do NOT ask the user to narrow down their search before calling GET_SPOTS."
@@ -255,15 +324,9 @@ class SpaceBookingService:
                             # or building name after already fetching all spots in the session.
                             all_cached = _get_cached_spots(session_id, None) if session_id else None
                             if all_cached is not None and s_term and str(s_term).strip():
-                                clean_search = str(s_term).strip().lower()
+                                from app.tools.space_booking_tool import fuzzy_filter_spots
                                 p_list_all = all_cached.get("p_list", [])
-                                filtered = [
-                                    spot for spot in p_list_all
-                                    if clean_search in str(spot.get("BuildingName", "")).lower()
-                                    or clean_search in str(spot.get("SpotCode", "")).lower()
-                                    or clean_search in str(spot.get("SpotName", "")).lower()
-                                    or clean_search in str(spot.get("FloorName", "")).lower()
-                                ]
+                                filtered = fuzzy_filter_spots(s_term, p_list_all)
                                 tool_data = {"TotalCount": len(filtered), "p_list": filtered}
                                 tool_result_str = json.dumps(tool_data)
                                 if session_id:

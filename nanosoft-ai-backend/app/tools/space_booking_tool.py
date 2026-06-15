@@ -26,6 +26,100 @@ def _get_client_config_sync(user_name: str):
     return None
 
 
+def fuzzy_filter_spots(search_term: str, p_list: list) -> list:
+    if not search_term or not str(search_term).strip():
+        return p_list
+
+    clean_term = str(search_term).strip().lower()
+
+    # 1. Exact match on SpotCode (highest priority)
+    exact_matches = [s for s in p_list if str(s.get("SpotCode", "")).strip().lower() == clean_term]
+    if exact_matches:
+        return exact_matches
+        
+    # 2. Exact match on SpotName
+    exact_names = [s for s in p_list if str(s.get("SpotName", "")).strip().lower() == clean_term]
+    if exact_names:
+        return exact_names
+
+    import re
+    from difflib import SequenceMatcher
+
+    def tokenize(text):
+        cleaned = re.sub(r'[^a-z0-9\s]', ' ', str(text).lower())
+        return [w for w in cleaned.split() if w]
+
+    q_tokens = tokenize(clean_term)
+    if not q_tokens:
+        return p_list
+
+    fuzzy_matches = []
+    for s in p_list:
+        def get_val(s_dict, key):
+            for k, v in s_dict.items():
+                if k.lower() == key.lower() and v:
+                    return str(v)
+            return ''
+
+        combined_target = f"{get_val(s, 'BuildingName')} {get_val(s, 'SpotCode')} {get_val(s, 'SpotName')} {get_val(s, 'FloorName')}"
+        t_tokens = tokenize(combined_target)
+
+        if not t_tokens:
+            continue
+
+        intersection = set(q_tokens).intersection(set(t_tokens))
+        diff_q = set(q_tokens).difference(set(t_tokens))
+        diff_t = set(t_tokens).difference(set(q_tokens))
+
+        sorted_inter = sorted(list(intersection))
+        sorted_diff_q = sorted(list(diff_q))
+        sorted_diff_t = sorted(list(diff_t))
+
+        base_inter = " ".join(sorted_inter)
+        base_q = base_inter + " " + " ".join(sorted_diff_q) if sorted_diff_q else base_inter
+        base_t = base_inter + " " + " ".join(sorted_diff_t) if sorted_diff_t else base_inter
+
+        r1 = SequenceMatcher(None, base_q.strip(), base_t.strip()).ratio()
+        r2 = SequenceMatcher(None, base_inter.strip(), base_q.strip()).ratio()
+        r3 = SequenceMatcher(None, base_inter.strip(), base_t.strip()).ratio()
+        token_ratio = max(r1, r2, r3)
+
+        sub_ratios = []
+        q_squished = "".join(q_tokens)
+        t_squished = "".join(t_tokens)
+        sub_ratios.append(SequenceMatcher(None, q_squished, t_squished).ratio())
+
+        for qw in q_tokens:
+            best_sub = 0.0
+            for tw in t_tokens:
+                if qw == tw:
+                    best_sub = 1.0
+                elif qw in tw or tw in qw:
+                    # Penalize short substrings (like "b" matching "labour")
+                    if len(qw) <= 2:
+                        best_sub = max(best_sub, 0.3)
+                    else:
+                        best_sub = max(best_sub, min(len(qw), len(tw)) / max(len(qw), len(tw)))
+                else:
+                    best_sub = max(best_sub, SequenceMatcher(None, qw, tw).ratio())
+            sub_ratios.append(best_sub)
+
+        avg_sub_ratio = sum(sub_ratios) / len(sub_ratios) if sub_ratios else 0.0
+        similarity_score = max(token_ratio, avg_sub_ratio)
+        
+        # 100% Guarantee: If the search term is an exact substring, force max score
+        if clean_term in combined_target.lower().replace(" ", ""):
+            similarity_score = 1.0
+            
+        # Unified threshold to prevent silently dropping valid 2-letter acronyms
+        threshold = 0.60
+        if similarity_score >= threshold:
+            fuzzy_matches.append((similarity_score, s))
+
+    fuzzy_matches.sort(key=lambda x: x[0], reverse=True)
+    return [match[1] for match in fuzzy_matches]
+
+
 async def fetch_spots_api(user_name: str, search_term: Optional[str] = None) -> str:
     row = await asyncio.to_thread(_get_client_config_sync, user_name)
     if not row:
@@ -43,7 +137,6 @@ async def fetch_spots_api(user_name: str, search_term: Optional[str] = None) -> 
         "userid": "101",
         "Content-Type": "application/json"
     }
-    # Always fetch all spots then filter client-side (RAG-like)
     payload = {
         "SpotCode": None, "SpotName": None, "SpotNo": None,
         "SpotTypeCode": None, "SpotTypeName": None,
@@ -68,80 +161,8 @@ async def fetch_spots_api(user_name: str, search_term: Optional[str] = None) -> 
             json_resp = response.json()
             p_list = json_resp.get("data", [])
 
-            # Similarity-based fuzzy matching to handle typos and spelling variations dynamically without hardcoding
-            if search_term and str(search_term).strip():
-                import re
-                from difflib import SequenceMatcher
-
-                # Tokenize and normalize text helper
-                def tokenize(text):
-                    cleaned = re.sub(r'[^a-z0-9\s]', ' ', str(text).lower())
-                    return [w for w in cleaned.split() if w]
-
-                q_tokens = tokenize(search_term)
-
-                fuzzy_matches = []
-                for s in p_list:
-                    # Helper for case-insensitive value extraction
-                    def get_val(s_dict, key):
-                        for k, v in s_dict.items():
-                            if k.lower() == key.lower() and v:
-                                return str(v)
-                        return ''
-
-                    # Combine target fields for matching (includes Building, Code, Name, and Floor)
-                    combined_target = f"{get_val(s, 'BuildingName')} {get_val(s, 'SpotCode')} {get_val(s, 'SpotName')} {get_val(s, 'FloorName')}"
-                    t_tokens = tokenize(combined_target)
-
-                    if not q_tokens or not t_tokens:
-                        continue
-
-                    # 1. Token Set Ratio
-                    intersection = set(q_tokens).intersection(set(t_tokens))
-                    diff_q = set(q_tokens).difference(set(t_tokens))
-                    diff_t = set(t_tokens).difference(set(q_tokens))
-
-                    sorted_inter = sorted(list(intersection))
-                    sorted_diff_q = sorted(list(diff_q))
-                    sorted_diff_t = sorted(list(diff_t))
-
-                    base_inter = " ".join(sorted_inter)
-                    base_q = base_inter + " " + " ".join(sorted_diff_q) if sorted_diff_q else base_inter
-                    base_t = base_inter + " " + " ".join(sorted_diff_t) if sorted_diff_t else base_inter
-
-                    r1 = SequenceMatcher(None, base_q.strip(), base_t.strip()).ratio()
-                    r2 = SequenceMatcher(None, base_inter.strip(), base_q.strip()).ratio()
-                    r3 = SequenceMatcher(None, base_inter.strip(), base_t.strip()).ratio()
-                    token_ratio = max(r1, r2, r3)
-
-                    # 2. Substring / Typo matching ratio
-                    sub_ratios = []
-                    q_squished = "".join(q_tokens)
-                    t_squished = "".join(t_tokens)
-                    sub_ratios.append(SequenceMatcher(None, q_squished, t_squished).ratio())
-
-                    for qw in q_tokens:
-                        best_sub = 0.0
-                        for tw in t_tokens:
-                            if qw == tw:
-                                best_sub = 1.0
-                            elif qw in tw or tw in qw:
-                                best_sub = max(best_sub, min(len(qw), len(tw)) / max(len(qw), len(tw)))
-                            else:
-                                # character-level similarity between individual words
-                                best_sub = max(best_sub, SequenceMatcher(None, qw, tw).ratio())
-                        sub_ratios.append(best_sub)
-
-                    avg_sub_ratio = sum(sub_ratios) / len(sub_ratios) if sub_ratios else 0.0
-
-                    # Overall similarity score
-                    similarity_score = max(token_ratio, avg_sub_ratio)
-
-                    # Include matching spot if it meets the similarity threshold of 0.60
-                    if similarity_score >= 0.60:
-                        fuzzy_matches.append(s)
-
-                p_list = fuzzy_matches
+            # Apply robust fuzzy matching logic
+            p_list = fuzzy_filter_spots(search_term, p_list)
 
             total_count = len(p_list)
             logger.info(f"✅ Spots fetched: {total_count}")
@@ -373,9 +394,9 @@ async def BOOK_SPOT(
         if start_dt is None:
             start_dt = datetime.fromisoformat(cleaned_time_str)
             
-        # UAE is UTC+4. timedelta avoids ZoneInfo KeyError on Windows (no tzdata).
+        # India Time is UTC+5:30. timedelta avoids ZoneInfo KeyError on Windows (no tzdata).
         from datetime import timezone, timedelta
-        now_naive = (datetime.now(timezone.utc) + timedelta(hours=4)).replace(tzinfo=None)
+        now_naive = (datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)).replace(tzinfo=None)
         if start_dt < now_naive:
             logger.warning(f"⚠️ BOOK_SPOT: Blocked booking for past date/time: {start_time}")
             return json.dumps({

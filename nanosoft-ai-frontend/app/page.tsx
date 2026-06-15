@@ -4654,7 +4654,10 @@ export default function Home() {
                     return ((m.tableData && m.tableData.length > 0) || (m.multipleDatasets && m.multipleDatasets.length > 0)) ? i : last;
                   }, -1);
                   return messages.map((msg, idx) => {
-                  const isUser = msg.role === "user";
+                    if (msg.role === "user" && typeof msg.text === "string" && msg.text.trim().startsWith("SpotCode:")) {
+                      return null;
+                    }
+                    const isUser = msg.role === "user";
                   const isError = msg.role === "error";
                   const isStreaming = msg.streaming === true;
                   const isAudio = msg.isAudio === true;
@@ -4753,7 +4756,7 @@ export default function Home() {
                           <>{(() => {
                             if (isUser && msg.text.includes("[CALENDAR_PAYLOAD]")) {
                               const match = msg.text.match(/start_time:\s*"([^"]+)",\s*end_time:\s*"([^"]+)"/);
-                              const prefix = msg.text.split("[CALENDAR_PAYLOAD]")[0].trim();
+                              const prefix = msg.text.split("[CALENDAR_PAYLOAD]")[0].replace(/\|\s*$/, "").trim();
                               if (match) {
                                 return prefix ? `${prefix} | Book from ${match[1]} to ${match[2]}` : `Book from ${match[1]} to ${match[2]}`;
                               }
