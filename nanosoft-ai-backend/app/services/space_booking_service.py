@@ -68,7 +68,7 @@ def _set_cached_spots(session_id: str, search_term: Optional[str], data: dict):
 
 
 def _lookup_spot_from_cache(session_id: Optional[str], spot_code: str) -> Optional[dict]:
-    """Find a spot's full details by SpotCode across all cached searches (case-insensitive)."""
+    """Find a spot's full details by SpotCode or SpotName across all cached searches (case-insensitive)."""
     if not session_id or not spot_code:
         return None
     
@@ -76,8 +76,9 @@ def _lookup_spot_from_cache(session_id: Optional[str], spot_code: str) -> Option
     sb_cache = memory_store.get(session_id, {}).get("sb_spot_cache", {})
     for cached_data in sb_cache.values():
         for spot in cached_data.get("p_list", []):
-            cached_code = str(spot.get("SpotCode", "")).strip().lower()
-            if cached_code == target_code:
+            cached_code = str(spot.get("SpotCode", spot.get("spotCode", spot.get("spotcode", "")))).strip().lower()
+            cached_name = str(spot.get("SpotName", spot.get("spotName", spot.get("spotname", "")))).strip().lower()
+            if cached_code == target_code or cached_name == target_code:
                 return spot
     return None
 
@@ -99,7 +100,9 @@ async def _verify_spot_async(session_id: Optional[str], spot_code: str, user_nam
         api_result = json.loads(api_result_str)
         target_code = str(spot_code).strip().lower()
         for spot in api_result.get("p_list", []):
-            if str(spot.get("SpotCode", "")).strip().lower() == target_code:
+            cached_code = str(spot.get("SpotCode", spot.get("spotCode", spot.get("spotcode", "")))).strip().lower()
+            cached_name = str(spot.get("SpotName", spot.get("spotName", spot.get("spotname", "")))).strip().lower()
+            if cached_code == target_code or cached_name == target_code:
                 return spot
     except Exception as e:
         logger.error("❌ Failed DB verification for spot %s: %s", spot_code, e)
@@ -124,12 +127,17 @@ def _save_sb_thread(session_id: Optional[str], thread: list):
 
 
 def _clear_sb_thread(session_id: Optional[str]):
-    """Reset only the conversation thread after a completed booking.
-    The spot cache is intentionally kept so the next search in the same
-    session does not need to re-hit the API."""
+    """Reset the conversation thread after a completed booking.
+    The __all__ spot cache is kept to avoid re-hitting the API.
+    Per-search-term caches are cleared so fresh searches return correct filtered results
+    instead of stale single-spot selections from the previous booking."""
     if session_id and session_id in memory_store:
         memory_store[session_id]["sb_thread"] = []
-        logger.info("🗑️ sb_thread reset (cache kept) | session=%s", session_id)
+        # Clear per-term caches but preserve the __all__ full dataset cache
+        sb_cache = memory_store[session_id].get("sb_spot_cache", {})
+        all_data = sb_cache.get("__all__")
+        memory_store[session_id]["sb_spot_cache"] = {"__all__": all_data} if all_data else {}
+        logger.info("🗑️ sb_thread reset + per-term cache cleared (all-cache kept) | session=%s", session_id)
 
 
 # ── Service ────────────────────────────────────────────────────────────────────
@@ -241,11 +249,13 @@ class SpaceBookingService:
                 f"{current_query}\n\n"
                 f"[SYSTEM: EVERY SINGLE search or location query from the user MUST hit the cache by calling GET_SPOTS immediately. "
                 f"Even if they are just refining a previous search, you MUST call GET_SPOTS again. "
+                f"NEVER answer from memory or history when asked to book or search. You MUST use GET_SPOTS. "
+                f"NEVER say 'I couldn't find any spots' or 'I don't see any spots' WITHOUT actually calling GET_SPOTS first! "
                 f"NEVER output bullet points or lists of spaces in your text response! The UI will render the list for you. "
                 f"Only GET_BOOKING_STATUS is allowed to use bullet points. "
                 f"If you do not call a tool, you MUST output a conversational response explaining what you need from the user.]"
             )
-            sb_thread.append(HumanMessage(content=injected_query))
+            sb_thread.append(HumanMessage(content=current_query))
 
             # ── Just-in-Time (JIT) Dynamic Prompt Hydration ──
             # Fetch active buildings dynamically from cache or API to load into LLM system prompt context
@@ -294,7 +304,10 @@ class SpaceBookingService:
                 hydrated_content += f"\n\nLIVE ACTIVE BUILDINGS DIRECTORY TODAY (DYNAMIC): {', '.join(unique_buildings)}"
 
             sys_msg = SystemMessage(content=hydrated_content)
-            prompt_messages = [sys_msg] + sb_thread
+            # Create a temporary HumanMessage with the injected JIT directives only for this invoke,
+            # so the DB thread history doesn't save the system directives.
+            temp_human = HumanMessage(content=injected_query)
+            prompt_messages = [sys_msg] + sb_thread[:-1] + [temp_human]
 
             # First model invoke
             ai_msg = await self.model.ainvoke(prompt_messages)
@@ -305,6 +318,7 @@ class SpaceBookingService:
 
             if ai_msg.tool_calls:
                 prompt_messages.append(ai_msg)
+                sb_thread.append(ai_msg)
 
                 for tc in ai_msg.tool_calls:
                     last_tool_called = tc["name"]
@@ -371,9 +385,11 @@ class SpaceBookingService:
                         else:
                             llm_content = tool_result_str
 
-                        prompt_messages.append(ToolMessage(
+                        tool_msg = ToolMessage(
                             name=tc["name"], tool_call_id=tc["id"], content=llm_content
-                        ))
+                        )
+                        prompt_messages.append(tool_msg)
+                        sb_thread.append(tool_msg)
 
 
 
@@ -388,10 +404,11 @@ class SpaceBookingService:
                         spot_code_req = args.get("spot_code", "")
                         verified = await _verify_spot_async(session_id, spot_code_req, user_name)
                         if verified:
-                            args["spot_name"]     = verified.get("SpotName", args.get("spot_name"))
-                            args["building_name"] = verified.get("BuildingName", args.get("building_name"))
-                            args["floor_name"]    = verified.get("FloorName", args.get("floor_name"))
-                            logger.info("✅ Spot verified: %s → %s", spot_code_req, args["spot_name"])
+                            args["spot_code"]     = verified.get("SpotCode", verified.get("spotCode", verified.get("spotcode", args.get("spot_code"))))
+                            args["spot_name"]     = verified.get("SpotName", verified.get("spotName", verified.get("spotname", args.get("spot_name"))))
+                            args["building_name"] = verified.get("BuildingName", verified.get("buildingName", verified.get("buildingname", args.get("building_name"))))
+                            args["floor_name"]    = verified.get("FloorName", verified.get("floorName", verified.get("floorname", args.get("floor_name"))))
+                            logger.info("✅ Spot verified: %s → %s (real spot_code: %s)", spot_code_req, args["spot_name"], args["spot_code"])
                             tool_result_str = await BOOK_SPOT.ainvoke(args)
                         else:
                             logger.warning("❌ Spot hallucinated or invalid: %s", spot_code_req)
@@ -407,7 +424,7 @@ class SpaceBookingService:
                                 spot_code = parsed_res.get("spot_code", "the spot")
                                 building  = parsed_res.get("building_name", "the building")
 
-                                prompt_messages.append(ToolMessage(
+                                tool_msg = ToolMessage(
                                     name=tc["name"], tool_call_id=tc["id"],
                                     content=json.dumps({
                                         "error_type": "missing_time",
@@ -417,7 +434,9 @@ class SpaceBookingService:
                                             f"CRITICAL: You MUST include the exact phrase 'use the calendar' in your response."
                                         )
                                     })
-                                ))
+                                )
+                                prompt_messages.append(tool_msg)
+                                sb_thread.append(tool_msg)
                                 ai_msg2 = await self.model.ainvoke(prompt_messages)
                                 time_ask = ai_msg2.content or (
                                     f"When would you like to book **{spot_code}** at **{building}**? "
@@ -434,9 +453,11 @@ class SpaceBookingService:
                         except json.JSONDecodeError:
                             pass
 
-                        prompt_messages.append(ToolMessage(
+                        tool_msg = ToolMessage(
                             name=tc["name"], tool_call_id=tc["id"], content=tool_result_str
-                        ))
+                        )
+                        prompt_messages.append(tool_msg)
+                        sb_thread.append(tool_msg)
 
                     # ── GET_BOOKING_STATUS ────────────────────────────────────
                     elif tc["name"] == "GET_BOOKING_STATUS":
@@ -449,9 +470,11 @@ class SpaceBookingService:
                         except Exception as e:
                             logger.error("Failed to parse GET_BOOKING_STATUS result: %s", e)
 
-                        prompt_messages.append(ToolMessage(
+                        tool_msg = ToolMessage(
                             name=tc["name"], tool_call_id=tc["id"], content=tool_result_str
-                        ))
+                        )
+                        prompt_messages.append(tool_msg)
+                        sb_thread.append(tool_msg)
 
                 # Final model response
                 ai_msg2 = await self.model.ainvoke(prompt_messages)
@@ -495,6 +518,7 @@ class SpaceBookingService:
                 if not content.strip() and ai_msg2.tool_calls:
                     logger.info("⚡ ai_msg2 has tool_calls but no content — handling inline")
                     prompt_messages.append(ai_msg2)
+                    sb_thread.append(ai_msg2)
 
                     for tc2 in ai_msg2.tool_calls:
                         if tc2["name"] == "BOOK_SPOT":
@@ -507,10 +531,11 @@ class SpaceBookingService:
                             spot_code_req2 = args2.get("spot_code", "")
                             verified2 = await _verify_spot_async(session_id, spot_code_req2, user_name)
                             if verified2:
-                                args2["spot_name"]     = verified2.get("SpotName", args2.get("spot_name"))
-                                args2["building_name"] = verified2.get("BuildingName", args2.get("building_name"))
-                                args2["floor_name"]    = verified2.get("FloorName", args2.get("floor_name"))
-                                logger.info("✅ Spot verified (round-2): %s → %s", spot_code_req2, args2["spot_name"])
+                                args2["spot_code"]     = verified2.get("SpotCode", verified2.get("spotCode", verified2.get("spotcode", args2.get("spot_code"))))
+                                args2["spot_name"]     = verified2.get("SpotName", verified2.get("spotName", verified2.get("spotname", args2.get("spot_name"))))
+                                args2["building_name"] = verified2.get("BuildingName", verified2.get("buildingName", verified2.get("buildingname", args2.get("building_name"))))
+                                args2["floor_name"]    = verified2.get("FloorName", verified2.get("floorName", verified2.get("floorname", args2.get("floor_name"))))
+                                logger.info("✅ Spot verified (round-2): %s → %s (real spot_code: %s)", spot_code_req2, args2["spot_name"], args2["spot_code"])
                                 tool_result2_str = await BOOK_SPOT.ainvoke(args2)
                             else:
                                 logger.warning("❌ Spot hallucinated or invalid (round-2): %s", spot_code_req2)
@@ -523,7 +548,7 @@ class SpaceBookingService:
                                 if parsed2.get("error_type") == "missing_time":
                                     spot_code2   = parsed2.get("spot_code", args2.get("spot_code", "the spot"))
                                     building2    = parsed2.get("building_name", args2.get("building_name", "the building"))
-                                    prompt_messages.append(ToolMessage(
+                                    tool_msg2 = ToolMessage(
                                         name=tc2["name"], tool_call_id=tc2["id"],
                                         content=json.dumps({
                                             "error_type": "missing_time",
@@ -533,7 +558,9 @@ class SpaceBookingService:
                                                 f"CRITICAL: You MUST include the exact phrase 'use the calendar' in your response."
                                             )
                                         })
-                                    ))
+                                    )
+                                    prompt_messages.append(tool_msg2)
+                                    sb_thread.append(tool_msg2)
                                     ai_msg3 = await self.model.ainvoke(prompt_messages)
                                     time_ask = ai_msg3.content or (
                                         f"Almost there! Please use the calendar to select your preferred start and end time "
@@ -549,17 +576,21 @@ class SpaceBookingService:
                             except json.JSONDecodeError:
                                 pass
 
-                            prompt_messages.append(ToolMessage(
+                            tool_msg2 = ToolMessage(
                                 name=tc2["name"], tool_call_id=tc2["id"], content=tool_result2_str
-                            ))
+                            )
+                            prompt_messages.append(tool_msg2)
+                            sb_thread.append(tool_msg2)
 
                         elif tc2["name"] == "GET_SPOTS":
                             # Shouldn't re-call GET_SPOTS, but handle gracefully
                             logger.warning("⚠️ Unexpected second GET_SPOTS call — skipping")
-                            prompt_messages.append(ToolMessage(
+                            tool_msg2 = ToolMessage(
                                 name=tc2["name"], tool_call_id=tc2["id"],
                                 content=json.dumps({"info": "Spots already retrieved. Use the previous results."})
-                            ))
+                            )
+                            prompt_messages.append(tool_msg2)
+                            sb_thread.append(tool_msg2)
 
                     # Get final content after handling round-2 tool calls
                     ai_msg3 = await self.model.ainvoke(prompt_messages)
@@ -588,7 +619,7 @@ class SpaceBookingService:
                     _save_sb_thread(session_id, sb_thread)
 
                 # ── Respond: table for multiple spots, conversational otherwise ──
-                if tool_data and "p_list" in tool_data and len(tool_data["p_list"]) > 1:
+                if tool_data and "p_list" in tool_data and len(tool_data["p_list"]) >= 1:
                     total = tool_data.get("TotalCount", len(tool_data["p_list"]))
                     p_list = tool_data["p_list"]
 

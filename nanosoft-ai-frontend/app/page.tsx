@@ -2551,7 +2551,9 @@ export default function Home() {
 
           // ── Auto-open inline calendar picker on Phase 3 message ──────────
           // Detect when AI asks user to pick a date/time via the calendar or matches example formats
-          const isCalendarPrompt = /use the calendar/i.test(finalText) || /(\(e\.g\.[^)]*(?:10am|2pm|morning|all day|afternoon|evening)[^)]*)\)/gi.test(finalText);
+          // DO NOT auto-open if the message includes a search dataset (tableData) which requires a tile selection click first.
+          const isCalendarPrompt = (/use the calendar/i.test(finalText) || /(\(e\.g\.[^)]*(?:10am|2pm|morning|all day|afternoon|evening)[^)]*)\)/gi.test(finalText))
+            && !(tableData && tableData.length > 0);
           if (isCalendarPrompt && isSpaceBookingRef.current) {
             setMessages(prev => {
               const idx = prev.length - 1;
@@ -3114,10 +3116,12 @@ export default function Home() {
         break;
       }
     }
-    const hasPrompt = lastAiIdx !== -1 && (
-      /use the calendar/i.test(processed[lastAiIdx].text || "") ||
-      /(\(e\.g\.[^)]*(?:10am|2pm|morning|all day|afternoon|evening)[^)]*)\)/gi.test(processed[lastAiIdx].text || "")
-    );
+    const lastMsg = lastAiIdx !== -1 ? processed[lastAiIdx] : null;
+    const hasPrompt = lastMsg && (
+      /use the calendar/i.test(lastMsg.text || "") ||
+      /(\(e\.g\.[^)]*(?:10am|2pm|morning|all day|afternoon|evening)[^)]*)\)/gi.test(lastMsg.text || "")
+    ) && !(lastMsg.tableData && lastMsg.tableData.length > 0)
+      && !(lastMsg.multipleDatasets && lastMsg.multipleDatasets.length > 0);
     if (hasPrompt) {
       const parsed = parseDateTimeFromMessage(processed[lastAiIdx].text || "");
       setBookingStartDate(parsed.date);

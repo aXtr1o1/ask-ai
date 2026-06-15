@@ -336,8 +336,9 @@ class BookSpotInput(BaseModel):
     spot_name: Optional[str] = Field(default="Unknown Spot", description="The name of the spot.")
     building_name: Optional[str] = Field(default="Unknown Building", description="The name of the building where the spot is located.")
     floor_name: Optional[str] = Field(default="Unknown Floor", description="The floor where the spot is located.")
-    start_time: str = Field(description="Booking start datetime. Can be in YYYY-MM-DD HH:MM:00 (24-hour format) or include AM/PM (e.g., YYYY-MM-DD hh:mm AM/PM). CRITICAL: If the user has not explicitly provided a start time, DO NOT CALL THIS TOOL. You MUST reply conversationally and ask them to 'use the calendar'. NEVER pass 'none', 'unknown', or guess the time.")
-    end_time: str = Field(description="Booking end datetime. Can be in YYYY-MM-DD HH:MM:00 (24-hour format) or include AM/PM (e.g., YYYY-MM-DD hh:mm AM/PM). CRITICAL: If the user has not explicitly provided an end time, DO NOT CALL THIS TOOL. You MUST reply conversationally and ask them to 'use the calendar'. NEVER pass 'none', 'unknown', or guess the time.")
+    start_time: str = Field(description="Booking start datetime. Can be in YYYY-MM-DD HH:MM:00 (24-hour format) or include AM/PM (e.g., YYYY-MM-DD hh:mm AM/PM). CRITICAL: If the user has not explicitly provided a start time, or has omitted the year (e.g., they only typed month and day like 'July 10' without explicitly specifying the year, and it is not a structured calendar payload), DO NOT CALL THIS TOOL. You MUST reply conversationally and ask them to confirm the year or use the calendar. NEVER guess, assume, or auto-fill the year.")
+    end_time: str = Field(description="Booking end datetime. Can be in YYYY-MM-DD HH:MM:00 (24-hour format) or include AM/PM (e.g., YYYY-MM-DD hh:mm AM/PM). CRITICAL: If the user has not explicitly provided an end time, or has omitted the year (e.g., they only typed month and day like 'July 10' without explicitly specifying the year, and it is not a structured calendar payload), DO NOT CALL THIS TOOL. You MUST reply conversationally and ask them to confirm the year or use the calendar. NEVER guess, assume, or auto-fill the year.")
+
 
 class GetSpotsInput(BaseModel):
     user_name: str = Field(description="The client_name/user_name from the frontend context.")

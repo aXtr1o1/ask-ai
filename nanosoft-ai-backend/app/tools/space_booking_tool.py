@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 import asyncio
 import requests
 from typing import Optional
@@ -13,16 +14,90 @@ logger = logging.getLogger("space_booking_tool")
 logger.setLevel(logging.INFO)
 
 
+# ── Module-level constants (defined once, shared across tokenize + fetch_spots_api) ─────
+
+def _build_word_to_num() -> dict:
+    """Dynamically build a complete cardinal + ordinal word → integer map.
+    Covers singles, teens, tens, and all compound ordinals/cardinals
+    (e.g. 'twenty first', 'forty second') without any hardcoded ceiling."""
+    ones = {
+        "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+        "six": 6, "seven": 7, "eight": 8, "nine": 9,
+        "first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5,
+        "sixth": 6, "seventh": 7, "eighth": 8, "ninth": 9,
+    }
+    teens = {
+        "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14,
+        "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19,
+        "tenth": 10, "eleventh": 11, "twelfth": 12, "thirteenth": 13, "fourteenth": 14,
+        "fifteenth": 15, "sixteenth": 16, "seventeenth": 17, "eighteenth": 18, "nineteenth": 19,
+    }
+    tens_map = {
+        "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50,
+        "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90,
+        "twentieth": 20, "thirtieth": 30, "fortieth": 40, "fiftieth": 50,
+        "sixtieth": 60, "seventieth": 70, "eightieth": 80, "ninetieth": 90,
+    }
+    # Cardinal singles 1–9
+    cardinal_singles = {
+        "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+        "six": 6, "seven": 7, "eight": 8, "nine": 9,
+    }
+    result = {**ones, **teens, **tens_map}
+    # Compound: "twenty one", "thirty second" … "ninety ninth"
+    for tens_word, tens_val in {"twenty": 20, "thirty": 30, "forty": 40, "fifty": 50,
+                                 "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90}.items():
+        for ones_word, ones_val in cardinal_singles.items():
+            result[f"{tens_word} {ones_word}"] = tens_val + ones_val
+            result[f"{tens_word}{ones_word}"] = tens_val + ones_val  # hyphenless form
+        # Ordinal singles for compound (first..ninth)
+        for ord_word, ord_val in {
+            "first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5,
+            "sixth": 6, "seventh": 7, "eighth": 8, "ninth": 9,
+        }.items():
+            result[f"{tens_word} {ord_word}"] = tens_val + ord_val
+            result[f"{tens_word}{ord_word}"] = tens_val + ord_val
+    return result
+
+
+_WORD_TO_NUM: dict = _build_word_to_num()
+
+# Ground floor abbreviation whitelist — explicit, no broad regex false-positives.
+# NOTE: "gf" is intentionally excluded — in this dataset "GF" is its own floor
+# designation, not an alias for Ground Floor. It matches via literal token equality.
+_GROUND_ABBREVS: frozenset = frozenset({
+    "gr", "grd", "grnd", "gl", "grndflr", "gfloor", "groundfloor",
+})
+
+# Structural noise: strip from QUERY tokens only (not target)
+_STOP_WORDS: frozenset = frozenset({
+    "i", "a", "an", "the", "to", "of", "in", "on", "at", "for",
+    "and", "or", "is", "it", "be", "do", "we", "my", "me",
+    "need", "want", "book", "find", "show", "get", "give", "go",
+    "please", "can", "could", "would", "like", "any", "some",
+})
+
+# Dimension words stripped from BOTH query and target (so "GF Level" and "ground" match)
+_DIM_WORDS: frozenset = frozenset({"floor", "level", "fl", "lvl", "storey", "story"})
+
+# Expansion sets for fetch_spots_api pre-processing.
+# NOTE: "gf" excluded from _GND_SET — it is a distinct floor code in this dataset.
+_GND_SET: frozenset = frozenset({
+    "gr", "grd", "grnd", "gl", "grndflr", "gfloor", "ground", "groundfloor",
+})
+_BASEMENT_SET: frozenset = frozenset({"b", "bsmt", "basement", "b1", "b2", "ug"})
+_ROOF_SET: frozenset = frozenset({"r", "rf", "roof", "rooftop", "rooflevel"})
+_ORD_SUFFIX_RE = re.compile(r'^(\d+)(?:st|nd|rd|th)$')
 
 def _get_client_config_sync(user_name: str):
     conn = get_pool()
     if not conn:
         return None
     with conn.cursor() as cur:
-        cur.execute("SELECT base_url, jwt_token FROM client_sync_config WHERE client_name = %s", (user_name,))
+        cur.execute("SELECT base_url, jwt_token, user_id FROM client_sync_config WHERE client_name = %s", (user_name,))
         row = cur.fetchone()
         if row:
-            return {"base_url": row[0], "jwt_token": row[1]}
+            return {"base_url": row[0], "jwt_token": row[1], "user_id": str(row[2]) if row[2] is not None else "101"}
     return None
 
 
@@ -45,13 +120,47 @@ def fuzzy_filter_spots(search_term: str, p_list: list) -> list:
     import re
     from difflib import SequenceMatcher
 
-    def tokenize(text):
-        cleaned = re.sub(r'[^a-z0-9\s]', ' ', str(text).lower())
-        return [w for w in cleaned.split() if w]
+    def tokenize(text, strip_stopwords: bool = False):
+        def _normalize_token(w):
+            # Ground floor abbreviations (module-level explicit whitelist)
+            if w in _GROUND_ABBREVS or w == "ground":
+                return "ground"
+            # Dimension words stripped transparently from both sides
+            if w in _DIM_WORDS:
+                return None
+            # Ordinal suffix: "1st", "2nd", "21st", "100th" → bare digit string
+            m = _ORD_SUFFIX_RE.match(w)
+            if m:
+                return m.group(1)
+            # English number/ordinal words → digit string (module-level, compound-aware)
+            if w in _WORD_TO_NUM:
+                return str(_WORD_TO_NUM[w])
+            return w
 
-    q_tokens = tokenize(clean_term)
+        cleaned = re.sub(r'[^a-z0-9\s]', ' ', str(text).lower())
+        tokens = []
+        for w in cleaned.split():
+            if not w:
+                continue
+            if strip_stopwords and w in _STOP_WORDS:
+                continue
+            norm = _normalize_token(w)
+            if norm is not None:
+                tokens.append(norm)
+        return tokens
+
+
+    # Strip stopwords from query tokens only — target tokens keep all words for precision
+    q_tokens = tokenize(clean_term, strip_stopwords=True)
     if not q_tokens:
         return p_list
+
+    # Extract structural constraints from query (e.g. "floor 6", "floor6", "6th floor", "building 2")
+    floor_match = re.search(r'(?:floor\s*(\d+))|(?:(\d+)\s*(?:st|nd|rd|th)?\s*floor)', clean_term)
+    q_floor_num = (floor_match.group(1) or floor_match.group(2)) if floor_match else None
+
+    building_match = re.search(r'(?:building\s*(\d+))|(?:(\d+)\s*(?:st|nd|rd|th)?\s*building)', clean_term)
+    q_bld_num = (building_match.group(1) or building_match.group(2)) if building_match else None
 
     fuzzy_matches = []
     for s in p_list:
@@ -61,7 +170,33 @@ def fuzzy_filter_spots(search_term: str, p_list: list) -> list:
                     return str(v)
             return ''
 
-        combined_target = f"{get_val(s, 'BuildingName')} {get_val(s, 'SpotCode')} {get_val(s, 'SpotName')} {get_val(s, 'FloorName')}"
+        # Enforce floor constraint if present
+        if q_floor_num:
+            f_val = get_val(s, "FloorName").lower()
+            try:
+                f_numbers = [int(n) for n in re.findall(r'\d+', f_val)]
+                if int(q_floor_num) not in f_numbers:
+                    continue
+            except ValueError:
+                if q_floor_num not in f_val:
+                    continue
+
+        # Enforce building constraint if present
+        if q_bld_num:
+            b_val = get_val(s, "BuildingName").lower()
+            try:
+                b_numbers = [int(n) for n in re.findall(r'\d+', b_val)]
+                if int(q_bld_num) not in b_numbers:
+                    continue
+            except ValueError:
+                if q_bld_num not in b_val:
+                    continue
+
+
+        # SpotCode is intentionally excluded here — it is already matched exactly in lines 36-38.
+        # Including it in combined_target causes SpotCode abbreviations (e.g. GR) to
+        # tokenize as floor names (e.g. "ground"), creating false positives on floor searches.
+        combined_target = f"{get_val(s, 'BuildingName')} {get_val(s, 'SpotName')} {get_val(s, 'FloorName')}"
         t_tokens = tokenize(combined_target)
 
         if not t_tokens:
@@ -117,11 +252,25 @@ def fuzzy_filter_spots(search_term: str, p_list: list) -> list:
                 similarity_score = 0.0
         
         # 100% Guarantee: If the search term is an exact substring (ignoring spaces), force max score
+        # But avoid false positives for short abbreviations (like 'gf') matching across adjacent word boundaries (e.g. 'parkinG Floor').
+        is_exact_sub = False
         if clean_term.replace(" ", "") in combined_target.lower().replace(" ", ""):
+            if len(clean_term) <= 2:
+                # Check if it exists as a separate word boundary or with numbers in the raw combined target
+                # e.g., "gf" matches "GF-01", "GF", "Floor GF", but NOT "parking floor"
+                pattern = r'\b' + re.escape(clean_term) + r'\b|\b' + re.escape(clean_term) + r'\d+|\d+' + re.escape(clean_term) + r'\b'
+                if re.search(pattern, combined_target.lower()):
+                    is_exact_sub = True
+            else:
+                is_exact_sub = True
+
+        if is_exact_sub:
             similarity_score = 1.0
             
-        # Unified threshold to prevent silently dropping valid 2-letter acronyms
-        threshold = 0.60
+        # Raised from 0.60 → 0.72: tokenization is now precise (SpotCode excluded from target,
+        # stopwords stripped from query, dimension words neutralized on both sides),
+        # so a higher threshold cuts false positives without dropping valid matches.
+        threshold = 0.72
         if similarity_score >= threshold:
             fuzzy_matches.append((similarity_score, s))
 
@@ -135,6 +284,7 @@ async def fetch_spots_api(user_name: str, search_term: Optional[str] = None) -> 
         return json.dumps({"error": f"Configuration not found for user {user_name}."})
     base_url = row['base_url'].rstrip('/')
     jwt_token = row['jwt_token']
+    user_id = row['user_id']
 
     if base_url.endswith('askmeapi'):
         api_url = f"{base_url}/getSpot"
@@ -143,7 +293,7 @@ async def fetch_spots_api(user_name: str, search_term: Optional[str] = None) -> 
 
     headers = {
         "x-auth": jwt_token,
-        "userid": "101",
+        "userid": user_id,
         "Content-Type": "application/json"
     }
     payload = {
@@ -170,8 +320,54 @@ async def fetch_spots_api(user_name: str, search_term: Optional[str] = None) -> 
             json_resp = response.json()
             p_list = json_resp.get("data", [])
 
+            # ── Dynamic search term normalization ────────────────────────────────────────
+            # GUARD: Skip expansion if the term looks like a SpotCode
+            # (e.g. GR, WRMF-SCR, B04) — uppercase-only alphanumeric + optional hyphens.
+
+            def _dynamic_expand(term: str):
+                """Expand abbreviated/ordinal floor term to canonical search string.
+                Works for ANY floor number or abbreviation via module-level sets."""
+                t = term.strip().lower()
+                if t in _GND_SET:
+                    return "ground"
+                if t in _BASEMENT_SET:
+                    return "basement"
+                if t in _ROOF_SET:
+                    return "roof"
+                # Bare integer or ordinal suffix → digit string (works for ANY N)
+                m = _ORD_SUFFIX_RE.match(t)
+                if m:
+                    return m.group(1)
+                return None
+
+            effective_search = (search_term or "").strip()
+            _is_spot_code = bool(
+                effective_search and
+                re.match(r'^[A-Z0-9][A-Z0-9\-]{0,19}$', effective_search)
+            )
+            if effective_search and not _is_spot_code:
+                expanded = _dynamic_expand(effective_search)
+                if expanded:
+                    logger.info(f"🔄 Dynamic expand: '{effective_search}' → '{expanded}'")
+                    effective_search = expanded
+
             # Apply robust fuzzy matching logic
-            p_list = fuzzy_filter_spots(search_term, p_list)
+            final_term = effective_search if effective_search else search_term
+            p_list = fuzzy_filter_spots(final_term, p_list)
+
+            # ── Zero-result fallback: retry with stopwords stripped from multi-word query ──
+            # Handles cases where LLM passes the full user sentence as search_term.
+            if len(p_list) == 0 and final_term and len(final_term.split()) > 2:
+                core_tokens = [w for w in final_term.lower().split() if w not in _STOP_WORDS]
+                if core_tokens:
+                    fallback_term = " ".join(core_tokens)
+                    fallback_list = json_resp.get("data", [])
+                    fallback_result = fuzzy_filter_spots(fallback_term, fallback_list)
+                    if len(fallback_result) > 0:
+                        logger.info(
+                            f"🔄 Stopword fallback: '{final_term}' → '{fallback_term}' | matches={len(fallback_result)}"
+                        )
+                        p_list = fallback_result
 
             total_count = len(p_list)
             logger.info(f"✅ Spots fetched: {total_count}")
