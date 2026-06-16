@@ -140,6 +140,21 @@ def _clear_sb_thread(session_id: Optional[str]):
         logger.info("🗑️ sb_thread reset + per-term cache cleared (all-cache kept) | session=%s", session_id)
 
 
+def is_direct_booking_query(query: str) -> bool:
+    """Check if the user is trying to book a specific spot directly."""
+    q_low = query.lower()
+    if not ("book" in q_low or "reserve" in q_low or "[calendar_payload]" in q_low):
+        return False
+    # Check for alphanumeric patterns representing specific spots (e.g., SP420, B1-APT-048)
+    import re
+    tokens = re.findall(r"[a-z0-9-]+", q_low)
+    for token in tokens:
+        # A specific spot code typically contains both letters and digits, and has length >= 3
+        if len(token) >= 3 and any(c.isdigit() for c in token) and any(c.isalpha() for c in token):
+            return True
+    return False
+
+
 # ── Service ────────────────────────────────────────────────────────────────────
 
 class SpaceBookingService:
@@ -284,6 +299,28 @@ class SpaceBookingService:
             current_date_str = current_ist_time.strftime("%Y-%m-%d")
             current_time_str = current_ist_time.strftime("%Y-%m-%d %I:%M %p (India Time)")
 
+            is_direct_booking = is_direct_booking_query(current_query)
+            if is_direct_booking:
+                spot_code_instruction = (
+                    "\nCRITICAL: If the user's message contains a specific Spot Code but does NOT contain the calendar booking payload ([CALENDAR_PAYLOAD]), "
+                    "you MUST call GET_SPOTS to verify it exists and retrieve its building and floor details. NEVER call BOOK_SPOT with unknown or hallucinated "
+                    "spot details. Once verified, ask them conversationally to confirm the year and AM/PM times. DO NOT ask them to use the calendar."
+                )
+                calendar_instruction = (
+                    "\nCRITICAL: The user wants to book conversationally. DO NOT include the phrase 'use the calendar' in your response. "
+                    "Instead, ask them conversationally to clarify the year, AM/PM, or other missing times. Do NOT trigger the calendar UI."
+                )
+            else:
+                spot_code_instruction = (
+                    "\nCRITICAL: If the user's message contains a specific Spot Code but does NOT contain the calendar booking payload ([CALENDAR_PAYLOAD]), "
+                    "you MUST call GET_SPOTS to verify it exists and retrieve its building and floor details. NEVER call BOOK_SPOT with unknown or hallucinated "
+                    "spot details. Once verified, ask them to 'use the calendar' to select a time."
+                )
+                calendar_instruction = (
+                    "\nCRITICAL: When asking the user for their booking times, you MUST include the exact phrase 'use the calendar' in your response. "
+                    "Do NOT ask the user to type, share, write, or tell you their start and end time manually."
+                )
+
             # Build prompt dynamically with injected live directory and strict guardrails
             hydrated_content = (
                 self.system_prompt.content + 
@@ -291,11 +328,11 @@ class SpaceBookingService:
                 f"\nCURRENT INDIA TIME: {current_time_str}."
                 f"\nCRITICAL: You are operating in India Time. If the user asks for a time that has ALREADY PASSED according to the CURRENT INDIA TIME, you MUST NOT call BOOK_SPOT. Tell them they cannot book in the past."
                 f"\nCURRENT USER_NAME: {user_name}."
-                "\nCRITICAL: If the user's message contains a specific Spot Code but does NOT contain the calendar booking payload ([CALENDAR_PAYLOAD]), you MUST call GET_SPOTS to verify it exists and retrieve its building and floor details. NEVER call BOOK_SPOT with unknown or hallucinated spot details. Once verified, ask them to 'use the calendar' to select a time."
-                "\nCRITICAL: If the user searches for any kind of space, keyword, floor name, or tries to refine the list (e.g., 'floor 6', 'floor6', 'Building 1'), you MUST call GET_SPOTS immediately. You MUST pass the user's query exactly as entered (including single squished words like 'floor6') as the search_term. Do NOT pass an empty string, None, or modify the query before calling GET_SPOTS."
+                f"{spot_code_instruction}"
+                "\nCRITICAL: If the user searches for any kind of space, keyword, floor name, or tries to refine the list (e.g., 'floor 6', 'floor6', 'Building 1'), you MUST call GET_SPOTS immediately. You MUST extract the core search keywords (such as the floor name/number, building name, or spot code, preserving single letters/numbers or squished terms like 'floor6') and pass them as the search_term. Do NOT pass conversational fillers like 'i need to book', 'i want to book', 'please book', etc."
                 "\nCRITICAL: If the user's message is a conversational affirmation, confirmation, or agreement in response to your suggestion, do NOT call GET_SPOTS. Instead, ask them to specify which building or floor they would like to search or try."
                 "\nCRITICAL: If the user's message is a general intent to book, you MUST call GET_SPOTS immediately to show them the available options. Do NOT respond with conversational clarification questions. Just call the tool."
-                "\nCRITICAL: When asking the user for their booking times, you MUST include the exact phrase 'use the calendar' in your response. Do NOT ask the user to type, share, write, or tell you their start and end time manually."
+                f"{calendar_instruction}"
                 "\nCRITICAL: Never call BOOK_SPOT unless the COMPLETE date (including the year) and the time have been provided by the user (either in their latest message, or established in the recent conversation history) or via a structured calendar message. If the user provides a month and day but NOT the year, you MUST NOT call BOOK_SPOT. Instead, ask the user to confirm the year for their booking."
                 f"\nCRITICAL: If the user requests a booking for a date or time that is in the past (before {current_date_str}), you MUST NOT call BOOK_SPOT. Instead, reply immediately: 'You cannot create a booking for a past date. Please select a present or future date.'"
                 "\nCRITICAL: If the calendar booking payload ([CALENDAR_PAYLOAD]) is present in the user message (e.g. '[CALENDAR_PAYLOAD] start_time: ...'), this means the user used the calendar UI. You MUST call BOOK_SPOT immediately using the start_time and end_time from the payload (even if they are in 24-hour format). You MUST NOT ask for AM/PM confirmation, and you MUST NOT call GET_SPOTS. Only ask for AM/PM confirmation if the user typed dates/times via conversational text without any '[CALENDAR_PAYLOAD]' present."
@@ -315,6 +352,7 @@ class SpaceBookingService:
             tool_data = None
             last_tool_called = None
             booking_status_data = None
+            booking_success = False
 
             if ai_msg.tool_calls:
                 prompt_messages.append(ai_msg)
@@ -424,24 +462,38 @@ class SpaceBookingService:
                                 spot_code = parsed_res.get("spot_code", "the spot")
                                 building  = parsed_res.get("building_name", "the building")
 
+                                is_direct = is_direct_booking_query(current_query)
+                                if is_direct:
+                                    inst_text = (
+                                        f"Time not provided. Ask the user warmly to specify their preferred year and if "
+                                        f"the time is AM or PM for booking {spot_code} at {building}."
+                                    )
+                                    fallback_text = (
+                                        f"When would you like to book **{spot_code}** at **{building}**? "
+                                        f"Could you please specify the year and if the time is AM or PM?"
+                                    )
+                                else:
+                                    inst_text = (
+                                        f"Time not provided. Ask the user warmly for their preferred time "
+                                        f"for booking {spot_code} at {building}. "
+                                        f"CRITICAL: You MUST include the exact phrase 'use the calendar' in your response."
+                                    )
+                                    fallback_text = (
+                                        f"When would you like to book **{spot_code}** at **{building}**? "
+                                        f"Please use the calendar to select your preferred start and end time."
+                                    )
+
                                 tool_msg = ToolMessage(
                                     name=tc["name"], tool_call_id=tc["id"],
                                     content=json.dumps({
                                         "error_type": "missing_time",
-                                        "instruction": (
-                                            f"Time not provided. Ask the user warmly for their preferred time "
-                                            f"for booking {spot_code} at {building}. "
-                                            f"CRITICAL: You MUST include the exact phrase 'use the calendar' in your response."
-                                        )
+                                        "instruction": inst_text
                                     })
                                 )
                                 prompt_messages.append(tool_msg)
                                 sb_thread.append(tool_msg)
                                 ai_msg2 = await self.model.ainvoke(prompt_messages)
-                                time_ask = ai_msg2.content or (
-                                    f"When would you like to book **{spot_code}** at **{building}**? "
-                                    f"Please use the calendar to select your preferred start and end time."
-                                )
+                                time_ask = ai_msg2.content or fallback_text
                                 logger.info("⏰ Missing time — asking: %s", time_ask[:100])
                                 sb_thread.append(AIMessage(content=time_ask))
                                 _save_sb_thread(session_id, sb_thread)
@@ -449,6 +501,7 @@ class SpaceBookingService:
 
                             if parsed_res.get("success"):
                                 logger.info("✅ Booking success | id=%s", parsed_res.get("booking_id"))
+                                booking_success = True
 
                         except json.JSONDecodeError:
                             pass
@@ -548,24 +601,39 @@ class SpaceBookingService:
                                 if parsed2.get("error_type") == "missing_time":
                                     spot_code2   = parsed2.get("spot_code", args2.get("spot_code", "the spot"))
                                     building2    = parsed2.get("building_name", args2.get("building_name", "the building"))
+                                    
+                                    is_direct2 = is_direct_booking_query(current_query)
+                                    if is_direct2:
+                                        inst_text2 = (
+                                            f"Time not provided. Ask the user warmly to specify their preferred year and if "
+                                            f"the time is AM or PM for booking {spot_code2} at {building2}."
+                                        )
+                                        fallback_text2 = (
+                                            f"Almost there! Could you please specify the year and if the time is AM or PM "
+                                            f"for booking {spot_code2} at {building2}?"
+                                        )
+                                    else:
+                                        inst_text2 = (
+                                            f"Time not provided. Ask the user warmly for their preferred time "
+                                            f"for booking {spot_code2} at {building2}. "
+                                            f"CRITICAL: You MUST include the exact phrase 'use the calendar' in your response."
+                                        )
+                                        fallback_text2 = (
+                                            f"Almost there! Please use the calendar to select your preferred start and end time "
+                                            f"for {spot_code2} at {building2} and I will get it confirmed."
+                                        )
+
                                     tool_msg2 = ToolMessage(
                                         name=tc2["name"], tool_call_id=tc2["id"],
                                         content=json.dumps({
                                             "error_type": "missing_time",
-                                            "instruction": (
-                                                f"Time not provided. Ask the user warmly for their preferred time "
-                                                f"for booking {spot_code2} at {building2}. "
-                                                f"CRITICAL: You MUST include the exact phrase 'use the calendar' in your response."
-                                            )
+                                            "instruction": inst_text2
                                         })
                                     )
                                     prompt_messages.append(tool_msg2)
                                     sb_thread.append(tool_msg2)
                                     ai_msg3 = await self.model.ainvoke(prompt_messages)
-                                    time_ask = ai_msg3.content or (
-                                        f"Almost there! Please use the calendar to select your preferred start and end time "
-                                        f"for {spot_code2} at {building2} and I will get it confirmed."
-                                    )
+                                    time_ask = ai_msg3.content or fallback_text2
                                     logger.info("⏰ Round-2 missing time — asking: %s", time_ask[:100])
                                     sb_thread.append(AIMessage(content=time_ask))
                                     _save_sb_thread(session_id, sb_thread)
@@ -573,6 +641,7 @@ class SpaceBookingService:
 
                                 if parsed2.get("success"):
                                     logger.info("✅ Round-2 booking success | id=%s", parsed2.get("booking_id"))
+                                    booking_success = True
                             except json.JSONDecodeError:
                                 pass
 
@@ -602,6 +671,7 @@ class SpaceBookingService:
                 try:
                     last_result = json.loads(prompt_messages[-1].content)
                     if last_result.get("success"):
+                        booking_success = True
                         # If LLM didn't generate a conversational confirmation, provide one
                         if not content.strip():
                             b_id = last_result.get('booking_id', '')
@@ -619,7 +689,16 @@ class SpaceBookingService:
                     _save_sb_thread(session_id, sb_thread)
 
                 # ── Respond: table for multiple spots, conversational otherwise ──
-                if tool_data and "p_list" in tool_data and len(tool_data["p_list"]) >= 1:
+                show_dataset = (
+                    not booking_success 
+                    and tool_data 
+                    and "p_list" in tool_data 
+                    and len(tool_data["p_list"]) >= 1
+                )
+                if show_dataset and len(tool_data["p_list"]) == 1 and is_direct_booking_query(current_query):
+                    show_dataset = False
+
+                if show_dataset:
                     total = tool_data.get("TotalCount", len(tool_data["p_list"]))
                     p_list = tool_data["p_list"]
 

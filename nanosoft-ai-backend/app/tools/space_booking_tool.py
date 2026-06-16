@@ -105,17 +105,16 @@ def fuzzy_filter_spots(search_term: str, p_list: list) -> list:
     if not search_term or not str(search_term).strip():
         return p_list
 
+    import re
     clean_term = str(search_term).strip().lower()
+    # Strip trailing punctuation/slashes
+    clean_term = re.sub(r'[./?!,;]+$', '', clean_term).strip()
 
     # 1. Exact match on SpotCode (highest priority)
     exact_matches = [s for s in p_list if str(s.get("SpotCode", "")).strip().lower() == clean_term]
     if exact_matches:
         return exact_matches
         
-    # 2. Exact match on SpotName
-    exact_names = [s for s in p_list if str(s.get("SpotName", "")).strip().lower() == clean_term]
-    if exact_names:
-        return exact_names
 
     import re
     from difflib import SequenceMatcher
@@ -142,16 +141,23 @@ def fuzzy_filter_spots(search_term: str, p_list: list) -> list:
         for w in cleaned.split():
             if not w:
                 continue
-            if strip_stopwords and w in _STOP_WORDS:
+            if strip_stopwords and w in _STOP_WORDS and len(w) > 1:
                 continue
             norm = _normalize_token(w)
             if norm is not None:
                 tokens.append(norm)
         return tokens
 
+    def tokenize_query(text, strip_stopwords: bool = False):
+        tokens = tokenize(text, strip_stopwords)
+        cleaned = [w for w in re.sub(r'[^a-z0-9\s]', ' ', str(text).lower()).split() if w]
+        if len(cleaned) == 1 and cleaned[0] in _DIM_WORDS:
+            return cleaned
+        return tokens
+
 
     # Strip stopwords from query tokens only — target tokens keep all words for precision
-    q_tokens = tokenize(clean_term, strip_stopwords=True)
+    q_tokens = tokenize_query(clean_term, strip_stopwords=True)
     if not q_tokens:
         return p_list
 
