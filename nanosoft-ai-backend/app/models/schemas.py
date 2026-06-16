@@ -336,14 +336,15 @@ class BookSpotInput(BaseModel):
     spot_name: Optional[str] = Field(default="Unknown Spot", description="The name of the spot.")
     building_name: Optional[str] = Field(default="Unknown Building", description="The name of the building where the spot is located.")
     floor_name: Optional[str] = Field(default="Unknown Floor", description="The floor where the spot is located.")
-    start_time: str = Field(description="Booking start datetime. MUST be explicitly extracted from user input or calendar (e.g. '2026-06-04 10:00:00'). NEVER guess or omit.")
-    end_time: str = Field(description="Booking end datetime (e.g. '2026-06-04 14:00:00'). If the user provides an end time but no end date, assume the end date is the same as the start date.")
+    start_time: str = Field(description="Booking start datetime. Can be in YYYY-MM-DD HH:MM:00 (24-hour format) or include AM/PM (e.g., YYYY-MM-DD hh:mm AM/PM). CRITICAL: If the user has not explicitly provided a start time, or has omitted the year (e.g., they only typed month and day like 'July 10' without explicitly specifying the year, and it is not a structured calendar payload), DO NOT CALL THIS TOOL. You MUST reply conversationally and ask them to confirm the year or use the calendar. NEVER guess, assume, or auto-fill the year.")
+    end_time: str = Field(description="Booking end datetime. Can be in YYYY-MM-DD HH:MM:00 (24-hour format) or include AM/PM (e.g., YYYY-MM-DD hh:mm AM/PM). CRITICAL: If the user has not explicitly provided an end time, or has omitted the year (e.g., they only typed month and day like 'July 10' without explicitly specifying the year, and it is not a structured calendar payload), DO NOT CALL THIS TOOL. You MUST reply conversationally and ask them to confirm the year or use the calendar. NEVER guess, assume, or auto-fill the year.")
+
 
 class GetSpotsInput(BaseModel):
     user_name: str = Field(description="The client_name/user_name from the frontend context.")
     search_term: Optional[str] = Field(
         default="",
-        description="The Spot Code, Spot Name, or Building Name. If the user does not specify a location, pass an empty string '' to show all options."
+        description="The Spot Code, Spot Name, Building Name, Floor Name, or any search term/keyword typed by the user (e.g. 'floor 6', 'floor6', 'Building 1', 'WMR'). You MUST pass the user's search text exactly as entered."
     )
 
 class GetBookingStatusInput(BaseModel):

@@ -669,17 +669,7 @@ export default function SpaceBookingModal({
           }}
         >
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", position: "relative" }}>
-            <span style={{ transform: hasAnyBooking(dateStr) && !isFullyBooked && !isPastDate ? "translateY(-1px)" : "none" }}>{day}</span>
-            {hasAnyBooking(dateStr) && !isFullyBooked && !isPastDate && (
-              <div style={{
-                width: "4px",
-                height: "4px",
-                borderRadius: "50%",
-                background: isHighlighted ? "#000000" : "var(--color-primary, #d4af37)",
-                position: "absolute",
-                bottom: "-6px"
-              }} />
-            )}
+            <span>{day}</span>
           </div>
         </button>
       );

@@ -2551,7 +2551,9 @@ export default function Home() {
 
           // ── Auto-open inline calendar picker on Phase 3 message ──────────
           // Detect when AI asks user to pick a date/time via the calendar or matches example formats
-          const isCalendarPrompt = /use the calendar/i.test(finalText) || /(\(e\.g\.[^)]*(?:10am|2pm|morning|all day|afternoon|evening)[^)]*)\)/gi.test(finalText);
+          // DO NOT auto-open if the message includes a search dataset (tableData) which requires a tile selection click first.
+          const isCalendarPrompt = (/use the calendar/i.test(finalText) || /(\(e\.g\.[^)]*(?:10am|2pm|morning|all day|afternoon|evening)[^)]*)\)/gi.test(finalText))
+            && !(tableData && tableData.length > 0);
           if (isCalendarPrompt && isSpaceBookingRef.current) {
             setMessages(prev => {
               const idx = prev.length - 1;
@@ -3114,10 +3116,12 @@ export default function Home() {
         break;
       }
     }
-    const hasPrompt = lastAiIdx !== -1 && (
-      /use the calendar/i.test(processed[lastAiIdx].text || "") ||
-      /(\(e\.g\.[^)]*(?:10am|2pm|morning|all day|afternoon|evening)[^)]*)\)/gi.test(processed[lastAiIdx].text || "")
-    );
+    const lastMsg = lastAiIdx !== -1 ? processed[lastAiIdx] : null;
+    const hasPrompt = lastMsg && (
+      /use the calendar/i.test(lastMsg.text || "") ||
+      /(\(e\.g\.[^)]*(?:10am|2pm|morning|all day|afternoon|evening)[^)]*)\)/gi.test(lastMsg.text || "")
+    ) && !(lastMsg.tableData && lastMsg.tableData.length > 0)
+      && !(lastMsg.multipleDatasets && lastMsg.multipleDatasets.length > 0);
     if (hasPrompt) {
       const parsed = parseDateTimeFromMessage(processed[lastAiIdx].text || "");
       setBookingStartDate(parsed.date);
@@ -4654,7 +4658,10 @@ export default function Home() {
                     return ((m.tableData && m.tableData.length > 0) || (m.multipleDatasets && m.multipleDatasets.length > 0)) ? i : last;
                   }, -1);
                   return messages.map((msg, idx) => {
-                  const isUser = msg.role === "user";
+                    if (msg.role === "user" && typeof msg.text === "string" && msg.text.trim().startsWith("SpotCode:")) {
+                      return null;
+                    }
+                    const isUser = msg.role === "user";
                   const isError = msg.role === "error";
                   const isStreaming = msg.streaming === true;
                   const isAudio = msg.isAudio === true;
@@ -4753,7 +4760,7 @@ export default function Home() {
                           <>{(() => {
                             if (isUser && msg.text.includes("[CALENDAR_PAYLOAD]")) {
                               const match = msg.text.match(/start_time:\s*"([^"]+)",\s*end_time:\s*"([^"]+)"/);
-                              const prefix = msg.text.split("[CALENDAR_PAYLOAD]")[0].trim();
+                              const prefix = msg.text.split("[CALENDAR_PAYLOAD]")[0].replace(/\|\s*$/, "").trim();
                               if (match) {
                                 return prefix ? `${prefix} | Book from ${match[1]} to ${match[2]}` : `Book from ${match[1]} to ${match[2]}`;
                               }

@@ -27,11 +27,13 @@ def _get_title_model():
 
 # Strip HTML tags from text before using for title generation
 def strip_html(text: str) -> str:
-    """Remove HTML tags and clean up whitespace."""
+    """Remove HTML tags, calendar payloads, and clean up whitespace."""
     if not text:
         return ""
+    # Remove calendar payload and anything after it to prevent it from polluting the title
+    clean = re.sub(r'\[CALENDAR_PAYLOAD\].*', '', text, flags=re.DOTALL)
     # Remove HTML tags
-    clean = re.sub(r'<[^>]+>', '', text)
+    clean = re.sub(r'<[^>]+>', '', clean)
     # Remove extra whitespace
     clean = re.sub(r'\s+', ' ', clean).strip()
     return clean
@@ -63,6 +65,9 @@ async def generate_session_title(history: list) -> str:
             assistant_raw = item.get("context", "") or item.get("assistant", "")
             assistant_part = strip_html(assistant_raw)[:100]
 
+            # If user_part is just trailing punctuation after stripping payload, clean it
+            user_part = re.sub(r'^[|\-:\s]+|[|\-:\s]+$', '', user_part)
+
             conversation_text += f"User: {user_part}\n"
             conversation_text += f"Assistant: {assistant_part}\n\n"
 
@@ -91,6 +96,10 @@ async def generate_session_title(history: list) -> str:
         
         title = str(response.content).strip()
 
+        # Clean calendar payload if the LLM hallucinated it
+        title = re.sub(r'\[CALENDAR_PAYLOAD\].*', '', title, flags=re.DOTALL).strip()
+        title = re.sub(r'[|\-:\s]+$', '', title).strip()
+
         if not title or len(title) > 60:
             title = "New Chat"
 
@@ -100,6 +109,7 @@ async def generate_session_title(history: list) -> str:
     except Exception as e:
         logger.error(f"❌ Title generation failed: {e}", exc_info=True)
         return "New Chat"
+
 
 
 # ── Save session to PostgreSQL ──────────────────────────────────────────────
