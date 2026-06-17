@@ -319,13 +319,7 @@ class SessionRequest(BaseModel):
     chatHistory: Optional[List[FrontendChatMessage]] = None
     historyOnClick: bool = False
     group_name: Optional[str] = None
-
-class ClientInsertionRequest(BaseModel):
-    """Request schema for client insertion"""
-    userId: str
-    userName: str
-    service: str
-    token: str
+    isSpaceBooking: Optional[bool] = False
 
 class ClientInsertionRequest(BaseModel):
     """Request schema for client insertion"""
@@ -334,3 +328,25 @@ class ClientInsertionRequest(BaseModel):
     userName: str
     service: str
     token: str
+
+class BookSpotInput(BaseModel):
+    user_name: str = Field(description="The client_name/user_name from the frontend context.")
+    sub_user_name: Optional[str] = Field(default=None, description="The specific user making the booking, if any.")
+    spot_code: str = Field(description="The unique Spot Code being booked (e.g., WRMF-NES).")
+    spot_name: Optional[str] = Field(default="Unknown Spot", description="The name of the spot.")
+    building_name: Optional[str] = Field(default="Unknown Building", description="The name of the building where the spot is located.")
+    floor_name: Optional[str] = Field(default="Unknown Floor", description="The floor where the spot is located.")
+    start_time: str = Field(description="Booking start datetime. Can be in YYYY-MM-DD HH:MM:00 (24-hour format) or include AM/PM (e.g., YYYY-MM-DD hh:mm AM/PM). CRITICAL: If the user has not explicitly provided a start time, or has omitted the year (e.g., they only typed month and day like 'July 10' without explicitly specifying the year, and it is not a structured calendar payload), DO NOT CALL THIS TOOL. You MUST reply conversationally and ask them to confirm the year or use the calendar. NEVER guess, assume, or auto-fill the year.")
+    end_time: str = Field(description="Booking end datetime. Can be in YYYY-MM-DD HH:MM:00 (24-hour format) or include AM/PM (e.g., YYYY-MM-DD hh:mm AM/PM). CRITICAL: If the user has not explicitly provided an end time, or has omitted the year (e.g., they only typed month and day like 'July 10' without explicitly specifying the year, and it is not a structured calendar payload), DO NOT CALL THIS TOOL. You MUST reply conversationally and ask them to confirm the year or use the calendar. NEVER guess, assume, or auto-fill the year.")
+
+
+class GetSpotsInput(BaseModel):
+    user_name: str = Field(description="The client_name/user_name from the frontend context.")
+    search_term: Optional[str] = Field(
+        default="",
+        description="The Spot Code, Spot Name, Building Name, Floor Name, or any search term/keyword typed by the user (e.g. 'floor 6', 'floor6', 'Building 1', 'WMR'). You MUST pass the user's search text exactly as entered."
+    )
+
+class GetBookingStatusInput(BaseModel):
+    user_name: str = Field(description="The client_name/user_name from the frontend context.")
+    booking_id: Optional[str] = Field(default=None, description="The 4-digit booking ID provided by the user. If omitted, returns all bookings for the user.")

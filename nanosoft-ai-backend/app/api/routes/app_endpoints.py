@@ -7,6 +7,7 @@ from app.services.postgres_service import save_session_to_postgres_service
 from app.state import frontend_saved_sessions
 from app.api.database.postgres_client import get_pool
 from app.services.sync.migrate_user import migrate_user
+from app.services.user_profile_service import get_user_usage_stats
 
 logger = logging.getLogger('app_endpoints')
 app_endpoints_router = APIRouter()
@@ -59,7 +60,8 @@ async def sessions_endpoint(request: SessionRequest):
             session_id = session_id,
             user_name  = user_name,
             history    = history_pairs,
-            group_name = request.group_name
+            group_name = request.group_name,
+            is_space_booking = request.isSpaceBooking or False
         )
         #Mark this session as saved by frontend
         # So WebSocketDisconnect will NOT save it again
@@ -383,8 +385,60 @@ def api_health():
 
 @app_endpoints_router.on_event("startup")
 async def startup_event():
-    get_pool()
+    conn = get_pool()
     logger.info("🚀 PostgreSQL client initialized during startup")
+    try:
+        conn.rollback()
+        with conn.cursor() as cur:
+            # Check if column is_space_booking exists in chat_sessions
+            cur.execute("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name='chat_sessions' AND column_name='is_space_booking'
+            """)
+            if not cur.fetchone():
+                logger.info("Adding column 'is_space_booking' to 'chat_sessions' table...")
+                cur.execute("ALTER TABLE chat_sessions ADD COLUMN is_space_booking BOOLEAN DEFAULT FALSE")
+                conn.commit()
+                logger.info("Column 'is_space_booking' added successfully.")
+            else:
+                logger.info("Column 'is_space_booking' already exists in 'chat_sessions'.")
+    except Exception as e:
+        logger.error(f"Failed to migrate database: {e}", exc_info=True)
+        if conn:
+            conn.rollback()
+
+@app_endpoints_router.get("/bookings/{spot_code}")
+async def get_bookings_for_spot(spot_code: str):
+    if not spot_code:
+        raise HTTPException(status_code=400, detail="spot_code is required")
+
+    conn = get_pool()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT start_time, end_time, booking_id
+                FROM space_bookings
+                WHERE spot_code = %s
+                """,
+                (spot_code,)
+            )
+            rows = cur.fetchall()
+            bookings = []
+            for row in rows:
+                bookings.append({
+                    "start_time": str(row[0]),
+                    "end_time": str(row[1]),
+                    "booking_id": str(row[2])
+                })
+            return {"status": "ok", "bookings": bookings}
+    except Exception as e:
+        logger.error(f"Failed to fetch bookings for spot {spot_code}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Database query failed: {e}")
 
 @app_endpoints_router.get("/health", tags=["Health"])
 def health():

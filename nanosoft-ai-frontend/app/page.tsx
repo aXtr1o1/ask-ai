@@ -22,6 +22,9 @@ import GroupsChat, { FolderListItem, ChatListItem } from "./components/GroupsCha
 import { useGhostInputCompletion } from "./hooks/useGhostInputCompletion";
 import { recordPromptForGhostHistory, ghostPromptHistoryStorageKey } from "./lib/ghostInputCompletion";
 import SpaceBooking from "./components/Bookings/spacebooking";
+import SpaceBookingModal from "./components/Bookings/SpaceBookingModal";
+import ComplaintsModal from "./components/Bookings/ComplaintsModal";
+
 /* changes done by megnathan: Cleaned up icon imports to avoid conflicts with local definitions */
 import {
   IconUser, IconMicrophone, IconPlayerPlay, IconPlayerPause,
@@ -55,9 +58,10 @@ interface Message {
   // ← Multiple datasets (type="multiple_datasets" from backend)
   multipleDatasets?: MultiDatasetView[];
   multiSummary?: string;  // ← context_summary from the backend
+  isSpaceBooking?: boolean;   // ← Track if message belongs to Space Booking session
 }
 
-interface ChatSession { id: string; title: string; createdAt: number; updatedAt?: number; isPinned?: boolean; isArchived?: boolean; group_name?: string; }
+interface ChatSession { id: string; title: string; createdAt: number; updatedAt?: number; isPinned?: boolean; isArchived?: boolean; group_name?: string; isSpaceBooking?: boolean; }
 interface Group {
   id: string;
   name: string;
@@ -137,6 +141,32 @@ function md(text: string): string {
   text = text.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
   text = text.replace(/\*(.+?)\*/g, "<em>$1</em>");
   return text;
+}
+
+// ── Format Multi-line Context Summary (safely render markdown & newlines) ──
+function formatContextSummary(text: string): string {
+  if (!text) return "";
+  return text
+    .split("\n")
+    .map(line => {
+      const trimmed = line.trim();
+      if (!trimmed) return '<div style="height:6px"></div>';
+      
+      // Check for bullet list
+      const bulletMatch = line.match(/^[\s]*([-*•])\s+(.*)/);
+      if (bulletMatch) {
+        return `<div style="display:flex;align-items:baseline;gap:8px;margin-left:12px;margin-top:2px;margin-bottom:2px"><span style="color:#D2AC47;font-size:10px;flex-shrink:0">•</span><span style="color:#F3F4F6">${md(bulletMatch[2])}</span></div>`;
+      }
+      
+      // Check for numbered list
+      const numberMatch = line.match(/^[\s]*(\d+[.)])\s+(.*)/);
+      if (numberMatch) {
+        return `<div style="display:flex;align-items:baseline;gap:8px;margin-left:12px;margin-top:2px;margin-bottom:2px"><span style="color:#D2AC47;font-size:12px;font-weight:600;flex-shrink:0">${numberMatch[1]}</span><span style="color:#F3F4F6">${md(numberMatch[2])}</span></div>`;
+      }
+      
+      return `<div style="line-height:1.6;margin:2px 0;color:#F3F4F6">${md(line)}</div>`;
+    })
+    .join("");
 }
 
 // ── Strip bullet/number prefix + strip **bold** and *italic* from a line ──────
@@ -304,12 +334,12 @@ function extractResponseContent(text: string): string {
     const parsed = JSON.parse(text);
 
     // If wrapper has session_id + response, extract just the response
-    if (parsed.session_id && parsed.response) {
+    if (parsed.session_id !== undefined && parsed.response !== undefined) {
       return String(parsed.response);
     }
 
     // If it has a response field, use it
-    if (parsed.response) {
+    if (parsed.response !== undefined) {
       return String(parsed.response);
     }
 
@@ -445,7 +475,7 @@ function renderLargeDataset(text: string): string | null {
   }
 
   if (!records.length) {
-    const contextDiv = context.trim() ? `<div class="large-dataset-context">${escapeHTML(context)}</div>` : "";
+    const contextDiv = context.trim() ? `<div class="large-dataset-context">${formatContextSummary(context)}</div>` : "";
     return `${searchBanner}${contextDiv}`;
   }
 
@@ -525,7 +555,7 @@ function renderLargeDataset(text: string): string | null {
   // ─────────────────────────────────────────
   // Final HTML
   // ─────────────────────────────────────────
-  const contextDiv = context.trim() ? `<div class="large-dataset-context">${escapeHTML(context)}</div>` : "";
+  const contextDiv = context.trim() ? `<div class="large-dataset-context">${formatContextSummary(context)}</div>` : "";
   const table = `
   ${searchBanner}
   ${contextDiv}
@@ -554,7 +584,7 @@ function formatLargeDatasetTable(largeDataData: any): string {
 
 
   if (records.length === 0) {
-    return `<div class="large-dataset-context"><strong>Summary:</strong> ${esc(context)}</div>`;
+    return `<div class="large-dataset-context"><strong>Summary:</strong> ${formatContextSummary(context)}</div>`;
   }
 
 
@@ -662,7 +692,7 @@ function formatLargeDatasetTable(largeDataData: any): string {
   // const contextHTML = context 
   //   ? `<div class="large-dataset-context">${esc(context)}</div>` 
   const contextHTML = context
-    ? `<div class="large-dataset-context">${esc(context)}</div>`
+    ? `<div class="large-dataset-context">${formatContextSummary(context)}</div>`
     : "";
 
 
@@ -791,6 +821,120 @@ function removeEmoji(text: string): string {
     lines[0] = firstLine;
   }
   return lines.join("\n");
+}
+
+// Inject calendar icon at the end of space booking time examples (disabled now)
+function injectCalendarIcon(text: string, msgIdx: number = -1): string {
+  if (!text) return text;
+  // Remove calendar emoji if present in the text to avoid double icons / unwanted icons
+  return text.replace(/📅/g, "");
+}
+
+// Telemetry-logged date/time extraction from message text
+function parseDateTimeFromMessage(text: string): { date: string; fromTime: string; toTime: string } {
+  console.log("🔍 [Telemetry] Running parseDateTimeFromMessage on text:", text);
+
+  const getLocalYYYYMMDD = (d: Date = new Date()): string => {
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
+  const now = new Date();
+  let date = getLocalYYYYMMDD(now);
+  
+  // Future defaults: next hour
+  let fromHour = now.getHours() + 1;
+  let toHour = fromHour + 1;
+  
+  if (fromHour >= 24) {
+    fromHour = fromHour % 24;
+    toHour = fromHour + 1;
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    date = getLocalYYYYMMDD(tomorrow);
+  } else if (toHour >= 24) {
+    toHour = toHour % 24;
+  }
+  
+  let fromTime = `${String(fromHour).padStart(2, "0")}:00`;
+  let toTime = `${String(toHour).padStart(2, "0")}:00`;
+
+  try {
+    // 1. Try to find a date like YYYY-MM-DD
+    const dateMatch = text.match(/\b(\d{4}-\d{2}-\d{2})\b/);
+    if (dateMatch) {
+      date = dateMatch[1];
+      console.log("📅 [Telemetry] Parsed date YYYY-MM-DD:", date);
+    } else {
+      // Check for tomorrow
+      if (/tomorrow/i.test(text)) {
+        const tomorrow = new Date(now);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        date = getLocalYYYYMMDD(tomorrow);
+        console.log("📅 [Telemetry] Parsed date (tomorrow):", date);
+      } else if (/today/i.test(text)) {
+        date = getLocalYYYYMMDD(now);
+        console.log("📅 [Telemetry] Parsed date (today):", date);
+      }
+    }
+
+    // 2. Try to find times like "10am", "2pm", "10:00", "15:00"
+    const timeRegex = /\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i;
+    const timeMatches = [...text.matchAll(new RegExp(timeRegex, "gi"))];
+
+    if (timeMatches.length >= 1) {
+      const parseMatch = (m: RegExpMatchArray) => {
+        let hour = parseInt(m[1], 10);
+        const min = m[2] ? m[2] : "00";
+        const ampm = m[3].toLowerCase();
+        if (ampm === "pm" && hour < 12) hour += 12;
+        if (ampm === "am" && hour === 12) hour = 0;
+        return `${String(hour).padStart(2, "0")}:${min}`;
+      };
+
+      fromTime = parseMatch(timeMatches[0]);
+      console.log("📅 [Telemetry] Parsed start time:", fromTime);
+
+      if (timeMatches.length >= 2) {
+        toTime = parseMatch(timeMatches[1]);
+        console.log("📅 [Telemetry] Parsed end time:", toTime);
+      } else {
+        // Default end time to start time + 1 hour
+        const [h, m] = fromTime.split(":").map(Number);
+        const endHour = (h + 1) % 24;
+        toTime = `${String(endHour).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+        console.log("📅 [Telemetry] Defaulted end time to start + 1h:", toTime);
+      }
+    } else {
+      // Look for 24h formats like 14:00 or 9:30 or 09:30 (handles 1-digit hours too)
+      const time24Match = text.match(/\b(\d{1,2}):(\d{2})\b/g);
+      if (time24Match && time24Match.length >= 1) {
+        const format24 = (tStr: string) => {
+          const parts = tStr.split(":");
+          const hr = String(parseInt(parts[0], 10)).padStart(2, "0");
+          const mn = parts[1];
+          return `${hr}:${mn}`;
+        };
+        fromTime = format24(time24Match[0]);
+        console.log("📅 [Telemetry] Parsed 24h start time:", fromTime);
+        if (time24Match.length >= 2) {
+          toTime = format24(time24Match[1]);
+          console.log("📅 [Telemetry] Parsed 24h end time:", toTime);
+        } else {
+          const [h, m] = fromTime.split(":").map(Number);
+          const endHour = (h + 1) % 24;
+          toTime = `${String(endHour).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+          console.log("📅 [Telemetry] Defaulted 24h end time to start + 1h:", toTime);
+        }
+      }
+    }
+  } catch (err) {
+    console.error("⚠️ [Telemetry] Failed to parse date/time from message:", err);
+  }
+
+  return { date, fromTime, toTime };
 }
 
 function formatOutput(text: string): string {
@@ -1029,6 +1173,14 @@ const IconChat = ({ width = 16, height = 16, style }: { width?: number; height?:
     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
   </svg>
 );
+const IconCalendar = ({ width = 16, height = 16, style }: { width?: number; height?: number; style?: React.CSSProperties }) => (
+  <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ ...style, width, height, flexShrink: 0 }}>
+    <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+    <line x1="16" y1="2" x2="16" y2="6" />
+    <line x1="8" y1="2" x2="8" y2="6" />
+    <line x1="3" y1="10" x2="21" y2="10" />
+  </svg>
+);
 const IconArchive = ({ width = 16, height = 16, style }: { width?: number; height?: number; style?: React.CSSProperties }) => (
   <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ ...style, width, height, flexShrink: 0 }}>
     <rect x="3" y="4" width="18" height="4" rx="1" /><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8" /><line x1="10" y1="12" x2="14" y2="12" />
@@ -1140,18 +1292,24 @@ export default function Home() {
 
   // SpaceBooking active feature states
   const [isSpaceBooking, setIsSpaceBooking] = useState<boolean>(false);
-  
-  useEffect(() => {
-    if (isSpaceBooking) {
-      const greeting = `Hello ${userIdFromUrl ?? loggedInUser ?? "there"}, you can book your space here. Please tell me your requirements, and we can proceed with the interaction.`;
-      setMessages(prev => {
-        const updated: Message[] = [...prev, { role: "ai" as const, text: greeting, streaming: false }];
-        sessionMessagesRef.current.set(sessionId, updated);
-        return updated;
-      });
-    }
-  }, [isSpaceBooking, userIdFromUrl, loggedInUser, sessionId]);
+  const [isComplaints, setIsComplaints] = useState<boolean>(false);
+  const [isComplaintsModalOpen, setIsComplaintsModalOpen] = useState<boolean>(false);
+  const [activeBookingBubbleIndex, setActiveBookingBubbleIndex] = useState<number | null>(null);
+  const [bookingStartDate, setBookingStartDate] = useState<string>("");
+  const [bookingEndDate, setBookingEndDate] = useState<string>("");
+  const [bookingStartTime, setBookingStartTime] = useState<string>("");
+  const [bookingEndTime, setBookingEndTime] = useState<string>("");
 
+  const isSpaceBookingRef = useRef(isSpaceBooking);
+  useEffect(() => {
+    isSpaceBookingRef.current = isSpaceBooking;
+  }, [isSpaceBooking]);
+
+  useEffect(() => {
+    if (isComplaints) {
+      setIsComplaintsModalOpen(true);
+    }
+  }, [isComplaints]);
   const [activeFeature, setActiveFeature] = useState<'chat' | 'archived' | 'groups'>('chat');
   const [showFeaturePlaceholder, setShowFeaturePlaceholder] = useState<boolean>(false);
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
@@ -1202,6 +1360,10 @@ export default function Home() {
     setSelectedGroupName(name);
     setMessages([]); // Clear messages for new group chat
     setSessionId(generateSessionId()); // New session for the group
+    setIsSpaceBooking(false);
+    setIsComplaints(false);
+    setIsComplaintsModalOpen(false);
+    setActiveBookingBubbleIndex(null);
 
     try {
       await fetch(`${baseUrl}/api/folder/create`, {
@@ -1588,7 +1750,11 @@ export default function Home() {
               }
             ]);
             setSessionId(sharedSid);
-            setMessages(processLoadedMessages(mappedHistory));
+            const processed = processLoadedMessages(mappedHistory);
+            const isBooking = processed.some(m => m.isSpaceBooking);
+            const finalProcessed = isBooking ? processLoadedMessages(mappedHistory, true) : processed;
+            setMessages(finalProcessed);
+            setIsSpaceBooking(isBooking);
             console.log("[share] shared chat loaded and mapped");
             setAuthChecked(true);
           }
@@ -1764,6 +1930,7 @@ export default function Home() {
           userName: userIdFromUrl ?? loggedInUser,
           sessionId: sid,
           group_name: selectedGroupName,
+          isSpaceBooking: (sid === sessionId ? isSpaceBooking : (chatSessions.find(s => s.id === sid)?.isSpaceBooking || false)) || valid.some(m => m.isSpaceBooking),
           chatHistory: valid.map(m => ({
             role: m.role,
             text: m.isAudio
@@ -2295,6 +2462,7 @@ export default function Home() {
                       text: multiSummary!,
                       streaming: false,
                       originalText: finalText,
+                      isSpaceBooking: isSpaceBookingRef.current,
                       ...(multipleDatasets.length > 0 ? { multipleDatasets, multiSummary } : {}),
                     };
                   }
@@ -2323,13 +2491,40 @@ export default function Home() {
               }
             } else {
               try {
-                processedText = formatOutput(cleanedText);
-                console.log("📝 [DONE] Formatted as text");
+                // ── Space booking plain-text: skip table-conversion formatting ──
+                // Booking confirmations and status messages have "Key: Value" lines
+                // that formatOutput() incorrectly converts into HTML tables.
+                // For space booking sessions, render as simple line-broken plain text.
+                if (isSpaceBookingRef.current) {
+                  processedText = formatContextSummary(cleanedText);
+                  console.log("📝 [DONE] Space booking — rendered as plain text (no table conversion)");
+                } else {
+                  processedText = formatOutput(cleanedText);
+                  console.log("📝 [DONE] Formatted as text");
+                }
               } catch (err) {
                 console.log("📝 [DONE] Using raw text", err);
                 processedText = finalText;
               }
             }
+          }
+
+          // ── Handle Empty LLM Responses without hardcoding text ──
+          if (!processedText || !processedText.trim()) {
+            setMessages(prev => {
+              const u = [...prev];
+              // Remove the loading AI bubble completely since there's no response
+              if (u[u.length - 1]?.role === "ai") {
+                u.pop();
+              }
+              const activeSid = sessionIdRef.current;
+              sessionMessagesRef.current.set(activeSid, u);
+              return u;
+            });
+            accRef.current = "";
+            setIsLoading(false);
+            setTimeout(() => inputRef.current?.focus(), 50);
+            return; // Abort further processing
           }
 
           setMessages(prev => {
@@ -2344,7 +2539,8 @@ export default function Home() {
                 chartType: chartType,              // ← Store chart type
                 originalText: finalText,           // ← Store original raw response before HTML processing
                 tableData: tableData,              // ← Store table rows
-                tableTitle: tableTitle              // ← Store table title
+                tableTitle: tableTitle,             // ← Store table title
+                isSpaceBooking: isSpaceBookingRef.current // ← Store space booking state
               };
             }
             // Persist to per-session store so switching sessions keeps history
@@ -2352,6 +2548,26 @@ export default function Home() {
             sessionMessagesRef.current.set(activeSid, u);
             return u;
           });
+
+          // ── Auto-open inline calendar picker on Phase 3 message ──────────
+          // Detect when AI asks user to pick a date/time via the calendar or matches example formats
+          // DO NOT auto-open if the message includes a search dataset (tableData) which requires a tile selection click first.
+          const isCalendarPrompt = (/use the calendar/i.test(finalText) || /(\(e\.g\.[^)]*(?:10am|2pm|morning|all day|afternoon|evening)[^)]*)\)/gi.test(finalText))
+            && !(tableData && tableData.length > 0);
+          if (isCalendarPrompt && isSpaceBookingRef.current) {
+            setMessages(prev => {
+              const idx = prev.length - 1;
+              const parsed = parseDateTimeFromMessage(finalText);
+              setBookingStartDate(parsed.date);
+              setBookingEndDate(parsed.date);
+              setBookingStartTime(parsed.fromTime);
+              setBookingEndTime(parsed.toTime);
+              setActiveBookingBubbleIndex(idx);
+              console.log("📅 [Auto] Phase 3 detected — auto-opening inline booking picker on message index:", idx);
+              return prev;
+            });
+          }
+
           accRef.current = "";          // reset for next message
           setIsLoading(false);
           setTimeout(() => inputRef.current?.focus(), 50);
@@ -2379,10 +2595,10 @@ export default function Home() {
             const l = u.length - 1;
             // If last message is already our streaming AI bubble → update it
             if (u[l]?.role === "ai" && u[l]?.streaming === true) {
-              u[l] = { ...u[l], text: displayText, streaming: true };  // ← Preserve chartType
+              u[l] = { ...u[l], text: displayText, streaming: true, isSpaceBooking: isSpaceBookingRef.current };  // ← Preserve chartType
             } else {
               // First chunk → create the AI bubble now (only once) with current chartType
-              u.push({ role: "ai", text: displayText, streaming: true, chartType: chartType });
+              u.push({ role: "ai", text: displayText, streaming: true, chartType: chartType, isSpaceBooking: isSpaceBookingRef.current });
             }
             return u;
           });
@@ -2490,7 +2706,7 @@ export default function Home() {
       const data = await res.json();
       setChatSessions(prev => {
         const fetched: ChatSession[] = (data?.sessions ?? []).map(
-          (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; is_pinned?: boolean; is_archived?: boolean; group_name?: string }) => {
+          (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; is_pinned?: boolean; is_archived?: boolean; group_name?: string; is_space_booking?: boolean }) => {
             const existing = prev.find(p => p.id === s.session_id);
             return {
               id: s.session_id,
@@ -2500,6 +2716,7 @@ export default function Home() {
               isPinned: s.is_pinned || false,
               isArchived: s.is_archived || false,
               group_name: s.group_name,
+              isSpaceBooking: s.is_space_booking || false,
             };
           }
         );
@@ -2597,7 +2814,7 @@ export default function Home() {
     }, 3000);
   };
 
-  const handleNewChat = async () => {
+  const handleNewChat = async (initialMode?: 'space_booking' | 'complaints' | 'ask_ai') => {
     if (isLoading) {
       showWarningToast("Please wait, don't switch the chat!");
       console.log("⚠️ Chat creation blocked: Please wait, don't switch the chat!");
@@ -2611,6 +2828,10 @@ export default function Home() {
     setMessages([]);
     accRef.current = "";
     setIsLoading(false);
+    setIsSpaceBooking(initialMode === 'space_booking'); // Reset space booking state when starting a new chat
+    setIsComplaints(initialMode === 'complaints');
+    setIsComplaintsModalOpen(false);
+    setActiveBookingBubbleIndex(null);
 
     const newSessionId = generateSessionId();
     setSessionId(newSessionId);
@@ -2650,7 +2871,7 @@ export default function Home() {
         const data = await res.json();
         const currentSessions = chatSessions;
         const fetched: ChatSession[] = (data?.sessions ?? []).map(
-          (s: any) => {
+          (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; is_pinned?: boolean; is_archived?: boolean; group_name?: string; is_space_booking?: boolean }) => {
             const existing = currentSessions.find(p => p.id === s.session_id);
             return {
               id: s.session_id,
@@ -2660,6 +2881,7 @@ export default function Home() {
               isPinned: s.is_pinned || false,
               isArchived: s.is_archived || false,
               group_name: s.group_name,
+              isSpaceBooking: s.is_space_booking || false,
             };
           }
         );
@@ -2694,10 +2916,29 @@ export default function Home() {
     setTimeout(() => refetchSessions(), 400);
   };
 
+  const handleSwitchMode = (newMode: 'space_booking' | 'complaints' | 'ask_ai') => {
+    const currentMode = isSpaceBooking ? 'space_booking' : isComplaints ? 'complaints' : 'ask_ai';
+    if (newMode === currentMode) {
+      return;
+    }
+
+    if (messages.length > 0) {
+      // Save current chat history to database in background
+      saveChatHistory(sessionId, messages);
+
+      // Start a new chat instantly
+      handleNewChat(newMode);
+    } else {
+      // If current chat is empty, just switch the mode of the current chat!
+      setIsSpaceBooking(newMode === 'space_booking');
+      setIsComplaints(newMode === 'complaints');
+    }
+  };
+
 
 
   // ── Process loaded messages: convert raw JSON to formatted tables ─────────
-  function processLoadedMessages(msgs: Message[]): Message[] {
+  function processLoadedMessages(msgs: Message[], isSpaceBookingSession?: boolean): Message[] {
     return msgs.map(m => {
       if (m.role !== "ai") return m;
 
@@ -2707,7 +2948,7 @@ export default function Home() {
       const graphData = parseGraphData(text);
       if (graphData) {
         console.log("📊 [HISTORY] Graph response detected — keeping as raw JSON for chart");
-        return { ...m, text, originalText: text, isGraphResponse: true };
+        return { ...m, text, originalText: text, isGraphResponse: true, isSpaceBooking: isSpaceBookingSession };
       }
 
       // 🔑 Check if this is a MULTIPLE_DATASETS response
@@ -2743,10 +2984,21 @@ export default function Home() {
               };
             });
             const multipleDatasets = parsedMulti.filter((ds) => ds.rows.length > 0);
+            const isSpaceBooking = isSpaceBookingSession || multipleDatasets.some(ds =>
+              ds.rows.some(row =>
+                Object.keys(row).some(col =>
+                  typeof col === 'string' && (
+                    col.toUpperCase() === "SPOTIDPK" ||
+                    col.toUpperCase() === "SPOTCODE"
+                  )
+                )
+              )
+            );
             return {
               ...m,
               text: multiSummary,
               originalText: text,
+              isSpaceBooking,
               ...(multipleDatasets.length > 0 ? { multipleDatasets, multiSummary } : {}),
             };
           }
@@ -2763,8 +3015,16 @@ export default function Home() {
             const tableHTML = renderLargeDataset(text);
             if (tableHTML) {
               const rows = extractTableRows(tableHTML);
+              const isSpaceBooking = isSpaceBookingSession || rows.some(row =>
+                Object.keys(row).some(col =>
+                  typeof col === 'string' && (
+                    col.toUpperCase() === "SPOTIDPK" ||
+                    col.toUpperCase() === "SPOTCODE"
+                  )
+                )
+              );
               // ✅ Set originalText = raw JSON so future saves preserve it
-              return { ...m, text: tableHTML, originalText: text, tableData: rows, tableTitle: "Results" };
+              return { ...m, text: tableHTML, originalText: text, tableData: rows, tableTitle: "Results", isSpaceBooking };
             }
           }
         }
@@ -2781,10 +3041,18 @@ export default function Home() {
         console.log("✅ [HISTORY] Message already HTML formatted - extracting table data");
         const rows = extractTableRows(text);
         if (rows.length > 0) {
+          const isSpaceBooking = isSpaceBookingSession || rows.some(row =>
+            Object.keys(row).some(col =>
+              typeof col === 'string' && (
+                col.toUpperCase() === "SPOTIDPK" ||
+                col.toUpperCase() === "SPOTCODE"
+              )
+            )
+          );
           // ✅ originalText stays as the HTML — no raw JSON available here
-          return { ...m, text, originalText: text, tableData: rows, tableTitle: "Results" };
+          return { ...m, text, originalText: text, tableData: rows, tableTitle: "Results", isSpaceBooking };
         }
-        return { ...m, originalText: text };
+        return { ...m, originalText: text, isSpaceBooking: isSpaceBookingSession };
       }
 
       // Extract response content (removes session_id wrapper)
@@ -2797,30 +3065,74 @@ export default function Home() {
         console.log("✅ [HISTORY] Successfully rendered as table structure");
         const rows = extractTableRows(tableHTML);
         if (rows.length > 0) {
+          const isSpaceBooking = isSpaceBookingSession || rows.some(row =>
+            Object.keys(row).some(col =>
+              typeof col === 'string' && (
+                col.toUpperCase() === "SPOTIDPK" ||
+                col.toUpperCase() === "SPOTCODE"
+              )
+            )
+          );
           // ✅ originalText = raw text from DB so future saves re-parse correctly
-          return { ...m, text: tableHTML, originalText: text, tableData: rows, tableTitle: "Results" };
+          return { ...m, text: tableHTML, originalText: text, tableData: rows, tableTitle: "Results", isSpaceBooking };
         }
-        return { ...m, text: tableHTML, originalText: text };
+        return { ...m, text: tableHTML, originalText: text, isSpaceBooking: isSpaceBookingSession };
       }
 
       // Not tabular data → try to format as text
       try {
-        const formattedText = formatOutput(cleanedText);
+        const formattedText = isSpaceBookingSession ? formatContextSummary(cleanedText) : formatOutput(cleanedText);
         // Check if formatOutput produced an HTML table
         const rows = extractTableRows(formattedText);
         if (rows.length > 0) {
-          return { ...m, text: formattedText, originalText: text, tableData: rows, tableTitle: "Results" };
+          const isSpaceBooking = isSpaceBookingSession || rows.some(row =>
+            Object.keys(row).some(col =>
+              typeof col === 'string' && (
+                col.toUpperCase() === "SPOTIDPK" ||
+                col.toUpperCase() === "SPOTCODE"
+              )
+            )
+          );
+          return { ...m, text: formattedText, originalText: text, tableData: rows, tableTitle: "Results", isSpaceBooking };
         }
         // If the formatted text has raw HTML tags, decode them
         if (formattedText.includes('<div') || formattedText.includes('&lt;')) {
-          return { ...m, text: decodeEntities(formattedText), originalText: text };
+          return { ...m, text: decodeEntities(formattedText), originalText: text, isSpaceBooking: isSpaceBookingSession };
         }
-        return { ...m, text: formattedText, originalText: text };
+        return { ...m, text: formattedText, originalText: text, isSpaceBooking: isSpaceBookingSession };
       } catch (err) {
         console.log("📝 [HISTORY] Fallback to raw text");
-        return { ...m, text: decodeEntities(text), originalText: text };
+        return { ...m, text: decodeEntities(text), originalText: text, isSpaceBooking: isSpaceBookingSession };
       }
     });
+  };
+
+  // Auto-opens calendar if the last assistant message contains "use the calendar" or example formats
+  const autoOpenCalendarIfApplicable = (processed: Message[]) => {
+    let lastAiIdx = -1;
+    for (let i = processed.length - 1; i >= 0; i--) {
+      if (processed[i].role === "ai") {
+        lastAiIdx = i;
+        break;
+      }
+    }
+    const lastMsg = lastAiIdx !== -1 ? processed[lastAiIdx] : null;
+    const hasPrompt = lastMsg && (
+      /use the calendar/i.test(lastMsg.text || "") ||
+      /(\(e\.g\.[^)]*(?:10am|2pm|morning|all day|afternoon|evening)[^)]*)\)/gi.test(lastMsg.text || "")
+    ) && !(lastMsg.tableData && lastMsg.tableData.length > 0)
+      && !(lastMsg.multipleDatasets && lastMsg.multipleDatasets.length > 0);
+    if (hasPrompt) {
+      const parsed = parseDateTimeFromMessage(processed[lastAiIdx].text || "");
+      setBookingStartDate(parsed.date);
+      setBookingEndDate(parsed.date);
+      setBookingStartTime(parsed.fromTime);
+      setBookingEndTime(parsed.toTime);
+      setActiveBookingBubbleIndex(lastAiIdx);
+      console.log("📅 [Auto-Open] Found last AI message with calendar prompt at index:", lastAiIdx, parsed);
+    } else {
+      setActiveBookingBubbleIndex(null);
+    }
   };
 
   // ── Switch to an existing session ─────────────────────────────────────────
@@ -2836,6 +3148,11 @@ export default function Home() {
     if (responsive.isMobile) {
       setSidebarOpen(false);
     }
+
+    setIsSpaceBooking(false); // Reset space booking state when switching session
+    setIsComplaints(false);
+    setIsComplaintsModalOpen(false);
+    setActiveBookingBubbleIndex(null);
 
     // Capture the currently active session ID
     const currentSid = sessionIdRef.current;
@@ -2864,7 +3181,7 @@ export default function Home() {
         const data = await res.json();
         setChatSessions(prev => {
           const fetched: ChatSession[] = (data?.sessions ?? []).map(
-            (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; group_name?: string; is_pinned?: boolean; is_archived?: boolean }) => {
+            (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; group_name?: string; is_pinned?: boolean; is_archived?: boolean; is_space_booking?: boolean }) => {
               const existing = prev.find(p => p.id === s.session_id);
               return {
                 id: s.session_id,
@@ -2874,6 +3191,7 @@ export default function Home() {
                 isPinned: s.is_pinned || false,
                 isArchived: s.is_archived || false,
                 group_name: s.group_name,
+                isSpaceBooking: s.is_space_booking || false,
               };
             }
           );
@@ -2895,8 +3213,12 @@ export default function Home() {
     // Check local cache first
     const cached = sessionMessagesRef.current.get(targetSid);
     if (cached && cached.length > 0) {
-      const processed = processLoadedMessages(cached);
+      const isBookingSession = targetSession?.isSpaceBooking || false;
+      const processed = processLoadedMessages(cached, isBookingSession);
       setMessages(processed);
+      const finalIsBooking = isBookingSession || processed.some(m => m.isSpaceBooking);
+      setIsSpaceBooking(finalIsBooking);
+      autoOpenCalendarIfApplicable(processed);
     } else {
       // Fetch from backend
       setHistoryLoading(true);
@@ -2930,9 +3252,13 @@ export default function Home() {
             history.push({ role: "ai", text: entry.assistant });
           }
         }
-        const processed = processLoadedMessages(history);
+        const isBookingSession = targetSession?.isSpaceBooking || false;
+        const processed = processLoadedMessages(history, isBookingSession);
         sessionMessagesRef.current.set(targetSid, processed);
         setMessages(processed);
+        const finalIsBooking = isBookingSession || processed.some(m => m.isSpaceBooking);
+        setIsSpaceBooking(finalIsBooking);
+        autoOpenCalendarIfApplicable(processed);
       } catch (err) {
         console.warn("Failed to fetch session history:", err);
         setMessages([]);
@@ -2979,7 +3305,8 @@ export default function Home() {
                     history.push({ role: "ai", text: entry.assistant });
                   }
                 }
-                const processed = processLoadedMessages(history);
+                const isBookingSession = s.isSpaceBooking || false;
+                const processed = processLoadedMessages(history, isBookingSession);
                 sessionMessagesRef.current.set(s.id, processed);
               }
             } catch (err) {
@@ -3145,13 +3472,14 @@ export default function Home() {
       const existing = prev.find(s => s.id === sessionId);
       const rest = prev.filter(s => s.id !== sessionId);
       if (existing) {
-        return [{ ...existing, updatedAt: now }, ...rest];
+        return [{ ...existing, updatedAt: now, isSpaceBooking: isSpaceBooking || existing.isSpaceBooking }, ...rest];
       }
       const newCapsule: ChatSession = {
         id: sessionId,
         title: "New Chat",
         createdAt: now,
         updatedAt: now,
+        isSpaceBooking: isSpaceBooking,
       };
       return [newCapsule, ...rest];
     });
@@ -3188,6 +3516,27 @@ export default function Home() {
     setIsLoading(true);
   };
 
+  // Helper to handle Space Booking tile selection clicks (sends all 4 fields to backend)
+  const handleTileClickForSpaceBooking = (row: Record<string, any>) => {
+    const getField = (keys: string[]) => {
+      for (const k of keys) {
+        const foundKey = Object.keys(row).find(rk => rk.toLowerCase() === k.toLowerCase());
+        if (foundKey) return row[foundKey];
+      }
+      return "";
+    };
+
+    const spotCode = getField(["SpotCode", "SPOTCODE", "SpotIdPK", "SPOTIDPK"]);
+    const spotName = getField(["SpotName", "SPOTNAME"]);
+    const buildingName = getField(["BuildingName", "BUILDINGNAME"]);
+    const floorName = getField(["FloorName", "FLOORNAME"]);
+
+    if (spotCode) {
+      const messageText = `SpotCode: ${spotCode}, SpotName: ${spotName}, BuildingName: ${buildingName}, FloorName: ${floorName}`;
+      sendTextDirectly(messageText);
+    }
+  };
+
   // ── Send message over the persistent WebSocket ────────────────────────────
   const sendMessage = () => {
     const domVal = inputRef.current?.value ?? "";
@@ -3211,13 +3560,14 @@ export default function Home() {
       const existing = prev.find(s => s.id === sessionId);
       const rest = prev.filter(s => s.id !== sessionId);
       if (existing) {
-        return [{ ...existing, updatedAt: now }, ...rest];
+        return [{ ...existing, updatedAt: now, isSpaceBooking: isSpaceBooking || existing.isSpaceBooking }, ...rest];
       }
       const newCapsule: ChatSession = {
         id: sessionId,
         title: "New Chat",
         createdAt: now,
         updatedAt: now,
+        isSpaceBooking: isSpaceBooking,
       };
       return [newCapsule, ...rest];
     });
@@ -3351,6 +3701,10 @@ export default function Home() {
             <SpaceBooking
               isSpaceBooking={isSpaceBooking}
               setIsSpaceBooking={setIsSpaceBooking}
+              isComplaints={isComplaints}
+              setIsComplaints={setIsComplaints}
+              isChatStarted={messages.length > 0}
+              onSwitchMode={handleSwitchMode}
             >
               {/* changes done by megnathan: Used correct CSS classes for perfect Ghost Text alignment */}
               <div className="main-input-stack" style={{ flexGrow: 1 }}>
@@ -3438,7 +3792,7 @@ export default function Home() {
             </SpaceBooking>
           </div>
         )}
-        {variant === "landing" && (
+        {variant === "landing" && !isSpaceBooking && !isComplaints && (
           <LandingSuggestedQueries
             onSelect={(q) => {
               if (inputDebounceRef.current) { clearTimeout(inputDebounceRef.current); inputDebounceRef.current = null; }
@@ -3664,7 +4018,7 @@ export default function Home() {
 
             {/* + New Chat Button */}
             <div className="new-chat-container-top" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-              <button className="new-chat-btn" onClick={handleNewChat} style={{ flex: 1 }}>
+              <button className="new-chat-btn" onClick={() => handleNewChat()} style={{ flex: 1 }}>
                 <IconChat width={16} height={16} />
                 <span>+ New Chat</span>
               </button>
@@ -3699,6 +4053,10 @@ export default function Home() {
                   setSessionId(newSid);
                   sessionIdRef.current = newSid;
                   setMessages([]);
+                  setIsSpaceBooking(false);
+                  setIsComplaints(false);
+                  setIsComplaintsModalOpen(false);
+                  setActiveBookingBubbleIndex(null);
                 }}
               >
                 <IconChat />
@@ -3712,6 +4070,10 @@ export default function Home() {
                   handleFeatureClick('archived');
                   setSelectedGroupName(null);
                   setMessages([]); // Clear messages to show landing container
+                  setIsSpaceBooking(false);
+                  setIsComplaints(false);
+                  setIsComplaintsModalOpen(false);
+                  setActiveBookingBubbleIndex(null);
                 }}
               >
                 <IconArchive />
@@ -3723,6 +4085,10 @@ export default function Home() {
                   setSearchTerm("");
                   setActiveFeature('groups');
                   handleFeatureClick('groups');
+                  setIsSpaceBooking(false);
+                  setIsComplaints(false);
+                  setIsComplaintsModalOpen(false);
+                  setActiveBookingBubbleIndex(null);
                 }}
               >
                 <IconLibrary />
@@ -3965,7 +4331,13 @@ export default function Home() {
                         style={{ cursor: "pointer", display: 'flex', alignItems: 'center', gap: 8 }}
                       >
                         <div className="content" style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
-                          {s.isPinned ? <IconPin size={16} style={{ color: 'var(--color-primary)' }} /> : <IconChat width={16} height={16} />}
+                          {s.isPinned ? (
+                            <IconPin size={16} style={{ color: 'var(--color-primary)' }} />
+                          ) : s.isSpaceBooking ? (
+                            <IconCalendar width={16} height={16} style={{ color: 'var(--color-primary, #d4af37)' }} />
+                          ) : (
+                            <IconChat width={16} height={16} />
+                          )}
                           {editingSessionId === s.id ? (
                             <input
                               ref={(el) => { editingInputRef.current = el; if (el) el.focus(); }}
@@ -4257,9 +4629,39 @@ export default function Home() {
                   <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text)' }}>{selectedGroupName}</span>
                 </div>
               )}
-              <div className="messages-container">
-                {messages.map((msg, idx) => {
-                  const isUser = msg.role === "user";
+              <div
+                className="messages-container"
+                onClick={(e) => {
+                  const target = e.target as HTMLElement;
+                  const btn = target.closest(".interactive-calendar-btn");
+                  if (btn) {
+                    const msgIdxStr = btn.getAttribute("data-msg-idx");
+                    if (msgIdxStr !== null) {
+                      const idx = parseInt(msgIdxStr, 10);
+                      const msg = messages[idx];
+                      if (msg) {
+                        const parsed = parseDateTimeFromMessage(msg.text);
+                        console.log("📅 [Telemetry] Calendar button clicked. Message index:", idx, "Parsed details:", parsed);
+                        setBookingStartDate(parsed.date);
+                        setBookingEndDate(parsed.date);
+                        setBookingStartTime(parsed.fromTime);
+                        setBookingEndTime(parsed.toTime);
+                        setActiveBookingBubbleIndex(idx);
+                        setIsSpaceBooking(true);
+                      }
+                    }
+                  }
+                }}
+              >
+                {(() => {
+                  const latestTableIdx = messages.reduce((last, m, i) => {
+                    return ((m.tableData && m.tableData.length > 0) || (m.multipleDatasets && m.multipleDatasets.length > 0)) ? i : last;
+                  }, -1);
+                  return messages.map((msg, idx) => {
+                    if (msg.role === "user" && typeof msg.text === "string" && msg.text.trim().startsWith("SpotCode:")) {
+                      return null;
+                    }
+                    const isUser = msg.role === "user";
                   const isError = msg.role === "error";
                   const isStreaming = msg.streaming === true;
                   const isAudio = msg.isAudio === true;
@@ -4355,12 +4757,22 @@ export default function Home() {
                           })()
                         ) : isUser || isError ? (
                           /* ── User / Error: plain text ── */
-                          <>{msg.text}</>
+                          <>{(() => {
+                            if (isUser && msg.text.includes("[CALENDAR_PAYLOAD]")) {
+                              const match = msg.text.match(/start_time:\s*"([^"]+)",\s*end_time:\s*"([^"]+)"/);
+                              const prefix = msg.text.split("[CALENDAR_PAYLOAD]")[0].replace(/\|\s*$/, "").trim();
+                              if (match) {
+                                return prefix ? `${prefix} | Book from ${match[1]} to ${match[2]}` : `Book from ${match[1]} to ${match[2]}`;
+                              }
+                              return prefix;
+                            }
+                            return msg.text;
+                          })()}</>
 
                         ) : isStreaming ? (
                           /* ── Streaming: pre-wrap plain text + blinking cursor ── */
                           <div className="ai-bubble streaming-text">
-                            {msg.text}
+                            <span dangerouslySetInnerHTML={{ __html: injectCalendarIcon(msg.text, idx) }} />
                             <span className="stream-cursor" />
                           </div>
 
@@ -4425,7 +4837,7 @@ export default function Home() {
                                 borderRadius: '8px',
                                 borderLeft: '3px solid var(--color-accent, #D4AF37)',
                               }}>
-                                {msg.multiSummary}
+                                <span dangerouslySetInnerHTML={{ __html: injectCalendarIcon(msg.multiSummary, idx) }} />
                               </div>
                             )}
                             {msg.multipleDatasets.map((ds, dsIdx) => (
@@ -4435,6 +4847,10 @@ export default function Home() {
                                   title={ds.name}
                                   htmlTableContent={ds.html}
                                   totalCount={ds.totalCount}
+                                  showOnlyTiles={msg.isSpaceBooking}
+                                  isSpaceBooking={msg.isSpaceBooking}
+                                  forceDisable={msg.isSpaceBooking ? idx !== latestTableIdx : false}
+                                  onTileClick={handleTileClickForSpaceBooking}
                                 />
                               </div>
                             ))}
@@ -4446,6 +4862,10 @@ export default function Home() {
                             rows={msg.tableData}
                             title={msg.tableTitle || "Data"}
                             htmlTableContent={msg.text}
+                            showOnlyTiles={msg.isSpaceBooking}
+                            isSpaceBooking={msg.isSpaceBooking}
+                            forceDisable={msg.isSpaceBooking ? idx !== latestTableIdx : false}
+                            onTileClick={handleTileClickForSpaceBooking}
                           />
 
                         ) : (
@@ -4458,7 +4878,7 @@ export default function Home() {
                             justifyContent: 'center',
                             alignItems: 'flex-start',
                           }}>
-                            <div dangerouslySetInnerHTML={{ __html: msg.text }} style={{
+                            <div dangerouslySetInnerHTML={{ __html: injectCalendarIcon(msg.text, idx) }} style={{
                               width: '100%',
                               textAlign: 'left',
                             }} />
@@ -4472,7 +4892,7 @@ export default function Home() {
                               className="copy-bubble-btn"
                               onClick={(e) => {
                                 // Extract plain text if it's HTML
-                                const textToCopy = msg.text.replace(/<[^>]*>?/gm, '');
+                                const textToCopy = injectCalendarIcon(msg.text, idx).replace(new RegExp('<[^>]*>?', 'gm'), '');
                                 navigator.clipboard.writeText(textToCopy);
 
                                 // Change icon to tick
@@ -4528,12 +4948,111 @@ export default function Home() {
                           </>
                         )}
 
+                        {/* Inline Booking Picker if active */}
+                        {activeBookingBubbleIndex === idx && (() => {
+                          const currentMessages = messages;
+                          let extractedSpotCode = "";
+                          
+                          // Helper: extract SpotCode from text using multiple patterns
+                          const extractSpotCodeFromText = (text: string): string => {
+                            // Pattern 1: "Spot Code: WRMF-SCR" or "SpotCode: WRMF-SCR"
+                            const m1 = text.match(/(?:Spot\s*Code|SpotCode):\s*([^\s,)|\)]+)/i);
+                            if (m1) return m1[1].trim();
+                            // Pattern 2: "(Spot Code: WRMF-SCR)" — label inside parens
+                            const m2 = text.match(/\((?:Spot\s*Code|SpotCode):\s*([^)]+)\)/i);
+                            if (m2) return m2[1].trim();
+                            // Pattern 3: bare SpotCode like WRMF-SCR or GPRF-KFC
+                            const m3 = text.match(/\b([A-Z]{2,6}-[A-Z0-9]{2,10})\b/);
+                            if (m3) return m3[1].trim();
+                            return "";
+                          };
 
+                          // 1. Try to find in the assistant message itself (which is at idx)
+                          const aiMsg = currentMessages[idx];
+                          if (aiMsg && typeof aiMsg.text === "string") {
+                            extractedSpotCode = extractSpotCodeFromText(aiMsg.text);
+                            if (extractedSpotCode) {
+                              console.log("🔍 [Inline Calendar] Extracted SpotCode from assistant message:", extractedSpotCode);
+                            }
+                          }
+                          
+                          // 2. If not found, try to search backwards in user or AI messages
+                          if (!extractedSpotCode) {
+                            for (let mi = idx - 1; mi >= 0; mi--) {
+                              const m = currentMessages[mi];
+                              if (m && typeof m.text === "string") {
+                                const code = extractSpotCodeFromText(m.text);
+                                if (code) {
+                                  extractedSpotCode = code;
+                                  console.log("🔍 [Inline Calendar] Extracted SpotCode backwards from message:", mi, extractedSpotCode);
+                                  break;
+                                }
+                              }
+                            }
+                          }
+                          return (
+                            <SpaceBookingModal
+                              isInline={true}
+                              bookingFrom={`${bookingStartDate} ${bookingStartTime}`}
+                              bookingTo={`${bookingEndDate} ${bookingEndTime}`}
+                              spotCode={extractedSpotCode}
+                              onSave={(from, to) => {
+                                const [fromDate, fromTime] = from.split(" ");
+                                const [toDate, toTime] = to.split(" ");
+                                setBookingStartDate(fromDate || "");
+                                setBookingStartTime(fromTime || "");
+                                setBookingEndDate(toDate || "");
+                                setBookingEndTime(toTime || "");
+
+                                let bookingMsg = `${from} to ${to}`;
+                                if (from.includes(" ") && to.includes(" ")) {
+                                  const partsFrom = from.split(" ");
+                                  const partsTo = to.split(" ");
+                                  const startDate = partsFrom[0];
+                                  const startTime = partsFrom[1];
+                                  const endDate = partsTo[0];
+                                  const endTime = partsTo[1];
+                                  // ALWAYS use the full YYYY-MM-DD HH:MM:00 format.
+                                  // The backend LLM schema STRICTLY requires the end date to be present and parsable.
+                                  bookingMsg = `[CALENDAR_PAYLOAD] start_time: "${startDate} ${startTime}:00", end_time: "${endDate} ${endTime}:00"`;
+                                }
+
+                                // ── Prepend spot context so the backend has all booking info
+                                // even if the server restarted and sb_thread memory was cleared.
+                                // Search backwards through messages for the last SpotCode user message.
+                                const currentMessagesInner = messages;
+                                let spotContext = "";
+                                for (let mi = idx - 1; mi >= 0; mi--) {
+                                  const m = currentMessagesInner[mi];
+                                  if (m?.role === "user" && typeof m.text === "string" && m.text.includes("SpotCode:")) {
+                                    spotContext = m.text.trim();
+                                    break;
+                                  }
+                                }
+                                if (spotContext) {
+                                  // Strip any previous " | Book from" additions so we don't chain them
+                                  const cleanContext = spotContext.split("| Book from")[0].trim();
+                                  bookingMsg = `${cleanContext} | Book from ${bookingMsg}`;
+                                }
+
+                                console.log("📅 [Telemetry] Inline saving booking times. Sending message:", bookingMsg);
+                                sendTextDirectly(bookingMsg);
+
+                                // Reset inline bubble index to close the inline picker
+                                setActiveBookingBubbleIndex(null);
+                              }}
+                              onClose={() => {
+                                setActiveBookingBubbleIndex(null);
+                              }}
+                            />
+                          );
+                        })()}
 
                       </div>
                     </div>
                   );
-                })}
+                });
+              })()}
 
                 {isLoading && !(messages[messages.length - 1]?.role === "ai" && messages[messages.length - 1]?.streaming) && (() => {
                   const isDarkTheme = typeof window !== 'undefined' ? document.documentElement.getAttribute('data-theme') === 'dark' : (theme === 'dark');
@@ -5003,6 +5522,10 @@ export default function Home() {
                 </div>
               </div>
             </div>
+          )}
+
+          {isComplaintsModalOpen && (
+            <ComplaintsModal onClose={() => setIsComplaintsModalOpen(false)} />
           )}
         </div>
       </div>

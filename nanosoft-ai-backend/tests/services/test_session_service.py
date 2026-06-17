@@ -17,12 +17,12 @@ async def test_get_sessions_for_user():
     now = datetime.now()
     mock_cursor = MagicMock()
     mock_cursor.fetchall.return_value = [
-        ("sess-001", "Asset Query", now, now, False, False, None),
-        ("sess-002", "PPM Check",   now, now, True,  False, "Work"),
+        ("sess-001", "Asset Query", now, now, False, False, None, False),
+        ("sess-002", "PPM Check",   now, now, True,  False, "Work", False),
     ]
     mock_cursor.description = [
         ("session_id",), ("title",), ("created_at",), ("updated_at",),
-        ("is_pinned",), ("is_archived",), ("group_name",),
+        ("is_pinned",), ("is_archived",), ("group_name",), ("is_space_booking",),
     ]
     mock_conn = MagicMock()
     mock_conn.cursor.return_value = mock_cursor
