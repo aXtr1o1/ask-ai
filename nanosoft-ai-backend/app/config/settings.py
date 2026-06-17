@@ -18,6 +18,10 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "fake-api-key-for-testing")
 GOOGLE_AI_MODEL = os.getenv("GOOGLE_AI_MODEL", "gemini-2.5-flash").strip()
 GOOGLE_SPACE_BOOKING_MODEL = os.getenv("GOOGLE_SPACE_BOOKING_MODEL", "gemini-2.5-flash").strip()
 
+# ── Multi-Agent Pipeline (Phase 1) ─────────────────────────────────────────
+MULTI_AGENT_MODEL = os.getenv("MULTI_AGENT_MODEL", "gemini-2.5-flash").strip()
+THINKING_BUDGET_TOKENS = int(os.getenv("THINKING_BUDGET_TOKENS", "3000"))
+
 # App Config
 MAX_HISTORY = int(os.getenv("MAX_HISTORY", "5"))
 DATABASE_API_URL = os.getenv("DATABASE_API_URL", "http://localhost:8000")
