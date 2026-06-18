@@ -69,3 +69,5 @@ nanosoft-ai-backend/tests/api/routes/__pycache__/
 nanosoft-ai-backend/tests/services/__pycache__/
 nanosoft-ai-backend/tests/tools/__pycache__/
 nanosoft-ai-backend/app/services/sync/__pycache__/*
+nanosoft-ai-backend/app/agents/__pycache__/*
+nanosoft-ai-backend/app/agents/prompts/__pycache__/*
