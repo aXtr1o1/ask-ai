@@ -18,9 +18,9 @@ from langchain_core.messages import SystemMessage, HumanMessage
 
 from app.agents.state import AgentState
 from app.agents.prompts.goal_planning_prompt import (
-    GOAL_PLANNING_SYSTEM_PROMPT,
     GOAL_PLANNING_USER_TEMPLATE,
 )
+from app.agents.prompts.retrieval_agent_prompt import get_retrieval_planning_prompt
 from app.config import settings
 
 logger = logging.getLogger("goal_planning_agent")
@@ -143,7 +143,7 @@ async def goal_planning_agent_node(state: AgentState) -> AgentState:
     )
 
     messages = [
-        SystemMessage(content=GOAL_PLANNING_SYSTEM_PROMPT),
+        get_retrieval_planning_prompt(),
         HumanMessage(content=user_content),
     ]
 
@@ -180,6 +180,53 @@ async def goal_planning_agent_node(state: AgentState) -> AgentState:
         raw_content = raw_content.strip()
 
         goal_plan = json.loads(raw_content)
+        if isinstance(goal_plan, list):
+            steps_list = goal_plan
+            goal_plan = {
+                "approach": "RETRIEVE",
+                "tools_required": list(set(step.get("target") for step in steps_list if isinstance(step, dict) and step.get("target"))),
+                "execution_steps": [
+                    {
+                        "step_number": step.get("step_id", idx + 1),
+                        "action": f"Query {step.get('source')} target '{step.get('target')}' with params {step.get('params')}",
+                        "reason": f"Retrieve info from {step.get('source')}",
+                        "execution_mode": "sequential",
+                        "depends_on": []
+                    }
+                    for idx, step in enumerate(steps_list) if isinstance(step, dict)
+                ],
+                "requires_web_search": any(isinstance(step, dict) and step.get("source") == "web_search" for step in steps_list),
+                "requires_db_query": any(isinstance(step, dict) and step.get("source") == "db" for step in steps_list),
+                "needs_clarification": False,
+                "clarification_question": None,
+                "estimated_complexity": "MODERATE" if len(steps_list) > 1 else "SIMPLE",
+                "planning_notes": "Generated retrieval plan.",
+                "steps": steps_list
+            }
+        else:
+            steps_list = []
+            if isinstance(goal_plan, dict):
+                steps_list = goal_plan.get("steps") or goal_plan.get("execution_steps") or []
+
+        # Automatically inject web_search step if needed but steps list is empty
+        if not steps_list:
+            needs_web = False
+            if isinstance(goal_plan, dict):
+                needs_web = goal_plan.get("requires_web_search") is True or goal_plan.get("approach") == "WEB_SEARCH"
+            needs_web = needs_web or understood_intent.get("needs_search") is True
+
+            if needs_web:
+                steps_list = [
+                    {
+                        "step_id": 1,
+                        "source": "web_search",
+                        "target": "web_search",
+                        "params": {"query": user_query}
+                    }
+                ]
+                if isinstance(goal_plan, dict):
+                    goal_plan["steps"] = steps_list
+                    goal_plan["requires_web_search"] = True
 
     except json.JSONDecodeError as jde:
         logger.error("JSON parse failed: %s | raw='%s'", jde, raw_content[:200])
@@ -202,6 +249,7 @@ async def goal_planning_agent_node(state: AgentState) -> AgentState:
             "estimated_complexity": "SIMPLE",
             "planning_notes": "Fallback plan due to parse error.",
         }
+        steps_list = []
         token_counts = {"thinking": 0, "input": 0, "output": 0}
 
     except Exception as exc:
@@ -220,6 +268,7 @@ async def goal_planning_agent_node(state: AgentState) -> AgentState:
     return {
         **state,
         "goal_plan":            goal_plan,
+        "retrieval_plan":       steps_list,
         "goal_log":             log_str,
         "goal_thinking_tokens": token_counts["thinking"],
         "agent_trace":          trace,

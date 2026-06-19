@@ -81,7 +81,9 @@ async def run_interactive():
                 user_name="test_user",
             )
         except Exception as exc:
+            import traceback
             print(f"  [ERROR] Pipeline failed: {exc}")
+            traceback.print_exc()
             print("-" * 70)
             print()
             continue
@@ -97,6 +99,13 @@ async def run_interactive():
         print(f"  Tools      : {plan.get('tools_required', [])}")
         print(f"  Summary    : {intent.get('summary', '--')}")
         print("-" * 70)
+        
+        retrieval_results = final_state.get("retrieval_results")
+        if retrieval_results:
+            print()
+            print("  RETRIEVAL DATA OUTPUT:")
+            import json
+            print(json.dumps(retrieval_results, indent=2))
         print()
 
         # -- Build a rich assistant context entry for history -----------------

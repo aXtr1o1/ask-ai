@@ -1,13 +1,10 @@
 """
-Multi-Agent LangGraph Graph — Phase 1
+Multi-Agent LangGraph Graph — Phase 1 with Retrieval Agent Execution
 
-Wires the Understanding Agent and Goal Planning Agent into a LangGraph StateGraph.
+Wires the Understanding Agent, Goal Planning Agent, and Retrieval Agent into a LangGraph StateGraph.
 
-Graph topology (Phase 1):
-    START → understanding_agent → goal_planning_agent → END
-
-Phase 1 produces only console logs.
-No tools are executed. No final user response is generated.
+Graph topology:
+    START → understanding_agent → goal_planning_agent → retrieval_agent → END
 """
 
 import logging
@@ -17,6 +14,7 @@ from langgraph.graph import StateGraph, START, END
 from app.agents.state import AgentState
 from app.agents.understanding_agent import understanding_agent_node
 from app.agents.goal_planning_agent import goal_planning_agent_node
+from app.agents.retrieval_agent import retrieval_agent_node
 
 logger = logging.getLogger("multi_agent_graph")
 logger.setLevel(logging.DEBUG)
@@ -33,7 +31,7 @@ logger.propagate = False   # prevent double-printing to root logger
 
 def build_agent_graph() -> StateGraph:
     """
-    Build and compile the Phase 1 LangGraph multi-agent pipeline.
+    Build and compile the LangGraph multi-agent pipeline with retrieval execution.
 
     Returns a compiled graph ready for async invocation.
     """
@@ -42,14 +40,16 @@ def build_agent_graph() -> StateGraph:
     # ── Register nodes ────────────────────────────────────────────────────────
     graph.add_node("understanding_agent", understanding_agent_node)
     graph.add_node("goal_planning_agent", goal_planning_agent_node)
+    graph.add_node("retrieval_agent", retrieval_agent_node)
 
     # ── Define edges ──────────────────────────────────────────────────────────
     graph.add_edge(START, "understanding_agent")
     graph.add_edge("understanding_agent", "goal_planning_agent")
-    graph.add_edge("goal_planning_agent", END)
+    graph.add_edge("goal_planning_agent", "retrieval_agent")
+    graph.add_edge("retrieval_agent", END)
 
     compiled = graph.compile()
-    logger.info("Multi-Agent Graph compiled | nodes=[understanding_agent -> goal_planning_agent]")
+    logger.info("Multi-Agent Graph compiled | nodes=[understanding_agent -> goal_planning_agent -> retrieval_agent]")
     return compiled
 
 
@@ -66,12 +66,12 @@ async def run_agent_pipeline(
     user_name: str | None = None,
 ) -> AgentState:
     """
-    Run the full Phase 1 multi-agent pipeline for a user query.
+    Run the full multi-agent pipeline for a user query.
 
     Args:
         user_query:            The raw user message string.
         conversation_history:  List of prior messages as dicts with 'role' and 'content'.
-        user_name:             Authenticated user name (optional for Phase 1 logging).
+        user_name:             Authenticated user name.
 
     Returns:
         The final AgentState after all agents have run.
@@ -80,13 +80,15 @@ async def run_agent_pipeline(
     initial_state: AgentState = {
         "user_query":                    user_query,
         "conversation_history":          conversation_history or [],
-        "user_name":                     user_name,
+        "user_name":                     user_name or "system",
         "understood_intent":             None,
         "understanding_log":             None,
         "understanding_thinking_tokens": None,
         "goal_plan":                     None,
         "goal_log":                      None,
         "goal_thinking_tokens":          None,
+        "retrieval_plan":                None,
+        "retrieval_results":             None,
         "agent_trace":                   [],
     }
 

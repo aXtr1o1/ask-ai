@@ -24,5 +24,9 @@ class AgentState(TypedDict):
     goal_log: Optional[str]             # Human-readable console log string
     goal_thinking_tokens: Optional[int] # Thinking tokens used
 
+    # ── Set by Retrieval Agent ─────────────────────────────────────────────────
+    retrieval_plan: Optional[list]       # List of structured steps to execute
+    retrieval_results: Optional[list]    # Output of executed steps
+
     # ── Meta-trace (appended by each agent for full pipeline visibility) ───────
     agent_trace: list[str]               # Ordered list of agent conclusions
