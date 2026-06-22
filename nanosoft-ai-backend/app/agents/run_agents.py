@@ -1,15 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-Standalone Test Runner -- Multi-Agent Pipeline (Phase 1)
+Standalone Test Runner -- Multi-Agent Pipeline (Full 6-Agent)
 
-Run this script to test the Understanding Agent + Goal Planning Agent.
+Run this script to test the full pipeline interactively.
 Type your queries directly in the terminal. The agents will process each
-query and print their full structured reasoning to the console.
-
-Zero changes to the existing langchain_service.py system.
+query and print their full structured reasoning to the console,
+ending with the final answer. All logs are also written to logs/agents.log
 
 HOW TO RUN (from nanosoft-ai-backend/):
-    $env:PYTHONUTF8=1; .\app\venv\Scripts\python -m app.agents.run_agents
+    $env:PYTHONUTF8=1; .\\app\\venv\\Scripts\\python -m app.agents.run_agents
 """
 
 import asyncio
@@ -23,11 +22,11 @@ if sys.platform == "win32":
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 # -- Root logging setup -------------------------------------------------------
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)],
-)
+# Only set the root level — do NOT add a root StreamHandler.
+# Agent loggers have their own handlers (via setup_agent_logger).
+# facility_tools/bdm_route etc. have their own handlers too.
+# A root StreamHandler would cause every log to print TWICE (double output).
+logging.getLogger().setLevel(logging.INFO)
 
 # Suppress noisy third-party loggers
 for _noisy in ("httpx", "httpcore", "google.auth", "urllib3", "asyncio"):
@@ -38,16 +37,23 @@ for _noisy in ("httpx", "httpcore", "google.auth", "urllib3", "asyncio"):
 
 async def run_interactive():
     """
-    Interactive REPL: type a query, agents process it, logs appear in console.
+    Interactive REPL: type a query, all 6 agents process it, logs + final answer appear.
     Conversation history is maintained across turns for follow-up queries.
     Type 'exit' or 'quit' to stop.
     """
     from app.agents.multi_agent_graph import run_agent_pipeline
+    from app.agents.log_config import write_session_separator
+
+    # Write a session separator to the log file so each run is clearly marked
+    write_session_separator("SESSION START")
 
     print()
     print("=" * 70)
-    print("  ASK-AI Multi-Agent Pipeline -- Phase 1 Test Runner")
+    print("  ASK-AI Multi-Agent Pipeline -- Full 6-Agent Pipeline")
+    print("  Agents: Understanding -> Goal Planning -> Retrieval")
+    print("          -> Mini Validation -> Filtering -> Execution")
     print("  Model : gemini-2.5-flash | Thinking : Enabled")
+    print("  Logs  : app/agents/logs/agents.log")
     print("  Type your query and press Enter.")
     print("  Type 'exit' or 'quit' to stop.")
     print("=" * 70)
@@ -78,7 +84,8 @@ async def run_interactive():
             final_state = await run_agent_pipeline(
                 user_query=raw,
                 conversation_history=conversation_history,
-                user_name="test_user",
+                user_name="poc",
+                user_id=1,
             )
         except Exception as exc:
             import traceback
@@ -88,56 +95,62 @@ async def run_interactive():
             print()
             continue
 
-        # -- Print final summary line -----------------------------------------
-        intent = final_state.get("understood_intent") or {}
-        plan   = final_state.get("goal_plan") or {}
+        # -- Print pipeline summary -------------------------------------------
+        intent    = final_state.get("understood_intent") or {}
+        plan      = final_state.get("goal_plan") or {}
+        v_status  = final_state.get("validation_status", "--")
+        retry_cnt = final_state.get("retry_count", 0)
+
+        # Token summary across all agents
+        u_think  = final_state.get("understanding_thinking_tokens") or 0
+        g_think  = final_state.get("goal_thinking_tokens") or 0
+        r_think  = final_state.get("retrieval_thinking_tokens") or 0
+        va_think = final_state.get("validation_thinking_tokens") or 0
+        f_think  = final_state.get("filtering_thinking_tokens") or 0
+        e_think  = final_state.get("execution_thinking_tokens") or 0
+        total_think = u_think + g_think + r_think + va_think + f_think + e_think
 
         print("-" * 70)
-        print(f"  RESULT SUMMARY")
-        print(f"  Intent     : {intent.get('intent_type', '--')} | Clarity: {intent.get('clarity', '--')}")
-        print(f"  Approach   : {plan.get('approach', '--')} | Complexity: {plan.get('estimated_complexity', '--')}")
-        print(f"  Tools      : {plan.get('tools_required', [])}")
-        print(f"  Summary    : {intent.get('summary', '--')}")
+        print("  PIPELINE SUMMARY")
+        print(f"  Intent      : {intent.get('intent_type', '--')} | Clarity: {intent.get('clarity', '--')}")
+        print(f"  Approach    : {plan.get('approach', '--')} | Complexity: {plan.get('estimated_complexity', '--')}")
+        print(f"  Validation  : {v_status} | Retries: {retry_cnt}")
+        print(f"  Think Tokens: Understanding={u_think:,} | GoalPlan={g_think:,} | "
+              f"Retrieval={r_think:,} | Validation={va_think:,} | "
+              f"Filtering={f_think:,} | Execution={e_think:,} | "
+              f"TOTAL={total_think:,}")
         print("-" * 70)
-        
-        retrieval_results = final_state.get("retrieval_results")
-        if retrieval_results:
+
+        # -- Print the final answer -------------------------------------------
+        final_answer = final_state.get("final_answer")
+        if final_answer:
             print()
-            print("  RETRIEVAL DATA OUTPUT:")
-            import json
-            print(json.dumps(retrieval_results, indent=2))
+            print("  ANSWER:")
+            print()
+            # Indent each line for readability in terminal
+            for line in final_answer.split("\n"):
+                print(f"  {line}")
+            print()
+        else:
+            print("  [No answer produced]")
+            print()
+
+        print("-" * 70)
         print()
 
-        # -- Build a rich assistant context entry for history -----------------
-        # Problem if we store only intent summary:
-        #   Next query "give me 5 of them" → agent sees no tool name, no filters
-        #   → cannot carry forward ASSETS_TOOL + status="online" etc.
-        #
-        # Fix: store a structured context that includes:
-        #   - Module(s) that were active
-        #   - Tool(s) that were planned
-        #   - All filters that were extracted
-        #   - Approach and complexity
-        #
-        # The Understanding Agent reads this on the next query and knows EXACTLY
-        # what was running, what params were in play, enabling proper follow-ups.
-
-        # Gather filter fields from understanding intent
-        entities   = intent.get("entities", {}) or {}
-        filters    = entities.get("filters", {}) or {}
-        modules    = entities.get("modules", [])
-        group_by   = entities.get("group_by")
-        is_agg     = entities.get("is_aggregate")
-
-        # Gather tool and approach from goal plan
+        # -- Build rich context for conversation history ----------------------
+        entities      = intent.get("entities", {}) or {}
+        filters       = entities.get("filters", {}) or {}
+        modules       = entities.get("modules", [])
+        group_by      = entities.get("group_by")
+        is_agg        = entities.get("is_aggregate")
         tools_planned = plan.get("tools_required", [])
         approach      = plan.get("approach", "")
         complexity    = plan.get("estimated_complexity", "")
 
-        # Build filter summary — only non-null fields
         filter_parts = [f"{k}={v!r}" for k, v in filters.items() if v is not None]
         if is_agg:
-            filter_parts.append(f"is_aggregate=True")
+            filter_parts.append("is_aggregate=True")
         if group_by:
             filter_parts.append(f"group_by={group_by!r}")
 
@@ -145,7 +158,6 @@ async def run_interactive():
         tools_str  = ", ".join(tools_planned) if tools_planned else "none"
         module_str = ", ".join(modules) if modules else "unknown"
 
-        # Rich assistant context — structured so the model can parse it on next turn
         rich_context = (
             f"[PREVIOUS TURN CONTEXT]\n"
             f"User asked: {raw}\n"
@@ -153,13 +165,14 @@ async def run_interactive():
             f"Tool(s) planned: {tools_str}\n"
             f"Filters used: {filter_str}\n"
             f"Approach: {approach} | Complexity: {complexity}\n"
-            f"Understanding: {intent.get('summary', '')}"
+            f"Understanding: {intent.get('summary', '')}\n"
+            f"Answer given: {(final_answer or '')[:200]}"
         )
 
         conversation_history.append({"role": "user",      "content": raw})
         conversation_history.append({"role": "assistant", "content": rich_context})
 
-        # Keep last 10 messages (5 full turns = 10 messages)
+        # Keep last 10 messages (5 full turns)
         if len(conversation_history) > 10:
             conversation_history = conversation_history[-10:]
 

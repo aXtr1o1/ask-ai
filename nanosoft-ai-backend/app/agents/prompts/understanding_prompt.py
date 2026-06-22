@@ -264,9 +264,27 @@ produce a complete understanding. Consider:
    date ranges, keywords, counts, comparison subjects -- anything the user said.
 
 4. CLARITY -- How clear is the user's request?
-   - HIGH   : Completely unambiguous, can proceed directly
-   - MEDIUM : Mostly clear, minor assumptions may be needed
-   - LOW    : Genuinely ambiguous -- clarification needed before proceeding
+   Reason about this honestly based on whether you have enough information to proceed.
+   - HIGH   : The query is completely unambiguous. You know exactly what data to fetch,
+              which module(s) to query, and what filters to apply.
+   - MEDIUM : The query has a clear intent but leaves some details open to reasonable
+              interpretation. You can make sensible assumptions and proceed. This includes
+              broad requests like performance reports or rankings where the intent is clear
+              even if the exact metric is not specified — in these cases, reason about which
+              modules and fields in the system are most relevant to "performance" and include
+              all of them. A MEDIUM query should ALWAYS proceed to retrieval.
+   - LOW    : The query is fundamentally unclear in a way that makes ANY retrieval attempt
+              likely to produce a wrong or misleading result. Reserve LOW for queries where
+              you genuinely cannot determine even a direction to proceed.
+
+   REASONING PRINCIPLE FOR BROAD QUERIES:
+   When a user asks for a report, summary, ranking, or "which is best/worst" without
+   naming a specific metric, ask yourself: "Do I understand the general intent?"
+   If YES — reason about what aspects of the facility management system relate to that
+   intent (e.g. performance, health, issues, maintenance state) and identify which of the
+   available modules capture those aspects. Set clarity to MEDIUM and proceed.
+   Only set clarification_needed=true if the answer to "Do I understand the general intent?"
+   is genuinely NO.
 
 5. NEEDS_SEARCH -- Does this require searching external information
    (e.g. facility management regulations or general knowledge outside the system)?

@@ -1,0 +1,2 @@
+# This file keeps the logs/ directory tracked in git.
+# Actual .log files are gitignored — they are created at runtime, one per agent.

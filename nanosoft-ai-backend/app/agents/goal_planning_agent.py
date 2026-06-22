@@ -4,34 +4,26 @@ Goal Planning Agent — Node 2 in the LangGraph multi-agent pipeline.
 Responsibilities:
   - Receive the structured understanding from the Understanding Agent
   - Determine the best approach and execution plan to satisfy the user's intent
-  - Produce a step-by-step plan (no tools are actually executed in Phase 1)
+  - Produce analytically rich execution steps including analysis_instruction per step
   - Log a clean, structured summary to the console
 
 Model: gemini-2.5-flash with thinking enabled
 """
 
 import json
-import logging
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from app.agents.state import AgentState
 from app.agents.prompts.goal_planning_prompt import (
+    GOAL_PLANNING_SYSTEM_PROMPT,
     GOAL_PLANNING_USER_TEMPLATE,
 )
-from app.agents.prompts.retrieval_agent_prompt import get_retrieval_planning_prompt
+from app.agents.log_config import setup_agent_logger
 from app.config import settings
 
-logger = logging.getLogger("goal_planning_agent")
-logger.setLevel(logging.DEBUG)
-
-if not logger.handlers:
-    _ch = logging.StreamHandler()
-    _ch.stream = open(_ch.stream.fileno(), mode='w', encoding='utf-8', buffering=1, closefd=False)
-    _ch.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(name)s | %(message)s"))
-    logger.addHandler(_ch)
-logger.propagate = False   # prevent double-printing to root logger
+logger = setup_agent_logger("goal_planning_agent")
 
 
 # ── Model initialisation ──────────────────────────────────────────────────────
@@ -42,13 +34,13 @@ def _build_model() -> ChatGoogleGenerativeAI:
         model=settings.MULTI_AGENT_MODEL,
         google_api_key=settings.GOOGLE_API_KEY,
         temperature=1,          # required for thinking mode
-        model_kwargs={"thinking": {"thinking_budget": 2000}},
+        thinking_budget=5000,   # correct kwarg for langchain_google_genai
     )
 
 
 # ── Console printer ───────────────────────────────────────────────────────────
 
-def _print_goal_log(plan: dict, thinking_tokens: int, query: str) -> str:
+def _print_goal_log(plan: dict, thinking_tokens: dict, query: str) -> str:
     """Print a clean structured log block. No emojis."""
     steps = plan.get("execution_steps", [])
 
@@ -57,9 +49,11 @@ def _print_goal_log(plan: dict, thinking_tokens: int, query: str) -> str:
     for step in steps:
         mode = step.get("execution_mode", "sequential")
         mode_icon = {"sequential": "->", "parallel": "=>", "conditional": "?>"}.get(mode, "->")
+        analysis = step.get("analysis_instruction", "")
         step_lines.append(
             f"||    Step {step.get('step_number', '?')} {mode_icon} {step.get('action', '')}\n"
-            f"||              Reason : {step.get('reason', '')}"
+            f"||              Reason   : {step.get('reason', '')}\n"
+            f"||              Analysis : {analysis[:120]}{'...' if len(analysis) > 120 else ''}"
         )
     steps_str = "\n".join(step_lines) if step_lines else "||    (no steps)"
 
@@ -143,7 +137,7 @@ async def goal_planning_agent_node(state: AgentState) -> AgentState:
     )
 
     messages = [
-        get_retrieval_planning_prompt(),
+        SystemMessage(content=GOAL_PLANNING_SYSTEM_PROMPT),   # FIX: use the rich system prompt
         HumanMessage(content=user_content),
     ]
 
@@ -152,13 +146,17 @@ async def goal_planning_agent_node(state: AgentState) -> AgentState:
         model = _build_model()
         response = await model.ainvoke(messages)
 
-        # Extract token counts separately — do NOT confuse input_tokens with thinking_tokens
+        # Extract token counts from usage_metadata
+        # In langchain_google_genai 4.2.0, thinking tokens are at:
+        #   usage_metadata['output_token_details']['reasoning']  (NOT 'thinking_tokens')
         token_counts = {"thinking": 0, "input": 0, "output": 0}
         usage = getattr(response, "usage_metadata", None)
-        if usage:
-            token_counts["thinking"] = usage.get("thinking_tokens") or 0
-            token_counts["input"]    = usage.get("input_tokens")    or 0
-            token_counts["output"]   = usage.get("output_tokens")   or 0
+        if usage and isinstance(usage, dict):
+            token_counts["input"]    = usage.get("input_tokens", 0) or 0
+            token_counts["output"]   = usage.get("output_tokens", 0) or 0
+            out_details = usage.get("output_token_details") or {}
+            if isinstance(out_details, dict):
+                token_counts["thinking"] = out_details.get("reasoning", 0) or 0
 
         # ── Parse JSON output ─────────────────────────────────────────────────
         raw_content = response.content
@@ -180,53 +178,6 @@ async def goal_planning_agent_node(state: AgentState) -> AgentState:
         raw_content = raw_content.strip()
 
         goal_plan = json.loads(raw_content)
-        if isinstance(goal_plan, list):
-            steps_list = goal_plan
-            goal_plan = {
-                "approach": "RETRIEVE",
-                "tools_required": list(set(step.get("target") for step in steps_list if isinstance(step, dict) and step.get("target"))),
-                "execution_steps": [
-                    {
-                        "step_number": step.get("step_id", idx + 1),
-                        "action": f"Query {step.get('source')} target '{step.get('target')}' with params {step.get('params')}",
-                        "reason": f"Retrieve info from {step.get('source')}",
-                        "execution_mode": "sequential",
-                        "depends_on": []
-                    }
-                    for idx, step in enumerate(steps_list) if isinstance(step, dict)
-                ],
-                "requires_web_search": any(isinstance(step, dict) and step.get("source") == "web_search" for step in steps_list),
-                "requires_db_query": any(isinstance(step, dict) and step.get("source") == "db" for step in steps_list),
-                "needs_clarification": False,
-                "clarification_question": None,
-                "estimated_complexity": "MODERATE" if len(steps_list) > 1 else "SIMPLE",
-                "planning_notes": "Generated retrieval plan.",
-                "steps": steps_list
-            }
-        else:
-            steps_list = []
-            if isinstance(goal_plan, dict):
-                steps_list = goal_plan.get("steps") or goal_plan.get("execution_steps") or []
-
-        # Automatically inject web_search step if needed but steps list is empty
-        if not steps_list:
-            needs_web = False
-            if isinstance(goal_plan, dict):
-                needs_web = goal_plan.get("requires_web_search") is True or goal_plan.get("approach") == "WEB_SEARCH"
-            needs_web = needs_web or understood_intent.get("needs_search") is True
-
-            if needs_web:
-                steps_list = [
-                    {
-                        "step_id": 1,
-                        "source": "web_search",
-                        "target": "web_search",
-                        "params": {"query": user_query}
-                    }
-                ]
-                if isinstance(goal_plan, dict):
-                    goal_plan["steps"] = steps_list
-                    goal_plan["requires_web_search"] = True
 
     except json.JSONDecodeError as jde:
         logger.error("JSON parse failed: %s | raw='%s'", jde, raw_content[:200])
@@ -238,6 +189,7 @@ async def goal_planning_agent_node(state: AgentState) -> AgentState:
                     "step_number": 1,
                     "action": "Ask user to clarify their request",
                     "reason": "Planning agent could not parse a clear execution path",
+                    "analysis_instruction": "Ask the user to rephrase their question more clearly.",
                     "execution_mode": "sequential",
                     "depends_on": [],
                 }
@@ -249,7 +201,6 @@ async def goal_planning_agent_node(state: AgentState) -> AgentState:
             "estimated_complexity": "SIMPLE",
             "planning_notes": "Fallback plan due to parse error.",
         }
-        steps_list = []
         token_counts = {"thinking": 0, "input": 0, "output": 0}
 
     except Exception as exc:
@@ -257,7 +208,7 @@ async def goal_planning_agent_node(state: AgentState) -> AgentState:
         raise
 
     # ── Log and build trace entry ─────────────────────────────────────────────
-    log_str = _print_goal_log(goal_plan, token_counts, user_query)
+    log_str = _print_goal_log(goal_plan, token_counts, query=user_query)
     trace.append(
         f"[GoalPlanningAgent] approach={goal_plan.get('approach')} | "
         f"tools={goal_plan.get('tools_required')} | "
@@ -268,7 +219,6 @@ async def goal_planning_agent_node(state: AgentState) -> AgentState:
     return {
         **state,
         "goal_plan":            goal_plan,
-        "retrieval_plan":       steps_list,
         "goal_log":             log_str,
         "goal_thinking_tokens": token_counts["thinking"],
         "agent_trace":          trace,

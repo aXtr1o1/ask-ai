@@ -71,3 +71,7 @@ nanosoft-ai-backend/tests/tools/__pycache__/
 nanosoft-ai-backend/app/services/sync/__pycache__/*
 nanosoft-ai-backend/app/agents/__pycache__/*
 nanosoft-ai-backend/app/agents/prompts/__pycache__/*
+
+# Agent runtime log files — one per agent, auto-generated at runtime
+nanosoft-ai-backend/app/agents/logs/*.log
+nanosoft-ai-backend/app/agents/logs/*.log.*
