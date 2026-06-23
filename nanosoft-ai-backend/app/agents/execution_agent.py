@@ -1,14 +1,20 @@
 """
-Execution Agent — Node 5 (Final) in the LangGraph multi-agent pipeline.
+Execution Agent — Node 6 (Final) in the LangGraph multi-agent pipeline.
 
 Responsibilities:
-  - Receive validated retrieval results from the Mini Validation Agent
+  - Receive filtered retrieval results from the Filtering Agent
   - Reason deeply over the data using the Goal Planning Agent's analysis_instruction
-  - Identify which fields in the returned records are relevant to the user's question
+  - If web_search_summary is present, incorporate it into the answer
   - Produce a complete, intelligent natural language answer
   - Log a clean, structured summary to the console
 
-Model: gemini-2.5-flash with thinking enabled (highest budget — this is the most important step)
+WHY this is the final node (not followed by anything):
+  The pipeline is: Understand → Plan → Retrieve → Validate → Filter → Execute
+  Execution produces the natural language answer the user sees. Once this runs,
+  the pipeline is complete. There is no post-processing node because the model's
+  answer is the product — further LLM calls would only add latency.
+
+Model: gemini-2.5-flash with thinking enabled (highest budget — final answer quality matters most)
 """
 
 import json
@@ -22,7 +28,12 @@ from app.agents.prompts.execution_prompt import (
     EXECUTION_SYSTEM_PROMPT,
     EXECUTION_USER_TEMPLATE,
 )
-from app.agents.log_config import setup_agent_logger
+# WHY these helpers: see log_config.py for detailed explanations.
+from app.agents.log_config import (
+    setup_agent_logger,
+    extract_token_counts,
+    parse_llm_text,
+)
 from app.config import settings
 
 logger = setup_agent_logger("execution_agent")
@@ -31,44 +42,25 @@ logger = setup_agent_logger("execution_agent")
 # ── Model initialisation ──────────────────────────────────────────────────────
 
 def _build_model() -> ChatGoogleGenerativeAI:
-    """Build the Execution Agent model with thinking enabled — highest budget."""
+    """
+    Build the Execution Agent model with the highest thinking budget.
+
+    WHY thinking_budget=8000 (highest in the pipeline):
+      This agent produces the final answer the user sees. It must:
+        - Read and reason over potentially hundreds of DB records
+        - Apply the analysis_instruction from Goal Planning
+        - Incorporate web_search_summary if external knowledge was fetched
+        - Write a clear, accurate, well-structured natural language response
+      All of this requires the most reasoning capacity of any agent in the pipeline.
+    """
     return ChatGoogleGenerativeAI(
         model=settings.MULTI_AGENT_MODEL,
         google_api_key=settings.GOOGLE_API_KEY,
-        temperature=1,          # required for thinking mode
-        thinking_budget=8000,   # highest budget — this agent produces the final answer
+        temperature=1,          # WHY: required for thinking mode (Gemini constraint)
+        thinking_budget=8000,
     )
 
 
-# ── Console printer ───────────────────────────────────────────────────────────
-
-def _print_execution_log(
-    final_answer: str,
-    thinking_tokens: dict,
-    query: str,
-    validation_status: str,
-) -> str:
-    """Print a clean structured log block."""
-    answer_preview = final_answer[:200].replace("\n", " ")
-    if len(final_answer) > 200:
-        answer_preview += "..."
-
-    log = (
-        f"\n"
-        f"|| ============================================================\n"
-        f"||  EXECUTION AGENT -- RESULT\n"
-        f"|| ============================================================\n"
-        f"||  Query            : {query[:80]}\n"
-        f"||  Validation Status: {validation_status}\n"
-        f"||  Answer Preview   : {answer_preview}\n"
-        f"||  Answer Length    : {len(final_answer)} chars\n"
-        f"||  Thinking Tokens  : {thinking_tokens['thinking']:,}\n"
-        f"||  Input Tokens     : {thinking_tokens['input']:,}\n"
-        f"||  Output Tokens    : {thinking_tokens['output']:,}\n"
-        f"|| ============================================================"
-    )
-    logger.info(log)
-    return log
 
 
 # ── Main agent node ───────────────────────────────────────────────────────────
@@ -85,10 +77,18 @@ async def execution_agent_node(state: AgentState) -> AgentState:
     user_query        = state.get("user_query", "").strip()
     understood_intent = state.get("understood_intent", {}) or {}
     goal_plan         = state.get("goal_plan", {}) or {}
-    # Use filtered_results if available (set by Filtering Agent), else fall back to raw
+    # WHY prefer filtered_results over retrieval_results:
+    #   The Filtering Agent has already removed irrelevant DB columns.
+    #   Using filtered data keeps the execution prompt smaller and the answer focused.
+    #   Fall back to raw retrieval_results only if filtering didn't run.
     retrieval_results = state.get("filtered_results") or state.get("retrieval_results", []) or []
     validation_status = state.get("validation_status", "PASS")
-    trace             = list(state.get("agent_trace", []))
+    # WHY read web_search_summary:
+    #   If the Understanding Agent ran Google Search (needs_search=True), this field
+    #   contains the external knowledge. We pass it to the prompt so the final answer
+    #   can cite or integrate the search findings.
+    web_search_summary = state.get("web_search_summary")
+    trace              = list(state.get("agent_trace", []))
 
     logger.info("=" * 66)
     logger.info("Execution Agent -- START | query='%s' | validation=%s", user_query[:80], validation_status)
@@ -134,32 +134,14 @@ async def execution_agent_node(state: AgentState) -> AgentState:
 
     # ── Invoke model ──────────────────────────────────────────────────────────
     try:
-        model = _build_model()
+        model    = _build_model()
         response = await model.ainvoke(messages)
 
-        # Extract token counts from usage_metadata
-        # In langchain_google_genai 4.2.0, thinking tokens are at:
-        #   usage_metadata['output_token_details']['reasoning']
-        token_counts = {"thinking": 0, "input": 0, "output": 0}
-        usage = getattr(response, "usage_metadata", None)
-        if usage and isinstance(usage, dict):
-            token_counts["input"]    = usage.get("input_tokens", 0) or 0
-            token_counts["output"]   = usage.get("output_tokens", 0) or 0
-            out_details = usage.get("output_token_details") or {}
-            if isinstance(out_details, dict):
-                token_counts["thinking"] = out_details.get("reasoning", 0) or 0
-
-        # Execution agent outputs plain text (not JSON)
-        raw_content = response.content
-        if isinstance(raw_content, list):
-            text_parts = [
-                p.get("text", "") if isinstance(p, dict) else str(p)
-                for p in raw_content
-                if not (isinstance(p, dict) and p.get("type") == "thinking")
-            ]
-            final_answer = "".join(text_parts).strip()
-        else:
-            final_answer = str(raw_content).strip()
+        # WHY use shared helpers: see log_config.py for detailed explanations.
+        # NOTE: execution agent outputs plain text (not JSON), so we only use
+        # extract_token_counts + parse_llm_text — strip_json_fences is not needed.
+        token_counts = extract_token_counts(response)
+        final_answer = parse_llm_text(response)
 
     except Exception as exc:
         logger.error("Execution Agent error: %s", exc, exc_info=True)
@@ -169,16 +151,26 @@ async def execution_agent_node(state: AgentState) -> AgentState:
         )
         token_counts = {"thinking": 0, "input": 0, "output": 0}
 
-    # ── Log and trace ─────────────────────────────────────────────────────────
-    log_str = _print_execution_log(
-        final_answer=final_answer,
-        thinking_tokens=token_counts,
-        query=user_query,
-        validation_status=validation_status,
+    # ── Result log (same || format as all other agents) ──────────────────────
+    preview = final_answer[:200].replace("\n", " ") + ("..." if len(final_answer) > 200 else "")
+    log_str = (
+        f"\n|| ============================================================\n"
+        f"||  EXECUTION AGENT -- RESULT\n"
+        f"|| ============================================================\n"
+        f"||  Query            : {user_query[:80]}\n"
+        f"||  Validation Status: {validation_status}\n"
+        f"||  Answer Preview   : {preview}\n"
+        f"||  Answer Length    : {len(final_answer)} chars\n"
+        f"||  Thinking Tokens  : {token_counts['thinking']:,}\n"
+        f"||  Input Tokens     : {token_counts['input']:,}\n"
+        f"||  Output Tokens    : {token_counts['output']:,}\n"
+        f"|| ============================================================"
     )
+    logger.info(log_str)
+
     trace.append(
         f"[ExecutionAgent] answer_len={len(final_answer)} | "
-        f"thinking_tokens={token_counts['thinking']} | input_tokens={token_counts['input']}"
+        f"thinking={token_counts['thinking']} | input={token_counts['input']}"
     )
 
     return {

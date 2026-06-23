@@ -23,6 +23,12 @@ class AgentState(TypedDict):
     understood_intent: Optional[dict]    # Structured intent output
     understanding_log: Optional[str]     # Human-readable console log string
     understanding_thinking_tokens: Optional[int]
+    # WHY: When the Understanding Agent detects needs_search=True it performs
+    # Google Search grounding in-place and stores the summary here. All downstream
+    # agents (Goal Planning, Retrieval, Execution) can read this field and use it
+    # as external context without triggering another web search.
+    web_search_summary: Optional[str]    # Web search summary (set when needs_search=True, else None)
+
 
     # ── Set by Goal Planning Agent ─────────────────────────────────────────────
     goal_plan: Optional[dict]            # Structured execution plan (with analysis_instruction per step)

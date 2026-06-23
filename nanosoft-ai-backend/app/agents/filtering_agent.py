@@ -3,19 +3,29 @@ Filtering Agent — Node 5 in the LangGraph multi-agent pipeline.
 (Inserted between Mini Validation Agent and Execution Agent)
 
 Responsibilities:
-  - Receive validated retrieval results (raw, all fields)
+  - Receive validated retrieval results (raw, all fields from DB)
   - Use LLM to decide which fields are relevant to answer the user's query
   - Python filters the raw data to only those fields
   - Pass the clean, precise filtered data to the Execution Agent
 
-This keeps the Execution Agent focused — it only sees the data it needs.
+WHY a separate filtering agent (not done inside Execution Agent):
+  DB stored procedures return 30-60 fields per record (e.g. BDM records include
+  technician phone numbers, GPS coordinates, internal codes). Sending all of them
+  to the Execution Agent inflates the prompt token count and confuses the model.
+  The Filtering Agent strips irrelevant fields BEFORE the Execution Agent sees the
+  data, keeping the execution prompt lean and the answer focused.
+
+WHY LLM for field selection + Python for actual filtering (not pure LLM filtering):
+  LLM field selection is flexible (it understands intent). Python filtering is
+  deterministic and fast. Using both gives the best of each:
+    - LLM: decides which fields to keep (semantic understanding)
+    - Python: performs the actual filtering (no hallucination risk)
 
 Model: gemini-2.5-flash with LOW thinking budget (field selection is simple)
 """
 
 import json
-import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -25,21 +35,35 @@ from app.agents.prompts.filtering_prompt import (
     FILTERING_SYSTEM_PROMPT,
     FILTERING_USER_TEMPLATE,
 )
-from app.agents.log_config import setup_agent_logger
+# WHY these helpers: see log_config.py for detailed explanations.
+from app.agents.log_config import (
+    setup_agent_logger,
+    extract_token_counts,
+    parse_llm_text,
+    strip_json_fences,
+)
 from app.config import settings
 
 logger = setup_agent_logger("filtering_agent")
 
 
+
 # ── Model initialisation ──────────────────────────────────────────────────────
 
 def _build_model() -> ChatGoogleGenerativeAI:
-    """Build the Filtering Agent model — low thinking budget, focused task."""
+    """
+    Build the Filtering Agent model with a low thinking budget.
+
+    WHY thinking_budget=1000 (lowest in the pipeline):
+      Field selection is a straightforward task: given a query and a list of DB
+      column names, pick the relevant ones. It doesn't require deep multi-step
+      reasoning. A low budget keeps latency low for this simple step.
+    """
     return ChatGoogleGenerativeAI(
         model=settings.MULTI_AGENT_MODEL,
         google_api_key=settings.GOOGLE_API_KEY,
-        temperature=1,          # required for thinking mode
-        thinking_budget=1000,   # low budget — field selection is a simple decision
+        temperature=1,          # WHY: required for thinking mode (Gemini constraint)
+        thinking_budget=1000,
     )
 
 
@@ -202,44 +226,22 @@ async def filtering_agent_node(state: AgentState) -> AgentState:
     token_counts = {"thinking": 0, "input": 0, "output": 0}
 
     try:
-        model = _build_model()
+        model    = _build_model()
         response = await model.ainvoke(messages)
 
-        # Extract token counts
-        usage = getattr(response, "usage_metadata", None)
-        if usage and isinstance(usage, dict):
-            token_counts["input"]  = usage.get("input_tokens", 0) or 0
-            token_counts["output"] = usage.get("output_tokens", 0) or 0
-            out_details = usage.get("output_token_details") or {}
-            if isinstance(out_details, dict):
-                token_counts["thinking"] = out_details.get("reasoning", 0) or 0
-
-        # Parse the field list from the LLM response
-        raw_content = response.content
-        if isinstance(raw_content, list):
-            text_parts = [
-                p.get("text", "") if isinstance(p, dict) else str(p)
-                for p in raw_content
-                if not (isinstance(p, dict) and p.get("type") == "thinking")
-            ]
-            raw_content = "".join(text_parts).strip()
-        else:
-            raw_content = str(raw_content).strip()
-
-        # Strip markdown code fences if present
-        if raw_content.startswith("```"):
-            raw_content = raw_content.split("```")[1]
-            if raw_content.startswith("json"):
-                raw_content = raw_content[4:]
-        raw_content = raw_content.strip()
-
-        parsed = json.loads(raw_content)
+        # WHY use shared helpers: see log_config.py for detailed explanations
+        token_counts = extract_token_counts(response)
+        raw_text     = parse_llm_text(response)
+        raw_text     = strip_json_fences(raw_text)
+        parsed       = json.loads(raw_text)
         if isinstance(parsed, list):
             keep_fields = [str(f) for f in parsed if f]
 
     except (json.JSONDecodeError, Exception) as exc:
-        logger.error("Filtering Agent error: %s", exc, exc_info=True)
-        # On error: pass all data through unfiltered (safe fallback)
+        logger.error("|| Filtering Agent error: %s", exc, exc_info=True)
+        # WHY pass all data through on error:
+        #   An empty keep_fields means _filter_results() returns data unchanged.
+        #   This is always safer than returning nothing to the Execution Agent.
         keep_fields = []
 
     # ── Python filters the data ───────────────────────────────────────────────

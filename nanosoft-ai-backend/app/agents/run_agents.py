@@ -21,14 +21,17 @@ if sys.platform == "win32":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
-# -- Root logging setup -------------------------------------------------------
-# Only set the root level — do NOT add a root StreamHandler.
-# Agent loggers have their own handlers (via setup_agent_logger).
-# facility_tools/bdm_route etc. have their own handlers too.
-# A root StreamHandler would cause every log to print TWICE (double output).
-logging.getLogger().setLevel(logging.INFO)
+# WHY setup_agent_logger (not raw logging):
+#   All agent files use setup_agent_logger from log_config.py which writes
+#   to app/agents/logs/agents.log with the standard || prefix format.
+#   Using the same logger here means run_agents output is in the same file
+#   and the same format as the agents it is testing.
+from app.agents.log_config import setup_agent_logger
+
+logger = setup_agent_logger("run_agents")
 
 # Suppress noisy third-party loggers
+import logging
 for _noisy in ("httpx", "httpcore", "google.auth", "urllib3", "asyncio"):
     logging.getLogger(_noisy).setLevel(logging.WARNING)
 

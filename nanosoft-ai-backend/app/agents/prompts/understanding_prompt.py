@@ -286,9 +286,13 @@ produce a complete understanding. Consider:
    Only set clarification_needed=true if the answer to "Do I understand the general intent?"
    is genuinely NO.
 
-5. NEEDS_SEARCH -- Does this require searching external information
-   (e.g. facility management regulations or general knowledge outside the system)?
+5. NEEDS_SEARCH -- Does this require external information that is NOT in the
+   facility management system? Examples: FM regulations, industry standards,
+   manufacturer specs, IEQ guidelines, ASHRAE values, warranty policies.
    Answer: true / false
+   If true: the Understanding Agent will perform a Google Search grounding call
+   and store the result in "web_search_summary". The downstream agents will use
+   that summary — no further web search step is needed.
 
 6. CONTEXT_DEPENDENCY -- Relationship to previous conversation:
    - INDEPENDENT : Standalone query, no dependency on prior messages
@@ -321,8 +325,22 @@ Respond with ONLY a valid JSON object. No text before or after. No markdown fenc
   "context_dependency": "<INDEPENDENT|DEPENDENT|PARTIAL>",
   "clarification_needed": false,
   "clarification_question": "<targeted question if clarity is LOW, else null>",
-  "summary": "<one sentence: what the user actually wants>"
+  "summary": "<one sentence: what the user actually wants>",
+  "modules_excluded_reason": {
+    "<MODULE>": "<one sentence: why this module is NOT relevant to this query>"
+  },
+  "web_search_summary": null
 }
+
+RULES FOR modules_excluded_reason:
+- Include ALL modules NOT in entities.modules.
+- Write a concise one-sentence reason for each excluded module.
+- Example: {"ASSETS": "User asked about maintenance tasks, not physical equipment."}
+- This field is essential for any developer to understand the routing decision.
+
+RULE FOR web_search_summary:
+- Always output null. The Understanding Agent Python code fills this field
+  with the Google Search result when needs_search=True. You do not generate it.
 
 IMPORTANT: The "filters" object must contain ALL fields you were able to extract
 from the user's query using the full schema above -- not a generic subset.

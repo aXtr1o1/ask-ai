@@ -37,16 +37,28 @@ logger = setup_agent_logger("multi_agent_graph")
 def route_after_validation(state: AgentState) -> str:
     """
     Route from mini_validation_agent:
-      - RETRY → retrieval_agent   (loop back for another attempt)
-      - PASS  → filtering_agent   (filter data before execution)
-      - FAIL  → filtering_agent   (execution agent handles gracefully)
+      - RETRY → retrieval_agent   (loop back for another attempt with new instructions)
+      - PASS  → filtering_agent   (data is good, proceed to filter then execute)
+      - FAIL  → filtering_agent   (execution agent will handle gracefully via FAIL status)
+
+    WHY RETRY loops back to retrieval_agent (not understanding or goal_planning):
+      The understanding and goal_planning agents already produced correct intent and plan.
+      The retrieval FAILED because of bad parameter values or wrong tool selection.
+      Looping back to retrieval with specific retry_instructions fixes JUST the retrieval
+      without wasting tokens re-running the entire pipeline from scratch.
+
+    WHY FAIL still goes to filtering_agent (not END):
+      Even on FAIL the Execution Agent must produce a response — either a helpful
+      message saying no data was found, or a partial answer from whatever data arrived.
+      Sending FAIL state to the Execution Agent lets it communicate this to the user
+      gracefully instead of returning a raw empty state.
     """
     status = state.get("validation_status", "PASS")
     if status == "RETRY":
-        logger.info("|| Routing: RETRY → retrieval_agent")
+        logger.info("|| Routing: RETRY -> retrieval_agent (will use retry_instructions)")
         return "retrieval_agent"
     else:
-        logger.info("|| Routing: %s → filtering_agent", status)
+        logger.info("|| Routing: %s -> filtering_agent", status)
         return "filtering_agent"
 
 
@@ -73,16 +85,22 @@ def build_agent_graph() -> StateGraph:
     graph.add_edge("goal_planning_agent",    "retrieval_agent")
     graph.add_edge("retrieval_agent",        "mini_validation_agent")
 
-    # Conditional: RETRY loops back to retrieval_agent; PASS/FAIL goes to filtering_agent
+    # WHY conditional edge here (not after retrieval):
+    #   The Validation Agent checks if the data is correct BEFORE execution.
+    #   A conditional edge lets the graph loop back to retrieval_agent for a RETRY
+    #   without re-running understanding or goal_planning (those results are still valid).
     graph.add_conditional_edges(
         "mini_validation_agent",
         route_after_validation,
         {
-            "retrieval_agent": "retrieval_agent",
-            "filtering_agent": "filtering_agent",
+            "retrieval_agent": "retrieval_agent",  # RETRY branch
+            "filtering_agent": "filtering_agent",  # PASS / FAIL branch
         },
     )
 
+    # WHY filtering_agent sits between validation and execution:
+    #   DB results contain 30-60 fields per record. Filtering removes columns that
+    #   are not needed for the answer, shrinking the execution prompt significantly.
     graph.add_edge("filtering_agent", "execution_agent")
     graph.add_edge("execution_agent", END)
 
@@ -127,9 +145,17 @@ async def run_agent_pipeline(
         "user_name":                     user_name or "system",
         "user_id":                       user_id,
 
+        # WHY all fields initialised to None:
+        #   LangGraph requires all TypedDict keys to be present in the initial state.
+        #   Agents read state fields with .get() and use None as a sentinel for
+        #   "not yet set by upstream agent". This avoids KeyError on any field access.
         "understood_intent":             None,
         "understanding_log":             None,
         "understanding_thinking_tokens": None,
+        # WHY web_search_summary starts None:
+        #   Set by Understanding Agent only when needs_search=True.
+        #   Downstream agents check this field; None means no external search ran.
+        "web_search_summary":            None,
 
         "goal_plan":                     None,
         "goal_log":                      None,

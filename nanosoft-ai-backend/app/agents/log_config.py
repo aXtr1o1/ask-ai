@@ -2,7 +2,7 @@
 log_config.py — Shared logger factory for all pipeline agents.
 
 Usage in any agent file:
-    from app.agents.log_config import setup_agent_logger
+    from app.agents.log_config import setup_agent_logger, extract_token_counts
     logger = setup_agent_logger("understanding_agent")
 
 Each agent logger writes to:
@@ -24,6 +24,7 @@ import logging
 import os
 import datetime
 from logging.handlers import RotatingFileHandler
+from typing import Any
 
 # ── Log directory ─────────────────────────────────────────────────────────────
 _LOG_DIR       = os.path.join(os.path.dirname(__file__), "logs")
@@ -93,7 +94,96 @@ def setup_agent_logger(name: str) -> logging.Logger:
     return logger
 
 
+def extract_token_counts(response: Any) -> dict:
+    """
+    Extract thinking / input / output token counts from a LangChain model response.
+
+    WHY this lives here (not in each agent):
+      All 6 pipeline agents call a Gemini model and need the same token-count
+      extraction. Without this helper, every agent file contains the identical
+      6-line block. Centralising it here means:
+        - A single place to update if langchain_google_genai changes its API
+        - No risk of one agent using a stale copy while another has the fix
+
+    WHY the key is "reasoning" not "thinking_tokens":
+      In langchain_google_genai >= 4.2.0 the thinking token count moved to:
+        response.usage_metadata["output_token_details"]["reasoning"]
+      The old key "thinking_tokens" no longer exists. This comment documents
+      that intentional choice so no future developer changes it back.
+
+    Returns:
+        {"thinking": int, "input": int, "output": int}
+        All values default to 0 if the metadata is missing or malformed.
+    """
+    counts = {"thinking": 0, "input": 0, "output": 0}
+    usage = getattr(response, "usage_metadata", None)
+    if usage and isinstance(usage, dict):
+        counts["input"]  = usage.get("input_tokens", 0) or 0
+        counts["output"] = usage.get("output_tokens", 0) or 0
+        out_details = usage.get("output_token_details") or {}
+        if isinstance(out_details, dict):
+            counts["thinking"] = out_details.get("reasoning", 0) or 0
+    return counts
+
+
+def parse_llm_text(response: Any) -> str:
+    """
+    Extract the plain text content from a LangChain model response,
+    skipping any thinking/reasoning parts emitted by Gemini thinking mode.
+
+    WHY this lives here (not in each agent):
+      All 6 agents call a Gemini model and need to extract the text part of
+      the response. Gemini thinking mode returns a list of content blocks;
+      some are type='thinking' (internal reasoning) and some are type='text'
+      (the actual output). Each agent used an identical 8-line block to do
+      this — centralising it removes the duplication.
+
+    WHY we skip blocks where type == 'thinking':
+      The thinking blocks contain raw chain-of-thought reasoning. Including
+      them in the text would pollute JSON parsing (thinking blocks contain
+      prose, not JSON) and inflate log output.
+
+    Returns:
+        The joined plain-text output as a stripped string.
+    """
+    raw = response.content
+    if isinstance(raw, list):
+        parts = [
+            p.get("text", "") if isinstance(p, dict) else str(p)
+            for p in raw
+            if not (isinstance(p, dict) and p.get("type") == "thinking")
+        ]
+        return "".join(parts).strip()
+    return str(raw).strip()
+
+
+def strip_json_fences(text: str) -> str:
+    """
+    Remove markdown code fences from a string so it can be parsed as JSON.
+
+    WHY this lives here (not in each agent):
+      Gemini sometimes wraps its JSON output in ```json ... ``` even when the
+      prompt says "no markdown". Every agent that parses JSON from the LLM
+      needs to strip these fences. Centralising avoids the identical 5-line
+      block being duplicated across 5 agent files.
+
+    Handles:
+      ```json\\n{...}\\n```
+      ```\\n{...}\\n```
+      {... } (already clean — returned as-is)
+    """
+    t = text.strip()
+    if t.startswith("```"):
+        t = t[3:]                      # strip opening ```
+        if t.startswith("json"):
+            t = t[4:]                  # strip optional 'json' language tag
+        if t.endswith("```"):
+            t = t[:-3]                 # strip closing ```
+    return t.strip()
+
+
 def write_session_separator(label: str = "SESSION START") -> None:
+
     """
     Write a visible session separator to BOTH the combined log AND all
     existing per-agent logs. Called once at the start of each pipeline run.

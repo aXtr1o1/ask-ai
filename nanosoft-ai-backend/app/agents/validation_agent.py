@@ -7,6 +7,19 @@ Responsibilities:
   - Provide specific, actionable retry instructions when validation fails
   - Never block indefinitely — respects max retry_count of 2
 
+WHY a separate validation node (not checking data inside the execution agent):
+  The Execution Agent is responsible for generating a natural language answer.
+  Asking it to also validate data quality mixes two concerns. A dedicated
+  Validation Agent can check data before the execution agent sees it, and can
+  trigger a RETRY that loops back to the Retrieval Agent — something the
+  Execution Agent cannot do (it is the final node).
+
+WHY MAX_RETRIES = 2 (not infinite):
+  Without a cap the pipeline could loop indefinitely on a query that returns
+  empty data for a valid reason (e.g. no PPM tasks in that building yet).
+  Two retries is enough to recover from model parameter errors while preventing
+  infinite loops. After 2 retries we PASS with whatever data is available.
+
 Model: gemini-2.5-flash with thinking enabled
 """
 
@@ -21,7 +34,13 @@ from app.agents.prompts.validation_prompt import (
     VALIDATION_SYSTEM_PROMPT,
     VALIDATION_USER_TEMPLATE,
 )
-from app.agents.log_config import setup_agent_logger
+# WHY these helpers: see log_config.py for detailed explanations.
+from app.agents.log_config import (
+    setup_agent_logger,
+    extract_token_counts,
+    parse_llm_text,
+    strip_json_fences,
+)
 from app.config import settings
 
 logger = setup_agent_logger("validation_agent")
@@ -155,46 +174,29 @@ async def validation_agent_node(state: AgentState) -> AgentState:
 
     # ── Invoke model ──────────────────────────────────────────────────────────
     try:
-        model = _build_model()
+        model    = _build_model()
         response = await model.ainvoke(messages)
 
-        # Extract token counts from usage_metadata
-        # In langchain_google_genai 4.2.0, thinking tokens are at:
-        #   usage_metadata['output_token_details']['reasoning']
-        token_counts = {"thinking": 0, "input": 0, "output": 0}
-        usage = getattr(response, "usage_metadata", None)
-        if usage and isinstance(usage, dict):
-            token_counts["input"]    = usage.get("input_tokens", 0) or 0
-            token_counts["output"]   = usage.get("output_tokens", 0) or 0
-            out_details = usage.get("output_token_details") or {}
-            if isinstance(out_details, dict):
-                token_counts["thinking"] = out_details.get("reasoning", 0) or 0
+        # WHY use shared helpers: see log_config.py for detailed explanations.
+        # extract_token_counts -> extracts thinking/input/output from usage_metadata
+        # parse_llm_text       -> strips thinking-block parts from content list
+        # strip_json_fences    -> removes ```json ... ``` the model sometimes adds
+        token_counts      = extract_token_counts(response)
+        raw_text          = parse_llm_text(response)
+        raw_text          = strip_json_fences(raw_text)
+        validation_result = json.loads(raw_text)
 
-        raw_content = response.content
-        if isinstance(raw_content, list):
-            text_parts = [
-                p.get("text", "") if isinstance(p, dict) else str(p)
-                for p in raw_content
-                if not (isinstance(p, dict) and p.get("type") == "thinking")
-            ]
-            raw_content = "".join(text_parts).strip()
-        else:
-            raw_content = str(raw_content).strip()
-
-        if raw_content.startswith("```"):
-            raw_content = raw_content.split("```")[1]
-            if raw_content.startswith("json"):
-                raw_content = raw_content[4:]
-        raw_content = raw_content.strip()
-
-        validation_result = json.loads(raw_content)
-        v_status          = validation_result.get("validation_status", "PASS")
-        v_reason          = validation_result.get("validation_reason", "")
-        v_retry_instr     = validation_result.get("retry_instructions")
+        v_status      = validation_result.get("validation_status", "PASS")
+        v_reason      = validation_result.get("validation_reason", "")
+        v_retry_instr = validation_result.get("retry_instructions")
 
     except (json.JSONDecodeError, Exception) as exc:
         logger.error("Validation Agent error: %s", exc, exc_info=True)
-        # On error, default to PASS so pipeline doesn't block
+        # WHY default to PASS on error:
+        #   If the validation model crashes or returns unparseable JSON, we must
+        #   not block the pipeline. PASS lets the Execution Agent see whatever
+        #   data was retrieved and produce a best-effort answer. A RETRY would
+        #   risk looping forever if the validation model itself is broken.
         v_status      = "PASS"
         v_reason      = "Validation agent encountered an error — defaulting to PASS"
         v_retry_instr = None

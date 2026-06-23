@@ -7,6 +7,12 @@ Responsibilities:
   - Produce analytically rich execution steps including analysis_instruction per step
   - Log a clean, structured summary to the console
 
+WHY this agent exists as a separate node (not merged with Understanding):
+  Understanding = WHAT the user wants (intent, filters, modules).
+  Planning      = HOW to get it (which approach, which tools, in what order).
+  Keeping them separate means each agent is focused and independently auditable.
+  If planning fails, we can retry just planning without re-running understanding.
+
 Model: gemini-2.5-flash with thinking enabled
 """
 
@@ -20,8 +26,18 @@ from app.agents.prompts.goal_planning_prompt import (
     GOAL_PLANNING_SYSTEM_PROMPT,
     GOAL_PLANNING_USER_TEMPLATE,
 )
-from app.agents.log_config import setup_agent_logger
+# WHY these helpers: see log_config.py for detailed explanations.
+# extract_token_counts -> extracts thinking/input/output from response.usage_metadata
+# parse_llm_text       -> strips thinking-block parts from model content list
+# strip_json_fences    -> removes ```json ... ``` fences the model sometimes adds
+from app.agents.log_config import (
+    setup_agent_logger,
+    extract_token_counts,
+    parse_llm_text,
+    strip_json_fences,
+)
 from app.config import settings
+
 
 logger = setup_agent_logger("goal_planning_agent")
 
@@ -29,12 +45,20 @@ logger = setup_agent_logger("goal_planning_agent")
 # ── Model initialisation ──────────────────────────────────────────────────────
 
 def _build_model() -> ChatGoogleGenerativeAI:
-    """Build the Goal Planning Agent model with thinking enabled."""
+    """
+    Build the Goal Planning Agent model with thinking enabled.
+
+    WHY thinking_budget=5000:
+      The planning agent must decide between approaches (DB_QUERY / DIRECT_ANSWER /
+      MULTI_STEP / CLARIFY), choose which tools are needed, and write an
+      analysis_instruction per step. For multi-module or comparative queries
+      this requires more reasoning than simple intent extraction.
+    """
     return ChatGoogleGenerativeAI(
         model=settings.MULTI_AGENT_MODEL,
         google_api_key=settings.GOOGLE_API_KEY,
-        temperature=1,          # required for thinking mode
-        thinking_budget=5000,   # correct kwarg for langchain_google_genai
+        temperature=1,          # WHY: required for thinking mode (Gemini constraint)
+        thinking_budget=5000,
     )
 
 
@@ -146,41 +170,17 @@ async def goal_planning_agent_node(state: AgentState) -> AgentState:
         model = _build_model()
         response = await model.ainvoke(messages)
 
-        # Extract token counts from usage_metadata
-        # In langchain_google_genai 4.2.0, thinking tokens are at:
-        #   usage_metadata['output_token_details']['reasoning']  (NOT 'thinking_tokens')
-        token_counts = {"thinking": 0, "input": 0, "output": 0}
-        usage = getattr(response, "usage_metadata", None)
-        if usage and isinstance(usage, dict):
-            token_counts["input"]    = usage.get("input_tokens", 0) or 0
-            token_counts["output"]   = usage.get("output_tokens", 0) or 0
-            out_details = usage.get("output_token_details") or {}
-            if isinstance(out_details, dict):
-                token_counts["thinking"] = out_details.get("reasoning", 0) or 0
-
-        # ── Parse JSON output ─────────────────────────────────────────────────
-        raw_content = response.content
-        if isinstance(raw_content, list):
-            text_parts = [
-                p.get("text", "") if isinstance(p, dict) else str(p)
-                for p in raw_content
-                if not (isinstance(p, dict) and p.get("type") == "thinking")
-            ]
-            raw_content = "".join(text_parts).strip()
-        else:
-            raw_content = str(raw_content).strip()
-
-        # Strip markdown fences if model adds them
-        if raw_content.startswith("```"):
-            raw_content = raw_content.split("```")[1]
-            if raw_content.startswith("json"):
-                raw_content = raw_content[4:]
-        raw_content = raw_content.strip()
-
-        goal_plan = json.loads(raw_content)
+        # WHY use shared helpers: see log_config.py for detailed explanations
+        token_counts = extract_token_counts(response)
+        raw_text     = parse_llm_text(response)
+        raw_text     = strip_json_fences(raw_text)
+        goal_plan    = json.loads(raw_text)
 
     except json.JSONDecodeError as jde:
-        logger.error("JSON parse failed: %s | raw='%s'", jde, raw_content[:200])
+        logger.error("JSON parse failed: %s | raw='%s'", jde, raw_text[:200] if 'raw_text' in dir() else 'N/A')
+        # WHY CLARIFY fallback (not ERROR): a parse failure likely means the model
+        # generated malformed JSON. Rather than crashing the request, we send the
+        # user a clarification question — they can rephrase and retry.
         goal_plan = {
             "approach": "CLARIFY",
             "tools_required": [],
