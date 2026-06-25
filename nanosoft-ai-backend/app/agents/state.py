@@ -58,5 +58,19 @@ class AgentState(TypedDict):
     execution_log: Optional[str]         # Human-readable console log string
     execution_thinking_tokens: Optional[int]
 
+    # ── Pipeline token accumulators ────────────────────────────────────────────
+    total_input_tokens: Optional[int]
+    total_output_tokens: Optional[int]
+    total_thinking_tokens: Optional[int]
+
+    # ── Per-agent latency (seconds, measured with time.perf_counter) ───────────
+    latency_understanding: Optional[float]   # understanding_agent wall-clock seconds
+    latency_goal_planning: Optional[float]   # goal_planning_agent wall-clock seconds
+    latency_retrieval: Optional[float]       # retrieval_agent wall-clock seconds
+    latency_validation: Optional[float]      # validation_agent wall-clock seconds
+    latency_filtering: Optional[float]       # filtering_agent wall-clock seconds
+    latency_execution: Optional[float]       # execution_agent wall-clock seconds
+    latency_total: Optional[float]           # full pipeline wall-clock seconds
+
     # ── Meta-trace (appended by each agent for full pipeline visibility) ───────
     agent_trace: list[str]               # Ordered list of agent conclusions

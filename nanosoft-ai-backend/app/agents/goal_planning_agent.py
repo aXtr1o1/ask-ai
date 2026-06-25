@@ -17,6 +17,7 @@ Model: gemini-2.5-flash with thinking enabled
 """
 
 import json
+import time
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -139,6 +140,7 @@ async def goal_planning_agent_node(state: AgentState) -> AgentState:
     logger.info("-" * 66)
     logger.info("Goal Planning Agent -- START  |  query='%s'", user_query[:80])
     logger.info("-" * 66)
+    _t_start = time.perf_counter()
 
     if not understood_intent:
         logger.warning("No understood_intent in state -- planning with empty context")
@@ -208,12 +210,15 @@ async def goal_planning_agent_node(state: AgentState) -> AgentState:
         raise
 
     # ── Log and build trace entry ─────────────────────────────────────────────
+    latency = round(time.perf_counter() - _t_start, 3)
+    logger.info("|| [GoalPlanningAgent] latency=%.3f s", latency)
     log_str = _print_goal_log(goal_plan, token_counts, query=user_query)
     trace.append(
         f"[GoalPlanningAgent] approach={goal_plan.get('approach')} | "
         f"tools={goal_plan.get('tools_required')} | "
         f"complexity={goal_plan.get('estimated_complexity')} | "
-        f"thinking_tokens={token_counts['thinking']} | input_tokens={token_counts['input']}"
+        f"thinking_tokens={token_counts['thinking']} | input_tokens={token_counts['input']} | "
+        f"latency={latency:.3f}s"
     )
 
     return {
@@ -221,5 +226,9 @@ async def goal_planning_agent_node(state: AgentState) -> AgentState:
         "goal_plan":            goal_plan,
         "goal_log":             log_str,
         "goal_thinking_tokens": token_counts["thinking"],
+        "total_input_tokens":   state.get("total_input_tokens", 0) + token_counts["input"],
+        "total_output_tokens":  state.get("total_output_tokens", 0) + token_counts["output"],
+        "total_thinking_tokens":state.get("total_thinking_tokens", 0) + token_counts["thinking"],
+        "latency_goal_planning": latency,
         "agent_trace":          trace,
     }

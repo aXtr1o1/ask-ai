@@ -25,6 +25,7 @@ Model: gemini-2.5-flash with LOW thinking budget (field selection is simple)
 """
 
 import json
+import time
 from typing import Dict, Any, List
 
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -67,7 +68,74 @@ def _build_model() -> ChatGoogleGenerativeAI:
     )
 
 
-# ── Field filtering (pure Python) ────────────────────────────────────────────
+# ── Schema extraction (lightweight — for LLM prompt only) ────────────────────
+
+def _extract_schema_for_prompt(retrieval_results: List[Dict[str, Any]]) -> str:
+    """
+    Extract a minimal schema description from the retrieval results to send
+    to the LLM. The LLM ONLY needs to know:
+      1. How many retrieval steps there are
+      2. What fields each step's records contain (field names, not values)
+      3. Whether it is an aggregate (p_count only) or a list result
+
+    WHY schema-only (not full data dump):
+      The full retrieval_results can contain hundreds of records more  fields so token increases 
+      field names. The LLM doesn't need the data VALUES to decide which fields
+      are relevant — it only needs the NAMES. A single sample record's keys
+      give the complete schema. This reduces the Filtering Agent's input tokens
+      from potentially 20K+ to under 500 tokens.
+
+    Returns a human-readable string describing each step's available fields.
+    """
+    lines = []
+    for i, result in enumerate(retrieval_results):
+        step_id = result.get("step_id", i + 1)
+        source  = result.get("source", "db")
+        target  = result.get("target", "unknown")
+        data    = result.get("data", {})
+
+        if isinstance(data, dict):
+            p_count = data.get("p_count")
+            p_list  = data.get("p_list", [])
+
+            if p_list and isinstance(p_list, list) and isinstance(p_list[0], dict):
+                # List result — show field names from first record only
+                fields     = list(p_list[0].keys())
+                record_cnt = len(p_list)
+                lines.append(
+                    f"Step {step_id} | [{source.upper()}] {target} | "
+                    f"{record_cnt} record(s) | p_count={p_count}\n"
+                    f"  Available fields ({len(fields)}): {fields}"
+                )
+            elif p_count is not None:
+                # Aggregate result — only p_count matters
+                lines.append(
+                    f"Step {step_id} | [{source.upper()}] {target} | "
+                    f"Aggregate result | p_count={p_count} | fields: ['p_count']"
+                )
+            else:
+                lines.append(
+                    f"Step {step_id} | [{source.upper()}] {target} | "
+                    f"data keys: {list(data.keys())}"
+                )
+
+        elif isinstance(data, list) and data and isinstance(data[0], dict):
+            fields     = list(data[0].keys())
+            record_cnt = len(data)
+            lines.append(
+                f"Step {step_id} | [{source.upper()}] {target} | "
+                f"{record_cnt} record(s)\n"
+                f"  Available fields ({len(fields)}): {fields}"
+            )
+        else:
+            lines.append(
+                f"Step {step_id} | [{source.upper()}] {target} | "
+                f"no records or unexpected data shape"
+            )
+
+    return "\n".join(lines) if lines else "(no retrieval results)"
+
+
 
 def _filter_results(
     retrieval_results: List[Dict[str, Any]],
@@ -156,6 +224,7 @@ async def filtering_agent_node(state: AgentState) -> AgentState:
     logger.info("=" * 66)
     logger.info("Filtering Agent -- START | query='%s'", user_query[:80])
     logger.info("=" * 66)
+    _t_start = time.perf_counter()
 
     # ── Short-circuit: no retrieval data → pass through empty ─────────────────
     if not retrieval_results:
@@ -208,12 +277,17 @@ async def filtering_agent_node(state: AgentState) -> AgentState:
         len(retrieval_results), total_raw_fields
     )
 
-    # ── Build prompt ──────────────────────────────────────────────────────────
+    # ── Build schema description for LLM (NOT the full data dump) ────────────
+    # WHY schema-only: the LLM only needs field names to decide which to keep.
+    # Sending all records inflates tokens massively with zero benefit — the LLM
+    # doesn't use data values to select fields, only field names and context.
+    schema_description = _extract_schema_for_prompt(retrieval_results)
+
     user_content = FILTERING_USER_TEMPLATE.format(
         user_query=user_query,
         understood_intent=json.dumps(understood_intent, indent=2),
         goal_plan=json.dumps(goal_plan, indent=2),
-        retrieval_results=json.dumps(retrieval_results, indent=2),
+        retrieval_schema=schema_description,
     )
 
     messages = [
@@ -275,9 +349,12 @@ async def filtering_agent_node(state: AgentState) -> AgentState:
         f"thinking_tokens={token_counts['thinking']} | "
         f"input_tokens={token_counts['input']}"
     )
+    latency = round(time.perf_counter() - _t_start, 3)
+    logger.info("|| [FilteringAgent] latency=%.3f s", latency)
     trace.append(
         f"[FilteringAgent] keep_fields={keep_fields} | "
-        f"thinking_tokens={token_counts['thinking']}"
+        f"thinking_tokens={token_counts['thinking']} | "
+        f"latency={latency:.3f}s"
     )
 
     return {
@@ -285,5 +362,9 @@ async def filtering_agent_node(state: AgentState) -> AgentState:
         "filtered_results":          filtered_results,
         "filtering_log":             log_str,
         "filtering_thinking_tokens": token_counts["thinking"],
+        "total_input_tokens":        state.get("total_input_tokens", 0) + token_counts.get("input", 0),
+        "total_output_tokens":       state.get("total_output_tokens", 0) + token_counts.get("output", 0),
+        "total_thinking_tokens":     state.get("total_thinking_tokens", 0) + token_counts.get("thinking", 0),
+        "latency_filtering":         latency,
         "agent_trace":               trace,
     }

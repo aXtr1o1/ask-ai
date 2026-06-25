@@ -18,6 +18,7 @@ Model: gemini-2.5-flash with thinking enabled (highest budget — final answer q
 """
 
 import json
+import time
 from typing import Dict, Any
 
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -34,6 +35,7 @@ from app.agents.log_config import (
     extract_token_counts,
     parse_llm_text,
 )
+from app.agents.services.data_summarizer import smart_prepare
 from app.config import settings
 
 logger = setup_agent_logger("execution_agent")
@@ -93,6 +95,7 @@ async def execution_agent_node(state: AgentState) -> AgentState:
     logger.info("=" * 66)
     logger.info("Execution Agent -- START | query='%s' | validation=%s", user_query[:80], validation_status)
     logger.info("=" * 66)
+    _t_start = time.perf_counter()
 
     # ── Pre-execution intention log ─────────────────────────────────────────
     approach          = goal_plan.get("approach", "?")
@@ -119,12 +122,23 @@ async def execution_agent_node(state: AgentState) -> AgentState:
         analysis_instr or "(produce a direct answer from retrieved data)"
     )
 
+    # ── Smart data preparation (replaces naive p_list[:100] cap) ──────────────
+    # WHY smart_prepare instead of a raw cap:
+    #   Truncating to 100 records gives WRONG answers when the user asks
+    #   "how many overdue tasks?" and the DB returned 11,000 records.
+    #   smart_prepare detects large datasets and replaces p_list with a compact
+    #   Python-computed summary (group-by counts, numeric stats) + a 20-record
+    #   sample. The LLM writes a CORRECT, DETAILED answer from the summary
+    #   without ever seeing all 11,000 rows -- and without hitting token limits.
+    #   Small datasets (<= 500 records) pass through unchanged.
+    capped_results = smart_prepare(retrieval_results, understood_intent)
+
     # ── Build prompt ──────────────────────────────────────────────────────────
     user_content = EXECUTION_USER_TEMPLATE.format(
         user_query=user_query,
         understood_intent=json.dumps(understood_intent, indent=2),
         goal_plan=json.dumps(goal_plan, indent=2),
-        retrieval_results=json.dumps(retrieval_results, indent=2),
+        retrieval_results=json.dumps(capped_results, indent=2),
     )
 
     messages = [
@@ -151,7 +165,9 @@ async def execution_agent_node(state: AgentState) -> AgentState:
         )
         token_counts = {"thinking": 0, "input": 0, "output": 0}
 
-    # ── Result log (same || format as all other agents) ──────────────────────
+    # ── Result log (same || format as all other agents) ────────────────────
+    latency = round(time.perf_counter() - _t_start, 3)
+    logger.info("|| [ExecutionAgent] latency=%.3f s", latency)
     preview = final_answer[:200].replace("\n", " ") + ("..." if len(final_answer) > 200 else "")
     log_str = (
         f"\n|| ============================================================\n"
@@ -170,7 +186,8 @@ async def execution_agent_node(state: AgentState) -> AgentState:
 
     trace.append(
         f"[ExecutionAgent] answer_len={len(final_answer)} | "
-        f"thinking={token_counts['thinking']} | input={token_counts['input']}"
+        f"thinking={token_counts['thinking']} | input={token_counts['input']} | "
+        f"latency={latency:.3f}s"
     )
 
     return {
@@ -178,5 +195,9 @@ async def execution_agent_node(state: AgentState) -> AgentState:
         "final_answer":               final_answer,
         "execution_log":              log_str,
         "execution_thinking_tokens":  token_counts["thinking"],
+        "total_input_tokens":         state.get("total_input_tokens", 0) + token_counts.get("input", 0),
+        "total_output_tokens":        state.get("total_output_tokens", 0) + token_counts.get("output", 0),
+        "total_thinking_tokens":      state.get("total_thinking_tokens", 0) + token_counts.get("thinking", 0),
+        "latency_execution":          latency,
         "agent_trace":                trace,
     }

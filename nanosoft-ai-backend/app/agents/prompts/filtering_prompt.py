@@ -1,9 +1,14 @@
 """
 Filtering Agent Prompt — Fully Model-Based
 
-The model receives the raw retrieval results (all fields) and the user's query.
-It decides which fields are necessary to answer the question.
-Python then filters the data to only those fields before passing to the Execution Agent.
+The model receives the retrieval SCHEMA (field names only, not full data dump)
+and the user's query. It decides which fields are necessary to answer the question.
+Python then filters ALL records to only those fields before passing to the Execution Agent.
+
+WHY schema-only (not full data):
+  DB results can be 500+ records × 45 fields. Sending all records to the LLM
+  just to pick field names inflates tokens massively with zero benefit — the
+  LLM only needs field NAMES, not VALUES, to decide what's relevant.
 """
 
 FILTERING_SYSTEM_PROMPT = """
@@ -20,13 +25,15 @@ WHAT YOU RECEIVE
 1. The user's original query
 2. The understood intent (what the user wants)
 3. The goal plan (how the pipeline planned to answer it)
-4. The raw retrieval results — full JSON with ALL fields
+4. The retrieval SCHEMA — field names available in each retrieval step
+   (You do NOT see the actual data records. You only see the available field names,
+    the number of records retrieved, and the step metadata.)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 YOUR TASK
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Look at the retrieval results and the user's question.
+Look at the available field names and the user's question.
 Decide which fields are needed to give a complete, correct answer.
 
 Rules:
@@ -39,7 +46,7 @@ Rules:
    (e.g. Id, UserId, CreatedById, RawCode, InternalRef — unless asked)
 4. For COUNT/AGGREGATE results: keep p_count, p_list (the group names + counts)
 5. For LIST results: keep the descriptive name fields + the status/stage + date fields
-6. If retrieval_results is empty or has no p_list: output an empty array []
+6. If the schema shows no records or no fields: output an empty array []
 7. If source is web_search or document: output ["content", "url", "title"] — those
    are the only fields that exist for web/document results
 
@@ -67,8 +74,9 @@ UNDERSTOOD INTENT:
 GOAL PLAN:
 {goal_plan}
 
-RAW RETRIEVAL RESULTS (full data with all fields):
-{retrieval_results}
+RETRIEVAL SCHEMA (field names available — NOT the actual data records):
+{retrieval_schema}
 
-Now output ONLY the JSON array of field names to keep. Nothing else.
+Based on the field names available above and the user's question,
+output ONLY the JSON array of field names to keep. Nothing else.
 """

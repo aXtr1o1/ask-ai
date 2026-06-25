@@ -14,6 +14,7 @@ Model: gemini-2.5-flash with thinking enabled
 """
 
 import json
+import time
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -125,23 +126,23 @@ def _print_understanding_log(
         f"||    {line}" for line in entity_lines
     ) if entity_lines else "||    (none extracted)"
 
-    # ── Build excluded-module reasoning lines ─────────────────────────────────
+    # ── Build module-selection reasoning block ─────────────────────────────────
+    # One crisp sentence per module: selected modules get the "chosen" reason,
+    # excluded modules get their exclusion reason — all in a flat readable list.
     excluded_reasons = intent.get("modules_excluded_reason") or {}
-    all_modules = {"ASSETS", "PPM", "BDM", "FA", "SB"}
+    all_modules = ["ASSETS", "PPM", "BDM", "FA", "SB"]
     selected    = set(modules)
-    excluded    = all_modules - selected
 
-    if excluded and excluded_reasons:
-        excl_lines = "\n".join(
-            f"||    {mod:<8}: {excluded_reasons.get(mod, 'no reason provided')}"
-            for mod in sorted(excluded)
-        )
-        excluded_block = f"||  MODULES EXCLUDED (WHY):\n{excl_lines}"
-    elif excluded:
-        excl_list = ", ".join(sorted(excluded))
-        excluded_block = f"||  MODULES EXCLUDED: {excl_list} (no reasons provided)"
-    else:
-        excluded_block = "||  MODULES EXCLUDED: none (all modules selected)"
+    module_lines = []
+    for mod in all_modules:
+        if mod in selected:
+            chosen_reason = excluded_reasons.get(mod, "matched the query context")
+            module_lines.append(f"||    ✓ {mod:<8}: {chosen_reason}")
+        else:
+            excl_reason = excluded_reasons.get(mod, "not relevant to this query")
+            module_lines.append(f"||    ✗ {mod:<8}: {excl_reason}")
+
+    module_block = "\n".join(module_lines)
 
     # ── Web search summary block ──────────────────────────────────────────────
     if web_search_summary:
@@ -178,7 +179,8 @@ def _print_understanding_log(
         f"||  ENTITIES EXTRACTED:\n"
         f"{entity_block}\n"
         f"|| ------------------------------------------------------------\n"
-        f"{excluded_block}\n"
+        f"||  MODULE SELECTION (\u2713 chosen | \u2717 not chosen):\n"
+        f"{module_block}\n"
         f"|| ------------------------------------------------------------\n"
         f"{web_block}\n"
         f"|| ------------------------------------------------------------\n"
@@ -321,13 +323,14 @@ async def understanding_agent_node(state: AgentState) -> AgentState:
     Reads:  state['user_query'], state['conversation_history']
     Writes: state['understood_intent'], state['understanding_log'],
             state['understanding_thinking_tokens'], state['web_search_summary'],
-            state['agent_trace']
+            state['agent_trace'], state['latency_understanding']
 
     WHY this is Node 1 (before Goal Planning):
       The Goal Planning Agent needs to know the intent type, scope, and
       extracted filters before it can decide which approach to use (DATA_QUERY
       vs DIRECT_ANSWER vs CLARIFY). Understanding must run first.
     """
+    _t_start   = time.perf_counter()
     user_query = state.get("user_query", "").strip()
     history    = state.get("conversation_history", [])
     trace      = list(state.get("agent_trace", []))
@@ -351,7 +354,10 @@ async def understanding_agent_node(state: AgentState) -> AgentState:
 
     # ── Build messages for the model ──────────────────────────────────────────
     history_str  = _format_history(history)
+    from datetime import date as _date
+    today_str    = _date.today().strftime("%Y-%m-%d")
     user_content = UNDERSTANDING_USER_TEMPLATE.format(
+        today=today_str,
         conversation_history=history_str,
         user_query=user_query,
     )
@@ -401,6 +407,10 @@ async def understanding_agent_node(state: AgentState) -> AgentState:
         logger.error("|| Understanding Agent error: %s", exc, exc_info=True)
         raise
 
+    # ── Latency ──────────────────────────────────────────────────────────────
+    latency = round(time.perf_counter() - _t_start, 3)
+    logger.info("|| [UnderstandingAgent] latency=%.3f s", latency)
+
     # ── Print structured log and build pipeline trace entry ───────────────────
     log_str = _print_understanding_log(
         understood_intent, token_counts, user_query, web_search_summary
@@ -411,7 +421,8 @@ async def understanding_agent_node(state: AgentState) -> AgentState:
         f"scope={understood_intent.get('scope')} | "
         f"needs_search={understood_intent.get('needs_search', False)} | "
         f"thinking_tokens={token_counts['thinking']} | "
-        f"input_tokens={token_counts['input']}"
+        f"input_tokens={token_counts['input']} | "
+        f"latency={latency:.3f}s"
     )
 
     return {
@@ -419,6 +430,10 @@ async def understanding_agent_node(state: AgentState) -> AgentState:
         "understood_intent":             understood_intent,
         "understanding_log":             log_str,
         "understanding_thinking_tokens": token_counts["thinking"],
+        "total_input_tokens":            state.get("total_input_tokens", 0) + token_counts["input"],
+        "total_output_tokens":           state.get("total_output_tokens", 0) + token_counts["output"],
+        "total_thinking_tokens":         state.get("total_thinking_tokens", 0) + token_counts["thinking"],
         "web_search_summary":            web_search_summary,
+        "latency_understanding":         latency,
         "agent_trace":                   trace,
     }

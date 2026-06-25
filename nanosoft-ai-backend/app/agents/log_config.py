@@ -205,3 +205,50 @@ def write_session_separator(label: str = "SESSION START") -> None:
         if filepath != _COMBINED_FILE:
             fh.stream.write(separator)
             fh.stream.flush()
+
+
+def log_pipeline_token_usage(state: dict, logger: logging.Logger) -> None:
+    """
+    Log the overall token usage AND per-agent / total latency for the full pipeline.
+    """
+    total_input    = state.get("total_input_tokens", 0) or 0
+    total_output   = state.get("total_output_tokens", 0) or 0
+    total_thinking = state.get("total_thinking_tokens", 0) or 0
+
+    # ── Latency helpers ───────────────────────────────────────────────────────
+    def _fmt(val) -> str:
+        """Format a latency value as '1.23 s' or 'n/a' when absent."""
+        return f"{val:.2f} s" if val is not None else "n/a"
+
+    lu  = state.get("latency_understanding")
+    lgp = state.get("latency_goal_planning")
+    lr  = state.get("latency_retrieval")
+    lv  = state.get("latency_validation")
+    lf  = state.get("latency_filtering")
+    le  = state.get("latency_execution")
+    lt  = state.get("latency_total")
+
+    log_str = (
+        f"\n{'=' * 70}\n"
+        f"  PIPELINE SUMMARY\n"
+        f"{'=' * 70}\n"
+        f"  LATENCY PER AGENT\n"
+        f"  {'Agent':<28} {'Latency':>10}\n"
+        f"  {'-' * 40}\n"
+        f"  {'1. Understanding Agent':<28} {_fmt(lu):>10}\n"
+        f"  {'2. Goal Planning Agent':<28} {_fmt(lgp):>10}\n"
+        f"  {'3. Retrieval Agent':<28} {_fmt(lr):>10}\n"
+        f"  {'4. Validation Agent':<28} {_fmt(lv):>10}\n"
+        f"  {'5. Filtering Agent':<28} {_fmt(lf):>10}\n"
+        f"  {'6. Execution Agent':<28} {_fmt(le):>10}\n"
+        f"  {'-' * 40}\n"
+        f"  {'OVERALL PIPELINE':<28} {_fmt(lt):>10}\n"
+        f"{'=' * 70}\n"
+        f"  TOKEN USAGE\n"
+        f"  {'Overall Input Tokens':<28} {total_input:>10,}\n"
+        f"  {'Overall Output Tokens':<28} {total_output:>10,}\n"
+        f"  {'Overall Thinking Tokens':<28} {total_thinking:>10,}\n"
+        f"  {'TOTAL TOKENS USED':<28} {total_input + total_output + total_thinking:>10,}\n"
+        f"{'=' * 70}\n"
+    )
+    logger.info(log_str)

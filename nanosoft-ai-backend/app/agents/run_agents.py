@@ -172,12 +172,16 @@ async def run_interactive():
             f"Answer given: {(final_answer or '')[:200]}"
         )
 
-        conversation_history.append({"role": "user",      "content": raw})
-        conversation_history.append({"role": "assistant", "content": rich_context})
+        # USER REQUESTED: Turn off chat history for now (make it 0)
+        # conversation_history.append({"role": "user",      "content": raw})
+        # conversation_history.append({"role": "assistant", "content": rich_context})
 
         # Keep last 10 messages (5 full turns)
-        if len(conversation_history) > 10:
-            conversation_history = conversation_history[-10:]
+        # if len(conversation_history) > 10:
+        #     conversation_history = conversation_history[-10:]
+        
+        # Force empty history for fresh sessions on every query
+        conversation_history = []
 
 
 def main():

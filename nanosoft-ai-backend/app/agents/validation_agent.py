@@ -24,6 +24,7 @@ Model: gemini-2.5-flash with thinking enabled
 """
 
 import json
+import time
 from typing import Dict, Any
 
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -115,6 +116,7 @@ async def validation_agent_node(state: AgentState) -> AgentState:
         user_query[:80], retry_count
     )
     logger.info("-" * 66)
+    _t_start = time.perf_counter()
 
     # ── Short-circuit: DIRECT_ANSWER or CLARIFY doesn't need validation ───────
     approach = goal_plan.get("approach", "")
@@ -158,12 +160,39 @@ async def validation_agent_node(state: AgentState) -> AgentState:
         approach, results_count, has_data, retry_count, MAX_RETRIES
     )
 
-    # ── Build prompt ──────────────────────────────────────────────────────────
+    # ── Build a lean summary of retrieval results (NOT the full raw data) ────
+    # WHY: Passing the full retrieval_results (e.g. 11,769 records × 30 fields)
+    # would exhaust the token quota. The validation agent only needs to know:
+    #   1. How many steps came back and their p_count
+    #   2. What filters were used (to check correctness)
+    #   3. A tiny sample to confirm field shape
+    # It does NOT need every single record to decide PASS/RETRY/FAIL.
+    lean_results = []
+    for r in retrieval_results:
+        data = r.get("data") or {}
+        
+        # If the API crashed, data might be returned as an error string
+        if isinstance(data, str):
+            error_msg = data
+            data = {}
+        else:
+            error_msg = r.get("error")
+            
+        p_list = data.get("p_list") or []
+        lean_results.append({
+            "step":     r.get("step"),
+            "tool":     r.get("tool"),
+            "filters":  r.get("filters"),
+            "p_count":  data.get("p_count", 0),
+            "sample":   p_list[:2] if p_list else [],
+            "error":    error_msg,
+        })
+
     user_content = VALIDATION_USER_TEMPLATE.format(
         user_query=user_query,
         understood_intent=json.dumps(understood_intent, indent=2),
         goal_plan=json.dumps(goal_plan, indent=2),
-        retrieval_results=json.dumps(retrieval_results, indent=2),
+        retrieval_results=json.dumps(lean_results, indent=2),
         retry_count=retry_count,
     )
 
@@ -214,6 +243,9 @@ async def validation_agent_node(state: AgentState) -> AgentState:
     # ── Update retry_count if we are retrying ─────────────────────────────────
     new_retry_count = retry_count + 1 if v_status == "RETRY" else retry_count
 
+    latency = round(time.perf_counter() - _t_start, 3)
+    logger.info("|| [ValidationAgent] latency=%.3f s", latency)
+
     log_str = _print_validation_log(
         status=v_status,
         reason=v_reason,
@@ -224,7 +256,8 @@ async def validation_agent_node(state: AgentState) -> AgentState:
     )
     trace.append(
         f"[ValidationAgent] status={v_status} | retry_count={retry_count} | "
-        f"thinking_tokens={token_counts['thinking']} | reason={v_reason[:60]}"
+        f"thinking_tokens={token_counts['thinking']} | reason={v_reason[:60]} | "
+        f"latency={latency:.3f}s"
     )
 
     return {
@@ -235,5 +268,9 @@ async def validation_agent_node(state: AgentState) -> AgentState:
         "retry_count":                new_retry_count,
         "validation_log":             log_str,
         "validation_thinking_tokens": token_counts["thinking"],
+        "total_input_tokens":         state.get("total_input_tokens", 0) + token_counts.get("input", 0),
+        "total_output_tokens":        state.get("total_output_tokens", 0) + token_counts.get("output", 0),
+        "total_thinking_tokens":      state.get("total_thinking_tokens", 0) + token_counts.get("thinking", 0),
+        "latency_validation":         latency,
         "agent_trace":                trace,
     }

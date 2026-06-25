@@ -75,6 +75,46 @@ def _call_sp_fa_query(req: FARequest) -> dict:
         raw = json.loads(raw)
     return format_response(raw)
 
+from collections import Counter
+from app.services.payload_constants import TOOL_GROUP_BY_COLUMNS
+FA_SP_AGGREGATE_GROUP_COLUMNS = set(TOOL_GROUP_BY_COLUMNS.get("FA", []))
+
+def _fa_requires_local_aggregate(req: FARequest) -> bool:
+    group_cols = set(req.group_by_columns or [])
+    if group_cols - FA_SP_AGGREGATE_GROUP_COLUMNS:
+        return True
+    return False
+
+def _format_local_fa_aggregate(rows: list[dict], group_by_columns: list[str]) -> dict:
+    counts: Counter[tuple] = Counter()
+    for row in rows:
+        key = tuple(row.get(col) for col in group_by_columns)
+        counts[key] += 1
+
+    p_list = []
+    for key, count in counts.items():
+        item = {col: key[idx] for idx, col in enumerate(group_by_columns)}
+        item["result"] = count
+        p_list.append(item)
+
+    p_list.sort(
+        key=lambda item: (
+            -int(item.get("result") or 0),
+            tuple("" if item.get(col) is None else str(item.get(col)) for col in group_by_columns),
+        )
+    )
+    return {"p_list": p_list, "p_count": len(p_list), "local_aggregate": True}
+
+def _call_local_fa_aggregate(req: FARequest) -> dict:
+    query_req = req.model_copy(update={
+        "is_aggregate": False,
+        "group_by_columns": None,
+        "aggregate_function": None,
+    })
+    formatted = _call_sp_fa_query(query_req)
+    rows = formatted.get("p_list") or []
+    return _format_local_fa_aggregate(rows, req.group_by_columns or [])
+
 
 @router.post("/get-fa")
 def get_fa(req: FARequest):
@@ -88,6 +128,11 @@ def get_fa(req: FARequest):
             validate_aggregate_request(True, req.group_by_columns)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
+            
+        if _fa_requires_local_aggregate(req):
+            logger.info("📊 [GET-FA] Local Aggregation Fallback triggered")
+            return _call_local_fa_aggregate(req)
+            
         logger.info("📊 [GET-FA] AGGREGATE MODE → calling sp_fa_aggregate")
         try:
             conn = get_pool()

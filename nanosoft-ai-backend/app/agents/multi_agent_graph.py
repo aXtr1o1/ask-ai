@@ -17,6 +17,7 @@ Graph topology:
 """
 
 import logging
+import time
 
 from langgraph.graph import StateGraph, START, END
 
@@ -27,7 +28,7 @@ from app.agents.retrieval_agent import retrieval_agent_node
 from app.agents.validation_agent import validation_agent_node
 from app.agents.filtering_agent import filtering_agent_node
 from app.agents.execution_agent import execution_agent_node
-from app.agents.log_config import setup_agent_logger
+from app.agents.log_config import setup_agent_logger, log_pipeline_token_usage
 
 logger = setup_agent_logger("multi_agent_graph")
 
@@ -182,13 +183,28 @@ async def run_agent_pipeline(
         "execution_thinking_tokens":     None,
 
         "agent_trace":                   [],
+
+        # WHY all latency fields initialised to None:
+        #   Each agent writes its own latency field. None = not yet run.
+        "latency_understanding":          None,
+        "latency_goal_planning":          None,
+        "latency_retrieval":              None,
+        "latency_validation":             None,
+        "latency_filtering":              None,
+        "latency_execution":              None,
+        "latency_total":                  None,
     }
 
     logger.info("=" * 66)
     logger.info("PIPELINE START  |  query='%s'  |  user='%s'", user_query[:80], user_name or "anon")
     logger.info("=" * 66)
 
+    _t_pipeline_start = time.perf_counter()
     final_state = await agent_graph.ainvoke(initial_state)
+    pipeline_latency = round(time.perf_counter() - _t_pipeline_start, 3)
+    # Inject total latency into state for the summary log
+    final_state = {**final_state, "latency_total": pipeline_latency}
+    logger.info("|| PIPELINE total latency=%.3f s", pipeline_latency)
 
     # ── Final pipeline summary ────────────────────────────────────────────────
     logger.info("\n" + "=" * 66)
@@ -196,5 +212,8 @@ async def run_agent_pipeline(
     for entry in final_state.get("agent_trace", []):
         logger.info("   >> %s", entry)
     logger.info("=" * 66 + "\n")
+
+    # Log the overall token usage (added for the user)
+    log_pipeline_token_usage(final_state, logger)
 
     return final_state

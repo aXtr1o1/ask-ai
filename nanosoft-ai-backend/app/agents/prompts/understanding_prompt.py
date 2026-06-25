@@ -26,173 +26,159 @@ correct filters from any user query.
 
 ------------------------------------------------------------------------------
 MODULE 1: ASSETS
-Purpose: Physical equipment, machines, and facility items. Master registry.
+Purpose: Physical equipment master registry. Every machine, device, and
+facility item. Use for questions about what assets exist, condition,
+type, location, or operational status.
 ------------------------------------------------------------------------------
-Fields you can extract filters for:
-  asset_tag_no      -- Unique alphanumeric tag (e.g. L1-HVAC-CHL-3827). NOT a plain number.
-  asset_barcode     -- Pure numeric barcode (e.g. 1731251675376).
-  equipment_name    -- Name of the equipment (e.g. Chiller 1, Fire Extinguisher).
-  equipment_ref_no  -- Equipment reference number (e.g. REF-1234).
+Fields sent to sp_asset_query / sp_asset_aggregate:
+  asset_tag_no      -- Alphanumeric tag (e.g. DXB-MTZ-WAT-MTZ-3841). NOT a plain number.
+  asset_barcode     -- Pure numeric barcode (e.g. 125243843).
+  equipment_name    -- Equipment name (e.g. AHU 01).
+  equipment_ref_no  -- Equipment reference number.
   serial_no         -- Serial number.
-  status            -- Operational status. Values: Online, Offline.
-  condition         -- Physical condition. Values: Good, Bad, Fair, Under Repair.
-  priority          -- Maintenance priority. Values: Critical, High, Medium, Low.
-  asset_type        -- Category/type of asset.
-  division          -- System category (e.g. HVAC System, Electrical System, Plumbing System,
-                       Fire Fighting and Alarm system, Duty Vehicles).
-  discipline        -- Technical discipline (e.g. CHILLER, Plumbing, Electrical, Duty Vehicles).
-  locality          -- Geographic zone (e.g. Al Jurf, Terminal A1, Ajman, Doha).
-  locality_code     -- Short locality code (e.g. RUW, AUH). Only when a specific code is given.
-  building          -- Building name (e.g. Camp, Villa 4, Passenger Terminal Building T1,
-                       Building 1 - Residential High Rise).
-  floor             -- Floor name. NEVER translate ordinal words to numbers.
-                       (e.g. "first floor" stays "first floor", not "Floor 1").
-                       Values: Ground Floor, Roof Level, Roof Top, Parking Floor 5.
-  spot_name         -- Specific indoor room or zone (e.g. AHU_R1201, Trash Compactor Area,
-                       Electrical Room, Common Area Arrivals).
-  owner             -- Department or entity responsible for the asset.
-  make              -- Manufacturer (e.g. Carrier, Trane, York, SHARK).
-  model             -- Model name/number (e.g. AST-2P, SDI 2045).
-  service_area      -- Functional service area or zone.
+  status            -- Operational status (StatusName). Values: Online, Offline.
+  condition         -- Physical condition (ConditionName). Values: Good, Bad, Fair, Under Repair.
+  priority          -- Priority (PriorityName). Values: P1 Critical, P2 High, P3 Medium, P4 Low.
+  asset_type        -- Asset category (AssetTypeName). Values: Fixed, Movable.
+  division          -- System category (DivisionName, e.g. HVAC System).
+  discipline        -- Technical discipline (DisciplineName, e.g. CHILLER).
+  locality          -- Geographic zone (LocalityName, e.g. Dubai).
+  building          -- Building name (e.g. Reef Mall).
+  floor             -- Floor name. NEVER translate ordinals to numbers.
+                       (e.g. "first floor" stays "first floor", NOT "Floor 1").
+  spot_name         -- Specific indoor room or zone (e.g. Electrical Room).
+  owner             -- Entity responsible for the asset.
+  make              -- Manufacturer (MakeName, e.g. Carrier).
+  model             -- Model name/number (ModelName, e.g. IED1502AO).
+  service_area      -- Functional service area (ServiceAreaName).
   trade_group       -- Maintenance trade group.
-  on_hold           -- Boolean: asset is on hold / unavailable.
-  is_snagged        -- Boolean: asset has a snag or defect logged.
-  is_scraped        -- Boolean: asset has been scrapped / retired.
-  enable_ppm        -- Boolean: PPM is enabled for this asset.
-  enable_bdm        -- Boolean: BDM is enabled for this asset.
-  enable_bms        -- Boolean: BMS monitoring enabled.
-  enable_dsm        -- Boolean: DSM enabled.
-  keyword           -- Free-text search for terms that don't map to a specific field.
-  date_from/date_to -- Date range (YYYY-MM-DD).
+  on_hold           -- Boolean: asset is on hold (OnHold).
+  is_snagged        -- Boolean: asset has a snag/defect (IsSnagged).
+  is_scraped        -- Boolean: asset has been scrapped (IsScraped).
+  enable_ppm        -- Boolean: PPM enabled (IsEnablePPM).
+  enable_bdm        -- Boolean: BDM enabled (IsEnableBDM).
+  enable_bms        -- Boolean: BMS monitoring enabled (IsEnableBMS).
+  enable_dsm        -- Boolean: DSM enabled (IsEnableDSM).
+  keyword           -- Free-text search.
+  date_from/date_to -- Asset last updated date range (UpdatedAt). Always YYYY-MM-DD format.
   limit             -- Specific number of results requested.
-  is_aggregate      -- True when user asks for a grouped count/breakdown.
-  group_by_columns  -- Which field to group by when is_aggregate is true.
-                       Valid: DivisionName, DisciplineName, BuildingName, FloorName,
+  is_aggregate      -- True when user wants a grouped count/breakdown.
+  group_by_columns  -- Valid: DivisionName, DisciplineName, BuildingName, FloorName,
                        LocalityName, LocalityCode, StatusName, ConditionName, PriorityName,
                        AssetTypeName, EquipmentName, MakeName, ModelName, SpotName,
                        TradeGroupName, ServiceAreaName, OnHold, IsSnagged, IsScraped,
                        IsEnablePPM, IsEnableBDM.
 
 ------------------------------------------------------------------------------
-MODULE 2: PPM (Preventive Maintenance)
-Purpose: Planned scheduled maintenance tasks to keep equipment in good condition.
+MODULE 2: PPM (Planned Preventive Maintenance)
+Purpose: Scheduled maintenance work orders to keep equipment in good
+condition. Use for questions about PPM tasks, frequency, technician
+assignments, or work order status.
 ------------------------------------------------------------------------------
-Fields:
-  work_order        -- Unique work order number (e.g. 50010-DM-14264-2026).
-  asset_tag_no      -- Asset tag linked to the PPM task.
+Fields sent to sp_ppm_query / sp_ppm_aggregate:
+  work_order        -- Unique work order number (e.g. 50010-DM-14267-2026).
+  asset_tag_no      -- Asset tag the PPM is raised for (e.g. DM-HVAC-FCU-13804).
   equipment_ref_no  -- Equipment reference number.
-  status            -- PPM status. Values: Open, Closed.
-  stage             -- Workflow stage. Values: Staff Yet to be Allocated,
-                       Technician Assigned, Work In Progress, Completed.
-  frequency         -- Maintenance schedule. Values: QUARTERLY, MONTHLY,
-                       ANNUALLY, WEEKLY, BI-MONTHLY.
-  division          -- System category (e.g. Fire Fighting and Alarm system,
-                       HVAC System, BHS - Maintenance).
-  discipline        -- Technical discipline (e.g. CHILLER, Fire Extinguisher,
-                       Plumbing, Electrical).
-  locality          -- Geographic zone.
-  locality_code     -- Specific locality code filter.
-  building          -- Building name.
-  floor             -- Floor name (do NOT translate ordinals to numbers).
-  spot_name         -- Specific indoor room or spot.
-  equipment         -- Equipment name (e.g. Fire Extinguisher, Chiller 1, AHU).
+  status            -- PPM work order status (PPMStatus). Values: Open, Closed.
+  stage             -- Workflow stage (PPMStageName, e.g. Staff Yet to be Allocated).
+  frequency         -- Maintenance schedule (FrequencyName, e.g. QUARTERLY).
+  division          -- System category (DivisionName, e.g. HVAC System).
+  discipline        -- Technical discipline (DisciplineName, e.g. FCU).
+  locality          -- Geographic zone (LocalityName, e.g. Doha).
+  locality_code     -- Specific locality code (LocalityCode, e.g. DM).
+  building          -- Building name (e.g. Building 1 - Residential High Rise).
+  floor             -- Floor name. NEVER translate ordinals to numbers.
+  spot_name         -- Specific indoor room (e.g. Electrical Room).
   contract          -- Contract name (e.g. Facility Management Residential Area).
-  tech              -- Technician name assigned to the PPM task.
+  tech              -- Technician assigned (PMTechName, e.g. sankar).
+  equipment         -- Equipment name (EquipmentName, e.g. Fire Extinguisher).
   keyword           -- Free-text search.
-  date_from/date_to -- Date range.
-  comp_from/comp_to -- Completion date range (WoCompletedDate).
-  sla_min/sla_max   -- SLA duration range.
+  date_from/date_to -- Scheduled date range (WoDateTime). Always YYYY-MM-DD format.
+  comp_from/comp_to -- Completion date range (WoCompletedDate). Always YYYY-MM-DD format.
+  sla_min/sla_max   -- SLA duration range in days (SLADuration).
   limit             -- Specific number requested.
   is_aggregate      -- True for breakdown/group queries.
-  group_by_columns  -- Valid: DivisionName, DisciplineName, BuildingName,
-                       FloorName, LocalityName, LocalityCode, FrequencyName,
-                       PPMStatus, PPMStageName, ContractName, SpotName.
+  group_by_columns  -- Valid: DivisionName, DisciplineName, BuildingName, FloorName,
+                       LocalityName, LocalityCode, FrequencyName, PPMStatus,
+                       PPMStageName, ContractName, SpotName.
 
 ------------------------------------------------------------------------------
 MODULE 3: BDM (Breakdown Maintenance)
-Purpose: Reactive complaints raised when equipment breaks or fails unexpectedly.
-Human-reported issues.
+Purpose: Reactive complaints raised when equipment breaks or an issue is
+reported. Human-submitted service requests and corrective maintenance.
 ------------------------------------------------------------------------------
-Fields:
-  complaint_no      -- Unique complaint number (e.g. 1261, 1260).
-  asset_tag_no      -- Asset tag linked to the complaint.
-  asset_barcode     -- Asset barcode linked to the complaint.
-  client_wo_no      -- Client work order number.
-  status            -- Complaint status. Values: Open, Closed.
-  priority          -- Priority. Values: Critical, High, Medium, Low.
+Fields sent to sp_bdm_query / sp_bdm_aggregate:
+  complaint_no      -- Unique complaint number (e.g. 1617).
+  asset_tag_no      -- Asset tag linked to complaint (often empty in BDM).
+  asset_barcode     -- Asset barcode (null if no asset linked).
+  client_wo_no      -- Client work order number (ClientWoNo).
+  status            -- Complaint status (WoStatus). Values: Open, Closed.
+  priority          -- Priority (PriorityName). Values: P1 Critical, P2 High, P3 Medium, P4 Low.
                        NEVER map "low count" or "fewest" to this field.
-  stage             -- Workflow stage. Values: Complaint/Service Request Raised,
-                       Staff Assigned for Analysis/Job Estimation,
-                       Staff Assigned for Work Execution,
-                       Complaint/Service Request - Closed.
-  complaint_type    -- Type. Values: Service Request, Corrective Maintenance,
-                       Reactive Maintenance.
-  complaint_header  -- Complaint header name.
-  complaint_mode    -- Channel. Values: By Call, By Community Portal.
-  complaint_nature  -- Nature/subject of complaint (e.g. Water leakage,
-                       light flickering, AC very noisy).
-  wo_type           -- Work order type (e.g. General).
-  service_type      -- Service category ending in "Services" (e.g. Electrical Services,
-                       Plumbing Services, Air Conditioning Services).
-  division          -- System category (e.g. Plumbing System, HVAC System,
-                       Fire Fighting and Alarm system). NOT for "... Services".
-  discipline        -- Short trade name (e.g. CHILLER, Plumbing, Electrical).
-  locality          -- Geographic zone.
-  locality_code     -- Specific locality code filter.
-  building          -- Building name.
-  floor             -- Floor name (do NOT translate ordinals to numbers).
-  spot_name         -- Specific indoor room or zone.
-  contract          -- Contract name.
-  complainer        -- Person who raised the complaint.
-  register_by       -- Username who registered the complaint.
-  analysis_tech     -- Technician for analysis/inspection phase.
-  execution_tech    -- Technician for repair/execution phase.
+  stage             -- Workflow stage (StageName, e.g. Complaint / Service Request Raised).
+  complaint_type    -- Type (ComplaintTypeName). Values: Service Request,
+                       Corrective Maintenance, Reactive Maintenance.
+  complaint_header  -- Header (ComplaintHeaderName, e.g. Without Approval Flow).
+  complaint_mode    -- Channel (ComplaintModeName, e.g. By Call).
+  complaint_nature  -- Nature/subject of complaint (ComplaintNatureName, e.g. AC very noisy).
+  wo_type           -- Work order type (WoTypeName, e.g. General).
+  service_type      -- Service category ending in "Services" (ServiceTypeName,
+                       e.g. Air Conditioning Services). NOT a "System" or "Division".
+  division          -- System category (DivisionName, e.g. HVAC System).
+  discipline        -- Technical trade (DisciplineName, usually null in BDM).
+  locality          -- Geographic zone (LocalityName, e.g. Bur Dubai).
+  locality_code     -- Specific code (LocalityCode, e.g. BD).
+  building          -- Building name (e.g. Bhawan Tower Al Barsha).
+  floor             -- Floor name. NEVER translate ordinals to numbers.
+  spot_name         -- Indoor room (e.g. Appartement-80).
+  contract          -- Contract name (e.g. Facility Management Residential Area).
+  complainer        -- Person who raised complaint (ComplainerName, e.g. eashak).
+  register_by       -- Username who registered (RegisterBy, e.g. admin).
+  analysis_tech     -- Technician for analysis (AnalysisTechName, e.g. sankar).
+  execution_tech    -- Technician for repair (ExecutionTechName, often empty).
   keyword           -- Free-text search.
-  date_from/date_to -- Reported date range.
-  completed_from/completed_to -- Resolution date range (BDMWOCompletedDate).
+  date_from/date_to -- Complaint registered date (ComplainedDateTime). Always YYYY-MM-DD.
+  completed_from/completed_to -- Resolution date (BDMWOCompletedDate). Always YYYY-MM-DD.
   limit             -- Specific number requested.
   is_aggregate      -- True for breakdown queries.
-  group_by_columns  -- Valid: DivisionName, DisciplineName, BuildingName,
-                       FloorName, LocalityName, LocalityCode, WoStatus,
-                       PriorityName, StageName, ComplaintTypeName,
-                       ComplaintHeaderName, ComplaintModeName, ServiceTypeName,
-                       SpotName, ContractName.
+  group_by_columns  -- Valid: DivisionName, DisciplineName, BuildingName, FloorName,
+                       LocalityName, LocalityCode, WoStatus, PriorityName, StageName,
+                       ComplaintTypeName, ComplaintHeaderName, ComplaintModeName,
+                       ServiceTypeName, SpotName, ContractName.
 
 ------------------------------------------------------------------------------
 MODULE 4: FA (Facility Audit)
-Purpose: System-generated audit and inspection complaints. Pest control,
-cleanliness, rodent activity checks, etc.
+Purpose: System-generated scheduled audit/inspection complaints — pest
+control, cleanliness, rodent activity checks. Recurring audits.
 ------------------------------------------------------------------------------
-Fields:
-  complaint_no      -- Unique FA complaint number (e.g. 55, 56, 57).
-  complaint_code    -- Internal CCM complaint code.
-  x_complaint_no    -- External cross-reference number.
-  priority          -- Priority. Values: Critical, High, Medium, Low.
-  stage             -- Workflow stage (FA has NO separate status/WoStatus).
-                       Map user "Open" or "Closed" HERE.
-                       Values: Facility Audit Request Raised,
-                       Facility Audit - Closed, Staff Assigned for Work Execution.
-  category          -- Audit inspection category (e.g. Pest Control Checks).
+Fields sent to sp_fa_query / sp_fa_aggregate:
+  complaint_no      -- Unique FA complaint number (e.g. 63).
+  complaint_code    -- Internal CCM complaint code (usually null).
+  x_complaint_no    -- External cross-reference number (RMXComplaintNo, e.g. 63).
+  priority          -- Priority (PriorityName). Values: P1 Critical, P2 High, P3 Medium, P4 Low.
+  stage             -- Workflow stage (RMStageName). FA has NO separate WoStatus.
+                       Map user "Open" or "Closed" HERE (e.g. Facility Audit Request Raised).
+  category          -- Audit category (RMCategoryName, e.g. Pest Control Checks).
                        ONLY for named audit types, NOT for building category grouping.
-  category_sub      -- Sub-category (e.g. RODENT ACTIVITY).
-  division          -- Division (e.g. Housekeeping).
-  locality          -- Geographic zone.
-  locality_code     -- Specific locality code filter.
-  building          -- Building name.
-  floor             -- Floor name (do NOT translate ordinals to numbers).
-  spot_name         -- Specific indoor room or zone.
-  contract          -- Contract name.
-  tech              -- Technician name.
-  frequency         -- Schedule. Values: MONTHLY, QUARTERLY, ANNUALLY, WEEKLY.
-  request_desc      -- Free-text description of the inspection task.
-  is_withdraw       -- Boolean: complaint withdrawn.
-  is_rework         -- Boolean: requires rework.
-  is_bms            -- Boolean: linked to BMS.
-  is_active         -- Boolean: currently active record.
-  is_draft          -- Boolean: still in draft state.
+  category_sub      -- Sub-category (RMCategorySubName, e.g. RODENT ACTIVITY).
+  division          -- Division (DivisionName, e.g. Housekeeping).
+  locality          -- Geographic zone (LocalityName, e.g. Doha).
+  locality_code     -- Specific locality code (LocalityCode, e.g. DM).
+  building          -- Building name (e.g. Building 1 - Residential High Rise).
+  floor             -- Floor name. NEVER translate ordinals to numbers.
+  spot_name         -- Indoor room (SpotName, e.g. Garbage Room).
+  contract          -- Contract name (e.g. Facility Management Residential Area).
+  tech              -- Technician (RMTechName, e.g. Technician).
+  frequency         -- Schedule (FrequencyName, e.g. MONTHLY).
+  request_desc      -- Free-text task description (RMRequestDetailsDesc, e.g. Pest Control).
+  is_withdraw       -- Boolean: complaint withdrawn (IsRMWithdraw).
+  is_rework         -- Boolean: requires rework (IsRMRework).
+  is_bms            -- Boolean: linked to BMS (IsRMBMS).
+  is_active         -- Boolean: active record (IsActive).
+  is_draft          -- Boolean: in draft (IsDraft).
   keyword           -- Free-text search.
-  date_from/date_to -- Complaint date range.
-  comp_from/comp_to -- Completion date range.
+  date_from/date_to -- Audit complaint date (RMComplainedDateTime). Always YYYY-MM-DD.
+  comp_from/comp_to -- Completion date (RMBDMWOCompletedDate). Always YYYY-MM-DD.
   limit             -- Specific number requested.
   is_aggregate      -- True for breakdown queries.
   group_by_columns  -- Valid: DivisionName, BuildingName, FloorName, LocalityName,
@@ -202,39 +188,38 @@ Fields:
 
 ------------------------------------------------------------------------------
 MODULE 5: SB (Schedule Based)
-Purpose: System-generated recurring work orders (landscaping, environmental
-services, housekeeping schedules).
+Purpose: System-generated recurring work orders for landscaping,
+environmental services, housekeeping schedules.
 ------------------------------------------------------------------------------
-Fields:
-  work_order        -- Work order number (e.g. AA-1-2026, AA-2-2026).
-  stage             -- Workflow stage. Values: Staff Yet to be Allocated,
-                       Technician Assigned, Work In Progress, Completed.
-  frequency         -- Schedule. Values: MONTHLY, QUARTERLY, ANNUALLY, WEEKLY.
-  service_type      -- Service category (e.g. Environmental Services).
-  division          -- Division (e.g. Environmental Services).
-  discipline        -- Discipline (e.g. Landscaping).
-  locality          -- Geographic zone.
+Fields sent to sp_sb_query / sp_sb_aggregate:
+  work_order        -- Work order number (e.g. AA-1-2026).
+  stage             -- Workflow stage (e.g. Staff Yet to be Allocated).
+  frequency         -- Schedule (FrequencyName, e.g. MONTHLY).
+  service_type      -- Service category (ServiceTypeName, e.g. Environmental Services).
+  division          -- Division (DivisionName, e.g. Environmental Services).
+  discipline        -- Discipline (DisciplineName, e.g. Landscaping).
+  locality          -- Geographic zone (LocalityName).
   locality_code     -- Specific locality code filter.
-  building          -- Building name (e.g. Al Safia Park,
-                       Building 1 - Residential High Rise).
-  floor             -- Floor name (do NOT translate ordinals to numbers).
+  building          -- Building name (e.g. Al Safia Park).
+  floor             -- Floor name. NEVER translate ordinals to numbers.
   spot_name         -- Specific indoor room or zone.
-  contract          -- Contract name.
+  contract          -- Contract name (e.g. Environmental Services - Annual Contract).
   tech              -- Technician name.
-  is_withdraw       -- Boolean: withdrawn work order.
-  is_reschedule     -- Boolean: rescheduled.
-  is_rework         -- Boolean: requires rework.
-  is_active         -- Boolean: active record.
-  is_draft          -- Boolean: in draft.
+  is_withdraw       -- Boolean: withdrawn work order (IsWithdraw).
+  is_reschedule     -- Boolean: rescheduled (IsReschedule).
+  is_rework         -- Boolean: requires rework (IsRework).
+  is_active         -- Boolean: active record (IsActive).
+  is_draft          -- Boolean: in draft (IsDraft).
   keyword           -- Free-text search.
-  date_from/date_to -- Scheduled date range.
-  comp_from/comp_to -- Completion date range.
+  date_from/date_to -- Scheduled date range (WoDateTime). Always YYYY-MM-DD format.
+  comp_from/comp_to -- Completion date (SBCreWoCompletedDate). Always YYYY-MM-DD format.
   sla_min/sla_max   -- SLA hours range.
   limit             -- Specific number requested.
   is_aggregate      -- True for breakdown queries.
-  group_by_columns  -- Valid: DivisionName, DisciplineName, BuildingName,
-                       FloorName, LocalityName, LocalityCode, PPMStageName,
-                       FrequencyName, ServiceTypeName, ContractName, SpotName.
+  group_by_columns  -- Valid: DivisionName, DisciplineName, BuildingName, FloorName,
+                       LocalityName, LocalityCode, PPMStageName, FrequencyName,
+                       ServiceTypeName, ContractName, SpotName.
+
 
 ==============================================================================
 YOUR REASONING TASK
@@ -262,6 +247,11 @@ produce a complete understanding. Consider:
    locality, building, floor, spot_name, equipment, contract, service_type,
    complaint_type, complaint_mode, make, model, condition, boolean flags,
    date ranges, keywords, counts, comparison subjects -- anything the user said.
+
+   FOR DATE FIELDS (date_from, date_to, comp_from, comp_to, completed_from, completed_to):
+   Always output YYYY-MM-DD format. Resolve any date phrase the user mentions
+   (e.g. "last month", "June 2026", "yesterday", "this week") into an actual
+   YYYY-MM-DD date using your reasoning. Also store the original phrase in "date_range_raw".
 
 4. CLARITY -- How clear is the user's request?
    Reason about this honestly based on whether you have enough information to proceed.
@@ -299,7 +289,19 @@ produce a complete understanding. Consider:
    - DEPENDENT   : Explicitly references prior output or context
    - PARTIAL     : References prior context but introduces new elements
 
-7. SUMMARY -- One clear sentence: what does the user actually want?
+7. SUMMARY -- A rich, multi-sentence description of what the user wants.
+   This is NOT a one-liner. Write 3-5 sentences that cover:
+     a) What the user is asking for (their intent in plain words)
+     b) Which module(s) are involved and why
+     c) What specific filters/date ranges/aggregations were extracted
+     d) What the expected result should look like (a list, a count, a breakdown, etc.)
+     e) Any important assumptions you made (e.g. assumed a module, inferred a filter)
+   Example of a GOOD summary:
+     "The user wants to see all open Breakdown Maintenance (BDM) complaints registered
+      in June 2026. The BDM module covers reactive complaints raised when equipment fails.
+      The filter status=Open narrows results to unresolved complaints only. The expected
+      result is a list of complaint records with their complaint number, status, priority,
+      building, and registered date."
 
 ==============================================================================
 OUTPUT FORMAT
@@ -318,14 +320,14 @@ Respond with ONLY a valid JSON object. No text before or after. No markdown fenc
     "is_aggregate": "<true|false|null>",
     "group_by": "<field to group by or null>",
     "comparison_subjects": [],
-    "date_range_raw": "<raw date phrase from user or null>"
+    "date_range_raw": "<raw date phrase from user exactly as spoken, or null>"
   },
   "clarity": "<HIGH|MEDIUM|LOW>",
   "needs_search": false,
   "context_dependency": "<INDEPENDENT|DEPENDENT|PARTIAL>",
   "clarification_needed": false,
   "clarification_question": "<targeted question if clarity is LOW, else null>",
-  "summary": "<one sentence: what the user actually wants>",
+  "summary": "<3-5 sentence rich description of what the user wants, filters used, expected result>",
   "modules_excluded_reason": {
     "<MODULE>": "<one sentence: why this module is NOT relevant to this query>"
   },
@@ -349,6 +351,12 @@ Only include fields with actual extracted values. Set to null if not mentioned.
 
 
 UNDERSTANDING_USER_TEMPLATE = """
+TODAY'S DATE: {today}
+Use this as the reference for ALL relative date expressions in the user query
+(e.g. "right now" = today, "overdue" = date_to=today, "yesterday" = today minus 1 day,
+"this week" = Monday to today, "last month" = first to last day of previous month).
+Always output resolved dates in YYYY-MM-DD format.
+
 CONVERSATION HISTORY:
 {conversation_history}
 

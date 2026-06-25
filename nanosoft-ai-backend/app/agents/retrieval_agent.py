@@ -27,6 +27,7 @@ Model: gemini-2.5-flash with thinking (budget=5000)
 import json
 import asyncio
 import inspect
+import time
 from typing import List, Dict, Any, Optional
 
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -329,6 +330,7 @@ async def retrieval_agent_node(state: Dict[str, Any]) -> Dict[str, Any]:
     if retry_instructions:
         logger.info("|| RETRY: %s", retry_instructions[:200])
     logger.info("=" * 66)
+    _t_start = time.perf_counter()
 
     approach       = goal_plan.get("approach", "")
     tools_required = goal_plan.get("tools_required") or []
@@ -419,6 +421,8 @@ async def retrieval_agent_node(state: Dict[str, Any]) -> Dict[str, Any]:
     )
 
     # ── Summary log ──────────────────────────────────────────────────────────
+    latency = round(time.perf_counter() - _t_start, 3)
+    logger.info("|| [RetrievalAgent] latency=%.3f s", latency)
     ok = sum(1 for r in results if r.get("success"))
     log_str = (
         f"\n|| ============================================================\n"
@@ -432,7 +436,8 @@ async def retrieval_agent_node(state: Dict[str, Any]) -> Dict[str, Any]:
 
     trace.append(
         f"[RetrievalAgent] steps={len(plan)} | ok={ok}/{len(results)} | "
-        f"thinking={token_counts['thinking']} | retry={retry_count}"
+        f"thinking={token_counts['thinking']} | retry={retry_count} | "
+        f"latency={latency:.3f}s"
     )
 
     return {
@@ -441,5 +446,9 @@ async def retrieval_agent_node(state: Dict[str, Any]) -> Dict[str, Any]:
         "retrieval_results":         results,
         "retrieval_log":             log_str,
         "retrieval_thinking_tokens": token_counts["thinking"],
+        "total_input_tokens":        state.get("total_input_tokens", 0) + token_counts["input"],
+        "total_output_tokens":       state.get("total_output_tokens", 0) + token_counts["output"],
+        "total_thinking_tokens":     state.get("total_thinking_tokens", 0) + token_counts["thinking"],
+        "latency_retrieval":         latency,
         "agent_trace":               trace,
     }
