@@ -3,7 +3,75 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Callable
+from typing import Any, Callable, TypeVar
+
+T = TypeVar("T")
+
+_fallback_logger = logging.getLogger("query_search_fallback")
+
+# ---------------------------------------------------------------------------
+# Generic multi-value list field handler
+# ---------------------------------------------------------------------------
+
+def call_sp_with_multi_values(
+    req: Any,
+    call_single_fn: Callable[[Any], dict],
+    id_fields: tuple[str, ...] = ("id",),
+) -> dict:
+    """
+    Transparent wrapper for SP calls when any string filter field is a list.
+
+    If ONE OR MORE fields on `req` carry a ``list[str]`` value (e.g.
+    ``complaint_type=['Reactive Maintenance', 'Corrective Maintenance']``),
+    this function:
+      1. Iterates over the values of the first list-valued field.
+      2. Calls ``call_single_fn`` once per value (with the field set to that
+         single string).
+      3. Merges and deduplicates all returned records by the first matching
+         ``id_fields`` key found on each record.
+      4. Returns a standard ``{"p_list": [...], "p_count": N}`` dict.
+
+    If NO field is a list, it falls straight through to ``call_single_fn(req)``.
+    """
+    # Find the first field that is a non-empty list of strings
+    list_field: str | None = None
+    list_values: list[str] = []
+
+    for field, value in req.model_dump().items():
+        if isinstance(value, list) and value and all(isinstance(v, str) for v in value):
+            list_field = field
+            list_values = value
+            break
+
+    if list_field is None:
+        # No list field — fast path
+        return call_single_fn(req)
+
+    _fallback_logger.info(
+        "🔀 [multi-value] field='%s' values=%s — making %d SP call(s)",
+        list_field, list_values, len(list_values),
+    )
+
+    merged_list: list[dict] = []
+    seen_ids: set = set()
+
+    for value in list_values:
+        single_req = req.model_copy(update={list_field: value})
+        result = call_single_fn(single_req)
+        for record in result.get("p_list", []):
+            # Build a dedup key from the first id_field that has a value
+            record_id = next(
+                (record.get(f) for f in id_fields if record.get(f)),
+                str(record),
+            )
+            if record_id not in seen_ids:
+                seen_ids.add(record_id)
+                merged_list.append(record)
+
+    _fallback_logger.info(
+        "✅ [multi-value] merged total_records=%d", len(merged_list)
+    )
+    return {"p_list": merged_list, "p_count": len(merged_list)}
 
 # Text filter fields per module (first match wins for retry / field_filter metadata).
 ASSET_TEXT_FILTER_FIELDS = (

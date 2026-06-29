@@ -136,11 +136,33 @@ async def goal_planning_agent_node(state: AgentState) -> AgentState:
     understood_intent = state.get("understood_intent", {})
     history           = state.get("conversation_history", [])
     trace             = list(state.get("agent_trace", []))
+    # WHY read overall_plan_retry_instructions:
+    #   When the Overall Validation Agent scores the pipeline below 7/10 and determines
+    #   the ROOT CAUSE is a wrong plan, it loops back here with specific guidance.
+    #   We read those instructions and prepend a ⚠️ RE-PLANNING block to the prompt so
+    #   the model knows exactly what it got wrong and what to fix in the new plan.
+    overall_plan_fix  = state.get("overall_plan_retry_instructions")
+    overall_retry_count = state.get("overall_retry_count", 0) or 0
 
     logger.info("-" * 66)
-    logger.info("Goal Planning Agent -- START  |  query='%s'", user_query[:80])
+    logger.info(
+        "Goal Planning Agent -- START  |  query='%s'  |  overall_retry=%d",
+        user_query[:80], overall_retry_count,
+    )
     logger.info("-" * 66)
     _t_start = time.perf_counter()
+
+    if overall_plan_fix:
+        logger.info(
+            "\n|| ============================================================\n"
+            "||  GOAL PLANNING AGENT -- RE-PLAN MODE\n"
+            "|| ============================================================\n"
+            "||  Re-plan Retry      : %d / %d max\n"
+            "||  Overall Validation found the PREVIOUS PLAN was incorrect.\n"
+            "||  Fix Instructions   : %s\n"
+            "|| ============================================================",
+            overall_retry_count, 2, (overall_plan_fix or "")[:200],
+        )
 
     if not understood_intent:
         logger.warning("No understood_intent in state -- planning with empty context")
@@ -156,14 +178,33 @@ async def goal_planning_agent_node(state: AgentState) -> AgentState:
 
     # ── Build messages for the model ──────────────────────────────────────────
     intent_json_str = json.dumps(understood_intent, indent=2)
+
+    # WHY prepend replan_block:
+    #   When this is a retry run (overall_plan_fix is set), the most critical
+    #   thing the model must see FIRST is what the previous plan got wrong.
+    #   Prepending the ⚠️ block ensures the model addresses the specific failure
+    #   before re-reading the intent and rebuilding the plan.
+    replan_block = ""
+    if overall_plan_fix:
+        replan_block = (
+            f"\n\n⚠️  RE-PLANNING REQUIRED (Retry {overall_retry_count} of 2):\n"
+            f"The Overall Validation Agent evaluated the full pipeline and found that "
+            f"the PREVIOUS PLAN was the root cause of the incorrect final answer.\n"
+            f"\nFAILURE DETAILS AND WHAT TO FIX:\n"
+            f"{overall_plan_fix}\n"
+            f"\nYou MUST produce a completely new, corrected plan that addresses all "
+            f"the above failures. Do NOT repeat the same approach, tools, or steps "
+            f"as before unless explicitly told they were correct.\n"
+        )
+
     user_content = GOAL_PLANNING_USER_TEMPLATE.format(
         conversation_history=history_str,
         understood_intent=intent_json_str,
         user_query=user_query,
-    )
+    ) + replan_block
 
     messages = [
-        SystemMessage(content=GOAL_PLANNING_SYSTEM_PROMPT),   # FIX: use the rich system prompt
+        SystemMessage(content=GOAL_PLANNING_SYSTEM_PROMPT),
         HumanMessage(content=user_content),
     ]
 
@@ -217,6 +258,8 @@ async def goal_planning_agent_node(state: AgentState) -> AgentState:
         f"[GoalPlanningAgent] approach={goal_plan.get('approach')} | "
         f"tools={goal_plan.get('tools_required')} | "
         f"complexity={goal_plan.get('estimated_complexity')} | "
+        f"overall_retry={overall_retry_count} | "
+        f"replan={'YES' if overall_plan_fix else 'NO'} | "
         f"thinking_tokens={token_counts['thinking']} | input_tokens={token_counts['input']} | "
         f"latency={latency:.3f}s"
     )

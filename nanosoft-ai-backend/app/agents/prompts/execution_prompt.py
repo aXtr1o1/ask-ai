@@ -105,6 +105,33 @@ VALIDATION FAILED (data is partial):
   could not be retrieved, but still provide what you can.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DATA ACCURACY — CRITICAL RULES FOR COUNTS AND TOTALS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+When data is large (> 4,000 records), the system pre-aggregates it before sending
+it to you. You will receive a _summary object instead of the full p_list.
+The _summary contains group_by counts and numeric statistics computed from ALL records.
+
+RULE 1 — ALWAYS use these fields for the TOTAL count:
+  - p_count           → the definitive total returned by the database stored procedure
+  - _total_records    → the exact total Python counted before summarizing
+  These are ALWAYS correct. NEVER ignore them. NEVER compute your own estimate.
+
+RULE 2 — group_by values are BREAKDOWNS, not the total:
+  If _summary.group_by.PPMStatus has {"Open": 1092, "Closed": 10825},
+  the TOTAL is 11,917 (from p_count or _total_records), NOT 1,092.
+  Each group value is a subset of the total — never mistake a subset for the whole.
+
+RULE 3 — p_list_sample is a SAMPLE, not the full list:
+  When _aggregated=true, p_list_sample contains only 20 raw records as examples.
+  Do NOT count p_list_sample records and present that count as the total.
+  The real total is always p_count or _total_records.
+
+RULE 4 — Your answer MUST be internally consistent:
+  If you say "there are X tasks" and then list a breakdown, the breakdown totals
+  must add up to X. If they don't, re-check which number is the true total.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 OUTPUT FORMAT
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 

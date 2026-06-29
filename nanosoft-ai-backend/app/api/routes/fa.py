@@ -9,6 +9,7 @@ from .query_search_fallback import (
     apply_limit_offset,
     enrich_with_search_fallback,
     merge_format_response,
+    call_sp_with_multi_values,
 )
 from app.services.tool_payload_validator import validate_aggregate_request
 
@@ -32,7 +33,8 @@ def format_response(data):
     return out
 
 
-def _call_sp_fa_query(req: FARequest) -> dict:
+def _call_sp_fa_query_single(req: FARequest) -> dict:
+    """Single-value SP call — always receives plain string fields."""
     conn = get_pool()
     cursor = conn.cursor()
     cursor.callproc("sp_fa_query", [
@@ -74,6 +76,15 @@ def _call_sp_fa_query(req: FARequest) -> dict:
     if isinstance(raw, str):
         raw = json.loads(raw)
     return format_response(raw)
+
+
+def _call_sp_fa_query(req: FARequest) -> dict:
+    """Multi-value-aware wrapper — fans out list fields across SP calls."""
+    return call_sp_with_multi_values(
+        req,
+        _call_sp_fa_query_single,
+        id_fields=("id", "RMComplaintNo"),
+    )
 
 from collections import Counter
 from app.services.payload_constants import TOOL_GROUP_BY_COLUMNS

@@ -240,6 +240,21 @@ class RetrievalAgent:
         if session_id:
             params.setdefault("session_id", session_id)
 
+        # When the model uses "CURRENT_USER" as a filter value, it means the user
+        # is asking about their own data. The authenticated user_name is already
+        # injected above as the SP auth context — it is the SP's responsibility to
+        # scope results to that user. So we DROP the redundant filter key entirely
+        # rather than passing the login name as a field value (which would NOT match
+        # the actual technician display name stored in the DB, e.g. "sankar" vs "poc").
+        for key, val in list(params.items()):
+            if isinstance(val, str) and val.strip().upper() == "CURRENT_USER":
+                logger.info(
+                    "🔧 Dropped CURRENT_USER placeholder on field '%s' — "
+                    "user_name='%s' already injected as SP auth context",
+                    key, user_name,
+                )
+                del params[key]
+
         logger.info(
             "|| Step %s | [%s] %s | filters=%s",
             step_id, source.upper(), target, [k for k in params if k not in ("user_name", "user_id", "session_id")],

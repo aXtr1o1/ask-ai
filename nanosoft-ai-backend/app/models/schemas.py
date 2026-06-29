@@ -2,7 +2,7 @@
 Pydantic Schemas for LangChain Tools and API Requests
 """
 from pydantic import BaseModel, Field, validator
-from typing import Optional, List
+from typing import Optional, List, Union
 import re
 from app.models.column_validation import AllColumns
 # ==========================================
@@ -21,12 +21,12 @@ class AssetsInput(BaseModel):
     equipment_name: Optional[str] = Field(None, description="Name or description of the equipment or asset type. Map if user mentions 'Equipment Name' or 'EquipmentName'. Example values: Chiller 1, Heavy Loader, High Loader 10, Pushback Tractor, Fire Extinguisher.")
     equipment_ref_no: Optional[str] = Field(None, description="Equipment reference number. Map if user mentions 'Ref No', 'Reference Number', or 'EquipmentRefNo'. Example values: REF-1234, EQP-001.")
     serial_no: Optional[str] = Field(None, description="Filter by serial number. Map if user mentions 'Serial', 'Serial No', 'Serial Number', or 'S/N'.")
-    status: Optional[str] = Field(None, description="Current operational status of the asset. Map if user mentions 'Status' or 'Status Name'. Example values: Online, Offline.")
-    condition: Optional[str] = Field(None, description="Physical condition of the asset as assessed. Map if user mentions 'Condition' or 'State'. Example values: Good, Bad, Fair, Under Repair.")
-    priority: Optional[str] = Field(None, description="Maintenance priority level assigned to the asset. Map if user mentions 'Priority' or 'Urgency'. Example values: Critical, High, Medium, Low.")
-    asset_type: Optional[str] = Field(None, description="Category or type of the asset. Map if user mentions 'Asset Type', 'Type', or 'AssetTypeName'.")
-    division: Optional[str] = Field(None, description="Division or system category the asset belongs to. Map if user mentions 'Division', 'Division Name', or 'DivisionName'. Example values: HVAC System, Duty Vehicles, Electrical System, Plumbing System, Fire Fighting and Alarm system, HVAC & PLUMBING SYSTEMS.")
-    discipline: Optional[str] = Field(None, description="Technical discipline or trade the asset belongs to. Map if user mentions 'Discipline', 'Discipline Name', or 'DisciplineName'. Example values: CHILLER, Duty Vehicles, Fire Extinguisher, Plumbing, Electrical.")
+    status: Optional[Union[str, List[str]]] = Field(None, description="Current operational status of the asset. Can be a single string or a list (e.g. ['Online', 'Offline']) to filter multiple statuses. Example values: Online, Offline.")
+    condition: Optional[Union[str, List[str]]] = Field(None, description="Physical condition of the asset. Can be a single string or a list (e.g. ['Good', 'Fair']). Example values: Good, Bad, Fair, Under Repair.")
+    priority: Optional[Union[str, List[str]]] = Field(None, description="Maintenance priority level. Can be a single string or a list (e.g. ['Critical', 'High']). Example values: Critical, High, Medium, Low.")
+    asset_type: Optional[Union[str, List[str]]] = Field(None, description="Category or type of the asset. Can be a single string or a list. Map if user mentions 'Asset Type', 'Type', or 'AssetTypeName'.")
+    division: Optional[Union[str, List[str]]] = Field(None, description="Division or system category the asset belongs to. Can be a single string or a list (e.g. ['HVAC System', 'Electrical System']). Example values: HVAC System, Duty Vehicles, Electrical System, Plumbing System, Fire Fighting and Alarm system, HVAC & PLUMBING SYSTEMS.")
+    discipline: Optional[Union[str, List[str]]] = Field(None, description="Technical discipline or trade the asset belongs to. Can be a single string or a list (e.g. ['CHILLER', 'Plumbing']). Example values: CHILLER, Duty Vehicles, Fire Extinguisher, Plumbing, Electrical.")
     locality: Optional[str] = Field(None, description="Physical location zone or geographic area (e.g. district, complex, community, airside zone). Do NOT map indoor rooms or common areas here — map those to 'spot_name'. Example values: Al Jurf, Terminal A1, Terminal - A2, Ajman, Doha, Airside Area.")
     locality_code: Optional[str] = Field(None, description="Filter by a SPECIFIC locality code (e.g., RUW, AUH). Do NOT use this field if the user asks for a breakdown or grouping (e.g., 'by locality code'). If they ask to group, leave this empty and use group_by_columns=['LocalityCode'] instead.")
     building: Optional[str] = Field(None, description="Name of the building where the asset is installed. Map if user mentions 'Building' or 'Building Name'. Example values: Camp, Villa 4, Passenger Terminal Building T1 (Demo), Old Airport Terminal, VIP Terminal, Building 1 - Residential High Rise, Airfield Fire Fighting Station Building.")
@@ -68,11 +68,11 @@ class PPMInput(BaseModel):
     work_order: Optional[str] = Field(None, description="Unique work order number for the PPM task. Map if user mentions 'Work Order' or 'WO Number'. Example values: 50010-DM-14264-2026, 50010-DM-14262-2026.")
     asset_tag_no: Optional[str] = Field(None, description="Tag number of the asset this PPM work order is raised for. Map if user mentions a specific asset tag. Example values: DM-FF&AS-FE-13802, DM-FF&AS-FE-13800, L1-HVAC-CHL-3827.")
     equipment_ref_no: Optional[str] = Field(None, description="Equipment reference number. Map if user mentions 'Ref No', 'Reference Number', or 'EquipmentRefNo'. Example values: REF-1234, EQP-001.")
-    status: Optional[str] = Field(None, description="Current status of the PPM work order. Map if user mentions 'PPM Status' or 'Status Name'. Example values: Open, Closed.")
-    stage: Optional[str] = Field(None, description="Current workflow stage of the PPM work order. Map if user mentions 'Stage' or 'Workflow Step'. Example values: Staff Yet to be Allocated, Technician Assigned, Work In Progress, Completed.")
-    frequency: Optional[str] = Field(None, description="Maintenance frequency schedule for the PPM work order. Map if user mentions 'Frequency', 'Daily', 'Weekly', or 'Monthly'. Example values: QUARTERLY, MONTHLY, ANNUALLY, WEEKLY, BI-MONTHLY.")
-    division: Optional[str] = Field(None, description="Division or system category the PPM asset belongs to. Map if user mentions 'Division'. Example values: Fire Fighting and Alarm system, HVAC System, BHS - Maintenance. CRITICAL: Do NOT include the word 'PPM' inside this field (e.g., use 'BHS - Maintenance' NOT 'BHS - Maintenance PPM').")
-    discipline: Optional[str] = Field(None, description="Technical discipline of the asset the PPM is for. Map if user mentions 'Discipline', 'Discipline Name', or 'DisciplineName'. Example values: Fire Extinguisher, CHILLER, Plumbing, Electrical, Duty Vehicles.")
+    status: Optional[Union[str, List[str]]] = Field(None, description="Current status of the PPM work order. Can be a single string or a list (e.g. ['Open', 'Closed']). Example values: Open, Closed.")
+    stage: Optional[Union[str, List[str]]] = Field(None, description="Current workflow stage. Can be a single string or a list (e.g. ['Staff Yet to be Allocated', 'Work In Progress']). Example values: Staff Yet to be Allocated, Technician Assigned, Work In Progress, Completed.")
+    frequency: Optional[Union[str, List[str]]] = Field(None, description="Maintenance frequency schedule. Can be a single string or a list (e.g. ['MONTHLY', 'QUARTERLY']). Example values: QUARTERLY, MONTHLY, ANNUALLY, WEEKLY, BI-MONTHLY.")
+    division: Optional[Union[str, List[str]]] = Field(None, description="Division or system category. Can be a single string or a list. Example values: Fire Fighting and Alarm system, HVAC System, BHS - Maintenance. CRITICAL: Do NOT include the word 'PPM' inside this field.")
+    discipline: Optional[Union[str, List[str]]] = Field(None, description="Technical discipline. Can be a single string or a list (e.g. ['Fire Extinguisher', 'CHILLER']). Example values: Fire Extinguisher, CHILLER, Plumbing, Electrical, Duty Vehicles.")
     locality: Optional[str] = Field(None, description="Physical location zone or geographic area of the PPM asset. Do NOT map indoor rooms here — map those to 'spot_name'. Example values: Doha, Terminal A1, Terminal - A2, Ajman, Al Jurf.")
     locality_code: Optional[str] = Field(None, description="Filter by a SPECIFIC locality code (e.g., RUW, AUH). Do NOT use this field if the user asks for a breakdown or grouping (e.g., 'by locality code'). If they ask to group, leave this empty and use group_by_columns=['LocalityCode'] instead.")
     building: Optional[str] = Field(None, description="Name of the building where the PPM asset is installed. Map if user mentions 'Building' or 'PPM Building'. Example values: Building 1 - Residential High Rise, Building 2 - Residential High Rise, Passenger Terminal Building T1 (Demo).")
@@ -111,7 +111,7 @@ class BDMInput(BaseModel):
     status: Optional[str] = Field(None, description="Current status of the BDM complaint or work order. Map if user mentions 'Status' or 'Status Name'. Example values: Open, Closed.")
     priority: Optional[str] = Field(None, description="Priority level assigned to the complaint. Map ONLY for explicit priority/urgency (e.g. Low, low priority). NEVER map 'low count', 'lowest', or 'fewest' to this field. Example values: Critical, High, Medium, Low.")
     stage: Optional[str] = Field(None, description="Current workflow stage of the complaint. Map if user mentions 'Stage' or 'Complaint Stage'. Example values: Complaint / Service Request Raised, Staff Assigned for Analysis / Job Estimation, Staff Assigned for Work Execution, Complaint / Service Request - Closed.")
-    complaint_type: Optional[str] = Field(None, description="Type of complaint raised. Allowed values: Service Request, Corrective Maintenance, Reactive Maintenance. Use the exact value the user says; never replace one allowed value with another.")
+    complaint_type: Optional[Union[str, List[str]]] = Field(None, description="Type of complaint raised. Allowed values: Service Request, Corrective Maintenance, Reactive Maintenance. Can be a single string OR a list of strings (e.g. ['Reactive Maintenance', 'Corrective Maintenance']) to filter multiple types at once. Use the exact value(s) the user says; never replace one allowed value with another.")
     complaint_header: Optional[str] = Field(None, description="Complaint header name. Map if user mentions 'Complaint Header' or 'ComplaintHeaderName'.")
     complaint_mode: Optional[str] = Field(None, description="Channel through which the complaint was submitted. Map if user mentions 'Complaint Mode' or 'Reporting Mode'. Example values: By Call, By Community Portal.")
     complaint_nature: Optional[str] = Field(None, description="Short description of the nature or subject of the complaint. Map if user mentions 'Nature', 'Failure', or 'Issue'. Example values: Water leakage in common area, light flickering, AC very noisy, Chiller vibration, fire related issues.")
@@ -189,28 +189,27 @@ class FAInput(BaseModel):
     complaint_no: Optional[str] = Field(None, description="Unique numeric complaint number that identifies this FA record. Map if user mentions a specific complaint number. Example values: 55, 56, 57, 58, 59, 60, 61, 62, 63.")
     complaint_code: Optional[str] = Field(None, description="Internal CCM complaint code assigned by the system. Map if user explicitly mentions 'Complaint Code' or 'CCM Code'.")
     x_complaint_no: Optional[str] = Field(None, description="External cross-reference complaint number. Map if user mentions 'X Complaint No' or 'External Complaint Number'.")
-    priority: Optional[str] = Field(None, description="Maintenance priority level assigned to the FA complaint. Map ONLY for explicit priority wording. NEVER map 'low count' or 'lowest' to this field. Example values: Critical, High, Medium, Low.")
-    stage: Optional[str] = Field(
+    priority: Optional[Union[str, List[str]]] = Field(None, description="Priority level. Can be a single string or a list (e.g. ['Critical', 'High']). NEVER map 'low count' or 'lowest' to this field. Example values: Critical, High, Medium, Low.")
+    stage: Optional[Union[str, List[str]]] = Field(
         None,
         description=(
             "Workflow stage (RMStageName). FA has NO separate status/WoStatus field. "
-            "Map user 'Open' or 'Closed' HERE (e.g. stage='Closed' matches 'Facility Audit - Closed'). "
-            "Do NOT use category or keyword for Open/Closed. "
+            "Can be a single string or a list (e.g. ['Facility Audit Request Raised', 'Facility Audit - Closed']). "
+            "Map user 'Open' or 'Closed' HERE. "
             "Example values: Facility Audit Request Raised, Facility Audit - Closed, "
             "Staf Assigned for Work Execution."
         ),
     )
-    category: Optional[str] = Field(
+    category: Optional[Union[str, List[str]]] = Field(
         None,
         description=(
-            "Audit inspection category (RMCategoryName) — e.g. Pest Control Checks. Map ONLY "
+            "Audit inspection category (RMCategoryName). Can be a single string or a list. Map ONLY "
             "for 'audit category', 'inspection category', or a named audit type. Do NOT map "
-            "'BuildingName Category', 'building categories', or 'categories of buildings' — "
-            "those mean group_by_columns=['BuildingName'], not this field."
+            "'BuildingName Category', 'building categories', or 'categories of buildings'."
         ),
     )
     category_sub: Optional[str] = Field(None, description="Specific sub-category under the audit category providing more detail on the inspection type. Map if user mentions 'Sub Category' or specific check name. Example values: RODENT ACTIVITY.")
-    division: Optional[str] = Field(None, description="Organizational division or department responsible for this FA complaint. Map if user mentions 'Division' or 'DivisionName'. Example values: Housekeeping.")
+    division: Optional[Union[str, List[str]]] = Field(None, description="Organizational division or department. Can be a single string or a list. Example values: Housekeeping.")
     locality: Optional[str] = Field(None, description="Geographic zone, district, or outdoor site area where the FA complaint is located. Do NOT use for indoor rooms or floors — map those to spot_name or floor. Example values: Doha, Ajman, Terminal A1.")
     locality_code: Optional[str] = Field(None, description="Filter by a SPECIFIC locality code (e.g., RUW, AUH). Do NOT use this field if the user asks for a breakdown or grouping (e.g., 'by locality code'). If they ask to group, leave this empty and use group_by_columns=['LocalityCode'] instead.")
     building: Optional[str] = Field(None, description="Name of the building where the FA inspection complaint was raised. Map if user mentions 'Building' or 'Building Name'. Example values: Building 1 - Residential High Rise, Building 2 - Residential High Rise.")
@@ -218,7 +217,7 @@ class FAInput(BaseModel):
     spot_name: Optional[str] = Field(None, description="Specific indoor room, spot, or interior area within the floor where the FA complaint is raised. Map if user mentions a room or interior location. Example values: Garbage Room, Electrical Room, Common Area.")
     contract: Optional[str] = Field(None, description="Name of the maintenance or service contract under which this FA complaint is raised. Map if user mentions 'Contract' or 'Agreement'. Example values: Facility Management Residential Area.")
     tech: Optional[str] = Field(None, description="Name of the technician assigned to carry out the FA inspection work. Map if user mentions 'Technician' or 'Tech Name'. Example values: Technician.")
-    frequency: Optional[str] = Field(None, description="Inspection recurrence schedule for this FA complaint. Map if user mentions 'Frequency', 'Monthly', 'Weekly', etc. Example values: MONTHLY, QUARTERLY, ANNUALLY, WEEKLY.")
+    frequency: Optional[Union[str, List[str]]] = Field(None, description="Inspection recurrence schedule. Can be a single string or a list (e.g. ['MONTHLY', 'QUARTERLY']). Example values: MONTHLY, QUARTERLY, ANNUALLY, WEEKLY.")
     request_desc: Optional[str] = Field(None, description="Free-text description of the inspection request or task to be performed. Map if user mentions the nature of work like 'Pest Control', 'Housekeeping'. Example values: Pest Control.")
     is_withdraw: Optional[bool] = Field(None, description="Whether the FA complaint has been withdrawn. Set true to filter withdrawn complaints. FILTER only — for breakdown use is_aggregate=True with group_by_columns=['IsRMWithdraw'].")
     is_rework: Optional[bool] = Field(None, description="Whether the FA complaint requires rework. Set true to filter rework complaints. FILTER only — for breakdown use is_aggregate=True with group_by_columns=['IsRMRework'].")
@@ -257,11 +256,11 @@ class SBInput(BaseModel):
     user_id: Optional[str] = Field(None, description="Internal system-set ID. Never request from user.")
     user_name: Optional[str] = Field(None, description="Internal system-set user name. Never request from user.")
     work_order: Optional[str] = Field(None, description="Unique work order number identifying this SB record. Map if user mentions 'Work Order' or 'WO Number'. Example values: AA-1-2026, AA-2-2026.")
-    stage: Optional[str] = Field(None, description="Current workflow stage showing the progress status of this SB work order. Map if user mentions 'Stage'. Example values: Staff Yet to be Allocated, Technician Assigned, Work In Progress, Completed.")
-    frequency: Optional[str] = Field(None, description="Recurrence schedule that determines how often this SB work order is generated. Map if user mentions 'Frequency', 'Monthly', 'Weekly', etc. Example values: MONTHLY, QUARTERLY, ANNUALLY, WEEKLY.")
-    service_type: Optional[str] = Field(None, description="Type of service this SB work order belongs to, grouping it under a broad service category. Map if user mentions 'Service Type'. Example values: Environmental Services.")
-    division: Optional[str] = Field(None, description="Organizational division or department responsible for this SB work order. Map if user mentions 'Division' or 'DivisionName'. Example values: Envrionmental Services.")
-    discipline: Optional[str] = Field(None, description="Technical trade or discipline classification of this SB work order. Map if user mentions 'Discipline'. Example values: Landscaping.")
+    stage: Optional[Union[str, List[str]]] = Field(None, description="Current workflow stage. Can be a single string or a list (e.g. ['Staff Yet to be Allocated', 'Work In Progress']). Example values: Staff Yet to be Allocated, Technician Assigned, Work In Progress, Completed.")
+    frequency: Optional[Union[str, List[str]]] = Field(None, description="Recurrence schedule. Can be a single string or a list (e.g. ['MONTHLY', 'QUARTERLY']). Example values: MONTHLY, QUARTERLY, ANNUALLY, WEEKLY.")
+    service_type: Optional[Union[str, List[str]]] = Field(None, description="Type of service this SB work order belongs to. Can be a single string or a list. Example values: Environmental Services.")
+    division: Optional[Union[str, List[str]]] = Field(None, description="Organizational division. Can be a single string or a list. Example values: Envrionmental Services.")
+    discipline: Optional[Union[str, List[str]]] = Field(None, description="Technical trade or discipline. Can be a single string or a list. Example values: Landscaping.")
     locality: Optional[str] = Field(None, description="Geographic zone, district, or outdoor site area where the SB work order is to be performed. Do NOT use for indoor rooms — map those to spot_name. Example values: Ajman, Doha, Terminal A1.")
     locality_code: Optional[str] = Field(None, description="Filter by a SPECIFIC locality code (e.g., RUW, AUH). Do NOT use this field if the user asks for a breakdown or grouping (e.g., 'by locality code'). If they ask to group, leave this empty and use group_by_columns=['LocalityCode'] instead.")
     building: Optional[str] = Field(None, description="Name of the building or outdoor facility where this SB work order is assigned. Map if user mentions 'Building' or 'Building Name'. Example values: Al Safia Park, Building 1 - Residential High Rise.")

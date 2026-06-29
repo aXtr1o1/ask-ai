@@ -1,7 +1,6 @@
 from __future__ import annotations
-from typing import Optional
+from typing import Optional, List, Union
 from pydantic import BaseModel, Field, validator
-from typing import Optional, List
 
 # ==========================================
 # ✅ REQUEST MODELS
@@ -34,12 +33,12 @@ class AssetRequest(BaseModel):
     equipment_name: Optional[str] = None      # NEW
     equipment_ref_no: Optional[str] = None    # NEW
     serial_no: Optional[str] = None
-    status: Optional[str] = None
-    condition: Optional[str] = None
-    priority: Optional[str] = None
-    asset_type: Optional[str] = None
-    division: Optional[str] = None
-    discipline: Optional[str] = None
+    status: Optional[Union[str, List[str]]] = None
+    condition: Optional[Union[str, List[str]]] = None
+    priority: Optional[Union[str, List[str]]] = None
+    asset_type: Optional[Union[str, List[str]]] = None
+    division: Optional[Union[str, List[str]]] = None
+    discipline: Optional[Union[str, List[str]]] = None
     locality: Optional[str] = None
     building: Optional[str] = None
     floor: Optional[str] = None
@@ -75,11 +74,11 @@ class PPMRequest(BaseModel):
     work_order: Optional[str] = None
     asset_tag_no: Optional[str] = None
     equipment_ref_no: Optional[str] = None    # NEW
-    status: Optional[str] = None
-    stage: Optional[str] = None
-    frequency: Optional[str] = None
-    division: Optional[str] = None
-    discipline: Optional[str] = None
+    status: Optional[Union[str, List[str]]] = None
+    stage: Optional[Union[str, List[str]]] = None
+    frequency: Optional[Union[str, List[str]]] = None
+    division: Optional[Union[str, List[str]]] = None
+    discipline: Optional[Union[str, List[str]]] = None
     locality: Optional[str] = None
     locality_code: Optional[str] = None
     building: Optional[str] = None
@@ -113,7 +112,7 @@ class BDMRequest(BaseModel):
     status: Optional[str] = None
     priority: Optional[str] = None
     stage: Optional[str] = None
-    complaint_type: Optional[str] = None
+    complaint_type: Optional[Union[str, List[str]]] = None
     complaint_header: Optional[str] = None    # NEW
     complaint_mode: Optional[str] = None
     complaint_nature: Optional[str] = None
@@ -154,11 +153,11 @@ class FARequest(BaseModel):
     complaint_no: Optional[str] = None        # maps to RMComplaintNo
     complaint_code: Optional[str] = None      # NEW — maps to RMCCMComplaintCode
     x_complaint_no: Optional[str] = None      # NEW — maps to RMXComplaintNo
-    priority: Optional[str] = None
-    stage: Optional[str] = None               # maps to RMStageName
-    category: Optional[str] = None            # maps to RMCategoryName
+    priority: Optional[Union[str, List[str]]] = None
+    stage: Optional[Union[str, List[str]]] = None               # maps to RMStageName
+    category: Optional[Union[str, List[str]]] = None            # maps to RMCategoryName
     category_sub: Optional[str] = None        # maps to RMCategorySubName
-    division: Optional[str] = None
+    division: Optional[Union[str, List[str]]] = None
     locality: Optional[str] = None
     locality_code: Optional[str] = None
     building: Optional[str] = None
@@ -166,7 +165,7 @@ class FARequest(BaseModel):
     spot_name: Optional[str] = None
     contract: Optional[str] = None
     tech: Optional[str] = None                # maps to RMTechName
-    frequency: Optional[str] = None
+    frequency: Optional[Union[str, List[str]]] = None
     request_desc: Optional[str] = None        # maps to RMRequestDetailsDesc
     is_withdraw: Optional[bool] = None        # maps to IsRMWithdraw
     is_rework: Optional[bool] = None          # maps to IsRMRework
@@ -190,11 +189,11 @@ class SBRequest(BaseModel):
     user_id: Optional[str] = None
     user_name: Optional[str] = None
     work_order: Optional[str] = None          # maps to SBCreWorkOrder
-    stage: Optional[str] = None               # maps to PPMStageName
-    frequency: Optional[str] = None
-    service_type: Optional[str] = None        # NEW — maps to ServiceTypeName
-    division: Optional[str] = None
-    discipline: Optional[str] = None
+    stage: Optional[Union[str, List[str]]] = None               # maps to PPMStageName
+    frequency: Optional[Union[str, List[str]]] = None
+    service_type: Optional[Union[str, List[str]]] = None        # NEW — maps to ServiceTypeName
+    division: Optional[Union[str, List[str]]] = None
+    discipline: Optional[Union[str, List[str]]] = None
     locality: Optional[str] = None
     locality_code: Optional[str] = None
     building: Optional[str] = None

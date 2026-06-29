@@ -66,7 +66,8 @@ def format_response(data):
     return out
 
 
-def _call_sp_bdm_query(req: BDMRequest) -> dict:
+def _call_sp_bdm_query_single(req: BDMRequest, complaint_type_override: str | None = None) -> dict:
+    """Call sp_bdm_query with a single (or no) complaint_type value."""
     conn = get_pool()
     cursor = conn.cursor()
     cursor.callproc("sp_bdm_query", [
@@ -79,7 +80,7 @@ def _call_sp_bdm_query(req: BDMRequest) -> dict:
         req.status,
         req.priority,
         req.stage,
-        req.complaint_type,
+        complaint_type_override,  # always a single string or None
         req.complaint_header,
         req.complaint_mode,
         req.complaint_nature,
@@ -109,6 +110,30 @@ def _call_sp_bdm_query(req: BDMRequest) -> dict:
     if isinstance(raw, str):
         raw = json.loads(raw)
     return format_response(raw)
+
+
+def _call_sp_bdm_query(req: BDMRequest) -> dict:
+    """Call sp_bdm_query, handling single string or list for complaint_type."""
+    complaint_type = req.complaint_type
+
+    # If complaint_type is a list, call SP once per value and merge results
+    if isinstance(complaint_type, list):
+        logger.info("🔀 [BDM] complaint_type is a list (%s) — making %d SP calls and merging", complaint_type, len(complaint_type))
+        merged_list: list = []
+        seen_ids: set = set()
+        for ct in complaint_type:
+            result = _call_sp_bdm_query_single(req, complaint_type_override=ct)
+            for record in result.get("p_list", []):
+                record_id = record.get("id") or record.get("ComplaintNo") or str(record)
+                if record_id not in seen_ids:
+                    seen_ids.add(record_id)
+                    merged_list.append(record)
+        merged = {"p_list": merged_list, "p_count": len(merged_list)}
+        logger.info("✅ [BDM] Merged result | total_records=%d", len(merged_list))
+        return merged
+
+    # Single string or None — standard path
+    return _call_sp_bdm_query_single(req, complaint_type_override=complaint_type)
 
 
 def _bdm_requires_local_aggregate(req: BDMRequest) -> bool:

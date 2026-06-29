@@ -17,8 +17,12 @@ SOLUTION:
   The LLM then writes a FULLY DETAILED and CORRECT answer from the summary
   because it has accurate counts/groups, not a truncated slice.
 
-HOW FIELD CLASSIFICATION WORKS (fully data-driven, zero hardcoding):
+DATA SHAPE (always Shape A from all DB tools):
+  All 5 DB tools (PPM, BDM, FA, SB, ASSETS) always return:
+    data = {"p_count": int, "p_list": [...records...]}
+  This is the only shape this module handles.
 
+HOW FIELD CLASSIFICATION WORKS (fully data-driven, zero hardcoding):
   Instead of hardcoding field name keywords like "id", "uuid", "name" etc.
   (which breaks on real DB fields like "ppm_reference" or "contractor_code"),
   this module looks at the ACTUAL DATA VALUES of each field and decides:
@@ -63,7 +67,7 @@ logger = logging.getLogger("data_summarizer")
 # Records below this count are passed to the LLM as-is without aggregation.
 # After Filtering Agent, each record has ~3-8 fields.
 # 500 records x 6 fields x ~15 chars = ~45,000 chars = ~11,000 tokens -- safe.
-SMALL_THRESHOLD = 500
+SMALL_THRESHOLD = 4000
 
 # When aggregating large datasets, keep this many raw records as a sample.
 # WHY keep a sample: the LLM can cite concrete examples even when the full
@@ -127,63 +131,59 @@ def _prepare_one_step(
     """
     Process a single retrieval result step.
 
-    Handles both data shapes the pipeline produces:
-      Shape A:  data = {"p_count": int, "p_list": [...records...]}
-      Shape B:  data = [...records...]  (plain list)
+    All DB tools (PPM, BDM, FA, SB, ASSETS) always produce Shape A:
+      data = {"p_count": int, "p_list": [...records...]}
+
+    If p_list > SMALL_THRESHOLD (500) records:
+      -> Remove p_list from data
+      -> Add _summary (aggregated stats) + p_list_sample (20 raw records)
+      -> Keep p_count unchanged (it is the true DB count, not len(p_list))
+
+    If p_list <= SMALL_THRESHOLD:
+      -> Pass through unchanged (fits safely in LLM context)
     """
     new_result = dict(result)
     data       = result.get("data")
 
-    # -- Shape A: data is a dict with p_count + p_list -------------------------
-    if isinstance(data, dict):
-        p_list = data.get("p_list") or []
+    if not isinstance(data, dict):
+        # Data is not the expected Shape A dict — pass through unchanged.
+        # This should not happen with any current DB tool.
+        logger.warning(
+            "|| [DataSummarizer] step=%s | unexpected data type=%s — pass-through",
+            result.get("step_id", "?"), type(data).__name__,
+        )
+        return new_result
 
-        if isinstance(p_list, list) and len(p_list) > SMALL_THRESHOLD:
-            new_data = {k: v for k, v in data.items() if k != "p_list"}
-            summary  = _aggregate(p_list)
-            sample   = p_list[:SAMPLE_SIZE]
+    p_list = data.get("p_list") or []
 
-            new_data["_note"] = (
-                f"This dataset has {len(p_list):,} records -- too large to send raw to the LLM. "
-                f"Python pre-aggregated the full list below for 100% accuracy. "
-                f"A sample of {len(sample)} records is also provided as concrete examples."
-            )
-            new_data["_aggregated"]    = True
-            new_data["_total_records"] = len(p_list)
-            new_data["_summary"]       = summary
-            new_data["p_list_sample"]  = sample
-            new_result["data"]         = new_data
+    if isinstance(p_list, list) and len(p_list) > SMALL_THRESHOLD:
+        # Large dataset — replace p_list with aggregated summary + sample
+        new_data = {k: v for k, v in data.items() if k != "p_list"}
+        summary  = _aggregate(p_list)
+        sample   = p_list[:SAMPLE_SIZE]
 
-            logger.info(
-                "|| [DataSummarizer] step=%s | %d records -> aggregated summary + %d-record sample",
-                result.get("step_id", "?"), len(p_list), len(sample),
-            )
-        else:
-            logger.info(
-                "|| [DataSummarizer] step=%s | %d records <= threshold=%d -> pass-through",
-                result.get("step_id", "?"),
-                len(p_list) if isinstance(p_list, list) else 0,
-                SMALL_THRESHOLD,
-            )
+        new_data["_note"] = (
+            f"This dataset has {len(p_list):,} records -- too large to send raw to the LLM. "
+            f"Python pre-aggregated the full list below for 100% accuracy. "
+            f"A sample of {len(sample)} records is also provided as concrete examples."
+        )
+        new_data["_aggregated"]    = True
+        new_data["_total_records"] = len(p_list)
+        new_data["_summary"]       = summary
+        new_data["p_list_sample"]  = sample
+        new_result["data"]         = new_data
 
-    # -- Shape B: data is a plain list -----------------------------------------
-    elif isinstance(data, list) and len(data) > SMALL_THRESHOLD:
-        summary = _aggregate(data)
-        sample  = data[:SAMPLE_SIZE]
-        new_result["data"] = {
-            "_note": (
-                f"This dataset has {len(data):,} records -- too large to send raw to the LLM. "
-                f"Python pre-aggregated the full list below for 100% accuracy. "
-                f"A sample of {len(sample)} records is also provided as concrete examples."
-            ),
-            "_aggregated":    True,
-            "_total_records": len(data),
-            "_summary":       summary,
-            "sample":         sample,
-        }
         logger.info(
-            "|| [DataSummarizer] step=%s | %d records (list) -> aggregated",
-            result.get("step_id", "?"), len(data),
+            "|| [DataSummarizer] step=%s | %d records -> aggregated summary + %d-record sample",
+            result.get("step_id", "?"), len(p_list), len(sample),
+        )
+    else:
+        # Small dataset — pass through as-is
+        logger.info(
+            "|| [DataSummarizer] step=%s | %d records <= threshold=%d -> pass-through",
+            result.get("step_id", "?"),
+            len(p_list) if isinstance(p_list, list) else 0,
+            SMALL_THRESHOLD,
         )
 
     return new_result

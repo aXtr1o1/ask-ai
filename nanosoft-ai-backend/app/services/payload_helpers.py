@@ -562,6 +562,17 @@ def _bdm_stage_is_header_not_workflow(stage_val: str) -> bool:
 
 
 def _bdm_complaint_type_from_query(query: str) -> str | None:
+    """
+    Read the EXACT complaint_type phrase from the user's query.
+
+    WHY exact-phrase only (no keyword shortcuts):
+      We are fully model-based. The retrieval LLM decides complaint_type from
+      intent — not this function. This function is used ONLY to detect when the
+      user explicitly typed the exact phrase (e.g. 'Reactive Maintenance tasks').
+      Adding keyword shortcuts here would be rule-based overriding of the LLM.
+      If the LLM set complaint_type correctly, it passes through unchanged.
+      If the LLM set it wrong, mini_validation_agent retries with better instructions.
+    """
     q = query or ""
     for value in _BDM_COMPLAINT_TYPE_VALUES:
         pattern = r"\b" + r"\s+".join(map(re.escape, value.split())) + r"\b"
@@ -596,16 +607,20 @@ def _fix_bdm_complaint_type_header_stage(tool: str, query: str, args: dict[str, 
     wants_ana_header = explicit_complaint_header == "ANA Approval Flow"
 
     if explicit_complaint_type:
+        # The user typed the exact phrase in their query — align the LLM's value to it.
         if args.get("complaint_type") != explicit_complaint_type:
             logger.info(
-                "🔧 BDM: corrected complaint_type=%r from query",
+                "🔧 BDM: aligned complaint_type=%r (exact phrase found in query)",
                 explicit_complaint_type,
             )
         args["complaint_type"] = explicit_complaint_type
-    elif args.get("complaint_type") in _BDM_COMPLAINT_TYPE_VALUES:
-        if not re.search(rf"\b{re.escape(str(args['complaint_type']))}\b", q, re.I):
-            args.pop("complaint_type", None)
-            logger.info("🔧 BDM: cleared guessed complaint_type not present in query")
+    # WHY no deletion of LLM-set complaint_type here:
+    #   Fully agentic approach — the retrieval LLM decides complaint_type from the
+    #   understood_intent (which already has the entity extracted by the understanding
+    #   agent). If the LLM set it, we trust it and let it pass through to the SP.
+    #   If the data that comes back is wrong, mini_validation_agent will RETRY with
+    #   corrected instructions. Deleting the LLM's decision here was the root cause
+    #   of the bug where 'reactive' queries returned all 1441 unfiltered records.
 
     if wants_sr_type:
         args["complaint_type"] = "Service Request"

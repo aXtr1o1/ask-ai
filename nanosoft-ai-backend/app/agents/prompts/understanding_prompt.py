@@ -248,6 +248,14 @@ produce a complete understanding. Consider:
    complaint_type, complaint_mode, make, model, condition, boolean flags,
    date ranges, keywords, counts, comparison subjects -- anything the user said.
 
+   IDENTITY ABSTRACTION:
+   A user's query sometimes has themselves as the implicit subject — they are reasoning about
+   their own work, their own tasks, or data belonging to them within the system. When you
+   infer this is the case, recognize that you have no access to the authenticated session context.
+   The semantically correct representation of this is the system placeholder "CURRENT_USER",
+   which the execution pipeline resolves to the real identity at runtime. Apply it to whichever
+   filter field within the target module logically captures the person the query is about.
+
    FOR DATE FIELDS (date_from, date_to, comp_from, comp_to, completed_from, completed_to):
    Always output YYYY-MM-DD format. Resolve any date phrase the user mentions
    (e.g. "last month", "June 2026", "yesterday", "this week") into an actual

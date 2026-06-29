@@ -76,24 +76,34 @@ async def execution_agent_node(state: AgentState) -> AgentState:
     Writes: state['final_answer'], state['execution_log'],
             state['execution_thinking_tokens'], state['agent_trace']
     """
-    user_query        = state.get("user_query", "").strip()
-    understood_intent = state.get("understood_intent", {}) or {}
-    goal_plan         = state.get("goal_plan", {}) or {}
+    user_query           = state.get("user_query", "").strip()
+    understood_intent    = state.get("understood_intent", {}) or {}
+    goal_plan            = state.get("goal_plan", {}) or {}
     # WHY prefer filtered_results over retrieval_results:
     #   The Filtering Agent has already removed irrelevant DB columns.
     #   Using filtered data keeps the execution prompt smaller and the answer focused.
     #   Fall back to raw retrieval_results only if filtering didn't run.
-    retrieval_results = state.get("filtered_results") or state.get("retrieval_results", []) or []
-    validation_status = state.get("validation_status", "PASS")
+    retrieval_results    = state.get("filtered_results") or state.get("retrieval_results", []) or []
+    validation_status    = state.get("validation_status", "PASS")
     # WHY read web_search_summary:
     #   If the Understanding Agent ran Google Search (needs_search=True), this field
     #   contains the external knowledge. We pass it to the prompt so the final answer
     #   can cite or integrate the search findings.
-    web_search_summary = state.get("web_search_summary")
-    trace              = list(state.get("agent_trace", []))
+    web_search_summary   = state.get("web_search_summary")
+    # WHY read overall_retry_instructions:
+    #   When the Overall Validation Agent scores the previous answer below 7,
+    #   it loops back here with specific instructions on what to fix.
+    #   We inject these instructions at the TOP of the user prompt so the model
+    #   addresses the identified problem directly instead of repeating the same answer.
+    overall_retry_instr  = state.get("overall_retry_instructions")
+    overall_retry_count  = state.get("overall_retry_count", 0) or 0
+    trace                = list(state.get("agent_trace", []))
 
     logger.info("=" * 66)
-    logger.info("Execution Agent -- START | query='%s' | validation=%s", user_query[:80], validation_status)
+    logger.info(
+        "Execution Agent -- START | query='%s' | validation=%s | overall_retry=%d",
+        user_query[:80], validation_status, overall_retry_count,
+    )
     logger.info("=" * 66)
     _t_start = time.perf_counter()
 
@@ -111,15 +121,18 @@ async def execution_agent_node(state: AgentState) -> AgentState:
         "||  EXECUTION AGENT -- HOW I WILL EXECUTE\n"
         "|| ============================================================\n"
         "||  Validation Status : %s\n"
+        "||  Overall Retry Run : %d (0 = first run)\n"
         "||  Goal Approach     : %s | Complexity: %s\n"
         "||  Data Received     : %d record(s) from retrieval\n"
         "||  Analysis Goal     : %s\n"
+        "||  Override Instr.   : %s\n"
         "||  I will            : Read the retrieved data carefully\n"
         "||                      Apply the analysis goal to find the answer\n"
         "||                      Write a clear, natural language response\n"
         "|| ============================================================",
-        validation_status, approach, complexity, data_count,
-        analysis_instr or "(produce a direct answer from retrieved data)"
+        validation_status, overall_retry_count, approach, complexity, data_count,
+        analysis_instr or "(produce a direct answer from retrieved data)",
+        (overall_retry_instr[:100] if overall_retry_instr else "N/A (first run)"),
     )
 
     # ── Smart data preparation (replaces naive p_list[:100] cap) ──────────────
@@ -134,12 +147,27 @@ async def execution_agent_node(state: AgentState) -> AgentState:
     capped_results = smart_prepare(retrieval_results, understood_intent)
 
     # ── Build prompt ──────────────────────────────────────────────────────────
+    # WHY prepend override_instructions:
+    #   When the Overall Validation Agent sends us back (overall_retry_count > 0),
+    #   the most important thing for the model to see FIRST is what it got wrong
+    #   and how to fix it. Prepending the override block ensures the model addresses
+    #   the specific problem before re-reading the data.
+    override_block = ""
+    if overall_retry_instr:
+        override_block = (
+            f"\n\n⚠️  QUALITY IMPROVEMENT REQUIRED (Retry {overall_retry_count} of 2):\n"
+            f"The Overall Validation Agent scored your previous answer below 7/10.\n"
+            f"You MUST fix the following specific problem before generating your new answer:\n"
+            f"{overall_retry_instr}\n"
+            f"Generate a completely new, corrected answer addressing this issue.\n"
+        )
+
     user_content = EXECUTION_USER_TEMPLATE.format(
         user_query=user_query,
         understood_intent=json.dumps(understood_intent, indent=2),
         goal_plan=json.dumps(goal_plan, indent=2),
         retrieval_results=json.dumps(capped_results, indent=2),
-    )
+    ) + override_block
 
     messages = [
         SystemMessage(content=EXECUTION_SYSTEM_PROMPT),
