@@ -6,6 +6,7 @@ import {
   IconPlus,
   IconX,
   IconMessageReport,
+  IconBrain,
 } from "@tabler/icons-react";
 
 const IconChat = ({ size = 16, stroke = 2, ...props }: { size?: number; stroke?: number | string; [key: string]: any }) => {
@@ -38,10 +39,14 @@ interface SpaceBookingProps {
   isComplaints: boolean;
   setIsComplaints: (val: boolean) => void;
 
+  // Advance Ask AI state
+  isAdvanceAskAi?: boolean;
+  setIsAdvanceAskAi?: (val: boolean) => void;
+
   // Chat locking state
   isChatStarted?: boolean;
   onLockedClick?: () => void;
-  onSwitchMode?: (newMode: "space_booking" | "complaints" | "ask_ai") => void;
+  onSwitchMode?: (newMode: "space_booking" | "complaints" | "ask_ai" | "advance_ask_ai") => void;
 }
 
 export default function SpaceBooking({
@@ -50,6 +55,8 @@ export default function SpaceBooking({
   setIsSpaceBooking,
   isComplaints,
   setIsComplaints,
+  isAdvanceAskAi,
+  setIsAdvanceAskAi,
   isChatStarted = false,
   onLockedClick,
   onSwitchMode,
@@ -118,6 +125,7 @@ export default function SpaceBooking({
                   setIsSpaceBooking(newVal);
                   if (newVal) {
                     setIsComplaints(false);
+                    if (setIsAdvanceAskAi) setIsAdvanceAskAi(false);
                   }
                 }
                 setIsOpen(false);
@@ -192,6 +200,7 @@ export default function SpaceBooking({
                   }
                   setIsSpaceBooking(false);
                   setIsComplaints(false);
+                  if (setIsAdvanceAskAi) setIsAdvanceAskAi(false);
                 }
                 setIsOpen(false);
               }}
@@ -201,10 +210,10 @@ export default function SpaceBooking({
                 justifyContent: "space-between",
                 width: "100%",
                 padding: "12px 14px",
-                background: (!isSpaceBooking && !isComplaints) ? "var(--color-primary-soft, rgba(212, 175, 55, 0.15))" : "transparent",
+                background: (!isSpaceBooking && !isComplaints && !isAdvanceAskAi) ? "var(--color-primary-soft, rgba(212, 175, 55, 0.15))" : "transparent",
                 border: "none",
                 borderRadius: "10px",
-                color: (!isSpaceBooking && !isComplaints) ? "var(--tile-label-color, #F7EF8A)" : "var(--color-text, #FFFFFF)",
+                color: (!isSpaceBooking && !isComplaints && !isAdvanceAskAi) ? "var(--tile-label-color, #F7EF8A)" : "var(--color-text, #FFFFFF)",
                 fontSize: "14px",
                 fontWeight: 500,
                 cursor: "pointer",
@@ -212,16 +221,16 @@ export default function SpaceBooking({
                 transition: "all 0.15s ease",
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.background = (!isSpaceBooking && !isComplaints)
+                e.currentTarget.style.background = (!isSpaceBooking && !isComplaints && !isAdvanceAskAi)
                   ? "var(--color-primary-soft, rgba(212, 175, 55, 0.2))"
                   : "var(--color-primary-soft, rgba(255, 255, 255, 0.05))";
                 e.currentTarget.style.color = "var(--tile-label-color, #F7EF8A)";
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.background = (!isSpaceBooking && !isComplaints)
+                e.currentTarget.style.background = (!isSpaceBooking && !isComplaints && !isAdvanceAskAi)
                   ? "var(--color-primary-soft, rgba(212, 175, 55, 0.15))"
                   : "transparent";
-                e.currentTarget.style.color = (!isSpaceBooking && !isComplaints)
+                e.currentTarget.style.color = (!isSpaceBooking && !isComplaints && !isAdvanceAskAi)
                   ? "var(--tile-label-color, #F7EF8A)"
                   : "var(--color-text, #FFFFFF)";
               }}
@@ -232,7 +241,7 @@ export default function SpaceBooking({
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    color: (!isSpaceBooking && !isComplaints) ? "var(--tile-label-color, #F7EF8A)" : "var(--color-text-muted, rgba(255, 255, 255, 0.7))",
+                    color: (!isSpaceBooking && !isComplaints && !isAdvanceAskAi) ? "var(--tile-label-color, #F7EF8A)" : "var(--color-text-muted, rgba(255, 255, 255, 0.7))",
                     transition: "color 0.15s ease",
                   }}
                 >
@@ -240,7 +249,7 @@ export default function SpaceBooking({
                 </span>
                 <span>Ask AI</span>
               </div>
-              {(!isSpaceBooking && !isComplaints) && (
+              {(!isSpaceBooking && !isComplaints && !isAdvanceAskAi) && (
                 <span
                   style={{
                     width: "6px",
@@ -252,6 +261,85 @@ export default function SpaceBooking({
                 />
               )}
             </button>
+
+            {/* Advance Ask-AI button */}
+            <button
+              type="button"
+              onClick={() => {
+                if (onSwitchMode) {
+                  onSwitchMode("advance_ask_ai");
+                } else {
+                  if (isChatStarted) {
+                    onLockedClick?.();
+                    return;
+                  }
+                  const newVal = !isAdvanceAskAi;
+                  if (setIsAdvanceAskAi) setIsAdvanceAskAi(newVal);
+                  if (newVal) {
+                    setIsSpaceBooking(false);
+                    setIsComplaints(false);
+                  }
+                }
+                setIsOpen(false);
+              }}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                width: "100%",
+                padding: "12px 14px",
+                background: isAdvanceAskAi ? "var(--color-primary-soft, rgba(212, 175, 55, 0.15))" : "transparent",
+                border: "none",
+                borderRadius: "10px",
+                color: isAdvanceAskAi ? "var(--tile-label-color, #F7EF8A)" : "var(--color-text, #FFFFFF)",
+                fontSize: "14px",
+                fontWeight: 500,
+                cursor: "pointer",
+                textAlign: "left",
+                transition: "all 0.15s ease",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = isAdvanceAskAi
+                  ? "var(--color-primary-soft, rgba(212, 175, 55, 0.2))"
+                  : "var(--color-primary-soft, rgba(255, 255, 255, 0.05))";
+                e.currentTarget.style.color = "var(--tile-label-color, #F7EF8A)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = isAdvanceAskAi
+                  ? "var(--color-primary-soft, rgba(212, 175, 55, 0.15))"
+                  : "transparent";
+                e.currentTarget.style.color = isAdvanceAskAi
+                  ? "var(--tile-label-color, #F7EF8A)"
+                  : "var(--color-text, #FFFFFF)";
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                <span
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: isAdvanceAskAi ? "var(--tile-label-color, #F7EF8A)" : "var(--color-text-muted, rgba(255, 255, 255, 0.7))",
+                    transition: "color 0.15s ease",
+                  }}
+                >
+                  <IconBrain size={18} stroke={1.5} />
+                </span>
+                <span>Advance Ask-AI</span>
+              </div>
+              {isAdvanceAskAi && (
+                <span
+                  style={{
+                    width: "6px",
+                    height: "6px",
+                    borderRadius: "50%",
+                    backgroundColor: "var(--tile-label-color, #F7EF8A)",
+                    boxShadow: "0 0 8px var(--tile-label-color, #F7EF8A)",
+                  }}
+                />
+              )}
+            </button>
+
 
             {/* Complaints menu item — hidden, preserved for future use */}
             <span style={{ display: 'none' }}>
@@ -269,6 +357,7 @@ export default function SpaceBooking({
                   setIsComplaints(newVal);
                   if (newVal) {
                     setIsSpaceBooking(false);
+                    if (setIsAdvanceAskAi) setIsAdvanceAskAi(false);
                   }
                 }
                 setIsOpen(false);
@@ -336,7 +425,7 @@ export default function SpaceBooking({
       )}
 
       {/* Active Feature Badges/Pills */}
-      {isSpaceBooking && (
+      {(isSpaceBooking || isAdvanceAskAi) && (
         <div
           style={{
             display: "flex",
@@ -369,13 +458,18 @@ export default function SpaceBooking({
               if (isChatStarted) {
                 onLockedClick?.();
               } else {
-                setIsSpaceBooking(false);
+                if (isSpaceBooking) setIsSpaceBooking(false);
+                if (isAdvanceAskAi && setIsAdvanceAskAi) setIsAdvanceAskAi(false);
               }
             }}
-            title={isChatStarted ? "Mode is locked for this chat" : "Click to turn off Space Booking mode"}
+            title={isChatStarted ? "Mode is locked for this chat" : `Click to turn off ${isSpaceBooking ? 'Space Booking' : 'Advance Ask-AI'} mode`}
           >
-            <IconCalendar size={14} style={{ color: isChatStarted ? "#a0a0a0" : "var(--tile-label-color, #F7EF8A)" }} />
-            <span>Space Booking</span>
+            {isSpaceBooking ? (
+              <IconCalendar size={14} style={{ color: isChatStarted ? "#a0a0a0" : "var(--tile-label-color, #F7EF8A)" }} />
+            ) : (
+              <IconBrain size={14} style={{ color: isChatStarted ? "#a0a0a0" : "var(--tile-label-color, #F7EF8A)" }} />
+            )}
+            <span>{isSpaceBooking ? "Space Booking" : "Advance Ask-AI"}</span>
             <span
               style={{
                 width: "6px",

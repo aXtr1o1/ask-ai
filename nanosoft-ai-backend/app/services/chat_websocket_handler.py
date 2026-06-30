@@ -314,7 +314,9 @@ async def ws_chat_endpoint(websocket: WebSocket):
             is_graph = bool(data.get("isGraph", False))
             logger.info(f"📊 isGraph flag received: {is_graph}")
             is_space_booking = bool(data.get("isSpaceBooking", False))
-            logger.info(f"📊 isSpaceBooking flag received: {is_space_booking}")
+            is_advance_ask_ai = bool(data.get("isAdvanceAskAi", False))
+            logger.info(f"🔍 isSpaceBooking flag received: {is_space_booking}")
+            logger.info(f"🔍 isAdvanceAskAi flag received: {is_advance_ask_ai}")
             group_name = data.get("group_name") or data.get("groupName")
             logger.info(f"📊 group_name={group_name}")
 
@@ -920,16 +922,19 @@ async def ws_chat_endpoint(websocket: WebSocket):
                     "sub_user_name": sub_user_name,
                     "pending_transcription": None,
                     "group_name": group_name,
-                    "is_space_booking": is_space_booking
+                    "is_space_booking": is_space_booking,
+                    "is_advance_ask_ai": is_advance_ask_ai
                 }
                 logger.info(f"🆕 Memory initialized for session_id: {session_id}")
             else:
                 # Update group_name if it was passed
                 if group_name:
                     memory_store[session_id]["group_name"] = group_name
-                # Keep is_space_booking flag sticky (once True, always True)
+                # Keep flags sticky
                 if is_space_booking:
                     memory_store[session_id]["is_space_booking"] = True
+                if is_advance_ask_ai:
+                    memory_store[session_id]["is_advance_ask_ai"] = True
 
             messages = build_scoped_messages(
                 user_name=user_name,
@@ -952,6 +957,8 @@ async def ws_chat_endpoint(websocket: WebSocket):
                     context_summary = final_response_text
                     logger.info("⛔ Credits exhausted | name=%s", sub_user_name)
                 else:
+                    is_advance_ask_ai_active = memory_store[session_id].get("is_advance_ask_ai", False)
+
                     if is_space_booking:
                         logger.info("🚀 Routing query to SpaceBookingService")
                         final_response_text, context_summary, _ = await space_booking_service.handle_space_booking(
@@ -960,6 +967,27 @@ async def ws_chat_endpoint(websocket: WebSocket):
                             sub_user_name=sub_user_name,
                             session_id=session_id
                         )
+                    elif is_advance_ask_ai_active:
+                        logger.info("🚀 Routing query to Advance Ask-AI Pipeline")
+                        from app.agents.multi_agent_graph import run_agent_pipeline
+                        
+                        agent_history = []
+                        for turn in memory_store[session_id].get("history", []):
+                            if turn.get("query"):
+                                agent_history.append({"role": "user", "content": turn["query"]})
+                            ast = turn.get("context") or turn.get("assistant")
+                            if ast:
+                                agent_history.append({"role": "assistant", "content": ast})
+                        
+                        final_state = await run_agent_pipeline(
+                            user_query=user_query,
+                            conversation_history=agent_history,
+                            user_name=user_name,
+                            user_id=user_id
+                        )
+                        
+                        final_response_text = final_state.get("formatted_answer") or final_state.get("final_answer") or "No answer produced."
+                        context_summary = final_response_text
                     else:
                         # ── Graph gate: if graph_count > graph_limit, skip model ───
                         try:

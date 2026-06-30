@@ -59,9 +59,10 @@ interface Message {
   multipleDatasets?: MultiDatasetView[];
   multiSummary?: string;  // ← context_summary from the backend
   isSpaceBooking?: boolean;   // ← Track if message belongs to Space Booking session
+  isAdvanceAskAi?: boolean;   // ← Track if message belongs to Advance Ask-AI session
 }
 
-interface ChatSession { id: string; title: string; createdAt: number; updatedAt?: number; isPinned?: boolean; isArchived?: boolean; group_name?: string; isSpaceBooking?: boolean; }
+interface ChatSession { id: string; title: string; createdAt: number; updatedAt?: number; isPinned?: boolean; isArchived?: boolean; group_name?: string; isSpaceBooking?: boolean; isAdvanceAskAi?: boolean; }
 interface Group {
   id: string;
   name: string;
@@ -325,7 +326,7 @@ function buildTable(rows: Record<string, string>[], cols?: string[]): string {
   return `<div class="table-wrapper"><table class="ai-table">${thead}${tbody}${tfoot}</table></div>`;
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
 //  EXTRACT RESPONSE CONTENT (Remove session_id wrapper)
 // ══════════════════════════════════════════════════════════════════════════════
 
@@ -1294,6 +1295,7 @@ export default function Home() {
   const [isSpaceBooking, setIsSpaceBooking] = useState<boolean>(false);
   const [isComplaints, setIsComplaints] = useState<boolean>(false);
   const [isComplaintsModalOpen, setIsComplaintsModalOpen] = useState<boolean>(false);
+  const [isAdvanceAskAi, setIsAdvanceAskAi] = useState<boolean>(false);
   const [activeBookingBubbleIndex, setActiveBookingBubbleIndex] = useState<number | null>(null);
   const [bookingStartDate, setBookingStartDate] = useState<string>("");
   const [bookingEndDate, setBookingEndDate] = useState<string>("");
@@ -1301,9 +1303,14 @@ export default function Home() {
   const [bookingEndTime, setBookingEndTime] = useState<string>("");
 
   const isSpaceBookingRef = useRef(isSpaceBooking);
+  const isAdvanceAskAiRef = useRef(isAdvanceAskAi);
+  
   useEffect(() => {
     isSpaceBookingRef.current = isSpaceBooking;
   }, [isSpaceBooking]);
+  useEffect(() => {
+    isAdvanceAskAiRef.current = isAdvanceAskAi;
+  }, [isAdvanceAskAi]);
 
   useEffect(() => {
     if (isComplaints) {
@@ -1931,6 +1938,7 @@ export default function Home() {
           sessionId: sid,
           group_name: selectedGroupName,
           isSpaceBooking: (sid === sessionId ? isSpaceBooking : (chatSessions.find(s => s.id === sid)?.isSpaceBooking || false)) || valid.some(m => m.isSpaceBooking),
+          isAdvanceAskAi: (sid === sessionId ? isAdvanceAskAi : (chatSessions.find(s => s.id === sid)?.isAdvanceAskAi || false)) || valid.some(m => m.isAdvanceAskAi),
           chatHistory: valid.map(m => ({
             role: m.role,
             text: m.isAudio
@@ -2404,6 +2412,20 @@ export default function Home() {
 
         // "[DONE]" = end of this response → finalize bubble, stay connected
         if (jsonStr.trim() === "[DONE]" || jsonStr.trim() === "__END__") {
+          
+          if (!accRef.current.trim()) {
+            sessionMessagesRef.current.get(sessionIdRef.current)?.forEach(m => {
+              m.streaming = false;
+            });
+            return;
+          }
+          const valid = sessionMessagesRef.current.get(sessionIdRef.current) || [];
+          saveChatHistory(sessionIdRef.current, valid.map(m => ({
+            ...m,
+            isSpaceBooking: isSpaceBookingRef.current, //   Store space booking state
+            isAdvanceAskAi: isAdvanceAskAiRef.current //   Store advance ask ai state
+          })));
+
           const finalText = accRef.current;
           let processedText = finalText;
           let isGraphResponse = false;
@@ -2463,6 +2485,7 @@ export default function Home() {
                       streaming: false,
                       originalText: finalText,
                       isSpaceBooking: isSpaceBookingRef.current,
+                      isAdvanceAskAi: isAdvanceAskAiRef.current,
                       ...(multipleDatasets.length > 0 ? { multipleDatasets, multiSummary } : {}),
                     };
                   }
@@ -2540,7 +2563,8 @@ export default function Home() {
                 originalText: finalText,           // ← Store original raw response before HTML processing
                 tableData: tableData,              // ← Store table rows
                 tableTitle: tableTitle,             // ← Store table title
-                isSpaceBooking: isSpaceBookingRef.current // ← Store space booking state
+                isSpaceBooking: isSpaceBookingRef.current, // ← Store space booking state
+                isAdvanceAskAi: isAdvanceAskAiRef.current // ← Store advance ask ai state
               };
             }
             // Persist to per-session store so switching sessions keeps history
@@ -2595,10 +2619,10 @@ export default function Home() {
             const l = u.length - 1;
             // If last message is already our streaming AI bubble → update it
             if (u[l]?.role === "ai" && u[l]?.streaming === true) {
-              u[l] = { ...u[l], text: displayText, streaming: true, isSpaceBooking: isSpaceBookingRef.current };  // ← Preserve chartType
+              u[l] = { ...u[l], text: displayText, streaming: true, isSpaceBooking: isSpaceBookingRef.current, isAdvanceAskAi: isAdvanceAskAiRef.current };  // ← Preserve chartType
             } else {
               // First chunk → create the AI bubble now (only once) with current chartType
-              u.push({ role: "ai", text: displayText, streaming: true, chartType: chartType, isSpaceBooking: isSpaceBookingRef.current });
+              u.push({ role: "ai", text: displayText, streaming: true, chartType: chartType, isSpaceBooking: isSpaceBookingRef.current, isAdvanceAskAi: isAdvanceAskAiRef.current });
             }
             return u;
           });
@@ -2916,8 +2940,8 @@ export default function Home() {
     setTimeout(() => refetchSessions(), 400);
   };
 
-  const handleSwitchMode = (newMode: 'space_booking' | 'complaints' | 'ask_ai') => {
-    const currentMode = isSpaceBooking ? 'space_booking' : isComplaints ? 'complaints' : 'ask_ai';
+  const handleSwitchMode = (newMode: 'space_booking' | 'complaints' | 'ask_ai' | 'advance_ask_ai') => {
+    const currentMode = isSpaceBooking ? 'space_booking' : isComplaints ? 'complaints' : isAdvanceAskAi ? 'advance_ask_ai' : 'ask_ai';
     if (newMode === currentMode) {
       return;
     }
@@ -2932,6 +2956,7 @@ export default function Home() {
       // If current chat is empty, just switch the mode of the current chat!
       setIsSpaceBooking(newMode === 'space_booking');
       setIsComplaints(newMode === 'complaints');
+      setIsAdvanceAskAi(newMode === 'advance_ask_ai');
     }
   };
 
@@ -3504,6 +3529,7 @@ export default function Home() {
       isText: true,
       isGraph: isGraphMode,
       isSpaceBooking,
+      isAdvanceAskAi,
       query: userText,
       userName: loggedInUser,
       subUserName: userIdFromUrl ?? loggedInUser,
@@ -3597,6 +3623,7 @@ export default function Home() {
       isText: true,
       isGraph: isGraphMode,
       isSpaceBooking,
+      isAdvanceAskAi,
       query: userText,
       userName: loggedInUser,
       subUserName: userIdFromUrl ?? loggedInUser,
@@ -3703,6 +3730,8 @@ export default function Home() {
               setIsSpaceBooking={setIsSpaceBooking}
               isComplaints={isComplaints}
               setIsComplaints={setIsComplaints}
+              isAdvanceAskAi={isAdvanceAskAi}
+              setIsAdvanceAskAi={setIsAdvanceAskAi}
               isChatStarted={messages.length > 0}
               onSwitchMode={handleSwitchMode}
             >
