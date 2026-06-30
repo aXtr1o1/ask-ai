@@ -2838,7 +2838,7 @@ export default function Home() {
     }, 3000);
   };
 
-  const handleNewChat = async (initialMode?: 'space_booking' | 'complaints' | 'ask_ai') => {
+  const handleNewChat = async (initialMode?: 'space_booking' | 'complaints' | 'ask_ai' | 'advance_ask_ai') => {
     if (isLoading) {
       showWarningToast("Please wait, don't switch the chat!");
       console.log("⚠️ Chat creation blocked: Please wait, don't switch the chat!");
@@ -2854,6 +2854,7 @@ export default function Home() {
     setIsLoading(false);
     setIsSpaceBooking(initialMode === 'space_booking'); // Reset space booking state when starting a new chat
     setIsComplaints(initialMode === 'complaints');
+    setIsAdvanceAskAi(initialMode === 'advance_ask_ai');
     setIsComplaintsModalOpen(false);
     setActiveBookingBubbleIndex(null);
 
