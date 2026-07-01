@@ -3,6 +3,7 @@ import localFont from "next/font/local";
 import "./globals.css";
 import { ApiPreconnect } from "./components/ApiPreconnect";
 import { ThemeScript } from "./components/ThemeScript";
+import Script from "next/script";
 
 const sometypeMono = localFont({
   variable: "--font-sometype-mono",
@@ -34,7 +35,9 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <script
+        <Script
+          id="theme-inline-script"
+          strategy="beforeInteractive"
           dangerouslySetInnerHTML={{
             __html: `
               (function() {

@@ -25,6 +25,7 @@ import SpaceBooking from "./components/Bookings/spacebooking";
 import SpaceBookingModal from "./components/Bookings/SpaceBookingModal";
 import ComplaintsModal from "./components/Bookings/ComplaintsModal";
 import AdvanceAskAiRenderer from "./components/AdvanceASKAI/AdvanceAskAiRenderer";
+import AdvanceWelcome from "./components/AdvanceASKAI/AdvanceWelcome";
 import { escapeRawNewlinesInJSON } from "./components/AdvanceASKAI/utils";
 
 /* changes done by megnathan: Cleaned up icon imports to avoid conflicts with local definitions */
@@ -4657,35 +4658,39 @@ export default function Home() {
             <div className="landing-start-column">
               <div className="landing-start-spacer-top" aria-hidden />
               <div className="landing-container landing-container--start">
-                <div className="landing-card">
-                  <h1
-                    style={{
-                      fontSize: 32,
-                      fontWeight: 700,
-                      marginBottom: 16,
-                      background:
-                        "linear-gradient(180deg, #AE8625 0%, #F7EF8A 35%, #D2AC47 65%, #EDC967 100%)",
-                      backgroundSize: "200% 200%",
-                      WebkitBackgroundClip: "text",
-                      backgroundClip: "text",
-                      WebkitTextFillColor: "transparent",
-                      animation: "goldShine 3s ease-in-out infinite",
-                    }}
-                  >
-                    {isSpaceBooking
-                      ? "Welcome to Space Booking"
-                      : selectedGroupName
-                        ? `📁 ${selectedGroupName}`
-                        : "Welcome to Ask AI"}
-                  </h1>
-                  <p className="landing-subtitle">
-                    {isSpaceBooking
-                      ? "Let's book your space buddy"
-                      : selectedGroupName
-                        ? `Start a new chat in ${selectedGroupName}`
-                        : "Let's work together buddy"}
-                  </p>
-                </div>
+                {isAdvanceAskAi ? (
+                  <AdvanceWelcome />
+                ) : (
+                  <div className="landing-card">
+                    <h1
+                      style={{
+                        fontSize: 32,
+                        fontWeight: 700,
+                        marginBottom: 16,
+                        background:
+                          "linear-gradient(180deg, #AE8625 0%, #F7EF8A 35%, #D2AC47 65%, #EDC967 100%)",
+                        backgroundSize: "200% 200%",
+                        WebkitBackgroundClip: "text",
+                        backgroundClip: "text",
+                        WebkitTextFillColor: "transparent",
+                        animation: "goldShine 3s ease-in-out infinite",
+                      }}
+                    >
+                      {isSpaceBooking
+                        ? "Welcome to Space Booking"
+                        : selectedGroupName
+                          ? `📁 ${selectedGroupName}`
+                          : "Welcome to Ask AI"}
+                    </h1>
+                    <p className="landing-subtitle">
+                      {isSpaceBooking
+                        ? "Let's book your space buddy"
+                        : selectedGroupName
+                          ? `Start a new chat in ${selectedGroupName}`
+                          : "Let's work together buddy"}
+                    </p>
+                  </div>
+                )}
               </div>
               {renderChatInputFooter("landing")}
               <div className="landing-start-spacer-bottom" aria-hidden />
@@ -4730,9 +4735,6 @@ export default function Home() {
                     return ((m.tableData && m.tableData.length > 0) || (m.multipleDatasets && m.multipleDatasets.length > 0)) ? i : last;
                   }, -1);
                   return messages.map((msg, idx) => {
-                    if (msg.role === "user" && typeof msg.text === "string" && msg.text.trim().startsWith("SpotCode:")) {
-                      return null;
-                    }
                     const isUser = msg.role === "user";
                   const isError = msg.role === "error";
                   const isStreaming = msg.streaming === true;
@@ -4841,7 +4843,7 @@ export default function Home() {
                           <>{(() => {
                             if (isUser && msg.text.includes("[CALENDAR_PAYLOAD]")) {
                               const match = msg.text.match(/start_time:\s*"([^"]+)",\s*end_time:\s*"([^"]+)"/);
-                              const prefix = msg.text.split("[CALENDAR_PAYLOAD]")[0].replace(/\|\s*$/, "").trim();
+                              const prefix = msg.text.split("[CALENDAR_PAYLOAD]")[0].replace(/\|\s*Book\s+from\s*$/i, "").replace(/\|\s*$/, "").trim();
                               if (match) {
                                 return prefix ? `${prefix} | Book from ${match[1]} to ${match[2]}` : `Book from ${match[1]} to ${match[2]}`;
                               }

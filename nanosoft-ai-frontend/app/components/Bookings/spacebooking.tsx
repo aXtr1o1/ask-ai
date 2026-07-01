@@ -539,7 +539,7 @@ export default function SpaceBooking({
         </div>
       )}
 
-      {!isSpaceBooking && !isComplaints && (
+      {!isSpaceBooking && !isComplaints && !isAdvanceAskAi && (
         <div
           style={{
             display: "flex",
