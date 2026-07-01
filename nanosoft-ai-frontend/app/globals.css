@@ -1813,6 +1813,16 @@ body {
   border-color: rgba(212, 175, 55, 0.3);
 }
 
+/* ─── Advance AI message bubble overrides ─── */
+.message-bubble.advance-ai-message {
+  max-width: 95% !important;
+  width: 100% !important;
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  box-shadow: none !important;
+}
+
 /* ─── Error bubble ─── */
 .message-bubble.error {
   background: rgba(60, 10, 10, 0.7);

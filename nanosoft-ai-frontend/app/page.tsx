@@ -24,6 +24,8 @@ import { recordPromptForGhostHistory, ghostPromptHistoryStorageKey } from "./lib
 import SpaceBooking from "./components/Bookings/spacebooking";
 import SpaceBookingModal from "./components/Bookings/SpaceBookingModal";
 import ComplaintsModal from "./components/Bookings/ComplaintsModal";
+import AdvanceAskAiRenderer from "./components/AdvanceASKAI/AdvanceAskAiRenderer";
+import { escapeRawNewlinesInJSON } from "./components/AdvanceASKAI/utils";
 
 /* changes done by megnathan: Cleaned up icon imports to avoid conflicts with local definitions */
 import {
@@ -97,11 +99,12 @@ function extractText(raw: any, depth = 0): string {
   if (Array.isArray(raw))
     return raw.map(item => extractText(item, depth + 1)).filter(t => t.trim()).join("");
   if (typeof raw === "object") {
-    // Priority order: response → content → text → reply
+    // Priority order: response → content → text → reply → formatted_answer
     if (raw.response) return extractText(raw.response, depth + 1);
     if (raw.content) return extractText(raw.content, depth + 1);
     if (raw.text) return extractText(raw.text, depth + 1);
     if (raw.reply) return extractText(raw.reply, depth + 1);
+    if (raw.formatted_answer) return extractText(raw.formatted_answer, depth + 1);
     return "";
   }
   return String(raw);
@@ -332,7 +335,8 @@ function buildTable(rows: Record<string, string>[], cols?: string[]): string {
 
 function extractResponseContent(text: string): string {
   try {
-    const parsed = JSON.parse(text);
+    const sanitized = escapeRawNewlinesInJSON(text);
+    const parsed = JSON.parse(sanitized);
 
     // If wrapper has session_id + response, extract just the response
     if (parsed.session_id !== undefined && parsed.response !== undefined) {
@@ -2432,102 +2436,119 @@ export default function Home() {
           let tableData: TableWithTileRow[] | undefined = undefined;
           let tableTitle: string | undefined = undefined;
 
-          // 🔑 FIRST: Check if this is a GRAPH response (type="graph")
-          const cleanedForGraph = extractResponseContent(finalText);
-          const graphData = parseGraphData(cleanedForGraph);
-          if (graphData) {
-            console.log("📊 [DONE] Graph response detected — will render as bar chart");
-            processedText = cleanedForGraph // ← Keep raw JSON for parseGraphData() in render
-            isGraphResponse = true;
-          } else {
-            // 🔑 SECOND: Check if this is a MULTIPLE_DATASETS response
-            let multipleDatasets: MultiDatasetView[] = [];
-            let multiSummary: string | undefined;
+          // 🔑 FIRST: Check if this is an Advance ASK-AI response
+          const cleanedText = extractResponseContent(finalText);
+          let isAdvance = isAdvanceAskAiRef.current;
+          if (!isAdvance && cleanedText.trim().startsWith('{')) {
             try {
-              const outerParsed = JSON.parse(finalText);
-              const innerStr = outerParsed?.response ?? finalText;
-              const inner = typeof innerStr === "string" ? JSON.parse(innerStr) : innerStr;
-              if (inner?.type === "multiple_datasets" && Array.isArray(inner?.datasets)) {
-                console.log("📋 [DONE] Multiple datasets response detected — rendering", inner.datasets.length, "tables");
-                multiSummary = inner.context_summary || "Here are the results of your query.";
-                const parsedMulti: MultiDatasetView[] = (inner.datasets as Array<{
-                  name: string;
-                  records?: Record<string, unknown>[];
-                  total_count?: number;
-                  search_context?: SearchContext;
-                }>).map((ds) => {
-                  const dsJsonStr = JSON.stringify({
-                    context_summary: ds.name,
-                    search_context: ds.search_context,
-                    is_multi_dataset: true,
-                    records: (ds.records || []).filter((rec: Record<string, unknown>) =>
-                      Object.values(rec).some(v => v !== null && v !== undefined && v !== "")
-                    ),
-                  });
-                  const html = renderLargeDataset(dsJsonStr) || "";
-                  const rows = extractTableRows(html);
-                  return {
-                    name: ds.name,
-                    rows,
-                    html,
-                    totalCount: typeof ds.total_count === "number" ? ds.total_count : rows.length,
-                  };
-                });
-                multipleDatasets = parsedMulti.filter((ds) => ds.rows.length > 0);
-                processedText = multiSummary || "Here are the results of your query.";
-                setMessages(prev => {
-                  const u = [...prev];
-                  const l = u.length - 1;
-                  if (u[l]?.role === "ai") {
-                    u[l] = {
-                      role: "ai",
-                      text: multiSummary!,
-                      streaming: false,
-                      originalText: finalText,
-                      isSpaceBooking: isSpaceBookingRef.current,
-                      isAdvanceAskAi: isAdvanceAskAiRef.current,
-                      ...(multipleDatasets.length > 0 ? { multipleDatasets, multiSummary } : {}),
-                    };
-                  }
-                  const activeSid = sessionIdRef.current;
-                  sessionMessagesRef.current.set(activeSid, u);
-                  return u;
-                });
-                accRef.current = "";
-                setIsLoading(false);
-                setTimeout(() => inputRef.current?.focus(), 50);
-                return;
+              const sanitizedCleaned = escapeRawNewlinesInJSON(cleanedText);
+              const parsed = JSON.parse(sanitizedCleaned);
+              if (parsed && parsed.formatted_answer !== undefined) {
+                isAdvance = true;
+                isAdvanceAskAiRef.current = true;
               }
-            } catch { /* not a multiple_datasets JSON */ }
+            } catch {}
+          }
 
-            // Not a graph, not multiple_datasets → continue with normal processing
-            const cleanedText = extractResponseContent(finalText);
-            const largeDatasetHTML = renderLargeDataset(cleanedText);
-
-            if (largeDatasetHTML) {
-              processedText = largeDatasetHTML;
-              const rows = extractTableRows(largeDatasetHTML);
-              if (rows.length > 0) {
-                tableData = rows;
-                tableTitle = "Data";
-                console.log("✅ [DONE] Rendered as unified table structure (" + rows.length + " rows)");
-              }
+          if (isAdvance) {
+            console.log("🚀 [DONE] Advance Ask-AI response detected — preserving JSON envelope");
+            processedText = cleanedText;
+          } else {
+            // 🔑 SECOND: Check if this is a GRAPH response (type="graph")
+            const graphData = parseGraphData(cleanedText);
+            if (graphData) {
+              console.log("📊 [DONE] Graph response detected — will render as bar chart");
+              processedText = cleanedText; // ← Keep raw JSON for parseGraphData() in render
+              isGraphResponse = true;
             } else {
+              // 🔑 THIRD: Check if this is a MULTIPLE_DATASETS response
+              let multipleDatasets: MultiDatasetView[] = [];
+              let multiSummary: string | undefined;
               try {
-                // ── Space booking plain-text: skip table-conversion formatting ──
-                // Booking confirmations and status messages have "Key: Value" lines
-                // that formatOutput() incorrectly converts into HTML tables.
-                // For space booking sessions, render as simple line-broken plain text.
-                if (isSpaceBookingRef.current) {
-                  processedText = formatContextSummary(cleanedText);
-                  console.log("📝 [DONE] Space booking — rendered as plain text (no table conversion)");
-                } else {
-                  processedText = formatOutput(cleanedText);
-                  console.log("📝 [DONE] Formatted as text");
+                const outerParsed = JSON.parse(finalText);
+                const innerStr = outerParsed?.response ?? finalText;
+                const inner = typeof innerStr === "string" ? JSON.parse(innerStr) : innerStr;
+                if (inner?.type === "multiple_datasets" && Array.isArray(inner?.datasets)) {
+                  console.log("📋 [DONE] Multiple datasets response detected — rendering", inner.datasets.length, "tables");
+                  multiSummary = inner.context_summary || "Here are the results of your query.";
+                  const parsedMulti: MultiDatasetView[] = (inner.datasets as Array<{
+                    name: string;
+                    records?: Record<string, unknown>[];
+                    total_count?: number;
+                    search_context?: SearchContext;
+                  }>).map((ds) => {
+                    const dsJsonStr = JSON.stringify({
+                      context_summary: ds.name,
+                      search_context: ds.search_context,
+                      is_multi_dataset: true,
+                      records: (ds.records || []).filter((rec: Record<string, unknown>) =>
+                        Object.values(rec).some(v => v !== null && v !== undefined && v !== "")
+                      ),
+                    });
+                    const html = renderLargeDataset(dsJsonStr) || "";
+                    const rows = extractTableRows(html);
+                    return {
+                      name: ds.name,
+                      rows,
+                      html,
+                      totalCount: typeof ds.total_count === "number" ? ds.total_count : rows.length,
+                    };
+                  });
+                  multipleDatasets = parsedMulti.filter((ds) => ds.rows.length > 0);
+                  processedText = multiSummary || "Here are the results of your query.";
+                  setMessages(prev => {
+                    const u = [...prev];
+                    const l = u.length - 1;
+                    if (u[l]?.role === "ai") {
+                      u[l] = {
+                        role: "ai",
+                        text: multiSummary!,
+                        streaming: false,
+                        originalText: finalText,
+                        isSpaceBooking: isSpaceBookingRef.current,
+                        isAdvanceAskAi: isAdvanceAskAiRef.current,
+                        ...(multipleDatasets.length > 0 ? { multipleDatasets, multiSummary } : {}),
+                      };
+                    }
+                    const activeSid = sessionIdRef.current;
+                    sessionMessagesRef.current.set(activeSid, u);
+                    return u;
+                  });
+                  accRef.current = "";
+                  setIsLoading(false);
+                  setTimeout(() => inputRef.current?.focus(), 50);
+                  return;
                 }
-              } catch (err) {
-                console.log("📝 [DONE] Using raw text", err);
-                processedText = finalText;
+              } catch { /* not a multiple_datasets JSON */ }
+
+              // Not a graph, not multiple_datasets → continue with normal processing
+              const largeDatasetHTML = renderLargeDataset(cleanedText);
+
+              if (largeDatasetHTML) {
+                processedText = largeDatasetHTML;
+                const rows = extractTableRows(largeDatasetHTML);
+                if (rows.length > 0) {
+                  tableData = rows;
+                  tableTitle = "Data";
+                  console.log("✅ [DONE] Rendered as unified table structure (" + rows.length + " rows)");
+                }
+              } else {
+                try {
+                  // ── Space booking plain-text: skip table-conversion formatting ──
+                  // Booking confirmations and status messages have "Key: Value" lines
+                  // that formatOutput() incorrectly converts into HTML tables.
+                  // For space booking sessions, render as simple line-broken plain text.
+                  if (isSpaceBookingRef.current) {
+                    processedText = formatContextSummary(cleanedText);
+                    console.log("📝 [DONE] Space booking — rendered as plain text (no table conversion)");
+                  } else {
+                    processedText = formatOutput(cleanedText);
+                    console.log("📝 [DONE] Formatted as text");
+                  }
+                } catch (err) {
+                  console.log("📝 [DONE] Using raw text", err);
+                  processedText = finalText;
+                }
               }
             }
           }
@@ -2970,7 +2991,28 @@ export default function Home() {
 
       const text = m.text || "";
 
-      // 🔑 FIRST: Check if this is a GRAPH response
+      // 🔑 FIRST: Check if this is an Advance ASK-AI response
+      try {
+        const cleaned = extractResponseContent(text);
+        if (cleaned.trim().startsWith('{')) {
+          const sanitizedCleaned = escapeRawNewlinesInJSON(cleaned);
+          const parsed = JSON.parse(sanitizedCleaned);
+          if (parsed && parsed.formatted_answer !== undefined) {
+            console.log("🚀 [HISTORY] Advance Ask-AI response detected");
+            return {
+              ...m,
+              text: cleaned,
+              originalText: text,
+              isAdvanceAskAi: true,
+              isSpaceBooking: isSpaceBookingSession
+            };
+          }
+        }
+      } catch (e) {
+        // Ignore
+      }
+
+      // 🔑 SECOND: Check if this is a GRAPH response
       const graphData = parseGraphData(text);
       if (graphData) {
         console.log("📊 [HISTORY] Graph response detected — keeping as raw JSON for chart");
@@ -4728,8 +4770,17 @@ export default function Home() {
                       )}
 
                       <div
-                        className={`message-bubble ${msg.role}${isGraphMsg ? ' graph-message' : ''}${(msg.tableData && msg.tableData.length > 0) || (msg.multipleDatasets && msg.multipleDatasets.length > 0) ? ' table-message' : ''}`}
-                        style={{ position: 'relative' }}
+                        className={`message-bubble ${msg.role}${isGraphMsg ? ' graph-message' : ''}${(msg.tableData && msg.tableData.length > 0) || (msg.multipleDatasets && msg.multipleDatasets.length > 0) ? ' table-message' : ''}${msg.isAdvanceAskAi ? ' advance-ai-message' : ''}`}
+                        style={{
+                          position: 'relative',
+                          ...(msg.isAdvanceAskAi ? {
+                            background: 'none',
+                            border: 'none',
+                            padding: 0,
+                            boxShadow: 'none',
+                            maxWidth: responsive.isMobile ? '92%' : responsive.isTablet ? '85%' : '75%',
+                          } : {})
+                        }}
                       >
 
                         {isAudio ? (
@@ -4798,6 +4849,21 @@ export default function Home() {
                             }
                             return msg.text;
                           })()}</>
+
+                        ) : msg.isAdvanceAskAi ? (
+                          /* ── Advance ASK-AI: Render formatting agent output dynamically ── */
+                          <AdvanceAskAiRenderer 
+                            text={msg.text} 
+                            isStreaming={isStreaming} 
+                            userQuery={(() => {
+                              for (let i = idx - 1; i >= 0; i--) {
+                                if (messages[i]?.role === "user") {
+                                  return messages[i].text;
+                                }
+                              }
+                              return "";
+                            })()} 
+                          />
 
                         ) : isStreaming ? (
                           /* ── Streaming: pre-wrap plain text + blinking cursor ── */

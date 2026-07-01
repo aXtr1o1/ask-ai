@@ -71,6 +71,10 @@ DECISION 2 — LAYOUT (visual presentation):
                     or machine-readable output.
     MARKDOWN      — Rich formatted output with headers, bold, mixed elements. Best for
                     reports, multi-section summaries, or complex structured answers.
+    GRAPH         — Graphical representation (like charts). Best when data has numeric values
+                    compared across labels, or when user explicitly asks for a graph, chart,
+                    or visual breakdown. The formatted_answer should be stringified JSON
+                    containing the keys 'title', 'records' (array of objects), 'label_key', and 'value_key'.
 
 DECISION 3 — FORMAT THE CONTENT:
   Apply the chosen layout to the final_answer. Preserve all facts exactly.
@@ -84,7 +88,7 @@ Respond with ONLY a valid JSON object. No explanation text. No markdown fences.
 
 {
   "response_type": "<the semantic type you reasoned — e.g. count, breakdown, list, comparison, report, analysis, summary, lookup, ranking, or any appropriate noun phrase>",
-  "layout": "<PLAIN_TEXT|BULLET_LIST|NUMBERED_LIST|TABLE|JSON|MARKDOWN>",
+  "layout": "<PLAIN_TEXT|BULLET_LIST|NUMBERED_LIST|TABLE|JSON|MARKDOWN|GRAPH>",
   "format_reason": "<one sentence explaining both the type and layout choice>",
   "formatted_answer": "<the final_answer presented in the chosen layout>"
 }

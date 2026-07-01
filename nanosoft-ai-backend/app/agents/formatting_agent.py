@@ -215,7 +215,7 @@ async def formatting_agent_node(state: AgentState) -> AgentState:
         formatted_answer  = result_json.get("formatted_answer", final_answer)
 
         # Validate layout value — model may return unexpected strings
-        valid_layouts = {"PLAIN_TEXT", "BULLET_LIST", "NUMBERED_LIST", "TABLE", "JSON", "MARKDOWN"}
+        valid_layouts = {"PLAIN_TEXT", "BULLET_LIST", "NUMBERED_LIST", "TABLE", "JSON", "MARKDOWN", "GRAPH"}
         if layout not in valid_layouts:
             logger.warning(
                 "|| [FormattingAgent] unexpected layout='%s' — defaulting to MARKDOWN",
