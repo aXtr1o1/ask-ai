@@ -343,21 +343,32 @@ def group_and_count(
     """
     df = _to_df(state, module)
     if df.empty or group_field not in df.columns:
-        return {"module": module, "group_field": group_field, "total_records": 0, "ranked": []}
+        return {
+            "module":          module,
+            "group_field":     group_field,
+            "secondary_field": secondary_field or None,
+            "total_records":   0,
+            "unique_groups":   0,
+            "ranked":          [],
+        }
 
     group_cols = [group_field] + ([secondary_field] if secondary_field and secondary_field in df.columns else [])
     grouped    = df.groupby(group_cols, dropna=False).size().reset_index(name="count")
     grouped    = grouped.sort_values("count", ascending=False).head(top_n)
 
-    ranked = grouped.to_dict(orient="records")
+    # Replace float NaN (from null group keys) with None for JSON safety
+    ranked = [
+        {k: (None if isinstance(v, float) and math.isnan(v) else v) for k, v in row.items()}
+        for row in grouped.to_dict(orient="records")
+    ]
 
     return {
-        "module":         module,
-        "group_field":    group_field,
-        "secondary_field":secondary_field or None,
-        "total_records":  len(df),
-        "unique_groups":  len(grouped),
-        "ranked":         ranked,
+        "module":          module,
+        "group_field":     group_field,
+        "secondary_field": secondary_field or None,
+        "total_records":   len(df),
+        "unique_groups":   len(grouped),
+        "ranked":          ranked,
     }
 
 
@@ -443,4 +454,4 @@ ALL_TOOLS = [
     group_and_count,
     arithmetic,
     logarithm,
-]
+]

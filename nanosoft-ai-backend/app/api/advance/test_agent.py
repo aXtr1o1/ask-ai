@@ -37,7 +37,7 @@ def _print_tool_output(i: int, tool_out: dict):
     # Show what operation was performed
     if "start_field" in tool_out:
         print(f"  Formula   : elapsed_minutes({tool_out['module']}, {tool_out['start_field']} -> {tool_out['end_field']})")
-        print(f"  Records   : {tool_out['total_records']} total | {tool_out['computed_count']} computed | {tool_out['null_count']} null ({tool_out['null_rate_percent']}%)")
+        print(f"  Records   : {tool_out['total_records']} total | {tool_out.get('computed_count', 0)} computed | {tool_out.get('null_count', 0)} null ({tool_out.get('null_rate_percent', 0)}%)")
         stats = tool_out.get("stats", {})
         if stats:
             print(f"  Average   : {stats.get('average')} min")
@@ -46,11 +46,13 @@ def _print_tool_output(i: int, tool_out: dict):
 
     elif "group_field" in tool_out:
         print(f"  Formula   : group_and_count({tool_out['module']}, group_by={tool_out['group_field']})")
-        print(f"  Records   : {tool_out['total_records']} total | {tool_out['unique_groups']} groups")
+        print(f"  Records   : {tool_out['total_records']} total | {tool_out.get('unique_groups', 0)} groups")
         print(f"  Ranked    :")
         for rank in tool_out.get("ranked", [])[:5]:
             group_key = tool_out["group_field"]
-            print(f"              {rank.get(group_key, '?'):40s} -> {rank.get('count')} records")
+            group_val = rank.get(group_key)
+            group_val_str = str(group_val) if group_val is not None else "(no value)"
+            print(f"              {group_val_str:40s} -> {rank.get('count')} records")
 
     elif "count" in tool_out and "condition" in tool_out:
         print(f"  Formula   : count_records({tool_out['module']}, condition={tool_out['condition']})")
@@ -132,7 +134,13 @@ if __name__ == "__main__":
     # -- No filters (all records) --
     run_question("Q1", filter_values={})
     run_question("Q2", filter_values={})
+    run_question("Q3", filter_values={})
+    run_question("Q4", filter_values={})
+    run_question("Q5", filter_values={})
 
     # -- With filters (real usage) --
-    run_question("Q1", filter_values={"locality": "Ajman"})
-    run_question("Q2", filter_values={"building": "Building 1"})
+    run_question("Q1", filter_values={"locality": "Doha"})
+    run_question("Q2", filter_values={"building": "Building 1 - Residential High Rise"})
+    run_question("Q3", filter_values={"locality": "Doha"})
+    run_question("Q4", filter_values={"building": "Reef Mall"})
+    run_question("Q5", filter_values={"locality": "Doha"})
