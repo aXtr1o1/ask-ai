@@ -1,0 +1,22 @@
+[
+  {
+    "SBRequestNo": "SB-2026-001",
+    "LocalityName": "Doha",
+    "BuildingName": "Building 1 - Residential High Rise",
+    "FloorName": "Floor 3",
+    "SpotName": "Appartement-30",
+    "DivisionName": "HVAC System",
+    "ServiceTypeName": "Air Conditioning Services",
+    "SBTypeName": "Scheduled Service",
+    "SBStatus": "Open",
+    "SBStageName": "Service Booking Raised",
+    "PriorityName": "P2 High",
+    "RequestedBy": "admin",
+    "TechName": null,
+    "BookedDateTime": "19-06-2026 10:00:00",
+    "ScheduledDateTime": "20-06-2026 09:00:00",
+    "CompletedDateTime": null,
+    "ContractName": "Facility Management Residential Area",
+    "Remarks": "Annual AC service booking for apartment block"
+  }
+]
