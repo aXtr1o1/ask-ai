@@ -80,11 +80,12 @@ def get_filtered_records(
     output: dict[str, list[dict]] = {}
     for module in modules:
         raw = _load_module(module)
-        filtered = _apply_filters(raw, filter_fields, filter_values)
-        projected = _project_columns(filtered, filter_fields)
+        module_filter_fields = filter_fields.get(module, {})
+        filtered = _apply_filters(raw, module_filter_fields, filter_values)
+        projected = _project_columns(filtered, module_filter_fields)
         output[module] = projected
         logger.info(
             "[RETRIEVAL] module=%s | raw=%d | filtered=%d | columns=%s",
-            module, len(raw), len(filtered), list(filter_fields.values()),
+            module, len(raw), len(filtered), list(module_filter_fields.values()),
         )
     return output

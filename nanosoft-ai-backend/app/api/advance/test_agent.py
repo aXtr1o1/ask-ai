@@ -219,4 +219,7 @@ def run_question(question_id: str, filter_values: dict = {}):
 if __name__ == "__main__":
     run_question("Q1", filter_values={})
     run_question("Q2", filter_values={})
+    run_question("Q3", filter_values={})
+    run_question("Q4", filter_values={})
+    run_question("Q5", filter_values={})
 
