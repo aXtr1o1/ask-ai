@@ -31,6 +31,58 @@ from app.api.advance.execution.tools import ALL_TOOLS
 logger = logging.getLogger("advance.execution.agent")
 
 
+# ── Helpers: parse Gemini content blocks ──────────────────────────────────
+def _extract_thinking(msg: AIMessage) -> str:
+    """
+    Attempt to extract Gemini's thinking/reasoning text.
+    Note: LangChain's Google GenAI wrapper currently encrypts the thinking
+    content in extras['signature'] and does not expose the raw text.
+    Returns empty string if not available.
+    """
+    content = msg.content
+    if not isinstance(content, list):
+        return ""
+    for item in content:
+        if not isinstance(item, dict):
+            continue
+        # Format 1: dedicated thinking block (older LangChain versions)
+        if item.get("type") == "thinking" and item.get("thinking"):
+            return item["thinking"]
+        # Format 2: extras dict with exposed thinking key
+        extras = item.get("extras", {})
+        if isinstance(extras, dict) and extras.get("thinking"):
+            return extras["thinking"]
+    return ""
+
+
+def _extract_reasoning(msg: AIMessage) -> str:
+    """
+    Extract the LLM's visible text rationale from a tool-calling AIMessage.
+    When the model calls tools it sometimes includes a short text explanation
+    alongside the tool_calls. This is used as the WHY in the execution trace
+    when the raw thinking block is not accessible.
+    """
+    thinking = _extract_thinking(msg)
+    if thinking:
+        return thinking
+    # Fall back to visible text block
+    return _extract_text(msg)
+
+
+def _extract_text(msg: AIMessage) -> str:
+    """Extract plain text from an AIMessage (handles list or str content)."""
+    content = msg.content
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            item.get("text", "")
+            for item in content
+            if isinstance(item, dict) and item.get("type") == "text"
+        ).strip()
+    return str(content)
+
+
 # ── State ──────────────────────────────────────────────────────────────────
 class AgentState(TypedDict):
     messages:          Annotated[list, add_messages]
@@ -101,28 +153,82 @@ def should_continue(state: AgentState) -> str:
 
 # ── Node: extract final result from messages ──────────────────────────────
 def extract_result(state: AgentState) -> dict:
-    """Collect all tool outputs into the result dict."""
-    tool_outputs = [
-        m for m in state["messages"]
-        if isinstance(m, ToolMessage)
-    ]
+    """
+    Walk the full message history and build a detailed execution trace:
+
+      agent_decides_tools  →  { step, thinking, tools: [{tool, args, output}] }
+      final_answer         →  { thinking, text }
+
+    Also keeps the flat tool_outputs list for backwards compat.
+    """
+    messages = state["messages"]
+
+    # Build lookup: tool_call_id → parsed tool output
+    tool_output_by_id: dict[str, dict] = {}
+    for msg in messages:
+        if isinstance(msg, ToolMessage):
+            try:
+                tool_output_by_id[msg.tool_call_id] = json.loads(msg.content)
+            except Exception:
+                tool_output_by_id[msg.tool_call_id] = {"raw": msg.content}
+
+    # Build execution trace
+    execution_trace = []
+    decision_step = 0
+
+    for msg in messages:
+        if not isinstance(msg, AIMessage):
+            continue
+
+        if msg.tool_calls:
+            # ── Agent decided to call tool(s) ────────────────────────────
+            decision_step += 1
+            thinking = _extract_reasoning(msg)
+
+            tools_info = []
+            for tc in msg.tool_calls:
+                tools_info.append({
+                    "tool":   tc["name"],
+                    "args":   tc["args"],
+                    "output": tool_output_by_id.get(tc["id"], {}),
+                })
+                logger.info(
+                    "[TRACE] step=%d  tool=%s  args=%s",
+                    decision_step, tc["name"], tc["args"],
+                )
+
+            execution_trace.append({
+                "step":     decision_step,
+                "type":     "agent_decides_tools",
+                "thinking": thinking,
+                "tools":    tools_info,
+            })
+
+        else:
+            # ── Final answer (no more tool calls) ────────────────────────
+            thinking  = _extract_thinking(msg)
+            final_txt = _extract_text(msg)
+            execution_trace.append({
+                "type":     "final_answer",
+                "thinking": thinking,
+                "text":     final_txt,
+            })
+            logger.info("[TRACE] final answer produced")
+
+    # Flat tool_outputs list (backwards compat)
+    tool_results = list(tool_output_by_id.values())
+
     last_ai = next(
-        (m for m in reversed(state["messages"]) if isinstance(m, AIMessage)),
+        (m for m in reversed(messages) if isinstance(m, AIMessage)),
         None,
     )
 
-    tool_results = []
-    for tm in tool_outputs:
-        try:
-            tool_results.append(json.loads(tm.content))
-        except Exception:
-            tool_results.append({"raw": tm.content})
-
     return {
         "result": {
-            "question": state["question"],
-            "tool_outputs": tool_results,
-            "agent_interpretation": last_ai.content if last_ai else "",
+            "question":             state["question"],
+            "tool_outputs":         tool_results,
+            "agent_interpretation": _extract_text(last_ai) if last_ai else "",
+            "execution_trace":      execution_trace,
         }
     }
 

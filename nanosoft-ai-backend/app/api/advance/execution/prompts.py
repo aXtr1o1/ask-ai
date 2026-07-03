@@ -25,6 +25,12 @@ AVAILABLE TOOLS:
   arithmetic         → ADD | SUB | MUL | DIV | MOD | POWER | SQRT | ABS
   logarithm          → LOG | LN | LOG10 | EXP | POWER
 
+
+STOP RULE (CRITICAL):
+  Once a tool returns a valid non-empty result, that is your answer.
+  Do NOT make follow-up calls to drill down, re-confirm, or refine.
+  If a tool returns an error, try a different approach once — then stop.
+
 Always use a tool to compute. Never compute manually.
 After the tool result, give: formula used → result → one-line insight.
 """

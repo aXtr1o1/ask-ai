@@ -342,22 +342,38 @@ def group_and_count(
         top_n:           How many top groups to return
     """
     df = _to_df(state, module)
-    if df.empty or group_field not in df.columns:
+
+    # Clear error if primary group field doesn't exist — do NOT return 0 silently
+    if df.empty:
         return {"module": module, "group_field": group_field, "total_records": 0, "ranked": []}
 
-    group_cols = [group_field] + ([secondary_field] if secondary_field and secondary_field in df.columns else [])
+    if group_field not in df.columns:
+        return {
+            "module":      module,
+            "group_field": group_field,
+            "field_error": True,
+            "error":       f"Field '{group_field}' does not exist in '{module}' data. "
+                           f"Cannot group by it. Use a different field.",
+            "total_records": 0,
+            "ranked":      [],
+        }
+
+    # secondary_field: use if present, skip silently if not
+    sec_available = secondary_field and secondary_field in df.columns
+    group_cols = [group_field] + ([secondary_field] if sec_available else [])
     grouped    = df.groupby(group_cols, dropna=False).size().reset_index(name="count")
     grouped    = grouped.sort_values("count", ascending=False).head(top_n)
 
     ranked = grouped.to_dict(orient="records")
 
     return {
-        "module":         module,
-        "group_field":    group_field,
-        "secondary_field":secondary_field or None,
-        "total_records":  len(df),
-        "unique_groups":  len(grouped),
-        "ranked":         ranked,
+        "module":                  module,
+        "group_field":             group_field,
+        "secondary_field":         secondary_field if sec_available else None,
+        "secondary_field_skipped": secondary_field if (secondary_field and not sec_available) else None,
+        "total_records":           len(df),
+        "unique_groups":           len(grouped),
+        "ranked":                  ranked,
     }
 
 
