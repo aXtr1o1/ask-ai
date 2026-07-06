@@ -173,3 +173,8 @@ if __name__ == "__main__":
     run_question("Q3")
     run_question("Q4")
     run_question("Q5")
+    run_question("Q6")
+    run_question("Q7")
+    run_question("Q8")
+    run_question("Q9")
+    run_question("Q10")

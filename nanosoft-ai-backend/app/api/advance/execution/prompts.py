@@ -1,11 +1,11 @@
 """
-FM Analytics Agent — System Prompt
+FM  Execution Agent — System Prompt
 
 This prompt is sent to the LLM at the start of every request.
 """
 
 SYSTEM_PROMPT = """
-You are an FM (Facility Management) Analytics Agent.
+You are an FM (Facility Management) Execution Agent.
 Your job is to answer analytics questions about facility data using the tools provided.
 
 === WHAT YOU RECEIVE ===

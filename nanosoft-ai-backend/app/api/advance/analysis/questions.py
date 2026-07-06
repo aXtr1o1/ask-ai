@@ -17,41 +17,24 @@ QUESTIONS: dict = {
     # ─────────────────────────────────────────────────────────────────────────
     "Q1": {
         "id": "Q1",
-        "question": "Generate a Building Performance Report.",
-        "modules": ["bdm", "ppm", "fa", "assets"],
+        "question": "Where are our critical infrastructure assets suffering the highest downtime?",
+        "modules": ["assets", "bdm"],
         "filter_fields": {
-            "bdm": {
-                "BuildingName":  "Name of the building",
-                "LocalityName":  "Geographic locality or area",
-                "DivisionName":  "Service division handling the work order",
-                "PriorityName":  "Priority level of the work order",
-                "WoStatus":      "Current status of the work order",
-                "ComplaintNo":   "Unique complaint or work order number",
-            },
-            "ppm": {
-                "BuildingName":  "Name of the building",
-                "LocalityName":  "Geographic locality or area",
-                "DivisionName":  "Service division handling the planned maintenance",
-                "PPMStatus":     "Current status of the planned preventive maintenance",
-                "WorkOrder":     "Unique PPM work order number",
-            },
-            "fa": {
-                "BuildingName":     "Name of the building",
-                "LocalityName":     "Geographic locality or area",
-                "DivisionName":     "Service division",
-                "PriorityName":     "Priority level",
-                "RMStageName":      "Current stage of the remedial maintenance",
-                "RMComplaintNo":    "Remedial maintenance complaint number",
-                "RMMaintenanceHrs": "Hours spent on remedial maintenance",
-            },
             "assets": {
-                "BuildingName":  "Name of the building",
+                "StatusName":   "Operational status of the asset (e.g. Offline, Online)",
+                "BuildingName":  "Name of the building where the asset is located",
                 "LocalityName":  "Geographic locality or area",
-                "DivisionName":  "Service division",
-                "PriorityName":  "Priority level of the asset",
-                "StatusName":    "Current operational status of the asset",
-                "ConditionName": "Physical condition of the asset",
+                "PriorityName":  "Priority level of the asset (e.g. P2 High)",
                 "AssetTagNo":    "Unique asset tag identifier",
+                "DivisionName":  "Service division responsible for the asset",
+                "EquipmentName": "Name or type of the equipment",
+            },
+            "bdm": {
+                "AnalysisStartTime": "Time when reactive breakdown analysis was started",
+                "AnalysisEndTime":   "Time when reactive breakdown analysis was completed",
+                "BuildingName":      "Name of the building linked to the complaint",
+                "LocalityName":      "Geographic locality of the complaint",
+                "WoStatus":          "Current status of the work order (Open / Closed)",
             },
         },
     },
@@ -59,34 +42,17 @@ QUESTIONS: dict = {
     # ─────────────────────────────────────────────────────────────────────────
     "Q2": {
         "id": "Q2",
-        "question": "Why has maintenance cost increased this quarter?",
-        "modules": ["bdm", "ppm", "assets"],
+        "question": "What is the current preventive maintenance backlog risk for high-priority sites?",
+        "modules": ["ppm"],
         "filter_fields": {
-            "bdm": {
-                "BuildingName":        "Name of the building",
-                "LocalityName":        "Geographic locality or area",
-                "DivisionName":        "Service division",
-                "PriorityName":        "Priority level of the work order",
-                "WoStatus":            "Current status of the work order",
-                "ComplaintNo":         "Unique complaint or work order number",
-                "ComplainedDateTime":  "Date and time the complaint was raised",
-            },
             "ppm": {
-                "BuildingName":  "Name of the building",
-                "LocalityName":  "Geographic locality or area",
-                "DivisionName":  "Service division",
-                "PPMStatus":     "Current status of the planned maintenance",
-                "WorkOrder":     "Unique PPM work order number",
-                "WoDateTime":    "Date and time the PPM work order was created",
-            },
-            "assets": {
-                "BuildingName":  "Name of the building",
-                "LocalityName":  "Geographic locality or area",
-                "DivisionName":  "Service division",
-                "PriorityName":  "Priority level of the asset",
-                "StatusName":    "Current operational status of the asset",
-                "ConditionName": "Physical condition of the asset",
-                "AssetTagNo":    "Unique asset tag identifier",
+                "PPMStatus":        "Current status of the planned preventive maintenance (Open / Closed)",
+                "BuildingName":     "Name of the building where the PPM is scheduled",
+                "LocalityName":     "Geographic locality or area",
+                "EquipmentName":    "Type or name of the equipment under maintenance",
+                "DivisionName":     "Service division handling the maintenance task",
+                "WorkOrder":        "Unique PPM work order number",
+                "PPMPendingPeriod": "Number of days the PPM task has been pending or overdue",
             },
         },
     },
@@ -94,26 +60,22 @@ QUESTIONS: dict = {
     # ─────────────────────────────────────────────────────────────────────────
     "Q3": {
         "id": "Q3",
-        "question": "Which technicians are carrying the heaviest workload right now?",
-        "modules": ["bdm", "ppm"],
+        "question": "Are structural cleanliness issues directly predicting spikes in reactive repairs?",
+        "modules": ["fa", "bdm"],
         "filter_fields": {
-            "bdm": {
-                "BuildingName":      "Name of the building",
+            "fa": {
+                "RMCategorySubName": "Sub-category of the remedial/audit issue (e.g. Rodent, Washroom, Cockroach, Floor)",
+                "RMCategoryName":    "Main category of the facility audit or remedial check",
+                "BuildingName":      "Name of the building where the audit issue was found",
                 "LocalityName":      "Geographic locality or area",
-                "DivisionName":      "Service division",
-                "PriorityName":      "Priority level",
-                "WoStatus":          "Current status of the work order",
-                "ComplaintNo":       "Unique complaint or work order number",
-                "AnalysisTechName":  "Technician assigned to analyse the complaint",
-                "ExecutionTechName": "Technician assigned to execute the work",
+                "RMComplaintNo":     "Unique remedial maintenance complaint number",
             },
-            "ppm": {
-                "BuildingName":  "Name of the building",
-                "LocalityName":  "Geographic locality or area",
-                "DivisionName":  "Service division",
-                "PPMStatus":     "Current status of the planned maintenance",
-                "WorkOrder":     "Unique PPM work order number",
-                "PMTechName":    "Technician assigned to the planned maintenance task",
+            "bdm": {
+                "BuildingName": "Name of the building where the breakdown was raised",
+                "LocalityName": "Geographic locality of the complaint",
+                "WoStatus":     "Current status of the work order (Open / Closed)",
+                "DivisionName": "Service division handling the reactive repair",
+                "ComplaintNo":  "Unique complaint or work order number",
             },
         },
     },
@@ -121,22 +83,18 @@ QUESTIONS: dict = {
     # ─────────────────────────────────────────────────────────────────────────
     "Q4": {
         "id": "Q4",
-        "question": "Which equipment is approaching the end of its useful life?",
-        "modules": ["assets"],
+        "question": "Which equipment types are consistently breaching their SLA resolution windows?",
+        "modules": ["bdm"],
         "filter_fields": {
-            "assets": {
-                "EquipmentName": "Type or name of the equipment",
-                "BuildingName":  "Name of the building",
-                "LocalityName":  "Geographic locality or area",
-                "DivisionName":  "Service division",
-                "PriorityName":  "Priority level of the asset",
-                "StatusName":    "Current operational status of the asset",
-                "ConditionName": "Physical condition rating of the asset",
-                "AssetTagNo":    "Unique asset tag identifier",
-                "MakeName":      "Manufacturer or make of the equipment",
-                "ModelName":     "Model name of the equipment",
-                "FloorName":     "Floor where the asset is located",
-                "SpotName":      "Specific spot or location of the asset on that floor",
+            "bdm": {
+                "WoStatus":     "Current status of the work order (Open / Closed)",
+                "DivisionName": "Service division / equipment type associated with the complaint",
+                "ResponseTAT": "Response turnaround indicator (e.g. ROT = on time, SNA = staff not assigned)",
+                "ResolutionTAT": "Resolution turnaround indicator showing if SLA window was met or breached",
+                "ComplaintNo":  "Unique complaint or work order number",
+                "BuildingName": "Name of the building where the complaint was raised",
+                "LocalityName": "Geographic locality of the complaint",
+                "PriorityName": "Priority level of the work order",
             },
         },
     },
@@ -144,20 +102,134 @@ QUESTIONS: dict = {
     # ─────────────────────────────────────────────────────────────────────────
     "Q5": {
         "id": "Q5",
-        "question": "How many routine checks are overdue right now?",
+        "question": "What percentage of closed work orders suffer from critical data compliance gaps?",
+        "modules": ["bdm", "ppm"],
+        "filter_fields": {
+            "bdm": {
+                "WoStatus":          "Current status of the work order — filter for Closed records",
+                "ExecutionTechName": "Technician who executed the work — blank value indicates a compliance gap",
+                "AnalysisTechName":  "Technician assigned to analyse the complaint",
+                "ComplaintNo":       "Unique complaint or work order number",
+                "BuildingName":      "Name of the building linked to the complaint",
+                "LocalityName":      "Geographic locality of the complaint",
+            },
+            "ppm": {
+                "PPMStatus":  "Current status of the PPM work order — filter for Closed records",
+                "PMTechName": "Technician assigned to the PPM task — blank value indicates a compliance gap",
+                "WorkOrder":  "Unique PPM work order number",
+                "BuildingName": "Name of the building for the PPM task",
+                "LocalityName": "Geographic locality or area",
+            },
+        },
+    },
+
+    # ─────────────────────────────────────────────────────────────────────────
+    "Q6": {
+        "id": "Q6",
+        "question": "How much preventive work is still pending versus completed?",
         "modules": ["ppm"],
         "filter_fields": {
             "ppm": {
-                "BuildingName":     "Name of the building",
-                "LocalityName":     "Geographic locality or area",
-                "DivisionName":     "Service division",
-                "EquipmentName":    "Type or name of the equipment",
-                "PPMStatus":        "Current status of the planned maintenance",
+                "PPMStatus":        "Current status of the PPM work order (Open = pending, Closed = completed)",
+                "WoCompletedDate":  "Date the work order was completed — blank means still pending",
+                "WoDateTime":       "Scheduled date of the PPM work order",
                 "WorkOrder":        "Unique PPM work order number",
-                "WoDateTime":       "Date and time the PPM work order was created",
+                "BuildingName":     "Name of the building where the PPM is scheduled",
+                "LocalityName":     "Geographic locality or area",
+                "EquipmentName":    "Type or name of the equipment under maintenance",
                 "PPMPendingPeriod": "Number of days the PPM task has been pending or overdue",
             },
         },
     },
 
+    # ─────────────────────────────────────────────────────────────────────────
+    "Q7": {
+        "id": "Q7",
+        "question": "Where are we seeing repeated breakdown issues piling up?",
+        "modules": ["bdm"],
+        "filter_fields": {
+            "bdm": {
+                "ComplaintNatureName": "Nature or description of the complaint",
+                "DivisionName":        "Service division responsible for the breakdown",
+                "WoStatus":            "Current status of the work order",
+                "BuildingName":        "Name of the building where breakdown occurred",
+                "LocalityName":        "Geographic locality or area",
+                "ComplaintNo":         "Unique complaint or work order number",
+            },
+        },
+    },
+
+    # ─────────────────────────────────────────────────────────────────────────
+    "Q8": {
+        "id": "Q8",
+        "question": "Is any contractor sitting on a high backlog of unresolved work?",
+        "modules": ["bdm", "ppm"],
+        "filter_fields": {
+            "bdm": {
+                "ContractName": "Name of the contract or contractor responsible",
+                "WoStatus":     "Current status of the work order",
+                "ComplaintNo":  "Unique complaint or work order number",
+                "BuildingName": "Name of the building",
+                "LocalityName": "Geographic locality or area",
+            },
+            "ppm": {
+                "ContractName": "Name of the contract or contractor responsible",
+                "PPMStatus":    "Current status of the planned maintenance",
+                "WorkOrder":    "Unique PPM work order number",
+                "BuildingName": "Name of the building",
+                "LocalityName": "Geographic locality or area",
+            },
+        },
+    },
+
+    # ─────────────────────────────────────────────────────────────────────────
+    "Q9": {
+        "id": "Q9",
+        "question": "Which technicians are carrying the heaviest workload right now?",
+        "modules": ["bdm", "ppm"],
+        "filter_fields": {
+            "bdm": {
+                "AnalysisTechName":  "Technician assigned to analyse the complaint",
+                "ExecutionTechName": "Technician assigned to execute the work",
+                "WoStatus":          "Current status of the work order",
+                "ComplaintNo":       "Unique complaint or work order number",
+                "BuildingName":      "Name of the building",
+                "PriorityName":      "Priority level of the work order",
+            },
+            "ppm": {
+                "PMTechName":    "Technician assigned to the planned maintenance task",
+                "PPMStatus":     "Current status of the planned maintenance",
+                "WorkOrder":     "Unique PPM work order number",
+                "BuildingName":  "Name of the building",
+                "EquipmentName": "Type or name of the equipment under maintenance",
+            },
+        },
+    },
+
+    # ─────────────────────────────────────────────────────────────────────────
+    "Q10": {
+        "id": "Q10",
+        "question": "Which contracts need urgent attention?",
+        "modules": ["bdm", "fa"],
+        "filter_fields": {
+            "bdm": {
+                "ContractName":  "Name of the contract or contractor responsible",
+                "WoStatus":      "Current status of the work order",
+                "ResponseTAT":   "Response turnaround status — SNA means Staff Not Assigned (no action taken)",
+                "ComplaintNo":   "Unique complaint or work order number",
+                "PriorityName":  "Priority level of the work order",
+                "BuildingName":  "Name of the building",
+            },
+            "fa": {
+                "ContractName":  "Name of the contract or contractor responsible",
+                "RMStageName":   "Current stage of the remedial/audit activity",
+                "RMComplaintNo": "Unique audit or remedial complaint number",
+                "PriorityName":  "Priority level",
+                "BuildingName":  "Name of the building",
+                "LocalityName":  "Geographic locality or area",
+            },
+        },
+    },
+
 }
+
