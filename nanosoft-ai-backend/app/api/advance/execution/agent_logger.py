@@ -23,28 +23,68 @@ logger = logging.getLogger("advance.execution")
 # Public functions — called from collect_result in agent.py
 # =============================================================================
 
-def log_question(question: str):
-    """Log the question being answered."""
+def log_question(question: str, pre_filters: dict = None):
+    """Log the question being answered and any pre-filters."""
     logger.info("")
     logger.info("QUESTION : %s", question)
+    if pre_filters:
+        logger.info("PRE-FILTERS : %s", pre_filters)
     logger.info("-" * 55)
 
 
 def log_why(reasoning: str):
     """
-    Extract the first meaningful line from the LLM's reasoning and log it.
-    Strips 'Formula:' prefix and numbered list prefixes like '1. '.
+    Extract and log the formula the LLM decided to use.
+
+    Priority order:
+      1. Line that contains '=' and math operators → most likely the formula
+      2. Line that starts with 'Formula:' or 'Approach:'
+      3. First meaningful non-preamble line
+    Skips: empty lines, lines starting with Step/Note/I will/I need
     """
     if not reasoning:
         return
-    for line in reasoning.strip().split("\n"):
-        clean = line.strip().lstrip("*#").strip()
-        clean = re.sub(r"^\d+\.\s*", "", clean)              # remove "1. "
-        clean = re.sub(r"^formula:\s*", "", clean, flags=re.IGNORECASE)  # remove "Formula:"
-        clean = clean.strip()
-        if clean and clean.lower() not in ("computed result:", ""):
-            logger.info("  WHY  : %s", clean)
-            return
+
+    skip_prefixes = (
+        "step ", "note", "i will", "i need", "i'll", "let me",
+        "first", "next", "then", "finally", "to answer",
+    )
+    formula_keywords = ("=", "/", "×", "*", "%", "count", "group", "sum", "ratio", "divide")
+
+    lines = [l.strip().lstrip("*#-•").strip() for l in reasoning.strip().split("\n")]
+    lines = [re.sub(r"^\d+\.\s*", "", l) for l in lines]  # remove "1. " prefixes
+    lines = [l for l in lines if l]  # remove empty
+
+    best_formula = None
+    best_approach = None
+    first_meaningful = None
+
+    for line in lines:
+        lower = line.lower()
+
+        # skip preamble lines
+        if any(lower.startswith(p) for p in skip_prefixes):
+            continue
+
+        # priority 1: line looks like a formula
+        if any(kw in lower for kw in formula_keywords) and best_formula is None:
+            clean = re.sub(r"^formula:\s*", "", line, flags=re.IGNORECASE).strip()
+            clean = re.sub(r"^approach:\s*", "", clean, flags=re.IGNORECASE).strip()
+            best_formula = clean
+
+        # priority 2: explicit formula/approach label
+        if re.match(r"^(formula|approach)\s*:", lower) and best_approach is None:
+            after = re.sub(r"^(formula|approach)\s*:\s*", "", line, flags=re.IGNORECASE).strip()
+            if after:
+                best_approach = after
+
+        # priority 3: first meaningful line
+        if first_meaningful is None and len(line) > 10:
+            first_meaningful = line
+
+    result = best_formula or best_approach or first_meaningful
+    if result:
+        logger.info("  FORMULA : %s", result)
 
 
 def log_tool_call(tool_name: str, args: dict):
@@ -64,77 +104,132 @@ def log_tool_call(tool_name: str, args: dict):
 def log_tool_result(output: dict, args: dict):
     """
     Log a one-line summary of what the tool returned.
-    Format depends on output type:
-      count_records    → GOT  : count = 10
-      group_by_count   → GOT  : total = 10  |  top: Name=3, Name=2
-      sum/average/stats → short summary
+    Shows: what tool returned + key numbers + top groups if any.
+
+    count_records      → RESULT : count = 10
+    sum_values         → RESULT : sum = 45.0  (6 records)
+    get_average        → RESULT : average = 11.16  (3 records)
+    group_by_and_count → RESULT : total = 10  |  top → Building A=3, Building B=2
+    calculate_time_between → RESULT : avg = 11.16 min  min = 8.27  max = 13.27  (3 records)
+    do_math            → RESULT : 9 DIV 10 = 0.9
+    join_records       → RESULT : matched = 5  unmatched_a = 2  unmatched_b = 1
+    get_unique_values  → RESULT : 4 unique values → [val1, val2, ...]
     """
-    if "count" in output and "ranked" not in output:
-        logger.info("  GOT  : count = %s", output["count"])
+    if "count" in output and "ranked" not in output and "stats" not in output:
+        logger.info("  RESULT : count = %s", output["count"])
 
     elif "total_sum" in output:
-        logger.info("  GOT  : sum = %s  (from %s records)",
+        logger.info("  RESULT : sum = %s  (%s records)",
                     output["total_sum"], output.get("records_used"))
 
-    elif "average" in output:
-        logger.info("  GOT  : average = %s  (from %s records)",
+    elif "average" in output and "ranked" not in output:
+        logger.info("  RESULT : average = %s  (%s records)",
                     output["average"], output.get("records_used"))
 
     elif "ranked" in output:
-        top   = output.get("ranked", [])[:3]
+        top   = output.get("ranked", [])[:5]
         total = output.get("total_records", "?")
         parts = []
         for r in top:
-            val = list(r.values())[0]
-            if val is None or val == "":
-                val = "(unassigned)"
-            parts.append(f"{val} = {r.get('count')}")
-        logger.info("  GOT  : total = %s  |  top: %s", total, ",  ".join(parts))
+            # first non-count value is the group label
+            label = next(
+                (v for k, v in r.items() if k != "count"),
+                "(unknown)"
+            )
+            if label is None or label == "":
+                label = "(unassigned)"
+            parts.append(f"{label} = {r.get('count')}")
+        logger.info("  RESULT : total = %s  |  top → %s", total, ",  ".join(parts))
 
     elif "stats" in output:
-        s = output["stats"]
-        logger.info("  GOT  : min=%s  max=%s  avg=%s",
-                    s.get("min"), s.get("max"), s.get("mean"))
+        s = output.get("stats", {})
+        calc = output.get("calculated", "?")
+        missing = output.get("missing_dates", 0)
+        logger.info("  RESULT : avg = %s min  |  min = %s min  |  max = %s min  "
+                    "(%s records, %s missing dates)",
+                    s.get("average"), s.get("minimum"), s.get("maximum"),
+                    calc, missing)
 
-    elif "values" in output:
-        logger.info("  GOT  : %s unique values", output.get("count"))
+    elif "result" in output:
+        # do_math output
+        logger.info("  RESULT : %s %s %s = %s",
+                    output.get("a"), output.get("operation"),
+                    output.get("b"), output.get("result"))
+
+    elif "matched_count" in output:
+        logger.info("  RESULT : matched = %s  |  unmatched_a = %s  |  unmatched_b = %s",
+                    output.get("matched_count"),
+                    output.get("unmatched_in_a"),
+                    output.get("unmatched_in_b"))
+
+    elif "unique_values" in output:
+        vals = output.get("unique_values", [])[:6]
+        logger.info("  RESULT : %s unique values → %s",
+                    output.get("count"), vals)
 
     else:
-        logger.info("  GOT  : %s", {k: v for k, v in output.items() if k != "module"})
+        logger.info("  RESULT : %s", {k: v for k, v in output.items() if k != "module"})
 
 
 def log_answer(final_text: str):
     """
-    Extract the insight/conclusion from the final answer and log it.
-
-    Rules (searched from the bottom of the answer up):
-      Rule 1 : Line starts with "Insight:" → use text after the prefix
-      Rule 2 : Skip lines starting with "Formula:", "Computed Result:", "Result:"
-      Rule 3 : Use the first line that passes Rules 1 & 2
+    Log the final answer in 4 parts:
+      APPROACH : how the LLM approached it
+      FORMULA  : what formula/approach the LLM stated
+      COMPUTED RESULT : the numeric result
+      BUSINESS INSIGHT : the one-line conclusion
     """
-    skip_starts = ("formula", "computed result", "result:")
-    insight = ""
+    approach_line  = None
+    formula_line   = None
+    computed_line  = None
+    insight_line   = None
 
-    for line in reversed(final_text.strip().split("\n")):
-        clean = line.strip().lstrip("*-•").strip()
+    skip_prefixes = ("step ", "i will", "i need", "let me", "to answer", "note")
+
+    approach_triggers = ("approach", "method")
+    formula_triggers  = ("formula",)
+    computed_triggers = ("computed result", "result:", "calculated", "=", "%")
+    insight_triggers  = ("insight", "conclusion", "therefore", "this means",
+                         "the highest", "the most", "indicates", "suggests", "business insight")
+
+    for line in final_text.strip().split("\n"):
+        clean = line.strip().lstrip("*-•#").strip()
         if not clean:
             continue
-        clean_lower = clean.lower()
+        lower = clean.lower()
 
-        # Rule 1: "Insight: ..." → extract and stop
-        if clean_lower.startswith("insight:"):
-            after = clean[len("insight:"):].strip()
-            if after:
-                insight = after
-            break
-
-        # Rule 2: skip formula/result lines
-        if any(clean_lower.startswith(p) for p in skip_starts):
+        if any(lower.startswith(p) for p in skip_prefixes):
             continue
 
-        # Rule 3: use this line
-        insight = clean
-        break
+        if approach_line is None and any(t in lower for t in approach_triggers):
+            approach_line = re.sub(r"^(approach|method)\s*:\s*", "",
+                                   clean, flags=re.IGNORECASE).strip()
 
-    logger.info("  ANSWER : %s", insight or final_text.strip().split("\n")[0])
+        if formula_line is None and any(t in lower for t in formula_triggers):
+            formula_line = re.sub(r"^(formula)\s*:\s*", "",
+                                  clean, flags=re.IGNORECASE).strip()
+
+        if computed_line is None and any(t in lower for t in computed_triggers):
+            computed_line = re.sub(r"^(computed result|result|calculated)\s*:\s*", "",
+                                   clean, flags=re.IGNORECASE).strip()
+
+        if insight_line is None and any(t in lower for t in insight_triggers):
+            insight_line = re.sub(r"^(business insight|insight|conclusion|therefore)\s*:\s*", "",
+                                  clean, flags=re.IGNORECASE).strip()
+
+    # fallback
+    if not insight_line:
+        for line in reversed(final_text.strip().split("\n")):
+            clean = line.strip().lstrip("*-•#").strip()
+            if clean and len(clean) > 15:
+                insight_line = clean
+                break
+
+    if approach_line:
+        logger.info("  APPROACH : %s", approach_line)
+    if formula_line:
+        logger.info("  FORMULA  : %s", formula_line)
+    if computed_line:
+        logger.info("  COMPUTED RESULT : %s", computed_line)
+    logger.info("  BUSINESS INSIGHT : %s", insight_line or final_text.strip().split("\n")[0])
     logger.info("")

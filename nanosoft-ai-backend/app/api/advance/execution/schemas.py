@@ -30,9 +30,10 @@ from langgraph.graph.message import add_messages
 # Used by: agent.py → StateGraph(AgentState), ask_llm, collect_result
 # =============================================================================
 class AgentState(TypedDict):
-    messages:         Annotated[list, add_messages]   # LangGraph manages appending to this
-    question:         str
-    modules:          list[str]
-    filter_fields:    dict[str, Any]
-    filtered_records: dict[str, list[dict]]
-    result:           dict[str, Any]
+    messages:             Annotated[list, add_messages]   # LangGraph manages appending to this
+    question:             str
+    modules:              list[str]
+    filter_fields:        dict[str, Any]
+    module_filter_values: dict[str, Any]
+    filtered_records:     dict[str, list[dict]]
+    result:               dict[str, Any]

@@ -105,15 +105,20 @@ def _project_columns(
 # =============================================================================
 def get_filtered_records(
     modules: list[str],
-    filter_fields: dict[str, dict],   # { module → { column_name → description } }
-    filter_values: dict[str, Any],    # { column_name → value from HTTP request }
+    filter_fields: dict[str, dict],         # { module → { column_name → description } }
+    filter_values: dict[str, Any],          # { column_name → value } from HTTP request (flat, all modules)
+    module_filter_values: dict[str, dict] | None = None,  # { module → { column → value } } from question definition
 ) -> dict[str, list[dict]]:
     """
     For each module:
       1. Load raw records from its JSON file
-      2. Apply row filters (keep only rows matching filter_values)
-      3. Project to only the relevant columns (defined in filter_fields)
+      2. Apply module-level pre-filters (from question definition)
+      3. Apply HTTP-level filters (from request, flat dict)
+      4. Project to only the relevant columns (defined in filter_fields)
     Returns { module_name: [filtered_rows] }
+
+    filter_values      — flat dict applied to all modules: {"BuildingName": "Tower A"}
+    module_filter_values — per-module pre-filters: {"bdm": {"WoStatus": "Closed"}, "ppm": {"PPMStatus": "Closed"}}
     """
     output: dict[str, list[dict]] = {}
 
@@ -124,10 +129,26 @@ def get_filtered_records(
         # Step 2: get this module's column definitions
         module_filter_fields = filter_fields.get(module, {})
 
-        # Step 3: apply row filters
-        filtered = _apply_filters(raw_records, module_filter_fields, filter_values)
+        # Step 3: apply module-level pre-filters (from question definition)
+        pre_filtered = raw_records
+        if module_filter_values and module in module_filter_values:
+            module_pre_filter = module_filter_values[module]
+            # Apply directly — no filter_fields guard, these are always valid
+            for col, val in module_pre_filter.items():
+                if val:
+                    pre_filtered = [
+                        row for row in pre_filtered
+                        if str(val).lower() in str(row.get(col, "")).lower()
+                    ]
+                    logger.info(
+                        "[RETRIEVAL] module=%s | pre-filter col=%s val=%s → %d records",
+                        module, col, val, len(pre_filtered),
+                    )
 
-        # Step 4: keep only relevant columns
+        # Step 4: apply HTTP-level filters (flat, applies to all modules)
+        filtered = _apply_filters(pre_filtered, module_filter_fields, filter_values)
+
+        # Step 5: keep only relevant columns
         projected = _project_columns(filtered, module_filter_fields)
 
         output[module] = projected

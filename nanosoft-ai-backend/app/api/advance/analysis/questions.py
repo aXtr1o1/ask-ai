@@ -46,7 +46,7 @@ QUESTIONS: dict = {
         "modules": ["ppm"],
         "filter_fields": {
             "ppm": {
-                "PPMStatus":        "Current status of the planned preventive maintenance (Open / Closed)",
+                "PPMStatus":        "Status of the task — Open means still pending/incomplete, Closed means completed",
                 "BuildingName":     "Name of the building where the PPM is scheduled",
                 "LocalityName":     "Geographic locality or area",
                 "EquipmentName":    "Type or name of the equipment under maintenance",
@@ -104,9 +104,14 @@ QUESTIONS: dict = {
         "id": "Q5",
         "question": "What percentage of closed work orders suffer from critical data compliance gaps?",
         "modules": ["bdm", "ppm"],
+        # Pre-filter: only load Closed records — compliance gaps only matter on completed WOs
+        "filter_values": {
+            "bdm": {"WoStatus": "Closed"},
+            "ppm": {"PPMStatus": "Closed"},
+        },
         "filter_fields": {
             "bdm": {
-                "WoStatus":          "Current status of the work order — filter for Closed records",
+                "WoStatus":          "Current status of the work order (Open / Closed)",
                 "ExecutionTechName": "Technician who executed the work — blank value indicates a compliance gap",
                 "AnalysisTechName":  "Technician assigned to analyse the complaint",
                 "ComplaintNo":       "Unique complaint or work order number",
@@ -114,7 +119,7 @@ QUESTIONS: dict = {
                 "LocalityName":      "Geographic locality of the complaint",
             },
             "ppm": {
-                "PPMStatus":  "Current status of the PPM work order — filter for Closed records",
+                "PPMStatus":  "Current status of the PPM work order (Open / Closed)",
                 "PMTechName": "Technician assigned to the PPM task — blank value indicates a compliance gap",
                 "WorkOrder":  "Unique PPM work order number",
                 "BuildingName": "Name of the building for the PPM task",
@@ -150,8 +155,8 @@ QUESTIONS: dict = {
         "filter_fields": {
             "bdm": {
                 "ComplaintNatureName": "Nature or description of the complaint",
-                "DivisionName":        "Service division responsible for the breakdown",
-                "WoStatus":            "Current status of the work order",
+                "DivisionName":        "Service division responsible for the breakdown (e.g. HVAC System, Electrical System)",
+                "WoStatus":            "Current status of the work order (Open / Closed)",
                 "BuildingName":        "Name of the building where breakdown occurred",
                 "LocalityName":        "Geographic locality or area",
                 "ComplaintNo":         "Unique complaint or work order number",
@@ -163,6 +168,7 @@ QUESTIONS: dict = {
     "Q8": {
         "id": "Q8",
         "question": "Is any contractor sitting on a high backlog of unresolved work?",
+        "modules": ["bdm", "ppm"],
         "modules": ["bdm", "ppm"],
         "filter_fields": {
             "bdm": {
@@ -186,6 +192,7 @@ QUESTIONS: dict = {
     "Q9": {
         "id": "Q9",
         "question": "Which technicians are carrying the heaviest workload right now?",
+        "modules": ["bdm", "ppm"],
         "modules": ["bdm", "ppm"],
         "filter_fields": {
             "bdm": {

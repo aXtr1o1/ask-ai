@@ -48,13 +48,15 @@ def get_text_from_ai_message(msg: AIMessage) -> str:
         return content
 
     if isinstance(content, list):
+        # Check for "text" block FIRST — this is the actual answer.
+        # "thinking" is internal reasoning and should only be used as a last resort fallback.
         for block in content:
-            if not isinstance(block, dict):
-                continue
-            if block.get("type") == "thinking" and block.get("thinking"):
-                return block["thinking"]
-            if block.get("type") == "text" and block.get("text"):
+            if isinstance(block, dict) and block.get("type") == "text" and block.get("text"):
                 return block["text"]
+        # Fallback: if no text block found, return the thinking content
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "thinking" and block.get("thinking"):
+                return block["thinking"]
 
     return str(content)
 
@@ -95,7 +97,7 @@ def collect_result(state: AgentState) -> dict:
     """Package tool outputs and the final answer into a clean structured result."""
     messages = state["messages"]
 
-    log_question(state["question"])
+    log_question(state["question"], state.get("module_filter_values"))
 
     # Collect tool outputs keyed by tool_call_id
     tool_outputs_by_id: dict[str, dict] = {}

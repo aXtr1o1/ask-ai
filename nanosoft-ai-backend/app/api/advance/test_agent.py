@@ -55,24 +55,40 @@ LINE = "=" * 62
 DASH = "-" * 50
 
 
-def build_question_message(question_definition: dict) -> HumanMessage:
+def build_question_message(question_definition: dict, filtered_records: dict) -> HumanMessage:
     """
     Build the question message that will be sent to the LLM.
-    Contains: question text + which modules are loaded + column names and descriptions.
-    The actual data is NOT here — only metadata (column names + what they mean).
+    Contains:
+      - question text
+      - which modules are loaded
+      - column names and what each means
+      - THE ACTUAL DATA RECORDS (so the model can see every row and make informed decisions)
     """
     filter_context = (
         json.dumps(question_definition["filter_fields"], indent=2)
         if question_definition["filter_fields"]
-        else "No filters applied."
+        else "No column definitions provided."
     )
+
+    # Build a readable data section — model sees the actual rows
+    data_sections = []
+    for module, records in filtered_records.items():
+        data_sections.append(
+            f"--- Module: {module} ({len(records)} records) ---\n"
+            + json.dumps(records, indent=2, default=str)
+        )
+    data_context = "\n\n".join(data_sections) if data_sections else "No data loaded."
+
     return HumanMessage(content=(
         f"Question: {question_definition['question']}\n\n"
         f"Modules loaded: {question_definition['modules']}\n"
         f"(Use only these module names when calling tools)\n\n"
-        f"Available columns per module (column name -> what it means):\n"
+        f"Column definitions per module:\n"
         f"{filter_context}\n\n"
-        f"Write the formula first, then call the right tool(s)."
+        f"Actual data records:\n"
+        f"{data_context}\n\n"
+        f"Study the data above. State your approach and the exact field values you will "
+        f"filter on, then call the right tools to compute the answer."
     ))
 
 
@@ -128,32 +144,37 @@ def run_question(question_id: str, filter_values: dict = {}):
     print(f"{LINE}")
 
     # Step 2: Load and filter records
+    # module_filter_values: per-module pre-filters defined in the question (e.g. only Closed WOs for Q5)
+    # filter_values: flat filters from HTTP request (overrides/supplements per-module filters)
+    module_filter_values = question_definition.get("filter_values", {})
     filtered_records = get_filtered_records(
         modules=question_definition["modules"],
         filter_fields=question_definition["filter_fields"],
         filter_values=filter_values,
+        module_filter_values=module_filter_values,
     )
     for module, records in filtered_records.items():
         print(f"  [DATA] {module} -> {len(records)} records loaded")
 
-    # Step 3: Build the question message
-    question_message = build_question_message(question_definition)
+    # Step 3: Build the question message (includes real data records)
+    question_message = build_question_message(question_definition, filtered_records)
 
     # Step 4: Build initial state and run the agent
     initial_state = {
-        "messages":         [question_message],
-        "question":         question_definition["question"],
-        "modules":          question_definition["modules"],
-        "filter_fields":    question_definition["filter_fields"],
-        "filtered_records": filtered_records,
-        "result":           {},
+        "messages":             [question_message],
+        "question":             question_definition["question"],
+        "modules":              question_definition["modules"],
+        "filter_fields":        question_definition["filter_fields"],
+        "module_filter_values": module_filter_values,
+        "filtered_records":     filtered_records,
+        "result":               {},
     }
 
     print(f"\n  [AGENT] Running ...\n")
     agent       = get_agent()
     # recursion_limit: max graph steps (each ask_llm + run_tool = 2 steps)
-    # Q1 has 4 modules → needs ~8-12 steps; set 25 to be safe while still capping loops
-    final_state = agent.invoke(initial_state, {"recursion_limit": 25})
+    # With data in context the model may make more tool calls — 50 gives up to ~23 tool calls
+    final_state = agent.invoke(initial_state, {"recursion_limit": 50})
 
     # Step 5: Print clear step-by-step result
     result = final_state.get("result", {})

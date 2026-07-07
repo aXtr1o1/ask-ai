@@ -72,20 +72,45 @@ def get_numeric_column(df: pd.DataFrame, field: str) -> pd.Series:
 def count_records(
     module: str,
     state: Annotated[dict, InjectedState()],
+    condition_field: str = "",
+    condition_value: str = "",
+    condition_field2: str = "",
+    condition_value2: str = "",
 ) -> dict:
     """
-    Count how many records exist in a module.
-    The data is already filtered — this counts all records in the filtered dataset.
-
-    Use this when the question asks: how many, total count, number of records.
+    Count records in a module.
+    Optionally filter to only rows where a field equals a specific value.
+    Pass condition_value="" to count rows where the field is blank or null.
+    Leave condition_field empty to count all records.
+    Use condition_field2 + condition_value2 to apply a second simultaneous filter.
 
     Args:
-        module: Data module to count from (bdm | ppm | fa | assets | sb)
+        module:           Data module name
+        condition_field:  First column to filter on (optional)
+        condition_value:  Value to match in condition_field; "" matches blank/null
+        condition_field2: Second column to filter on (optional, applied after first)
+        condition_value2: Value to match in condition_field2; "" matches blank/null
     """
     df = load_records_as_dataframe(state, module)
+    if condition_field and condition_field in df.columns:
+        col = df[condition_field].fillna("").astype(str).str.strip()
+        if condition_value == "":
+            df = df[col == ""]
+        else:
+            df = df[col.str.lower() == condition_value.lower()]
+    if condition_field2 and condition_field2 in df.columns:
+        col2 = df[condition_field2].fillna("").astype(str).str.strip()
+        if condition_value2 == "":
+            df = df[col2 == ""]
+        else:
+            df = df[col2.str.lower() == condition_value2.lower()]
     return {
-        "module": module,
-        "count":  len(df),
+        "module":           module,
+        "count":            len(df),
+        "condition_field":  condition_field,
+        "condition_value":  condition_value,
+        "condition_field2": condition_field2,
+        "condition_value2": condition_value2,
     }
 
 
@@ -99,14 +124,11 @@ def sum_values(
     state: Annotated[dict, InjectedState()],
 ) -> dict:
     """
-    Add up all numeric values in a field across all records in a module.
-    The data is already filtered — this sums all values in the filtered dataset.
-
-    Use this when the question asks: total, sum, accumulated value of a field.
+    Sum all values in a numeric field across all records in a module.
 
     Args:
-        module: Data module (bdm | ppm | fa | assets | sb)
-        field:  Numeric column name to sum
+        module: Data module name
+        field:  Numeric column to sum
     """
     numbers = get_numeric_column(load_records_as_dataframe(state, module), field)
     return {
@@ -127,14 +149,11 @@ def get_average(
     state: Annotated[dict, InjectedState()],
 ) -> dict:
     """
-    Compute the average (mean) of a numeric field across all records in a module.
-    The data is already filtered — this averages all values in the filtered dataset.
-
-    Use this when the question asks: average, mean, typical value of a field.
+    Compute the mean of a numeric field across all records in a module.
 
     Args:
-        module: Data module (bdm | ppm | fa | assets | sb)
-        field:  Numeric column name to average
+        module: Data module name
+        field:  Numeric column to average
     """
     numbers = get_numeric_column(load_records_as_dataframe(state, module), field)
     if numbers.empty:
@@ -157,14 +176,11 @@ def get_minimum(
     state: Annotated[dict, InjectedState()],
 ) -> dict:
     """
-    Find the smallest (minimum) value in a numeric field across all records.
-    The data is already filtered.
-
-    Use this when the question asks: minimum, lowest, shortest, least.
+    Find the minimum value in a numeric field across all records in a module.
 
     Args:
-        module: Data module (bdm | ppm | fa | assets | sb)
-        field:  Numeric column name to find the minimum of
+        module: Data module name
+        field:  Numeric column to find the minimum of
     """
     numbers = get_numeric_column(load_records_as_dataframe(state, module), field)
     return {
@@ -185,14 +201,11 @@ def get_maximum(
     state: Annotated[dict, InjectedState()]
 ) -> dict:
     """
-    Find the largest (maximum) value in a numeric field across all records.
-    The data is already filtered.
-
-    Use this when the question asks: maximum, highest, longest, most.
+    Find the maximum value in a numeric field across all records in a module.
 
     Args:
-        module: Data module (bdm | ppm | fa | assets | sb)
-        field:  Numeric column name to find the maximum of
+        module: Data module name
+        field:  Numeric column to find the maximum of
     """
     numbers = get_numeric_column(load_records_as_dataframe(state, module), field)
     return {
@@ -203,13 +216,9 @@ def get_maximum(
     }
 
 
+
 # =============================================================================
 # TOOL 6: calculate_time_between
-#
-# Role in FM analytics:
-#   Measures how much time passed between two date/time fields per record.
-#   Used for SLA tracking, response speed, overdue duration, maintenance windows.
-#   Returns average, minimum, maximum elapsed minutes across all records.
 # =============================================================================
 @tool
 def calculate_time_between(
@@ -219,17 +228,13 @@ def calculate_time_between(
     state: Annotated[dict, InjectedState()],
 ) -> dict:
     """
-    Calculate elapsed time in minutes between two datetime fields, per record.
-    Returns summary statistics: count, average, minimum, maximum elapsed minutes.
-    The data is already filtered.
-
-    Use this when the question asks: how long did it take, response time,
-    SLA breach, duration between two events, overdue period.
+    Calculate elapsed time in minutes between two datetime columns, per record.
+    Returns count, average, minimum, and maximum elapsed minutes.
 
     Args:
-        module:      Data module (bdm | ppm | fa | sb)
-        start_field: Column name with the start datetime
-        end_field:   Column name with the end datetime
+        module:      Data module name
+        start_field: Column name containing the start datetime
+        end_field:   Column name containing the end datetime
     """
     df = load_records_as_dataframe(state, module)
     if df.empty:
@@ -272,26 +277,37 @@ def group_by_and_count(
     module: str,
     group_field: str,
     state: Annotated[dict, InjectedState()],
+    filter_field: str = "",
+    filter_value: str = "",
     secondary_field: str = "",
     top_n: int = 10,
 ) -> dict:
     """
-    Group all records by a field and count how many records fall in each group.
+    Group records by a field and count how many records fall in each group.
     Results are ranked from highest count to lowest.
-    The data is already filtered.
-
-    Use this when the question asks: breakdown by, distribution across,
-    which category has the most, count per group.
+    Optionally pre-filter rows before grouping using filter_field + filter_value.
+    Pass filter_value="" to filter for rows where filter_field is blank or null.
+    Leave filter_field empty to group all records.
 
     Args:
-        module:          Data module (bdm | ppm | fa | assets | sb)
-        group_field:     Column name to group by
-        secondary_field: Optional second column name for nested grouping
-        top_n:           Number of top groups to return (default: 10)
+        module:          Data module name
+        group_field:     Column to group by
+        filter_field:    Column to pre-filter on before grouping (optional)
+        filter_value:    Value to match in filter_field; "" matches blank/null
+        secondary_field: Second column for nested grouping (optional)
+        top_n:           Max number of groups to return (default 10)
     """
     df = load_records_as_dataframe(state, module)
     if df.empty:
         return {"module": module, "group_field": group_field, "total_records": 0, "ranked": []}
+
+    # Apply optional pre-filter before grouping
+    if filter_field and filter_field in df.columns:
+        col = df[filter_field].fillna("").astype(str).str.strip()
+        if filter_value == "":
+            df = df[col == ""]
+        else:
+            df = df[col.str.lower() == filter_value.lower()]
 
     if group_field not in df.columns:
         return {
@@ -340,16 +356,11 @@ def get_unique_values(
     state: Annotated[dict, InjectedState()],
 ) -> dict:
     """
-    Return all distinct (unique) values that exist in a field across all records.
-    Uses a set internally to remove duplicates.
-    The data is already filtered.
-
-    Use this when the question asks: what are all the possible values,
-    list all categories, which statuses exist, distinct items in a field.
+    Return all distinct values in a field across all records in a module.
 
     Args:
-        module: Data module (bdm | ppm | fa | assets | sb)
-        field:  Column name to extract unique values from
+        module: Data module name
+        field:  Column to extract unique values from
     """
     df = load_records_as_dataframe(state, module)
     if df.empty or field not in df.columns:
@@ -366,13 +377,9 @@ def get_unique_values(
     }
 
 
+
 # =============================================================================
 # TOOL 9: join_records
-#
-# Role in FM analytics:
-#   Cross-module analysis requires matching records from two different modules
-#   on a shared key field (inner join). Returns matched pairs and counts.
-#   Unmatched records from each module are also counted for completeness.
 # =============================================================================
 @tool
 def join_records(
@@ -382,18 +389,13 @@ def join_records(
     state: Annotated[dict, InjectedState()],
 ) -> dict:
     """
-    Join records from two modules on a shared key field (inner join).
-    Returns the count of matched records and the unmatched counts per module.
-    Both datasets are already filtered before joining.
-
-    Use this when the question requires cross-module analysis:
-    matching work orders across bdm and ppm, linking assets to complaints,
-    finding records that exist in one module but not another.
+    Inner join two modules on a shared key field.
+    Returns matched record count and unmatched counts per module.
 
     Args:
-        module_a:   First data module (bdm | ppm | fa | assets | sb)
-        module_b:   Second data module (bdm | ppm | fa | assets | sb)
-        join_field: Column name that exists in both modules to join on
+        module_a:   First data module name
+        module_b:   Second data module name
+        join_field: Column name present in both modules to join on
     """
     df_a = load_records_as_dataframe(state, module_a)
     df_b = load_records_as_dataframe(state, module_b)
@@ -453,23 +455,14 @@ def do_math(
     b: float = 0,
 ) -> dict:
     """
-    Perform an arithmetic operation on two numbers.
-    Use this to calculate rates, percentages, ratios, or combine results from other tools.
-
-    Operations:
-      ADD   → a + b
-      SUB   → a - b
-      MUL   → a * b
-      DIV   → a / b  (use for rates and percentages)
-      MOD   → a % b  (remainder after division)
-      POWER → a ^ b
-      SQRT  → square root of a (b not used)
-      ABS   → absolute value of a (b not used)
+    Perform arithmetic on two numbers.
+    Operations: ADD | SUB | MUL | DIV | MOD | POWER | SQRT | ABS
+    DIV: a / b  — SQRT and ABS only use a.
 
     Args:
         operation: ADD | SUB | MUL | DIV | MOD | POWER | SQRT | ABS
         a:         First number
-        b:         Second number (not required for SQRT and ABS)
+        b:         Second number (unused for SQRT and ABS)
     """
     op = operation.upper()
     try:
