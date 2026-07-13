@@ -62,7 +62,8 @@ def get_numeric_column(df: pd.DataFrame, field: str) -> pd.Series:
 
 
 
-#for the question how the data is beinf sned to the tool ..state: Annotated[dict, InjectedState()], this is the unput argument where the data is 
+#for the question how the data is being sent to the tool ..state: 
+# Annotated[dict, InjectedState()], this is the input argument where the data is 
 #being send as  the argument ok .. 
 
 # =============================================================================
@@ -74,22 +75,17 @@ def count_records(
     state: Annotated[dict, InjectedState()],
     condition_field: str = "",
     condition_value: str = "",
-    condition_field2: str = "",
-    condition_value2: str = "",
 ) -> dict:
     """
     Count records in a module.
     Optionally filter to only rows where a field equals a specific value.
     Pass condition_value="" to count rows where the field is blank or null.
     Leave condition_field empty to count all records.
-    Use condition_field2 + condition_value2 to apply a second simultaneous filter.
 
     Args:
-        module:           Data module name
-        condition_field:  First column to filter on (optional)
-        condition_value:  Value to match in condition_field; "" matches blank/null
-        condition_field2: Second column to filter on (optional, applied after first)
-        condition_value2: Value to match in condition_field2; "" matches blank/null
+        module:          Data module name
+        condition_field: Column to filter on (optional)
+        condition_value: Value to match in condition_field; "" matches blank/null
     """
     df = load_records_as_dataframe(state, module)
     if condition_field and condition_field in df.columns:
@@ -98,19 +94,11 @@ def count_records(
             df = df[col == ""]
         else:
             df = df[col.str.lower() == condition_value.lower()]
-    if condition_field2 and condition_field2 in df.columns:
-        col2 = df[condition_field2].fillna("").astype(str).str.strip()
-        if condition_value2 == "":
-            df = df[col2 == ""]
-        else:
-            df = df[col2.str.lower() == condition_value2.lower()]
     return {
-        "module":           module,
-        "count":            len(df),
-        "condition_field":  condition_field,
-        "condition_value":  condition_value,
-        "condition_field2": condition_field2,
-        "condition_value2": condition_value2,
+        "module":          module,
+        "count":           len(df),
+        "condition_field": condition_field,
+        "condition_value": condition_value,
     }
 
 
@@ -277,64 +265,42 @@ def group_by_and_count(
     module: str,
     group_field: str,
     state: Annotated[dict, InjectedState()],
-    filter_field: str = "",
-    filter_value: str = "",
-    secondary_field: str = "",
-    top_n: int = 10,
 ) -> dict:
     """
     Group records by a field and count how many records fall in each group.
-    Results are ranked from highest count to lowest.
-    Optionally pre-filter rows before grouping using filter_field + filter_value.
-    Pass filter_value="" to filter for rows where filter_field is blank or null.
-    Leave filter_field empty to group all records.
+    Results are sorted from highest count to lowest.
+    The retrieval layer is responsible for returning already-filtered data;
+    this tool only groups and counts what it receives.
 
     Args:
-        module:          Data module name
-        group_field:     Column to group by
-        filter_field:    Column to pre-filter on before grouping (optional)
-        filter_value:    Value to match in filter_field; "" matches blank/null
-        secondary_field: Second column for nested grouping (optional)
-        top_n:           Max number of groups to return (default 10)
+        module:      Data module name
+        group_field: Column to group by
     """
     df = load_records_as_dataframe(state, module)
     if df.empty:
-        return {"module": module, "group_field": group_field, "total_records": 0, "ranked": []}
-
-    # Apply optional pre-filter before grouping
-    if filter_field and filter_field in df.columns:
-        col = df[filter_field].fillna("").astype(str).str.strip()
-        if filter_value == "":
-            df = df[col == ""]
-        else:
-            df = df[col.str.lower() == filter_value.lower()]
+        return {"module": module, "group_field": group_field, "total_records": 0, "groups": []}
 
     if group_field not in df.columns:
         return {
             "module":      module,
             "group_field": group_field,
             "error":       f"Column '{group_field}' does not exist in '{module}' data.",
-            "ranked":      [],
+            "groups":      [],
         }
 
-    use_secondary = secondary_field and secondary_field in df.columns
-    group_columns = [group_field] + ([secondary_field] if use_secondary else [])
-
     grouped = (
-        df.groupby(group_columns, dropna=False)
+        df.groupby(group_field, dropna=False)
           .size()
           .reset_index(name="count")
           .sort_values("count", ascending=False)
-          .head(top_n)
     )
 
     # Replace NaN with None so the output is always valid JSON
     # (NaN appears when a group field has null values — not valid in JSON)
-    import math
-    ranked_raw = grouped.to_dict(orient="records")
-    ranked_clean = [
+    groups_raw = grouped.to_dict(orient="records")
+    groups_clean = [
         {k: (None if isinstance(v, float) and math.isnan(v) else v) for k, v in row.items()}
-        for row in ranked_raw
+        for row in groups_raw
     ]
 
     return {
@@ -342,7 +308,7 @@ def group_by_and_count(
         "group_field":   group_field,
         "total_records": len(df),
         "unique_groups": len(grouped),
-        "ranked":        ranked_clean,
+        "groups":        groups_clean,
     }
 
 

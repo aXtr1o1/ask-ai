@@ -72,10 +72,10 @@ def ask_llm(state: AgentState) -> dict:
     """Send all current messages to the LLM and return its response."""
     from langchain_google_genai import ChatGoogleGenerativeAI
     llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
+        model="gemini-3.5-flash",
         google_api_key=settings.GOOGLE_API_KEY,
         temperature=1,
-        thinking_budget=3000,
+        thinking_level="medium",
     ).bind_tools(ALL_TOOLS)
 
     # Always send: [SystemMessage] + all current messages (question + any tool results)
@@ -111,6 +111,7 @@ def collect_result(state: AgentState) -> dict:
     # Build execution trace from AI messages
     execution_trace = []
     step = 0
+    final_answer_logged = False
 
     for msg in messages:
         if not isinstance(msg, AIMessage):
@@ -139,8 +140,25 @@ def collect_result(state: AgentState) -> dict:
             final_text = get_text_from_ai_message(msg)
             log_answer(final_text)
             execution_trace.append({"type": "final_answer", "answer": final_text})
+            final_answer_logged = True
 
     last_ai = next((m for m in reversed(messages) if isinstance(m, AIMessage)), None)
+
+    # Fallback: if LLM never sent a pure-text message (e.g. it returned both
+    # tool_calls AND text in its last message, which Gemini can do), extract
+    # the text from the last AI message and treat it as the final answer.
+    if not final_answer_logged and last_ai is not None:
+        final_text = get_text_from_ai_message(last_ai)
+        if not final_text:
+            # Last resort: pull from thinking block
+            content = last_ai.content
+            if isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "thinking" and block.get("thinking"):
+                        final_text = block["thinking"]
+                        break
+        log_answer(final_text)
+        execution_trace.append({"type": "final_answer", "answer": final_text})
 
     return {
         "result": {

@@ -52,4 +52,6 @@ Your job:
   - Do NOT re-call a tool to verify or double-check a result you already have.
   - Give the final answer immediately once computation is complete.
   - Use only the module names listed as loaded.
+  - When combining numbers from multiple tool calls (e.g. summing counts from two modules),
+    ALWAYS use do_math to compute the final total — never do arithmetic mentally.
 """

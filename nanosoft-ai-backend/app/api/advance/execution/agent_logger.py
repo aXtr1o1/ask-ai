@@ -84,13 +84,13 @@ def log_why(reasoning: str):
 
     result = best_formula or best_approach or first_meaningful
     if result:
-        logger.info("  FORMULA : %s", result)
+        logger.info("  THOUGHT : %s", result)
 
 
 def log_tool_call(tool_name: str, args: dict):
     """
     Log what tool was called and its key arguments.
-    Format: CALL : <tool> | module=<x> | <key>=<val> | ...
+    Format: ACTION : <tool> | module=<x> | <key>=<val> | ...
     Excludes 'top_n' (not meaningful to the reader).
     """
     module = args.get("module", "")
@@ -98,7 +98,7 @@ def log_tool_call(tool_name: str, args: dict):
     line = f"{tool_name} | module={module}"
     if key_args:
         line += " | " + " | ".join(f"{k}={v}" for k, v in key_args.items())
-    logger.info("  CALL : %s", line)
+    logger.info("  ACTION : %s", line)
 
 
 def log_tool_result(output: dict, args: dict):
@@ -106,24 +106,24 @@ def log_tool_result(output: dict, args: dict):
     Log a one-line summary of what the tool returned.
     Shows: what tool returned + key numbers + top groups if any.
 
-    count_records      → RESULT : count = 10
-    sum_values         → RESULT : sum = 45.0  (6 records)
-    get_average        → RESULT : average = 11.16  (3 records)
-    group_by_and_count → RESULT : total = 10  |  top → Building A=3, Building B=2
-    calculate_time_between → RESULT : avg = 11.16 min  min = 8.27  max = 13.27  (3 records)
-    do_math            → RESULT : 9 DIV 10 = 0.9
-    join_records       → RESULT : matched = 5  unmatched_a = 2  unmatched_b = 1
-    get_unique_values  → RESULT : 4 unique values → [val1, val2, ...]
+    count_records      → OBSERVATION : count = 10
+    sum_values         → OBSERVATION : sum = 45.0  (6 records)
+    get_average        → OBSERVATION : average = 11.16  (3 records)
+    group_by_and_count → OBSERVATION : total = 10  |  top → Building A=3, Building B=2
+    calculate_time_between → OBSERVATION : avg = 11.16 min  min = 8.27  max = 13.27  (3 records)
+    do_math            → OBSERVATION : 9 DIV 10 = 0.9
+    join_records       → OBSERVATION : matched = 5  unmatched_a = 2  unmatched_b = 1
+    get_unique_values  → OBSERVATION : 4 unique values → [val1, val2, ...]
     """
     if "count" in output and "ranked" not in output and "stats" not in output:
-        logger.info("  RESULT : count = %s", output["count"])
+        logger.info("  OBSERVATION : count = %s", output["count"])
 
     elif "total_sum" in output:
-        logger.info("  RESULT : sum = %s  (%s records)",
+        logger.info("  OBSERVATION : sum = %s  (%s records)",
                     output["total_sum"], output.get("records_used"))
 
     elif "average" in output and "ranked" not in output:
-        logger.info("  RESULT : average = %s  (%s records)",
+        logger.info("  OBSERVATION : average = %s  (%s records)",
                     output["average"], output.get("records_used"))
 
     elif "ranked" in output:
@@ -139,46 +139,51 @@ def log_tool_result(output: dict, args: dict):
             if label is None or label == "":
                 label = "(unassigned)"
             parts.append(f"{label} = {r.get('count')}")
-        logger.info("  RESULT : total = %s  |  top → %s", total, ",  ".join(parts))
+        logger.info("  OBSERVATION : total = %s  |  top → %s", total, ",  ".join(parts))
 
     elif "stats" in output:
         s = output.get("stats", {})
         calc = output.get("calculated", "?")
         missing = output.get("missing_dates", 0)
-        logger.info("  RESULT : avg = %s min  |  min = %s min  |  max = %s min  "
+        logger.info("  OBSERVATION : avg = %s min  |  min = %s min  |  max = %s min  "
                     "(%s records, %s missing dates)",
                     s.get("average"), s.get("minimum"), s.get("maximum"),
                     calc, missing)
 
     elif "result" in output:
         # do_math output
-        logger.info("  RESULT : %s %s %s = %s",
+        logger.info("  OBSERVATION : %s %s %s = %s",
                     output.get("a"), output.get("operation"),
                     output.get("b"), output.get("result"))
 
     elif "matched_count" in output:
-        logger.info("  RESULT : matched = %s  |  unmatched_a = %s  |  unmatched_b = %s",
+        logger.info("  OBSERVATION : matched = %s  |  unmatched_a = %s  |  unmatched_b = %s",
                     output.get("matched_count"),
                     output.get("unmatched_in_a"),
                     output.get("unmatched_in_b"))
 
     elif "unique_values" in output:
         vals = output.get("unique_values", [])[:6]
-        logger.info("  RESULT : %s unique values → %s",
+        logger.info("  OBSERVATION : %s unique values → %s",
                     output.get("count"), vals)
 
     else:
-        logger.info("  RESULT : %s", {k: v for k, v in output.items() if k != "module"})
+        logger.info("  OBSERVATION : %s", {k: v for k, v in output.items() if k != "module"})
 
 
 def log_answer(final_text: str):
     """
     Log the final answer in 4 parts:
       APPROACH : how the LLM approached it
-      FORMULA  : what formula/approach the LLM stated
+      FINAL_ANSWER_REASONING  : what formula/approach the LLM stated
       COMPUTED RESULT : the numeric result
       BUSINESS INSIGHT : the one-line conclusion
     """
+    if not final_text:
+        logger.info("  BUSINESS INSIGHT : (no answer text returned by LLM)")
+        logger.info("")
+        return
+
     approach_line  = None
     formula_line   = None
     computed_line  = None
@@ -228,7 +233,7 @@ def log_answer(final_text: str):
     if approach_line:
         logger.info("  APPROACH : %s", approach_line)
     if formula_line:
-        logger.info("  FORMULA  : %s", formula_line)
+        logger.info("  FINAL_ANSWER_REASONING  : %s", formula_line)
     if computed_line:
         logger.info("  COMPUTED RESULT : %s", computed_line)
     logger.info("  BUSINESS INSIGHT : %s", insight_line or final_text.strip().split("\n")[0])

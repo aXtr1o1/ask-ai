@@ -169,7 +169,6 @@ QUESTIONS: dict = {
         "id": "Q8",
         "question": "Is any contractor sitting on a high backlog of unresolved work?",
         "modules": ["bdm", "ppm"],
-        "modules": ["bdm", "ppm"],
         "filter_fields": {
             "bdm": {
                 "ContractName": "Name of the contract or contractor responsible",
@@ -192,7 +191,6 @@ QUESTIONS: dict = {
     "Q9": {
         "id": "Q9",
         "question": "Which technicians are carrying the heaviest workload right now?",
-        "modules": ["bdm", "ppm"],
         "modules": ["bdm", "ppm"],
         "filter_fields": {
             "bdm": {

@@ -87,8 +87,16 @@ def build_question_message(question_definition: dict, filtered_records: dict) ->
         f"{filter_context}\n\n"
         f"Actual data records:\n"
         f"{data_context}\n\n"
-        f"Study the data above. State your approach and the exact field values you will "
-        f"filter on, then call the right tools to compute the answer."
+        f"Before calling any tool, answer these five planning questions:\n"
+        f"  1. What is the core metric this question is asking for?\n"
+        f"  2. What dimensions should I break it down by? "
+        f"(buildings, contracts, divisions, equipment, technicians, status, priority)\n"
+        f"  3. What supporting context would make the answer actionable?\n"
+        f"  4. Do any modules need to be cross-referenced to answer fully?\n"
+        f"  5. What calculation turns raw counts into a business metric?\n\n"
+        f"Then declare your full tool call plan. Execute the plan. "
+        f"Deliver the final answer using the required output format:\n"
+        f"Approach / Formula / Computed Result / Supporting Evidence / Business Insight."
     ))
 
 
@@ -104,7 +112,7 @@ def print_result(result: dict):
     for entry in trace:
 
         if entry["type"] == "llm_decides_tool":
-            print(f"\n  [STEP {entry['step']}] LLM Formula / Reasoning:")
+            print(f"\n  [STEP {entry['step']}] THOUGHT PROCESS:")
             print(f"  {DASH}")
             for line in (entry.get("reasoning") or "").strip().split("\n"):
                 print(f"    {line}")
@@ -189,13 +197,13 @@ if __name__ == "__main__":
     logger.info("NEW RUN  %s", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     logger.info("=" * 60)
 
-    run_question("Q1")
+    #run_question("Q1")
     run_question("Q2")
-    run_question("Q3")
-    run_question("Q4")
-    run_question("Q5")
-    run_question("Q6")
-    run_question("Q7")
-    run_question("Q8")
-    run_question("Q9")
-    run_question("Q10")
+    # run_question("Q3")
+    # run_question("Q4")
+    # run_question("Q5")
+    # run_question("Q6")
+    # run_question("Q7")
+    # run_question("Q8")
+    # run_question("Q9")
+    # run_question("Q10")
