@@ -2,7 +2,7 @@
 Retrieval — Data Loader and Filter Function
 
 get_filtered_records(modules, filter_fields, filter_values)
-  → loads each module's JSON file
+  → loads each module's data dynamically
   → applies filter_values to keep only matching rows
   → keeps only the columns defined in filter_fields
   → returns { module_name: [filtered_rows] }
@@ -15,31 +15,12 @@ filter_fields format (new):
 The filtered records go DIRECTLY to tools via agent state.
 They are NEVER sent to the LLM.
 """
-import json
 import logging
-from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger("advance.retrieval")
 
-# The JSON data files live in the same folder as this file
-_DATA_DIR = Path(__file__).parent
-
-
-# =============================================================================
-# STEP 1: Load raw JSON records for a module
-#
-# Each module has its own JSON file: bdm.json, ppm.json, assets.json, fa.json, sb.json
-#
-# Called by: get_filtered_records
-# =============================================================================
-def _load_module_data(module: str) -> list[dict]:
-    """Load all raw records from the JSON file for a given module."""
-    path = _DATA_DIR / f"{module}.json"
-    if not path.exists():
-        logger.warning("[RETRIEVAL] File not found: %s", path)
-        return []
-    return json.loads(path.read_text(encoding="utf-8"))
+# Data is loaded dynamically via routes (assets.py, bdm.py, etc.)
 
 
 # =============================================================================
@@ -111,7 +92,7 @@ def get_filtered_records(
 ) -> dict[str, list[dict]]:
     """
     For each module:
-      1. Load raw records from its JSON file
+      1. Load raw records dynamically
       2. Apply module-level pre-filters (from question definition)
       3. Apply HTTP-level filters (from request, flat dict)
       4. Project to only the relevant columns (defined in filter_fields)
@@ -123,30 +104,42 @@ def get_filtered_records(
     output: dict[str, list[dict]] = {}
 
     for module in modules:
-        # Step 1: load raw data
-        raw_records = _load_module_data(module)
+        # Step 1: load data dynamically from route functions
+        raw_records = []
+        try:
+            # Pass only this module's slice of module_filter_values so each
+            # retrieval function receives only its own pre-filters, not all modules'.
+            this_module_filters = (module_filter_values or {}).get(module, {})
+
+            if module == "assets":
+                from app.api.advance.retrieval.assets import retrieve as assets_retrieve
+                raw_records = assets_retrieve(filter_values, this_module_filters)
+            elif module == "bdm":
+                from app.api.advance.retrieval.bdm import retrieve as bdm_retrieve
+                raw_records = bdm_retrieve(filter_values, this_module_filters)
+            elif module == "fa":
+                from app.api.advance.retrieval.fa import retrieve as fa_retrieve
+                raw_records = fa_retrieve(filter_values, this_module_filters)
+            elif module == "ppm":
+                from app.api.advance.retrieval.ppm import retrieve as ppm_retrieve
+                raw_records = ppm_retrieve(filter_values, this_module_filters)
+            elif module == "sb":
+                from app.api.advance.retrieval.sb import retrieve as sb_retrieve
+                raw_records = sb_retrieve(filter_values, this_module_filters)
+        except Exception as e:
+            logger.warning("[RETRIEVAL] Dynamic retrieval failed for module %s: %s", module, e)
+            
+        if not raw_records:
+            logger.warning("[RETRIEVAL] Dynamic retrieval returned 0 records for module %s", module)
 
         # Step 2: get this module's column definitions
         module_filter_fields = filter_fields.get(module, {})
 
-        # Step 3: apply module-level pre-filters (from question definition)
-        pre_filtered = raw_records
-        if module_filter_values and module in module_filter_values:
-            module_pre_filter = module_filter_values[module]
-            # Apply directly — no filter_fields guard, these are always valid
-            for col, val in module_pre_filter.items():
-                if val:
-                    pre_filtered = [
-                        row for row in pre_filtered
-                        if str(val).lower() in str(row.get(col, "")).lower()
-                    ]
-                    logger.info(
-                        "[RETRIEVAL] module=%s | pre-filter col=%s val=%s → %d records",
-                        module, col, val, len(pre_filtered),
-                    )
-
-        # Step 4: apply HTTP-level filters (flat, applies to all modules)
-        filtered = _apply_filters(pre_filtered, module_filter_fields, filter_values)
+        # Step 3: apply filters — merge HTTP-level + module pre-filters
+        # Fields that couldn't be mapped to SP params (e.g. ResolutionTAT) still
+        # get applied here as exact post-filters on the raw records.
+        combined_filters = {**this_module_filters, **filter_values}  # HTTP overrides pre-filter
+        filtered = _apply_filters(raw_records, module_filter_fields, combined_filters)
 
         # Step 5: keep only relevant columns
         projected = _project_columns(filtered, module_filter_fields)

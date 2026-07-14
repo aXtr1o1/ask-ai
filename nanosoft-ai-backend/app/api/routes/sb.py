@@ -34,6 +34,8 @@ def format_response_sb(data):
 
 def _call_sp_sb_query(req: SBRequest) -> dict:
     conn = get_pool()
+    _pld = {k: v for k, v in req.model_dump().items() if v not in (None, "")}
+    logger_sb.info("payloadlog: filter values:\n%s", ",\n".join(f" '{k}': {repr(v)}" for k, v in _pld.items()))
     cursor = conn.cursor()
     cursor.callproc("sp_sb_query", [
         req.user_name,
@@ -89,6 +91,8 @@ def get_sb(req: SBRequest):
         logger_sb.info("📊 [GET-SB] AGGREGATE MODE → calling sp_sb_aggregate")
         try:
             conn = get_pool()
+            _pld = {k: v for k, v in req.model_dump().items() if v not in (None, "")}
+            logger_sb.info("payloadlog: filter values:\n%s", ",\n".join(f" '{k}': {repr(v)}" for k, v in _pld.items()))
             cursor = conn.cursor()
             group_by_str = ",".join(req.group_by_columns) if req.group_by_columns else None
             agg_function = req.aggregate_function or "COUNT"
