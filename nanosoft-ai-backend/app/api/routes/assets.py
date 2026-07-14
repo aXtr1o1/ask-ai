@@ -26,7 +26,6 @@ if not logger.handlers:
 
 
 def format_response(data):
-    logger.info("you can view the length of the p_list and p_count value so that you can cross verify it")
     out = merge_format_response(data)
     logger.info(
         "📊 format_response | p_list_length=%s | p_count=%s",
@@ -101,6 +100,8 @@ def get_assets(req: AssetRequest):
         logger.info("📊 [GET-ASSETS] AGGREGATE MODE detected → calling sp_asset_aggregate")
         try:
             conn = get_pool()
+            _pld = {k: v for k, v in req.model_dump().items() if v not in (None, "")}
+            logger.info("payloadlog: filter values:\n%s", ",\n".join(f" '{k}': {repr(v)}" for k, v in _pld.items()))
             cursor = conn.cursor()
             group_by_str = ",".join(req.group_by_columns) if req.group_by_columns else None
             agg_function = req.aggregate_function or "COUNT"

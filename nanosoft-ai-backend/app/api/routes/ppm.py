@@ -37,6 +37,8 @@ def format_response(data):
 
 def _call_sp_ppm_query(req: PPMRequest) -> dict:
     conn = get_pool()
+    _pld = {k: v for k, v in req.model_dump().items() if v not in (None, "")}
+    logger.info("payloadlog: filter values:\n%s", ",\n".join(f" '{k}': {repr(v)}" for k, v in _pld.items()))
     cursor = conn.cursor()
     cursor.callproc("sp_ppm_query", [
         req.user_name,
@@ -89,6 +91,8 @@ def get_ppm(req: PPMRequest):
         logger.info("📊 [GET-PPM] AGGREGATE MODE detected → calling sp_ppm_aggregate")
         try:
             conn = get_pool()
+            _pld = {k: v for k, v in req.model_dump().items() if v not in (None, "")}
+            logger.info("payloadlog: filter values:\n%s", ",\n".join(f" '{k}': {repr(v)}" for k, v in _pld.items()))
             cursor = conn.cursor()
             group_by_str = ",".join(req.group_by_columns) if req.group_by_columns else None
             agg_function = req.aggregate_function or "COUNT"

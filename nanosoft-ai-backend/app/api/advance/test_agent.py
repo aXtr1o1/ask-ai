@@ -1,11 +1,12 @@
 """
-Test Agent — Direct Pipeline Runner
+Test Retrieval — Direct Retrieval Pipeline Runner
 
-Goal: Run the full pipeline end-to-end without starting the server.
-      Print a clear step-by-step log of what the agent did.
+Goal: Run the retrieval pipeline end-to-end without starting the server
+      and without the execution/agent layer.
+      Print the filtered records loaded for each module.
 
 Usage:
-  cd D:\\nonosoft_client_demo\\ask-ai\\nanosoft-ai-backend
+  cd nanosoft-ai-backend
   python -m app.api.advance.test_agent
 """
 import json
@@ -14,11 +15,17 @@ import warnings
 from pathlib import Path
 warnings.filterwarnings("ignore")
 
-from langchain_core.messages import HumanMessage
+# ── Force-import retrieval modules so route loggers are registered FIRST ─────
+# retrieval.py lazy-imports these; doing it here means route loggers already
+# exist before we apply any suppression below.
+import app.api.advance.retrieval.assets   # noqa: F401
+import app.api.advance.retrieval.bdm      # noqa: F401
+import app.api.advance.retrieval.fa       # noqa: F401
+import app.api.advance.retrieval.ppm      # noqa: F401
+import app.api.advance.retrieval.sb       # noqa: F401
 
 from app.api.advance.analysis.questions import QUESTIONS
 from app.api.advance.retrieval.retrieval import get_filtered_records
-from app.api.advance.execution.agent import get_agent
 
 
 # =============================================================================
@@ -28,9 +35,8 @@ from app.api.advance.execution.agent import get_agent
 # =============================================================================
 LOG_FILE = Path(__file__).parent / "advance_agent.log"
 
-# Only write our own advance.* logs to the file — suppress all library noise
 logging.basicConfig(
-    level=logging.WARNING,     # default: only warnings from libraries
+    level=logging.WARNING,
     format="%(asctime)s  %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[
@@ -38,10 +44,23 @@ logging.basicConfig(
         logging.StreamHandler(),
     ]
 )
-# Our advance logger writes at INFO level
 logging.getLogger("advance").setLevel(logging.INFO)
-# Silence noisy library loggers
-logging.getLogger("advance.retrieval").setLevel(logging.WARNING)  # remove [RETRIEVAL] lines
+logging.getLogger("advance.retrieval").setLevel(logging.INFO)
+
+# ── Block route logger duplicates from propagating to root ────────────────────
+_ROUTE_LOGGERS = frozenset(
+    {"assets_route", "bdm_route", "fa_route", "ppm_route", "sb_route",
+     "postgres_client"}
+)
+
+class _NoRouteDuplicates(logging.Filter):
+    def filter(self, record):
+        return record.name not in _ROUTE_LOGGERS
+
+for _h in logging.root.handlers:
+    _h.addFilter(_NoRouteDuplicates())
+
+# ── Silence noisy library loggers ─────────────────────────────────────────────
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 logging.getLogger("google").setLevel(logging.WARNING)
@@ -50,135 +69,59 @@ logging.getLogger("langgraph").setLevel(logging.WARNING)
 
 logger = logging.getLogger("advance")
 
-
 LINE = "=" * 62
 DASH = "-" * 50
 
 
-def build_question_message(question_definition: dict, filtered_records: dict) -> HumanMessage:
+def run_question(question_id: str):
     """
-    Build the question message that will be sent to the LLM.
-    Contains:
-      - question text
-      - which modules are loaded
-      - column names and what each means
-      - THE ACTUAL DATA RECORDS (so the model can see every row and make informed decisions)
-    """
-    filter_context = (
-        json.dumps(question_definition["filter_fields"], indent=2)
-        if question_definition["filter_fields"]
-        else "No column definitions provided."
-    )
+    Run the retrieval pipeline for one question and print the results.
 
-    # Build a readable data section — model sees the actual rows
-    data_sections = []
-    for module, records in filtered_records.items():
-        data_sections.append(
-            f"--- Module: {module} ({len(records)} records) ---\n"
-            + json.dumps(records, indent=2, default=str)
-        )
-    data_context = "\n\n".join(data_sections) if data_sections else "No data loaded."
-
-    return HumanMessage(content=(
-        f"Question: {question_definition['question']}\n\n"
-        f"Modules loaded: {question_definition['modules']}\n"
-        f"(Use only these module names when calling tools)\n\n"
-        f"Column definitions per module:\n"
-        f"{filter_context}\n\n"
-        f"Actual data records:\n"
-        f"{data_context}\n\n"
-        f"Study the data above. State your approach and the exact field values you will "
-        f"filter on, then call the right tools to compute the answer."
-    ))
-
-
-def print_result(result: dict):
-    """
-    Print the execution trace in a clear, readable format:
-      - Formula the LLM decided
-      - Each tool called, its arguments, and its output
-      - The final answer
-    """
-    trace = result.get("execution_trace", [])
-
-    for entry in trace:
-
-        if entry["type"] == "llm_decides_tool":
-            print(f"\n  [STEP {entry['step']}] LLM Formula / Reasoning:")
-            print(f"  {DASH}")
-            for line in (entry.get("reasoning") or "").strip().split("\n"):
-                print(f"    {line}")
-
-            for i, t in enumerate(entry.get("tools", []), 1):
-                print(f"\n  -> Tool {i}: {t['tool']}")
-                print(f"    Args   : {t['args']}")
-                print(f"    Output :")
-                for line in json.dumps(t["output"], indent=6, default=str).split("\n"):
-                    print(f"    {line}")
-
-        elif entry["type"] == "final_answer":
-            print(f"\n  [FINAL ANSWER]")
-            print(f"  {DASH}")
-            for line in (entry.get("answer") or "").strip().split("\n"):
-                print(f"    {line}")
-
-
-def run_question(question_id: str, filter_values: dict = {}):
-    """
-    Run the full pipeline for one question and print the result step-by-step.
-
-    Step 1: Load question definition
-    Step 2: Load and filter records from JSON files
-    Step 3: Build the question message (what LLM will receive)
-    Step 4: Run the agent → LLM decides formula → tool runs → final answer
-    Step 5: Print result step-by-step
+    Step 1: Load question definition from questions.py
+    Step 2: Load and filter records from DB using module_filter_values
+    Step 3: Print filtered records per module
     """
     # Step 1: Load question definition
     question_definition = QUESTIONS[question_id]
+    module_filter_values = question_definition.get("filter_values", {})
+
+    config_log = (
+        "======================================================================\n"
+        "QUESTION CONFIGURATION\n"
+        "======================================================================\n"
+        f"Question ID : {question_id}\n"
+        f"Question    : {question_definition['question']}\n"
+        f"Modules     : {question_definition['modules']}\n\n"
+        "Pre-Filter Values (from questions.py):\n"
+        f"{json.dumps(module_filter_values, indent=4)}\n\n"
+        "Filter Fields:\n"
+        f"{json.dumps(question_definition.get('filter_fields', {}), indent=4)}"
+    )
+    logger.info(config_log)
 
     print(f"\n{LINE}")
-    print(f"  Question ID : {question_id}")
-    print(f"  Question    : {question_definition['question']}")
-    print(f"  Modules     : {question_definition['modules']}")
-    print(f"  Filters     : {filter_values or 'none'}")
-    print(f"{LINE}")
+    print(f"  Question [{question_id}]: {question_definition['question']}")
+    print(LINE)
 
-    # Step 2: Load and filter records
-    # module_filter_values: per-module pre-filters defined in the question (e.g. only Closed WOs for Q5)
-    # filter_values: flat filters from HTTP request (overrides/supplements per-module filters)
-    module_filter_values = question_definition.get("filter_values", {})
+    # Step 2: Load and filter records from DB
     filtered_records = get_filtered_records(
         modules=question_definition["modules"],
         filter_fields=question_definition["filter_fields"],
-        filter_values=filter_values,
+        filter_values={},
         module_filter_values=module_filter_values,
     )
+
+    # Step 3: Print filtered records per module
     for module, records in filtered_records.items():
-        print(f"  [DATA] {module} -> {len(records)} records loaded")
-
-    # Step 3: Build the question message (includes real data records)
-    question_message = build_question_message(question_definition, filtered_records)
-
-    # Step 4: Build initial state and run the agent
-    initial_state = {
-        "messages":             [question_message],
-        "question":             question_definition["question"],
-        "modules":              question_definition["modules"],
-        "filter_fields":        question_definition["filter_fields"],
-        "module_filter_values": module_filter_values,
-        "filtered_records":     filtered_records,
-        "result":               {},
-    }
-
-    print(f"\n  [AGENT] Running ...\n")
-    agent       = get_agent()
-    # recursion_limit: max graph steps (each ask_llm + run_tool = 2 steps)
-    # With data in context the model may make more tool calls — 50 gives up to ~23 tool calls
-    final_state = agent.invoke(initial_state, {"recursion_limit": 50})
-
-    # Step 5: Print clear step-by-step result
-    result = final_state.get("result", {})
-    print_result(result)
+        logger.info("  [DATA] %s -> %d records loaded", module, len(records))
+        print(f"\n  Module: {module}  ({len(records)} records)")
+        print(f"  {DASH}")
+        if records:
+            print(json.dumps(records[:5], indent=4, default=str))
+            if len(records) > 5:
+                print(f"  ... and {len(records) - 5} more records.")
+        else:
+            print("  (no records)")
 
     print(f"\n{LINE}\n")
 
@@ -189,13 +132,23 @@ if __name__ == "__main__":
     logger.info("NEW RUN  %s", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     logger.info("=" * 60)
 
-    run_question("Q1")
-    run_question("Q2")
-    run_question("Q3")
-    run_question("Q4")
-    run_question("Q5")
-    run_question("Q6")
-    run_question("Q7")
-    run_question("Q8")
-    run_question("Q9")
-    run_question("Q10")
+    #run_question("Q1")
+    #run_question("Q2")
+    #run_question("Q3")
+    #run_question("Q4")
+    #run_question("Q5")
+    #run_question("Q6")
+    #run_question("Q7")
+    #run_question("Q8")
+    #run_question("Q9")
+    #run_question("Q10")
+    #run_question("Q11")
+    #run_question("Q12")
+    #run_question("Q13")
+    #run_question("Q14")
+    #run_question("Q15")
+    run_question("Q16")
+    #run_question("Q17")
+    #run_question("Q18")
+    #run_question("Q19")
+    #run_question("Q20")
