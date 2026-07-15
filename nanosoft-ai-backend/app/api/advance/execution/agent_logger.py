@@ -174,67 +174,85 @@ def log_tool_result(output: dict, args: dict):
 def log_answer(final_text: str):
     """
     Log the final answer in 4 parts:
-      APPROACH : how the LLM approached it
-      FINAL_ANSWER_REASONING  : what formula/approach the LLM stated
+      APPROACH        : how the LLM approached it
+      FORMULA         : the calculation performed
       COMPUTED RESULT : the numeric result
-      BUSINESS INSIGHT : the one-line conclusion
+      BUSINESS INSIGHT: the one-line conclusion
     """
     if not final_text:
         logger.info("  BUSINESS INSIGHT : (no answer text returned by LLM)")
         logger.info("")
         return
 
+    # ------------------------------------------------------------------
+    # Step 1: Clean Markdown and LaTeX noise from the raw text
+    # ------------------------------------------------------------------
+    def clean_line(text: str) -> str:
+        # Remove LaTeX math blocks: $$...$$ (single or multiline)
+        text = re.sub(r"\$\$.*?\$\$", "", text, flags=re.DOTALL)
+        # Remove inline LaTeX: $...$
+        text = re.sub(r"\$[^$]+\$", "", text)
+        # Remove all Markdown bold/italic markers: ** and *
+        text = re.sub(r"\*+", "", text)
+        # Remove Markdown headers: # ## ###
+        text = re.sub(r"^#+\s*", "", text, flags=re.MULTILINE)
+        # Remove backtick code spans
+        text = re.sub(r"`[^`]*`", lambda m: m.group(0).strip("`"), text)
+        return text.strip()
+
+    cleaned_text = clean_line(final_text)
+
+    # ------------------------------------------------------------------
+    # Step 2: Extract sections by label prefix
+    # ------------------------------------------------------------------
     approach_line  = None
     formula_line   = None
     computed_line  = None
     insight_line   = None
 
-    skip_prefixes = ("step ", "i will", "i need", "let me", "to answer", "note")
+    section_map = {
+        "approach":        "approach",
+        "formula":         "formula",
+        "computed result": "computed",
+        "business insight":"insight",
+        "insight":         "insight",
+        "conclusion":      "insight",
+    }
 
-    approach_triggers = ("approach", "method")
-    formula_triggers  = ("formula",)
-    computed_triggers = ("computed result", "result:", "calculated", "=", "%")
-    insight_triggers  = ("insight", "conclusion", "therefore", "this means",
-                         "the highest", "the most", "indicates", "suggests", "business insight")
-
-    for line in final_text.strip().split("\n"):
-        clean = line.strip().lstrip("*-•#").strip()
-        if not clean:
+    for raw_line in cleaned_text.split("\n"):
+        line = raw_line.strip().lstrip("-•").strip()
+        if not line:
             continue
-        lower = clean.lower()
+        lower = line.lower()
 
-        if any(lower.startswith(p) for p in skip_prefixes):
-            continue
+        for label, section in section_map.items():
+            if lower.startswith(label):
+                value = re.sub(rf"^{re.escape(label)}\s*[:\-]?\s*", "", line, flags=re.IGNORECASE).strip()
+                if not value:
+                    continue
+                if section == "approach" and approach_line is None:
+                    approach_line = value
+                elif section == "formula" and formula_line is None:
+                    formula_line = value
+                elif section == "computed" and computed_line is None:
+                    computed_line = value
+                elif section == "insight" and insight_line is None:
+                    insight_line = value
+                break
 
-        if approach_line is None and any(t in lower for t in approach_triggers):
-            approach_line = re.sub(r"^(approach|method)\s*:\s*", "",
-                                   clean, flags=re.IGNORECASE).strip()
-
-        if formula_line is None and any(t in lower for t in formula_triggers):
-            formula_line = re.sub(r"^(formula)\s*:\s*", "",
-                                  clean, flags=re.IGNORECASE).strip()
-
-        if computed_line is None and any(t in lower for t in computed_triggers):
-            computed_line = re.sub(r"^(computed result|result|calculated)\s*:\s*", "",
-                                   clean, flags=re.IGNORECASE).strip()
-
-        if insight_line is None and any(t in lower for t in insight_triggers):
-            insight_line = re.sub(r"^(business insight|insight|conclusion|therefore)\s*:\s*", "",
-                                  clean, flags=re.IGNORECASE).strip()
-
-    # fallback
+    # Fallback for business insight: use last substantial line
     if not insight_line:
-        for line in reversed(final_text.strip().split("\n")):
-            clean = line.strip().lstrip("*-•#").strip()
+        for line in reversed(cleaned_text.split("\n")):
+            clean = line.strip()
             if clean and len(clean) > 15:
                 insight_line = clean
                 break
 
     if approach_line:
-        logger.info("  APPROACH : %s", approach_line)
+        logger.info("  APPROACH        : %s", approach_line)
     if formula_line:
-        logger.info("  FINAL_ANSWER_REASONING  : %s", formula_line)
+        logger.info("  FORMULA         : %s", formula_line)
     if computed_line:
         logger.info("  COMPUTED RESULT : %s", computed_line)
-    logger.info("  BUSINESS INSIGHT : %s", insight_line or final_text.strip().split("\n")[0])
+    logger.info("  BUSINESS INSIGHT: %s", insight_line or cleaned_text.split("\n")[0])
     logger.info("")

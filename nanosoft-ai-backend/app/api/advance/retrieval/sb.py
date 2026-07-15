@@ -1,21 +1,23 @@
 import logging
 from app.api.routes.sb import get_sb
 from app.api.models.schemas import SBRequest
+from app.api.advance.retrieval.mappings import SB_MAPPINGS, SB_BOOL_MAPPINGS
 
 logger = logging.getLogger("advance.retrieval.sb")
 
+
 def retrieve(
-    filter_values: dict,          # flat filters from HTTP payload (across all modules)
-    module_filter_values: dict | None = None  # flat pre-filters for THIS module only (from questions.py)
+    filter_values: dict,
+    module_filter_values: dict | None = None
 ) -> list[dict]:
-    # Combine: start with HTTP payload filters, then overlay this module's pre-filters
+    # Combine HTTP-level filters + this module's pre-filters
     filters = {}
     if filter_values:
         filters.update(filter_values)
     if module_filter_values:
-        filters.update(module_filter_values)  # now safely a flat {col: val} dict for sb only
-    
-    # Helper to check case-insensitive presence of keys in filters
+        filters.update(module_filter_values)
+
+    # Case-insensitive key lookup — treats "" same as None (not a valid filter)
     def get_filter_value(*keys):
         for k in keys:
             if k in filters and filters[k] is not None and filters[k] != "":
@@ -28,68 +30,35 @@ def retrieve(
                     return fv
         return None
 
-    # Map filters to SBRequest fields
     payload = {
-        "user_name": str(get_filter_value("user_name", "userName") or "poc"),
-        "user_id": str(get_filter_value("user_id", "userId") or "1"),
+        "user_name": "poc",
+        "user_id": "1",
         "offset": 0,
         "limit": None,
         "is_aggregate": False
     }
-    
-    # Mappings for SBRequest fields
-    mappings = {
-        "work_order": ["SBCreWorkOrder", "work_order", "SBRequestNo"],
-        "stage": ["PPMStageName", "SBStageName", "stage"],
-        "frequency": ["Frequency", "frequency"],
-        "service_type": ["ServiceTypeName", "service_type"],
-        "division": ["DivisionName", "division"],
-        "discipline": ["DisciplineName", "discipline"],
-        "locality": ["LocalityName", "locality"],
-        "locality_code": ["LocalityCode", "locality_code"],
-        "building": ["BuildingName", "building"],
-        "floor": ["FloorName", "floor"],
-        "spot_name": ["SpotName", "spot_name"],
-        "contract": ["ContractName", "contract"],
-        "tech": ["SBTechName", "tech"],
-        "keyword": ["Keyword", "keyword"],
-        "date_from": ["date_from"],
-        "date_to": ["date_to"],
-        "comp_from": ["SBCreWoCompletedDate", "CompletedDateTime", "comp_from"],
-        "comp_to": ["comp_to"]
-    }
-    
-    for field_name, source_keys in mappings.items():
-        val = get_filter_value(*source_keys)
+
+    # String fields — metadata col name -> SP param name (from mappings.py)
+    for meta_col, sp_param in SB_MAPPINGS.items():
+        val = get_filter_value(meta_col)
         if val is not None:
-            payload[field_name] = str(val)
+            payload[sp_param] = str(val)
 
     # Boolean fields
-    bool_mappings = {
-        "is_withdraw": ["IsSBCreWithDraw", "is_withdraw"],
-        "is_reschedule": ["IsSbCreReschedule", "is_reschedule"],
-        "is_rework": ["IsSBCreRework", "is_rework"],
-        "is_active": ["IsActive", "is_active"],
-        "is_draft": ["IsDraft", "is_draft"]
-    }
-    
-    for field_name, source_keys in bool_mappings.items():
-        val = get_filter_value(*source_keys)
+    for meta_col, sp_param in SB_BOOL_MAPPINGS.items():
+        val = get_filter_value(meta_col)
         if val is not None:
             if isinstance(val, str):
-                payload[field_name] = val.lower() in ("true", "1", "yes")
+                payload[sp_param] = val.lower() in ("true", "1", "yes")
             else:
-                payload[field_name] = bool(val)
+                payload[sp_param] = bool(val)
 
-    # Numeric/float fields
-    for field_name, source_keys in {
-        "sla_min": ["SBCreSLAHours", "sla_min"],
-        "sla_max": ["sla_max"]
-    }.items():
-        val = get_filter_value(*source_keys)
+    # Numeric/float SP params (no metadata column)
+    for sp_param in ("sla_min", "sla_max"):
+        val = get_filter_value(sp_param)
         if val is not None:
             try:
-                payload[field_name] = float(val)
+                payload[sp_param] = float(val)
             except (ValueError, TypeError):
                 pass
 
@@ -102,5 +71,4 @@ def retrieve(
         return records
     except Exception as e:
         logger.error("Error retrieving SB: %s", e, exc_info=True)
-        return []
         return []

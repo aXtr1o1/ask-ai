@@ -127,10 +127,10 @@ def get_filtered_records(
                 from app.api.advance.retrieval.sb import retrieve as sb_retrieve
                 raw_records = sb_retrieve(filter_values, this_module_filters)
         except Exception as e:
-            logger.warning("[RETRIEVAL] Dynamic retrieval failed for module %s: %s", module, e)
+            logger.warning("[RETRIEVAL] Retrieval failed for module %s: %s", module, e)
             
         if not raw_records:
-            logger.warning("[RETRIEVAL] Dynamic retrieval returned 0 records for module %s", module)
+            logger.warning("[RETRIEVAL] Retrieval returned 0 records for module %s", module)
 
         # Step 2: get this module's column definitions
         module_filter_fields = filter_fields.get(module, {})

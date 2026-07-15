@@ -1,21 +1,23 @@
 import logging
 from app.api.routes.ppm import get_ppm
 from app.api.models.schemas import PPMRequest
+from app.api.advance.retrieval.mappings import PPM_MAPPINGS
 
 logger = logging.getLogger("advance.retrieval.ppm")
 
+
 def retrieve(
-    filter_values: dict,          # flat filters from HTTP payload (across all modules)
-    module_filter_values: dict | None = None  # flat pre-filters for THIS module only (from questions.py)
+    filter_values: dict,
+    module_filter_values: dict | None = None
 ) -> list[dict]:
-    # Combine: start with HTTP payload filters, then overlay this module's pre-filters
+    # Combine HTTP-level filters + this module's pre-filters
     filters = {}
     if filter_values:
         filters.update(filter_values)
     if module_filter_values:
-        filters.update(module_filter_values)  # now safely a flat {col: val} dict for ppm only
-    
-    # Helper to check case-insensitive presence of keys in filters
+        filters.update(module_filter_values)
+
+    # Case-insensitive key lookup — treats "" same as None (not a valid filter)
     def get_filter_value(*keys):
         for k in keys:
             if k in filters and filters[k] is not None and filters[k] != "":
@@ -28,57 +30,28 @@ def retrieve(
                     return fv
         return None
 
-    # Map filters to PPMRequest fields
     payload = {
-        "user_name": str(get_filter_value("user_name", "userName") or "poc"),
-        "user_id": str(get_filter_value("user_id", "userId") or "1"),
+        "user_name": "poc",
+        "user_id": "1",
         "offset": 0,
         "limit": None,
         "is_aggregate": False
     }
-    # Snapshot the keys that exist BEFORE any filter mappings are added.
-    # These are the structural/required fields â€” everything added after is optional/relaxable.
+    # Snapshot base keys before optional filters are added (used for retry relaxation)
     base_payload_keys = set(payload.keys())
-    
-    # Mappings for PPMRequest fields
-    mappings = {
-        "work_order": ["WorkOrder", "work_order"],
-        "asset_tag_no": ["AssetTagNo", "asset_tag_no"],
-        "equipment_ref_no": ["EquipmentRefNo", "equipment_ref_no"],
-        "status": ["PPMStatus", "status"],
-        "stage": ["PPMStageName", "stage"],
-        "frequency": ["Frequency", "frequency"],
-        "division": ["DivisionName", "division"],
-        "discipline": ["DisciplineName", "discipline"],
-        "locality": ["LocalityName", "locality"],
-        "locality_code": ["LocalityCode", "locality_code"],
-        "building": ["BuildingName", "building"],
-        "floor": ["FloorName", "floor"],
-        "spot_name": ["SpotName", "spot_name"],
-        "equipment": ["EquipmentName", "equipment"],
-        "contract": ["ContractName", "contract"],
-        "tech": ["PMTechName", "tech"],
-        "keyword": ["Keyword", "keyword"],
-        "date_from": ["date_from"],
-        "date_to": ["date_to"],
-        "comp_from": ["WoCompletedDate", "comp_from"],
-        "comp_to": ["comp_to"]
-    }
-    
-    for field_name, source_keys in mappings.items():
-        val = get_filter_value(*source_keys)
-        if val is not None:
-            payload[field_name] = str(val)
 
-    # Numeric fields
-    for field_name, source_keys in {
-        "sla_min": ["sla_min"],
-        "sla_max": ["sla_max"]
-    }.items():
-        val = get_filter_value(*source_keys)
+    # String fields — metadata col name -> SP param name (from mappings.py)
+    for meta_col, sp_param in PPM_MAPPINGS.items():
+        val = get_filter_value(meta_col)
+        if val is not None:
+            payload[sp_param] = str(val)
+
+    # Numeric-only SP params (no metadata column, HTTP pass-through only)
+    for sp_param in ("sla_min", "sla_max"):
+        val = get_filter_value(sp_param)
         if val is not None:
             try:
-                payload[field_name] = int(val)
+                payload[sp_param] = int(val)
             except (ValueError, TypeError):
                 pass
 
@@ -89,19 +62,15 @@ def retrieve(
         records = response.get("p_list") or []
         logger.info("Successfully retrieved %d PPM records", len(records))
 
-        # Progressive filter relaxation: if 0 results, dynamically determine
-        # which fields are optional (anything beyond the base required fields)
-        # and drop them one at a time â€” most recently added first (most specific)
-        # â€” until records are found.
+        # Progressive filter relaxation: if 0 results, drop optional filters one by one
         if not records:
-            # optional_fields = everything added by filter mappings (not the base snapshot)
             optional_fields = [k for k in payload if k not in base_payload_keys]
             dropped = []
             current_payload = dict(payload)
-            for field in reversed(optional_fields):  # reverse = most specific first
+            for field in reversed(optional_fields):
                 current_payload = {k: v for k, v in current_payload.items() if k != field}
                 dropped.append(field)
-                logger.info("PPM retry â€” dropped fields: %s | retrying payload: %s", dropped, current_payload)
+                logger.info("PPM retry — dropped fields: %s | retrying payload: %s", dropped, current_payload)
                 try:
                     retry_req = PPMRequest(**current_payload)
                     retry_response = get_ppm(retry_req)
