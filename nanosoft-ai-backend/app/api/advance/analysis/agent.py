@@ -1,22 +1,20 @@
 """
-FM Analysis Agent
+Analysis Agent
 
-Receives the Understanding Agent summary (db_query only) and decides:
-  - Which modules to query
-  - Which fields to retrieve from each module (filter_fields)
-  - Which values to pre-filter on per module (filter_values)
+Receives the Understanding Agent's query summary and the pre-identified
+modules. Decides which fields to retrieve and which values to filter on
+for each module.
 
-How metadata feeds the LLM:
-  MODULE_SCHEMAS from metadata.py is serialized into JSON and embedded
-  in the system prompt (see analysis/prompt.py → get_system_prompt).
-  The LLM reads the full field schema directly and reasons from it.
-  No hardcoded field selection rules.
+Why modules come from outside:
+    The Understanding Agent already identified which modules are relevant.
+    This agent only receives metadata for those modules, keeping the
+    system prompt lean (no wasted tokens on irrelevant modules).
 
 Flow:
-  Understanding Agent output (db_query only)
+  query_summary + modules (from Understanding Agent)
+    → Build system prompt with only selected modules' metadata
     → LLM with structured output (AnalysisOutput)
-    → Validate against MODULE_SCHEMAS (strip hallucinations)
-    → Merge standard context fields
+    → Validate — strip any hallucinated modules or fields
     → Return { modules, filter_fields, filter_values }
 """
 import logging
@@ -27,50 +25,77 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from app.config import settings
 from app.api.advance.analysis.schemas import AnalysisOutput
 from app.api.advance.analysis.prompt import get_system_prompt
-from app.api.advance.analysis.metadata import MODULE_SCHEMAS
+from app.api.advance.analysis.metadata import MODULE_SCHEMAS, get_metadata
 
 logger = logging.getLogger("advance.analysis")
 
-# System prompt built once at startup — MODULE_SCHEMAS is static
-_SYSTEM_PROMPT = get_system_prompt()
-
 
 # =============================================================================
-# MAIN FUNCTION: analyze_query
+# MAIN FUNCTION
 # =============================================================================
-def analyze_query(query_summary: str) -> dict:
+def analyze_query(query_summary: str, modules: list[str]) -> dict:
     """
     Run the Analysis Agent on a cleaned query summary.
-    This should ONLY be called if the intent is 'db_query'.
+
+    Args:
+        query_summary : Clean query text produced by the Understanding Agent.
+        modules       : FM modules identified by the Understanding Agent.
+                        Only metadata for these modules is loaded into the prompt.
 
     Returns:
-      {
-        "modules":       [list of modules],
-        "filter_fields": { module: { field: description } },
-        "filter_values": { module: { field: value } },
-      }
+        {
+            "reasoning":     str,
+            "modules":       [list of validated module names],
+            "filter_fields": { module: { field: description } },
+            "filter_values": { module: { field: value } },
+        }
     """
     # -------------------------------------------------------------------------
-    # Analysis Agent LLM
-    # Reads the query summary + full MODULE_SCHEMAS from the prompt.
-    # Outputs: modules + filter_fields + filter_values.
+    # Log what metadata is being loaded (field count per module)
+    # This lets you verify the lean-prompt effect before the LLM call
+    # -------------------------------------------------------------------------
+    loaded_meta = get_metadata(modules)
+    meta_summary = ", ".join(
+        f"{mod}({len(fields)} fields)" for mod, fields in loaded_meta.items()
+    )
+    logger.info("[Analysis Agent] metadata loaded — %s", meta_summary)
+
+    # -------------------------------------------------------------------------
+    # Build the system prompt with only the selected modules' metadata
+    # -------------------------------------------------------------------------
+    system_prompt = get_system_prompt(modules)
+
+    # -------------------------------------------------------------------------
+    # LLM call
     # -------------------------------------------------------------------------
     llm = ChatGoogleGenerativeAI(
         model="gemini-2.5-flash",
         google_api_key=settings.GOOGLE_API_KEY,
         temperature=1,
-        thinking_budget=1024,  # internal reasoning tokens to select correct fields and filter values
+        thinking_budget=512,
     )
-    structured_llm = llm.with_structured_output(AnalysisOutput)
+    # include_raw=True gives us the raw AIMessage (with usage_metadata)
+    # alongside the parsed Pydantic output
+    structured_llm = llm.with_structured_output(AnalysisOutput, include_raw=True)
 
     messages = [
-        SystemMessage(content=_SYSTEM_PROMPT),
+        SystemMessage(content=system_prompt),
         HumanMessage(content=query_summary),
     ]
-    response = structured_llm.invoke(messages)
+    result      = structured_llm.invoke(messages)
+    response: AnalysisOutput = result["parsed"]
+    usage       = result["raw"].usage_metadata or {}
+
+    logger.info(
+        "[Analysis Agent] tokens — input: %d | output: %d | total: %d",
+        usage.get("input_tokens",  0),
+        usage.get("output_tokens", 0),
+        usage.get("total_tokens",  0),
+    )
 
     # -------------------------------------------------------------------------
-    # Step 3: Validate — strip any hallucinated modules or fields
+    # Validate — strip any hallucinated modules or fields
+    # Only allow modules that exist in the full registry AND were requested
     # -------------------------------------------------------------------------
     valid_modules = [m for m in response.modules if m in MODULE_SCHEMAS]
 
@@ -90,11 +115,9 @@ def analyze_query(query_summary: str) -> dict:
             if field in MODULE_SCHEMAS.get(mod, {})
         }
 
-    result = {
+    return {
         "reasoning":     response.reasoning,
         "modules":       valid_modules,
         "filter_fields": valid_filter_fields,
         "filter_values": valid_filter_values,
     }
-
-    return result

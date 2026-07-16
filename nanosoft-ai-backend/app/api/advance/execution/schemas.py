@@ -1,39 +1,39 @@
 """
 Execution — Data Shapes
 
-This file holds ALL data structure definitions used in the execution module.
-
-  AgentState → TypedDict used by LangGraph to carry state through the agent graph
-               Every node (ask_llm, run_tool, collect_result) reads from and writes to this.
-               When routes are added later, RunRequest / RunResponse go here too.
-
-Used by:
-  agent.py → StateGraph(AgentState), ask_llm, collect_result
+StepDef       → one planned tool call in the queue
+ExecutionResult → the final output after the queue finishes running
 """
-from typing import Annotated, Any, TypedDict
-
-from langchain_core.messages import BaseMessage
-from langgraph.graph.message import add_messages
+from typing import Any, TypedDict
 
 
 # =============================================================================
-# AGENT STATE — used by LangGraph to carry data through the agent graph
+# STEP DEFINITION — one entry in the planned queue
 #
 # Fields:
-#   messages         → full conversation history (LangGraph appends to this automatically)
-#   question         → the FM analytics question text
-#   modules          → which data modules are loaded (e.g. ["bdm", "ppm"])
-#   filter_fields    → metadata about each filter field → sent to LLM as context
-#   filtered_records → actual data per module → tools read this, LLM NEVER sees it
-#   result           → final structured answer (filled by collect_result at the end)
-#
-# Used by: agent.py → StateGraph(AgentState), ask_llm, collect_result
+#   step  → index (0, 1, 2, ...)
+#   tool  → tool name (e.g. "count_records", "do_math", "final_answer_tool")
+#   args  → tool arguments; values may be plain scalars or "$step_N.key" references
 # =============================================================================
-class AgentState(TypedDict):
-    messages:             Annotated[list, add_messages]   # LangGraph manages appending to this
-    question:             str
-    modules:              list[str]
-    filter_fields:        dict[str, Any]
-    module_filter_values: dict[str, Any]
-    filtered_records:     dict[str, list[dict]]
-    result:               dict[str, Any]
+class StepDef(TypedDict):
+    step: int
+    tool: str
+    args: dict[str, Any]
+
+
+# =============================================================================
+# EXECUTION RESULT — returned by run_queue() after all steps complete
+#
+# Fields:
+#   queue        → the original planned queue (list of StepDef)
+#   step_results → raw tool output per step  e.g. {"step_0": {...}, "step_1": {...}}
+#   queue_total  → total steps that were planned
+#   tools_called → total steps that were actually executed
+#   status       → "COMPLETE" if tools_called == queue_total, else "INCOMPLETE"
+# =============================================================================
+class ExecutionResult(TypedDict):
+    queue:        list[StepDef]
+    step_results: dict[str, Any]
+    queue_total:  int
+    tools_called: int
+    status:       str

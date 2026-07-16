@@ -79,6 +79,8 @@ def _call_sp_asset_query(req: AssetRequest) -> dict:
     row = cursor.fetchone()
     cursor.close()
     raw = row[0] if row else {}
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8", errors="replace")  # safe: replace bad bytes instead of crashing
     if isinstance(raw, str):
         raw = json.loads(raw)
     return format_response(raw)
@@ -124,6 +126,8 @@ def get_assets(req: AssetRequest):
             row = cursor.fetchone()
             cursor.close()
             raw = row[0] if row else {}
+            if isinstance(raw, bytes):
+                raw = raw.decode("utf-8", errors="replace")  # safe: replace bad bytes instead of crashing
             if isinstance(raw, str):
                 raw = json.loads(raw)
             formatted = format_response(raw)

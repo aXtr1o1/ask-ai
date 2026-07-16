@@ -265,20 +265,31 @@ def group_by_and_count(
     module: str,
     group_field: str,
     state: Annotated[dict, InjectedState()],
+    filter_field: str = "",
+    filter_value: str = "",
 ) -> dict:
     """
     Group records by a field and count how many records fall in each group.
     Results are sorted from highest count to lowest.
-    The retrieval layer is responsible for returning already-filtered data;
-    this tool only groups and counts what it receives.
+    Optionally filter rows to only those where filter_field equals filter_value before grouping.
 
     Args:
-        module:      Data module name
-        group_field: Column to group by
+        module:       Data module name
+        group_field:  Column to group by
+        filter_field: Column to filter on before grouping (optional)
+        filter_value: Value to match in filter_field; "" matches blank/null rows
     """
     df = load_records_as_dataframe(state, module)
     if df.empty:
         return {"module": module, "group_field": group_field, "total_records": 0, "groups": []}
+
+    # Apply optional pre-filter before grouping
+    if filter_field and filter_field in df.columns:
+        col = df[filter_field].fillna("").astype(str).str.strip()
+        if filter_value == "":
+            df = df[col == ""]
+        else:
+            df = df[col.str.lower() == filter_value.lower()]
 
     if group_field not in df.columns:
         return {
@@ -296,7 +307,6 @@ def group_by_and_count(
     )
 
     # Replace NaN with None so the output is always valid JSON
-    # (NaN appears when a group field has null values — not valid in JSON)
     groups_raw = grouped.to_dict(orient="records")
     groups_clean = [
         {k: (None if isinstance(v, float) and math.isnan(v) else v) for k, v in row.items()}
@@ -306,6 +316,8 @@ def group_by_and_count(
     return {
         "module":        module,
         "group_field":   group_field,
+        "filter_field":  filter_field,
+        "filter_value":  filter_value,
         "total_records": len(df),
         "unique_groups": len(grouped),
         "groups":        groups_clean,
@@ -454,8 +466,27 @@ def do_math(
 
 
 # =============================================================================
-# ALL TOOLS — imported by agent.py
-# The LLM reads each tool's docstring to decide which one to call.
+# TOOL 11: final_answer_tool
+# =============================================================================
+@tool
+def final_answer_tool(result_ref: str) -> dict:
+    """
+    Completion marker. Always the LAST step in the execution queue.
+    Signals that all computation steps have been completed successfully.
+    result_ref receives the resolved value of the final computed answer.
+
+    Args:
+        result_ref: The final computed answer (a $step_N.key reference resolved
+                    by the queue runner before this tool is called)
+    """
+    return {
+        "status":      "complete",
+        "final_value": result_ref,
+    }
+
+
+# =============================================================================
+# ALL TOOLS — used by the planner for tool descriptions
 # =============================================================================
 ALL_TOOLS = [
     count_records,
@@ -468,4 +499,5 @@ ALL_TOOLS = [
     get_unique_values,
     join_records,
     do_math,
+    final_answer_tool,
 ]

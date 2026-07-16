@@ -20,13 +20,19 @@ def retrieve(
     # Case-insensitive key lookup -- treats "" same as None (not a valid filter)
     def get_filter_value(*keys):
         for k in keys:
-            if k in filters and filters[k] is not None and filters[k] != "":
-                return filters[k]
-            kl = k.lower()
-            if kl in filters and filters[kl] is not None and filters[kl] != "":
-                return filters[kl]
+            for fk, fv in [(k, filters.get(k)), (k.lower(), filters.get(k.lower()))]:
+                if fv is None or fv == "":
+                    continue
+                if isinstance(fv, str) and fv.strip().lower() in ("null", "none"):
+                    continue   # treat "null" string as no filter
+                if fv is not None:
+                    return fv
             for fk, fv in filters.items():
-                if fk.lower() == kl and fv is not None and fv != "":
+                if fk.lower() == k.lower():
+                    if fv is None or fv == "":
+                        continue
+                    if isinstance(fv, str) and fv.strip().lower() in ("null", "none"):
+                        continue
                     return fv
         return None
 
