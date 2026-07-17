@@ -1,0 +1,140 @@
+"""
+FM Formatting Agent
+
+This layer sits after execution and before the API/frontend response.
+Its job is to normalize the raw pipeline output into a stable envelope that
+the frontend can render consistently.
+"""
+from __future__ import annotations
+
+import json
+import logging
+from typing import Any
+
+from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_google_genai import ChatGoogleGenerativeAI
+
+from app.config import settings
+from app.api.advance.Formatting_agent.prompt import SYSTEM_PROMPT
+from app.api.advance.Formatting_agent.tools import FORMATTING_TOOLS
+
+logger = logging.getLogger("advance.formatting")
+
+
+def _stringify_answer(answer: Any) -> str:
+    if answer is None:
+        return ""
+
+    if isinstance(answer, str):
+        return answer.strip()
+
+    if isinstance(answer, (dict, list)):
+        return json.dumps(answer, indent=2, default=str)
+
+    return str(answer).strip()
+
+
+def format_pipeline_response(
+    response: dict,
+    *,
+    query: str | None = None,
+    default_response_type: str = "analytical-answer",
+    default_reason: str = "Normalized by formatting agent",
+) -> dict:
+    """
+    Format the pipeline output using an LLM that calls explicit layout tools.
+    """
+    formatted_answer = _stringify_answer(response.get("formatted_answer"))
+    
+    # Check if a layout was already hardcoded upstream (e.g. error)
+    hardcoded_layout = (response.get("layout") or "").upper().strip()
+    
+    # [PONYTAIL] If the caller explicitly gave us a layout, they don't need the LLM 
+    # to invent a header or explanation. Return exactly what was requested.
+    if hardcoded_layout:
+        return {
+            "response_type": response.get("response_type", default_response_type),
+            "layout": hardcoded_layout,
+            "format_reason": "Layout hardcoded by upstream pipeline",
+            "header": "",
+            "explanation": "",
+            "formatted_answer": formatted_answer
+        }
+
+    llm = ChatGoogleGenerativeAI(
+        model="gemini-2.5-flash",
+        google_api_key=settings.GOOGLE_API_KEY,
+        temperature=1,
+    )
+    llm_with_tools = llm.bind_tools(FORMATTING_TOOLS)
+
+    # Inject only the context the formatter needs: query, final answer, and any upstream hint.
+    human_content = (
+        "Context for layout selection:\n"
+        f"- Original user query: {query or 'None'}\n"
+        f"- Final answer text:\n{formatted_answer}\n"
+    )
+    if hardcoded_layout:
+        human_content += (
+            "\n- Upstream layout hint: "
+            f"{hardcoded_layout}\n"
+            "Use this hint only if it still fits the structure of the answer."
+        )
+
+    messages = [
+        SystemMessage(content=SYSTEM_PROMPT),
+        HumanMessage(content=human_content),
+    ]
+
+    # Default fallback
+    chosen_layout = "PLAIN_TEXT"
+    chosen_response_type = default_response_type
+    chosen_reason = default_reason
+    chosen_header = ""
+    chosen_explanation = ""
+
+    try:
+        # LLM analyzes and triggers a tool
+        logger.info("[FORMATTING AGENT] Analyzing text to trigger a layout tool...")
+        llm_response = llm_with_tools.invoke(messages)
+        
+        if llm_response.tool_calls:
+            tool_call = llm_response.tool_calls[0]
+            tool_name = tool_call["name"]
+            logger.info(f"[FORMATTING AGENT] Triggered layout tool: {tool_name}")
+            args = tool_call.get("args", {})
+            
+            tool_dict = {t.name: t for t in FORMATTING_TOOLS}
+            tool_func = tool_dict.get(tool_name)
+            
+            if tool_func:
+                # Dynamically invoke the tool to get its specific layout and response_type
+                result = tool_func.invoke(args)
+                chosen_layout = result.get("layout", chosen_layout)
+                chosen_response_type = result.get("response_type", chosen_response_type)
+                chosen_reason = result.get("format_reason", chosen_reason)
+                chosen_header = result.get("header", "")
+                chosen_explanation = result.get("explanation", "")
+                
+                
+               
+                if result.get("rewritten_text"):
+                    formatted_answer = result["rewritten_text"]
+            else:
+                logger.warning(f"Formatting LLM called unknown tool: {tool_name}")
+                chosen_reason = args.get("format_reason", chosen_reason)
+        else:
+            logger.warning("Formatting LLM returned without calling a tool. Using fallback.")
+
+    except Exception as e:
+        logger.error("Formatting LLM failed: %s. Falling back to default.", e)
+        chosen_reason = f"Fallback: LLM failed to format ({e})"
+
+    return {
+        "response_type": chosen_response_type,
+        "layout": chosen_layout,
+        "format_reason": chosen_reason,
+        "header": chosen_header,
+        "explanation": chosen_explanation,
+        "formatted_answer": formatted_answer
+    }

@@ -1,0 +1,1440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Advance Ask AI Playground</title>
+  <!-- Google Fonts: Outfit and Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+  
+  <style>
+    /* CSS Variables for light & dark themes */
+    :root {
+      --font-sans: 'Inter', sans-serif;
+      --font-heading: 'Outfit', sans-serif;
+      --font-mono: 'Fira Code', monospace;
+      
+      /* Dark Theme (Default) */
+      --bg-app: #0b0f19;
+      --bg-sidebar: #0f172a;
+      --bg-card: rgba(30, 41, 59, 0.45);
+      --bg-card-hover: rgba(30, 41, 59, 0.65);
+      --border-color: rgba(255, 255, 255, 0.08);
+      --border-color-subtle: rgba(255, 255, 255, 0.04);
+      --text-primary: #f8fafc;
+      --text-secondary: #94a3b8;
+      --text-muted: rgba(255, 255, 255, 0.45);
+      --accent-gold-primary: #D4AF37;
+      --accent-gold-secondary: #AA7C11;
+      --accent-gold-light: #ffd700;
+      --accent-gold-bg: rgba(212, 175, 55, 0.15);
+      --shadow-premium: 0 10px 30px -10px rgba(0, 0, 0, 0.5), 0 1px 1px rgba(255, 255, 255, 0.05);
+      --bg-code: rgba(15, 23, 42, 0.7);
+      
+      /* UI states */
+      --sidebar-width: 280px;
+    }
+
+    [data-theme="light"] {
+      --bg-app: #f8fafc;
+      --bg-sidebar: #ffffff;
+      --bg-card: rgba(241, 245, 249, 0.7);
+      --bg-card-hover: rgba(241, 245, 249, 0.9);
+      --border-color: rgba(15, 23, 42, 0.08);
+      --border-color-subtle: rgba(15, 23, 42, 0.04);
+      --text-primary: #0f172a;
+      --text-secondary: #475569;
+      --text-muted: rgba(15, 23, 42, 0.5);
+      --accent-gold-primary: #aa7c11;
+      --accent-gold-secondary: #8a6508;
+      --accent-gold-light: #8a6508;
+      --accent-gold-bg: rgba(212, 175, 55, 0.1);
+      --shadow-premium: 0 10px 30px -10px rgba(15, 23, 42, 0.08), 0 1px 1px rgba(15, 23, 42, 0.02);
+      --bg-code: #1e293b;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-app);
+      color: var(--text-primary);
+      font-family: var(--font-sans);
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      transition: background-color 0.3s ease, color 0.3s ease;
+    }
+
+    /* Scrollbar Styling */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(156, 163, 175, 0.25);
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(156, 163, 175, 0.45);
+    }
+
+    /* Main Area Styles */
+    .main-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      position: relative;
+    }
+
+    .header-bar {
+      height: 64px;
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      z-index: 5;
+    }
+
+    .engine-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-secondary);
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: #22c55e;
+      box-shadow: 0 0 8px #22c55e;
+    }
+
+    .content-area {
+      flex: 1;
+      overflow-y: auto;
+      padding: 32px 24px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .content-wrapper {
+      width: 100%;
+      max-width: 800px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+      flex: 1;
+    }
+
+    /* Welcome / Landing Styles */
+    .landing-card {
+      background: var(--bg-card);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--border-color);
+      border-radius: 16px;
+      padding: 48px 32px;
+      text-align: center;
+      box-shadow: var(--shadow-premium);
+      animation: fadeIn 0.6s ease-out;
+      margin: auto 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes goldShine {
+      0% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+
+    .landing-subtitle {
+      font-size: 16px;
+      color: var(--text-secondary);
+      margin-top: 4px;
+      font-weight: 400;
+      letter-spacing: 0.5px;
+    }
+
+    .quick-start-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 16px;
+      width: 100%;
+      max-width: 600px;
+      margin-top: 32px;
+    }
+
+    .quick-card {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 16px;
+      text-align: left;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .quick-card:hover {
+      background: var(--bg-card-hover);
+      border-color: var(--accent-gold-primary);
+      transform: translateY(-2px);
+    }
+
+    .quick-card-title {
+      font-family: var(--font-heading);
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .quick-card-desc {
+      font-size: 12px;
+      color: var(--text-secondary);
+      line-height: 1.4;
+    }
+
+    /* Chat Elements */
+    .chat-messages {
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+      width: 100%;
+    }
+
+    .message-user {
+      align-self: flex-end;
+      max-width: 80%;
+      background: linear-gradient(135deg, var(--accent-gold-primary) 0%, var(--accent-gold-secondary) 100%);
+      color: #ffffff;
+      padding: 12px 18px;
+      border-radius: 18px 18px 4px 18px;
+      font-size: 14.5px;
+      box-shadow: 0 4px 12px rgba(212, 175, 55, 0.25);
+      animation: messageSlideIn 0.3s ease-out;
+    }
+
+    @keyframes messageSlideIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .message-ai {
+      align-self: flex-start;
+      width: 100%;
+      animation: messageSlideIn 0.4s ease-out;
+    }
+
+    /* Input Bar Area */
+    .input-container {
+      border-top: 1px solid var(--border-color);
+      padding: 20px 24px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      background-color: var(--bg-app);
+      transition: background-color 0.3s;
+    }
+
+    .input-box-wrapper {
+      width: 100%;
+      max-width: 800px;
+      position: relative;
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 14px;
+      display: flex;
+      flex-direction: column;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .input-box-wrapper:focus-within {
+      border-color: var(--accent-gold-primary);
+      box-shadow: 0 0 0 2px var(--accent-gold-bg);
+    }
+
+    .textarea-mock {
+      width: 100%;
+      min-height: 48px;
+      max-height: 160px;
+      background: transparent;
+      border: none;
+      outline: none;
+      resize: none;
+      padding: 14px 16px;
+      color: var(--text-primary);
+      font-family: var(--font-sans);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .input-controls {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      padding: 8px 12px;
+      border-top: 1px solid var(--border-color-subtle);
+    }
+
+
+
+    .send-btn {
+      background: linear-gradient(135deg, var(--accent-gold-primary) 0%, var(--accent-gold-secondary) 100%);
+      border: none;
+      border-radius: 8px;
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      cursor: pointer;
+      box-shadow: 0 2px 8px rgba(212, 175, 55, 0.3);
+      transition: transform 0.2s, opacity 0.2s;
+    }
+
+    .send-btn:hover {
+      transform: scale(1.05);
+    }
+
+    .send-btn:active {
+      transform: scale(0.95);
+    }
+
+    /* Streaming Cursor */
+    .stream-cursor {
+      display: inline-block;
+      width: 2px;
+      height: 15px;
+      background-color: var(--accent-gold-light);
+      margin-left: 2px;
+      vertical-align: middle;
+      animation: blink 0.8s infinite;
+    }
+
+    @keyframes blink {
+      0%, 100% { opacity: 0; }
+      50% { opacity: 1; }
+    }
+
+    /* Tabler-like SVGs */
+    .btn-svg {
+      width: 16px;
+      height: 16px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .btn-svg-lg {
+      width: 20px;
+      height: 20px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    /* GRAPH Layout styling */
+    .graph-container {
+      background: var(--bg-code);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 16px;
+      width: 100%;
+      height: 320px;
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      box-shadow: inset 0 2px 4px rgba(0,0,0,0.3);
+    }
+
+    .graph-svg {
+      width: 100%;
+      height: 100%;
+    }
+
+    .node {
+      cursor: pointer;
+      transition: transform 0.2s;
+    }
+
+    .node:hover {
+      transform: scale(1.1);
+    }
+
+    .node circle {
+      stroke-width: 2px;
+    }
+
+    .node text {
+      font-size: 11px;
+      font-weight: 500;
+      font-family: var(--font-sans);
+    }
+
+    .link {
+      stroke-width: 1.5px;
+      stroke-dasharray: 4 2;
+      animation: dash 10s linear infinite;
+    }
+
+    @keyframes dash {
+      to {
+        stroke-dashoffset: -40;
+      }
+    }
+  </style>
+</head>
+<body>
+
+
+  <!-- Main Content Container -->
+  <main class="main-container">
+    <header class="header-bar">
+      <div class="engine-status">
+        <span class="status-dot"></span>
+        <span>NanoSoft Advance Ask-AI </span>
+      </div>
+
+    </header>
+
+    <div class="content-area">
+      <div class="content-wrapper" id="content-wrapper">
+        <!-- Dynmically loaded content will appear here -->
+      </div>
+    </div>
+
+    <!-- Input Bar -->
+    <div class="input-container">
+      <div class="input-box-wrapper">
+        <textarea 
+          class="textarea-mock" 
+          id="query-input" 
+          placeholder="Ask a question..."
+          onkeydown="if(event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendQuery(); }"
+        ></textarea>
+        <div class="input-controls">
+          <button class="send-btn" onclick="sendQuery()" title="Send prompt to engine">
+            <svg class="btn-svg" viewBox="0 0 24 24" style="stroke: #fff;"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4Z"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    // Presets definitions
+    const PRESETS = {
+      welcome: {
+        title: "Welcome Screen",
+        icon: '<path d="M5 12h14M12 5l7 7-7 7"/>',
+        query: "Welcome Screen",
+        isWelcome: true
+      },
+      revenue: {
+        title: "Revenue Table",
+        icon: '<path d="M12 3v18M3 12h18"/>',
+        query: "Show me a monthly revenue breakdown of Q1 2026",
+        response: {
+          response_type: "financial-report",
+          layout: "TABLE",
+          format_reason: "A structured table provides a clear comparison of revenue streams across different months of the first quarter, helping quickly identify financial trends.",
+          formatted_answer: "| Month | Software Licensing | Cloud Consulting | Support Contracts | Total |\n|---|---|---|---|---|\n| **January 2026** | $45,200 | $18,900 | $8,500 | $72,600 |\n| **February 2026** | $48,100 | $22,400 | $8,500 | $79,000 |\n| **March 2026** | $52,400 | $25,100 | $9,200 | $86,700 |\n| **Q1 Total** | **$145,700** | **$66,400** | **$26,200** | **$238,300** |"
+        }
+      },
+      architect: {
+        title: "Architecture Graph",
+        icon: '<path d="M3 12h18M12 3v18"/>',
+        query: "Draw a system dependency graph of the Nanosoft Ask-AI agent pipeline",
+        response: {
+          response_type: "architecture-graph",
+          layout: "GRAPH",
+          format_reason: "A graph visualization easily explains the sequential and branching flow of user requests processing through our pipeline stages.",
+          formatted_answer: JSON.stringify({
+            nodes: [
+              { id: "A", label: "User Input Panel", type: "input" },
+              { id: "B", label: "Understanding Agent", type: "agent" },
+              { id: "C", label: "Retrieval & Vector DB", type: "db" },
+              { id: "D", label: "Analysis Agent", type: "agent" },
+              { id: "E", label: "Response Enveloper", type: "agent" },
+              { id: "F", label: "Ask AI UI Renderer", type: "output" }
+            ],
+            links: [
+              { source: "A", target: "B" },
+              { source: "B", target: "C" },
+              { source: "B", target: "D" },
+              { source: "C", target: "D" },
+              { source: "D", target: "E" },
+              { source: "E", target: "F" }
+            ]
+          }, null, 2)
+        }
+      },
+      compare: {
+        title: "Comparison List",
+        icon: '<path d="M3 6h18M3 12h18M3 18h18"/>',
+        query: "What are the advantages of using layout wrappers in the Ask-AI engine?",
+        response: {
+          response_type: "comparison-analysis",
+          layout: "BULLET_LIST",
+          format_reason: "Bullet points are the cleanest way to summarize distinct advantages without the horizontal space overhead of a table.",
+          formatted_answer: "- **Intent-based Layouts**: The backend can format output exactly as the user wants (e.g. lists, graphs, JSON, tables).\n- **Graceful Degradation**: Fallbacks to standard markdown or plain text if formatting parsers run into JSON envelope errors.\n- **Premium Look-and-Feel**: Avoids raw dumps of unformatted text, using glassmorphism and gold-themed containers instead.\n- **Adaptive Querying**: Dynamically converts tables to lists if query context suggests the user doesn't want a table structure."
+        }
+      },
+      rawJson: {
+        title: "JSON Output",
+        icon: '<path d="M12 21a9 9 0 0 1 0-18M12 3v18"/>',
+        query: "Dump the raw JSON configuration metadata",
+        response: {
+          response_type: "system-config",
+          layout: "JSON",
+          format_reason: "JSON output is required for system configuration scripts, ensuring easy copy-paste capabilities for developers.",
+          formatted_answer: JSON.stringify({
+            engine: "Advance-Ask-AI",
+            version: "1.2.0-beta",
+            llm_provider: "Gemini 3.5 Flash",
+            temperature: 0.15,
+            routing_rules: [
+              { condition: "has_table_keyword", format: "TABLE" },
+              { condition: "has_graph_keyword", format: "GRAPH" },
+              { condition: "has_code_block", format: "MARKDOWN" }
+            ],
+            metrics: {
+              average_latency_ms: 480,
+              token_efficiency_ratio: 0.94
+            }
+          }, null, 2)
+        }
+      },
+      complaints: {
+        title: "AC Complaints",
+        icon: '<path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>',
+        query: "How many complaints reported 'AC very noisy' across all residential villas in the Al Jurf locality?"
+      },
+      standby: {
+        title: "Standby Remarks",
+        icon: '<path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>',
+        query: "Are there any standby remarks logged for open tickets that explain delays in execution?"
+      }
+    };
+
+    let isStreamingActive = false;
+
+    // Load preset
+    function loadPreset(key) {
+      const preset = PRESETS[key];
+      const simulateStream = true;
+
+      if (preset.isWelcome) {
+        renderWelcome();
+        document.getElementById("query-input").value = "";
+      } else if (preset.response) {
+        document.getElementById("query-input").value = preset.query;
+        if (simulateStream) {
+          simulateStreamingResponse(preset.query, preset.response);
+        } else {
+          renderChatResponse(preset.query, preset.response);
+        }
+      } else {
+        // Send real query to backend
+        document.getElementById("query-input").value = preset.query;
+        sendQuery();
+      }
+    }
+
+    // Render Welcome
+    function renderWelcome() {
+      const wrapper = document.getElementById("content-wrapper");
+      wrapper.innerHTML = `
+        <div class="landing-card">
+          <h1 style="
+            font-size: 32px;
+            font-family: var(--font-heading);
+            font-weight: 700;
+            margin-bottom: 16px;
+            background: linear-gradient(180deg, #AE8625 0%, #F7EF8A 35%, #D2AC47 65%, #EDC967 100%);
+            background-size: 200% 200%;
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            animation: goldShine 3s ease-in-out infinite;
+          ">
+            Welcome to Advance Ask AI
+          </h1>
+          <p class="landing-subtitle">
+            Let's work together buddy
+          </p>
+          
+          <div class="quick-start-grid">
+            <div class="quick-card" onclick="loadPreset('complaints')">
+              <span class="quick-card-title">
+                <svg class="btn-svg" viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                AC Complaints
+              </span>
+              <span class="quick-card-desc">Analyze specific AC noise complaints across residential villas in Al Jurf.</span>
+            </div>
+            <div class="quick-card" onclick="loadPreset('standby')">
+              <span class="quick-card-title">
+                <svg class="btn-svg" viewBox="0 0 24 24"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                Standby Remarks
+              </span>
+              <span class="quick-card-desc">Investigate standby remarks for open tickets causing execution delays.</span>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // Utility to escape HTML and prevent XSS or parsing errors
+    function escapeHtml(unsafe) {
+        return (unsafe || "").toString()
+             .replace(/&/g, "&amp;")
+             .replace(/</g, "&lt;")
+             .replace(/>/g, "&gt;")
+             .replace(/"/g, "&quot;")
+             .replace(/'/g, "&#039;");
+    }
+
+    // Stream simulation
+    function simulateStreamingResponse(query, responseObj) {
+      if (isStreamingActive) return;
+      isStreamingActive = true;
+      
+      const wrapper = document.getElementById("content-wrapper");
+      // Note: We don't clear wrapper here because sendQuery already cleared it and added the user bubble.
+      
+      // AI wrapper
+      const aiDiv = document.createElement("div");
+      aiDiv.className = "message-ai";
+      wrapper.appendChild(aiDiv);
+      
+      // Stream just the answer instead of raw JSON
+      const answerStr = responseObj.formatted_answer || "No response provided.";
+      let index = 0;
+      const speed = 6; // chars per tick
+      
+      const interval = setInterval(() => {
+        try {
+          if (index >= answerStr.length) {
+            clearInterval(interval);
+            isStreamingActive = false;
+            // Final clean render of parsed output
+            renderChatResponse(query, responseObj, aiDiv);
+            return;
+          }
+          
+          index += speed;
+          const currentText = answerStr.substring(0, index);
+            
+          aiDiv.innerHTML = `
+            <div style="display: inline-block; width: 100%; position: relative;">
+              <div style="font-size: 14px; line-height: 1.6; color: var(--text-secondary); white-space: pre-wrap;">${escapeHtml(currentText)}</div>
+              <span class="stream-cursor"></span>
+            </div>
+          `;
+          wrapper.parentElement.scrollTop = wrapper.parentElement.scrollHeight;
+        } catch (err) {
+          clearInterval(interval);
+          isStreamingActive = false;
+          aiDiv.innerHTML = `<div style="color:red; background:#330000; padding:10px; border-radius:5px;"><strong>Stream Error:</strong> ${err.message}<br/>${err.stack}</div>`;
+        }
+      }, 30);
+    }
+
+    function escapeHtml(text) {
+      return text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+    }
+
+    // Helper to escape raw newlines in JSON mimicking backend utils
+    function escapeRawNewlinesInJSON(raw) {
+      return raw.replace(/\n/g, "\\n").replace(/\r/g, "\\r");
+    }
+
+    // Copy handler
+    let copiedState = false;
+    function handleCopy(text, btnElement) {
+      navigator.clipboard.writeText(text);
+      
+      const originalHtml = btnElement.innerHTML;
+      btnElement.innerHTML = `
+        <svg class="btn-svg" viewBox="0 0 24 24" style="stroke: #22c55e;"><path d="M20 6L9 17l-5-5"/></svg>
+        <span style="color: #22c55e; margin-left: 4px;">Copied!</span>
+      `;
+      
+      setTimeout(() => {
+        btnElement.innerHTML = originalHtml;
+      }, 2000);
+    }
+
+    // Markdown / Plain Text renderer fallback
+    function renderMarkdownLayout(text) {
+      // Basic formatting for bold and newlines
+      let formatted = escapeHtml(text || "")
+        .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+        .replace(/\n/g, "<br/>");
+        
+      return `<div style="font-size: 14px; line-height: 1.6; color: var(--text-secondary); white-space: pre-wrap; font-family: var(--font-body);">${formatted}</div>`;
+    }
+
+    // Main Renderer for the Envelope Response
+    function renderChatResponse(query, responseObj, targetAiDiv = null) {
+      const wrapper = document.getElementById("content-wrapper");
+
+      // Use the provided AI div (from stream) or create a new one
+      let aiDiv = targetAiDiv;
+      if (!aiDiv) {
+        aiDiv = document.createElement("div");
+        aiDiv.className = "message-ai";
+        wrapper.appendChild(aiDiv);
+      }
+      aiDiv.innerHTML = ""; // Clear streaming text or old content
+
+      try {
+        // Hardcode dark mode for now as currentTheme was a React variable that got lost in the HTML port
+        const isDark = true;
+      const response_type = responseObj.response_type || "general";
+      const layout = responseObj.layout || "PLAIN_TEXT";
+      const format_reason = responseObj.format_reason || "";
+      
+      const formatTypeName = (name) => {
+        return name
+          .split(/[-_\s]+/)
+          .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+          .join(" ");
+      };
+      
+      const headerText = responseObj.header || formatTypeName(response_type);
+      const explanationText = responseObj.explanation || "";
+      const formatted_answer = responseObj.formatted_answer || "";
+
+      // Determine Icon
+      let typeIconHtml = `<svg class="btn-svg" viewBox="0 0 24 24"><path d="M12 3l1.912 5.886h6.188l-5.006 3.637 1.912 5.886-5.006-3.637-5.006 3.637 1.912-5.886-5.006-3.637h6.188z"/></svg>`;
+      const typeLower = response_type.toLowerCase();
+      if (typeLower.includes("table")) {
+        typeIconHtml = `<svg class="btn-svg" viewBox="0 0 24 24"><path d="M3 3h18v18H3zM3 9h18M3 15h18M9 3v18M15 3v18"/></svg>`;
+      } else if (typeLower.includes("list") || typeLower.includes("bullet")) {
+        typeIconHtml = `<svg class="btn-svg" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M5 6v.01M5 12v.01M5 18v.01"/></svg>`;
+      } else if (typeLower.includes("count") || typeLower.includes("ranking") || typeLower.includes("breakdown")) {
+        typeIconHtml = `<svg class="btn-svg" viewBox="0 0 24 24"><path d="M10 6h10M10 12h10M10 18h10M4 6h2v6H4M4 18h2M6 18H4"/></svg>`;
+      } else if (typeLower.includes("comparison") || typeLower.includes("versus")) {
+        typeIconHtml = `<svg class="btn-svg" viewBox="0 0 24 24"><path d="M3 6h18M3 18h18M12 3v18"/></svg>`;
+      } else if (typeLower.includes("report") || typeLower.includes("summary") || typeLower.includes("analysis")) {
+        typeIconHtml = `<svg class="btn-svg" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>`;
+      }
+
+      let finalLayout = layout || "PLAIN_TEXT";
+      let finalAnswer = formatted_answer || "";
+
+      // Generate layout specific renderer HTML
+      let renderedContentHtml = "";
+      switch (finalLayout) {
+        case "TABLE":
+          renderedContentHtml = renderTableLayout(finalAnswer, isDark);
+          break;
+        case "BULLET_LIST":
+          renderedContentHtml = renderListLayout(finalAnswer, false, isDark);
+          break;
+        case "NUMBERED_LIST":
+          renderedContentHtml = renderListLayout(finalAnswer, true, isDark);
+          break;
+        case "JSON":
+          renderedContentHtml = renderJsonLayout(finalAnswer, isDark);
+          break;
+        case "GRAPH":
+          renderedContentHtml = renderGraphLayout(finalAnswer, isDark);
+          break;
+        case "MARKDOWN":
+        default:
+          renderedContentHtml = renderMarkdownLayout(finalAnswer);
+          break;
+      }
+
+      let explanationHtml = "";
+      if (explanationText) {
+        explanationHtml = `
+          <div style="
+            font-size: 13px;
+            color: ${isDark ? "rgba(255,255,255,0.7)" : "rgba(15,23,42,0.8)"};
+            margin-bottom: 8px;
+            font-family: var(--font-sans);
+            line-height: 1.5;
+          ">
+            ${escapeHtml(explanationText)}
+          </div>
+        `;
+      }
+
+      aiDiv.innerHTML = `
+        <div class="advance-ask-ai-container" style="
+          width: 100%;
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+          padding: 16px;
+          border-radius: 12px;
+          background: ${isDark ? "rgba(30, 41, 59, 0.45)" : "rgba(241, 245, 249, 0.7)"};
+          backdrop-filter: blur(12px);
+          border: 1px solid ${isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(15, 23, 42, 0.08)"};
+          box-shadow: ${isDark ? "0 4px 20px -2px rgba(0, 0, 0, 0.25)" : "0 4px 20px -2px rgba(0, 0, 0, 0.05)"};
+          font-family: var(--font-heading);
+        ">
+          <!-- Premium Header -->
+          <div style="
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid ${isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(15, 23, 42, 0.06)"};
+            padding-bottom: 10px;
+            gap: 12px;
+          ">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <div style="
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                width: 28px;
+                height: 28px;
+                border-radius: 6px;
+                background: linear-gradient(135deg, #D4AF37 0%, #AA7C11 100%);
+                color: #fff;
+                box-shadow: 0 2px 8px rgba(212, 175, 55, 0.3);
+              ">
+                ${typeIconHtml}
+              </div>
+              <div>
+                <h4 style="
+                  margin: 0;
+                  font-size: 14px;
+                  font-weight: 600;
+                  color: ${isDark ? "#f8fafc" : "#0f172a"};
+                  letter-spacing: 0.2px;
+                ">
+                  ${escapeHtml(headerText)}
+                </h4>
+                <span style="
+                  font-size: 11px;
+                  color: ${isDark ? "rgba(255,255,255,0.45)" : "rgba(15,23,42,0.5)"};
+                ">
+                  Advance Ask-AI Engine
+                </span>
+              </div>
+            </div>
+
+            <div style="display: flex; align-items: center; gap: 8px;">
+
+
+              <button onclick="handleCopy(\`${finalAnswer.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`, this)" title="Copy answer content" style="
+                background: none;
+                border: none;
+                padding: 4px;
+                cursor: pointer;
+                color: ${isDark ? "rgba(255,255,255,0.55)" : "rgba(15, 23, 42, 0.55)"};
+                border-radius: 4px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+              ">
+                <svg class="btn-svg" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              </button>
+            </div>
+          </div>
+          
+          ${explanationHtml}
+
+          <!-- Structured Content Area -->
+          <div style="overflow-x: auto; width: 100%; font-family: var(--font-sans);">
+            ${renderedContentHtml}
+          </div>
+
+
+        </div>
+      `;
+      wrapper.parentElement.scrollTop = wrapper.parentElement.scrollHeight;
+      } catch (err) {
+        aiDiv.innerHTML = `<div style="color:red; background:#330000; padding:10px; border-radius:5px;"><strong>Render Error:</strong> ${err.message}<br/>${err.stack}</div>`;
+      }
+    }
+
+    // Toggle Accordion functionality
+    function toggleAccordion(btn) {
+      const content = btn.nextElementSibling;
+      const arrow = btn.querySelector(".accordion-arrow");
+      if (content.style.maxHeight && content.style.maxHeight !== "0px") {
+        content.style.maxHeight = "0px";
+        arrow.style.transform = "rotate(0deg)";
+      } else {
+        content.style.maxHeight = content.scrollHeight + "px";
+        arrow.style.transform = "rotate(180deg)";
+      }
+    }
+
+    // Table to bullets converter logic
+    function convertTableToBullets(text) {
+      const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+      const tableLines = lines.filter(l => l.includes("|"));
+      
+      if (tableLines.length < 3) {
+        return text;
+      }
+
+      const parseRow = (rowStr) => {
+        let cells = rowStr.split("|").map(c => c.trim());
+        if (rowStr.startsWith("|")) cells.shift();
+        if (rowStr.endsWith("|")) cells.pop();
+        return cells;
+      };
+
+      const headers = parseRow(tableLines[0]);
+      const rows = [];
+      
+      for (let i = 2; i < tableLines.length; i++) {
+        const cells = parseRow(tableLines[i]);
+        const rowParts = [];
+        for (let j = 0; j < headers.length; j++) {
+          const h = headers[j];
+          const c = cells[j] || "";
+          if (h && c) {
+            rowParts.push(`**${h}**: ${c}`);
+          }
+        }
+        if (rowParts.length > 0) {
+          rows.push(`* ${rowParts.join(", ")}`);
+        }
+      }
+
+      const firstIdx = lines.indexOf(tableLines[0]);
+      const lastIdx = lines.indexOf(tableLines[tableLines.length - 1]);
+      
+      const nonTableBefore = lines.slice(0, firstIdx);
+      const nonTableAfter = lines.slice(lastIdx + 1);
+
+      const result = [];
+      if (nonTableBefore.length > 0) {
+        result.push(nonTableBefore.join("\n"));
+      }
+      result.push(rows.join("\n"));
+      if (nonTableAfter.length > 0) {
+        result.push(nonTableAfter.join("\n"));
+      }
+
+      return result.join("\n");
+    }
+
+    // Custom layout renderers
+    function renderTableLayout(text, isDark) {
+      const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+      const tableLines = lines.filter(l => l.includes("|"));
+      if (tableLines.length < 2) return renderMarkdownLayout(text);
+
+      const parseRow = (rowStr) => {
+        let cells = rowStr.split("|").map(c => c.trim());
+        if (rowStr.startsWith("|")) cells.shift();
+        if (rowStr.endsWith("|")) cells.pop();
+        return cells;
+      };
+
+      const headers = parseRow(tableLines[0]);
+      const rows = tableLines.slice(2).map(parseRow);
+
+      let tableRowsHtml = rows.map((row, rIdx) => {
+        let cellsHtml = row.map((cell, cIdx) => {
+          let cellContent = cell;
+          if (cell.startsWith("**") && cell.endsWith("**")) {
+            cellContent = `<strong>${cell.replace(/\*\*/g, "")}</strong>`;
+          }
+          return `<td style="padding: 10px 14px; color: ${isDark ? "#cbd5e1" : "#475569"};">${cellContent}</td>`;
+        }).join("");
+        
+        const rowBg = rIdx % 2 === 1 ? (isDark ? "rgba(255,255,255,0.015)" : "rgba(0,0,0,0.005)") : "transparent";
+        return `
+          <tr style="
+            border-bottom: ${rIdx < rows.length - 1 ? (isDark ? "1px solid rgba(255,255,255,0.04)" : "1px solid rgba(15,23,42,0.04)") : "none"};
+            background: ${rowBg};
+            transition: background 0.2s;
+          " onmouseenter="this.style.background='${isDark ? "rgba(212, 175, 55, 0.04)" : "rgba(212, 175, 55, 0.03)"}'" onmouseleave="this.style.background='${rowBg}'">
+            ${cellsHtml}
+          </tr>
+        `;
+      }).join("");
+
+      return `
+        <div style="
+          overflow-x: auto;
+          border-radius: 8px;
+          border: 1px solid ${isDark ? "rgba(255,255,255,0.06)" : "rgba(15,23,42,0.06)"};
+          box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        ">
+          <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 13px;">
+            <thead>
+              <tr style="
+                background: ${isDark ? "rgba(255, 255, 255, 0.04)" : "rgba(0, 0, 0, 0.02)"};
+                border-bottom: 1.5px solid ${isDark ? "rgba(255,255,255,0.12)" : "1.5px solid rgba(15,23,42,0.12)"};
+              ">
+                ${headers.map(h => `<th style="padding: 10px 14px; fontWeight: 600; color: ${isDark ? "#ffd700" : "#8a6508"}; white-space: nowrap;">${h}</th>`).join("")}
+              </tr>
+            </thead>
+            <tbody>
+              ${tableRowsHtml}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    function renderListLayout(text, isNumbered, isDark) {
+      const lines = text.split("\n").map(l => l.trim()).filter(l => l.length > 0);
+      const parsedItems = [];
+      
+      for (const line of lines) {
+        if (/^([\s]*(?:[-*•]|\d+[.)]))\s*/.test(line)) {
+          const clean = line.replace(/^([\s]*(?:[-*•]|\d+[.)]))\s*/, "");
+          parsedItems.push(clean);
+        } else {
+          if (parsedItems.length > 0) {
+            parsedItems[parsedItems.length - 1] += "\n" + line;
+          } else {
+            parsedItems.push(line);
+          }
+        }
+      }
+
+      if (parsedItems.length === 0) {
+        return `<div style="font-size: 14px;">${text}</div>`;
+      }
+
+      let itemsHtml = parsedItems.map((item, idx) => {
+        let markerHtml = "";
+        if (isNumbered) {
+          markerHtml = `
+            <div style="
+              flex-shrink: 0;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              width: 22px;
+              height: 22px;
+              border-radius: 50%;
+              background: ${isDark ? "rgba(212, 175, 55, 0.15)" : "rgba(212, 175, 55, 0.1)"};
+              border: 1px solid ${isDark ? "rgba(212,175,55,0.3)" : "rgba(212,175,55,0.2)"};
+              color: ${isDark ? "#ffd700" : "#8a6508"};
+              font-size: 11px;
+              font-weight: 600;
+              margin-top: 2px;
+            ">
+              ${idx + 1}
+            </div>
+          `;
+        } else {
+          markerHtml = `
+            <div style="
+              flex-shrink: 0;
+              width: 6px;
+              height: 6px;
+              border-radius: 50%;
+              background: linear-gradient(135deg, #D4AF37 0%, #AA7C11 100%);
+              margin-top: 10px;
+              box-shadow: 0 0 6px rgba(212, 175, 55, 0.8);
+            "></div>
+          `;
+        }
+
+        return `
+          <div style="display: flex; align-items: flex-start; gap: 10px;">
+            ${markerHtml}
+            <div style="fontSize: 13.5px; line-height: 1.6; color: ${isDark ? "#cbd5e1" : "#475569"}; flex: 1;">
+              ${parseMarkdownTokens(item)}
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      return `
+        <div style="display: flex; flex-direction: column; gap: 10px; padding-left: 4px;">
+          ${itemsHtml}
+        </div>
+      `;
+    }
+
+    function renderJsonLayout(text, isDark) {
+      let formattedJson = text;
+      try {
+        const obj = JSON.parse(text);
+        formattedJson = JSON.stringify(obj, null, 2);
+      } catch (e) {}
+
+      return `
+        <div style="
+          position: relative;
+          background: ${isDark ? "rgba(15, 23, 42, 0.7)" : "#1e293b"};
+          color: #f8fafc;
+          font-family: var(--font-mono);
+          font-size: 12.5px;
+          padding: 14px;
+          border-radius: 8px;
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          box-shadow: inset 0 2px 4px rgba(0,0,0,0.3);
+        ">
+          <div style="
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 11px;
+            color: rgba(255,255,255,0.4);
+            margin-bottom: 8px;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+            padding-bottom: 6px;
+          ">
+            <span style="display: flex; align-items: center; gap: 4px;">
+              <svg class="btn-svg" style="width:14px; height:14px;" viewBox="0 0 24 24"><path d="M12 21a9 9 0 0 1 0-18M12 3v18"/></svg>
+              JSON Output
+            </span>
+            <button onclick="handleCopy(\`${formattedJson.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`, this)" style="
+              background: none;
+              border: none;
+              color: rgba(255,255,255,0.5);
+              cursor: pointer;
+              font-size: 11px;
+              display: flex;
+              align-items: center;
+              gap: 4px;
+              padding: 2px 6px;
+              border-radius: 4px;
+            ">
+              <svg class="btn-svg" style="width:12px; height:12px;" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              Copy
+            </button>
+          </div>
+          <pre style="margin: 0; overflow-x: auto; white-space: pre-wrap;"><code>${escapeHtml(formattedJson)}</code></pre>
+        </div>
+      `;
+    }
+
+    function renderGraphLayout(text, isDark) {
+      let data = { nodes: [], links: [] };
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        // Fallback layout
+        return `<div style="font-size:14px; white-space:pre-wrap;">${text}</div>`;
+      }
+
+      // Compute visual positions for SVG display
+      const width = 760;
+      const height = 280;
+      const radius = 22;
+
+      // Layout algorithm: rank nodes by level or simple spacing
+      const count = data.nodes.length;
+      data.nodes.forEach((n, idx) => {
+        // Linear chain layout or simple ring layout fallback
+        n.x = 80 + (idx * ((width - 160) / (count - 1 || 1)));
+        n.y = height / 2 + (idx % 2 === 0 ? -40 : 40);
+        
+        // Custom override for prettier flow if it is the preset architecture graph
+        if (n.id === "A") { n.x = 80; n.y = height/2; }
+        else if (n.id === "B") { n.x = 220; n.y = height/2; }
+        else if (n.id === "C") { n.x = 380; n.y = height/2 - 50; }
+        else if (n.id === "D") { n.x = 380; n.y = height/2 + 50; }
+        else if (n.id === "E") { n.x = 540; n.y = height/2; }
+        else if (n.id === "F") { n.x = 680; n.y = height/2; }
+      });
+
+      // Render links
+      let linksHtml = data.links.map(l => {
+        const sourceNode = data.nodes.find(n => n.id === l.source);
+        const targetNode = data.nodes.find(n => n.id === l.target);
+        if (!sourceNode || !targetNode) return "";
+        
+        return `
+          <line 
+            class="link" 
+            x1="${sourceNode.x}" 
+            y1="${sourceNode.y}" 
+            x2="${targetNode.x}" 
+            y2="${targetNode.y}" 
+            stroke="${isDark ? "rgba(212, 175, 55, 0.4)" : "rgba(170, 124, 17, 0.3)"}"
+          />
+        `;
+      }).join("");
+
+      // Render nodes
+      let nodesHtml = data.nodes.map(n => {
+        let colorGrad = "url(#gold-grad)";
+        let textCol = isDark ? "#ffffff" : "#0f172a";
+        let subTextCol = isDark ? "#94a3b8" : "#64748b";
+        
+        return `
+          <g class="node" transform="translate(0,0)">
+            <circle 
+              cx="${n.x}" 
+              cy="${n.y}" 
+              r="${radius}" 
+              fill="${isDark ? "#1e293b" : "#f1f5f9"}" 
+              stroke="${isDark ? "#D4AF37" : "#aa7c11"}" 
+              stroke-width="2" 
+            />
+            <circle 
+              cx="${n.x}" 
+              cy="${n.y}" 
+              r="${radius - 6}" 
+              fill="${colorGrad}" 
+              opacity="0.85" 
+            />
+            <text 
+              x="${n.x}" 
+              y="${n.y + radius + 16}" 
+              text-anchor="middle" 
+              fill="${textCol}" 
+              font-weight="600"
+            >
+              ${n.label}
+            </text>
+            <text 
+              x="${n.x}" 
+              y="${n.y + radius + 28}" 
+              text-anchor="middle" 
+              fill="${subTextCol}" 
+              font-size="9px"
+            >
+              ${n.type.toUpperCase()}
+            </text>
+          </g>
+        `;
+      }).join("");
+
+      return `
+        <div class="graph-container">
+          <svg class="graph-svg" viewBox="0 0 ${width} ${height}">
+            <defs>
+              <linearGradient id="gold-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#D4AF37" />
+                <stop offset="100%" stop-color="#AA7C11" />
+              </linearGradient>
+            </defs>
+            ${linksHtml}
+            ${nodesHtml}
+          </svg>
+        </div>
+      `;
+    }
+
+    function renderMarkdownLayout(text) {
+      return `
+        <div style="width: 100%; word-break: break-word; line-height: 1.6;">
+          ${parseMarkdownBlocks(text)}
+        </div>
+      `;
+    }
+
+    // Helper regex-based markdown parser
+    function parseMarkdownBlocks(text) {
+      if (!text) return "";
+      const blocks = text.split(/(```[\s\S]*?```)/g);
+
+      return blocks.map(block => {
+        if (block.startsWith("```") && block.endsWith("```")) {
+          const content = block.slice(3, -3);
+          const lines = content.split("\n");
+          let lang = "";
+          let code = content;
+          if (lines.length > 0 && lines[0].trim() && lines[0].trim().length < 15) {
+            lang = lines[0].trim();
+            code = lines.slice(1).join("\n");
+          }
+          return `
+            <div style="
+              background: rgba(0,0,0,0.2);
+              padding: 10px 14px;
+              border-radius: 6px;
+              margin: 8px 0;
+              font-family: var(--font-mono);
+              font-size: 12px;
+              border-left: 3px solid #D4AF37;
+              overflow-x: auto;
+              color: #cbd5e1;
+            ">
+              ${lang ? `<div style="font-size: 10px; color: #ffd700; font-weight: 600; text-transform: uppercase; margin-bottom: 4px;">${lang}</div>` : ""}
+              <pre style="margin: 0; white-space: pre-wrap;">${escapeHtml(code)}</pre>
+            </div>
+          `;
+        }
+
+        const lines = block.split("\n");
+        return lines.map((line, lIdx) => {
+          const trimmed = line.trim();
+          
+          if (trimmed.startsWith("### ")) {
+            return `<h5 style="margin: 12px 0 6px 0; font-weight: 600; font-size: 14px; border-left: 3.5px solid #D4AF37; padding-left: 8px; color: #D4AF37;">${parseMarkdownTokens(trimmed.slice(4))}</h5>`;
+          }
+          if (trimmed.startsWith("## ")) {
+            return `<h4 style="margin: 16px 0 8px 0; font-weight: 700; font-size: 15px; border-left: 4px solid #D4AF37; padding-left: 8px; color: #D4AF37;">${parseMarkdownTokens(trimmed.slice(3))}</h4>`;
+          }
+          if (trimmed.startsWith("# ")) {
+            return `<h3 style="margin: 20px 0 10px 0; font-weight: 700; font-size: 16px; border-left: 5px solid #D4AF37; padding-left: 8px; color: #D4AF37;">${parseMarkdownTokens(trimmed.slice(2))}</h3>`;
+          }
+
+          // Bullet items
+          if (/^[-*•]\s+/.test(trimmed)) {
+            return `<div style="display: flex; align-items: flex-start; gap: 8px; margin: 4px 0 4px 12px;"><span style="color: #D4AF37; font-size: 12px; margin-top: 2px;">•</span><span style="flex: 1;">${parseMarkdownTokens(trimmed.replace(/^[-*•]\s+/, ""))}</span></div>`;
+          }
+
+          // Numbered items
+          if (/^\d+[.)]\s+/.test(trimmed)) {
+            const match = trimmed.match(/^(\d+)[.)]\s+/);
+            const num = match ? match[1] : "1";
+            return `<div style="display: flex; align-items: flex-start; gap: 8px; margin: 4px 0 4px 12px;"><span style="color: #D4AF37; font-weight: 600; font-size: 12px; margin-top: 2px;">${num}.</span><span style="flex: 1;">${parseMarkdownTokens(trimmed.replace(/^\d+[.)]\s+/, ""))}</span></div>`;
+          }
+
+          return `<span>${parseMarkdownTokens(line)}${lIdx < lines.length - 1 ? "<br />" : ""}</span>`;
+        }).join("");
+      }).join("");
+    }
+
+    function parseMarkdownTokens(text) {
+      // Lazy senior dev: strip LaTeX math artifacts instead of adding a heavy math rendering dependency
+      text = text.replace(/\$\$/g, '').replace(/\\text\{([^}]+)\}/g, '$1');
+      
+      const parts = text.split(/(\*\*.*?\*\*|`.*?`)/g);
+      return parts.map(part => {
+        if (part.startsWith("**") && part.endsWith("**")) {
+          return `<strong style="font-weight: 600;">${part.slice(2, -2)}</strong>`;
+        }
+        if (part.startsWith("`") && part.endsWith("`")) {
+          return `<code style="font-family: var(--font-mono); background: rgba(212, 175, 55, 0.12); color: #ffd700; padding: 2px 5px; border-radius: 4px; font-size: 90%; margin: 0 2px; border: 1px solid rgba(212, 175, 55, 0.2);">${part.slice(1, -1)}</code>`;
+        }
+        return escapeHtml(part);
+      }).join("");
+    }
+
+    // Send query simulator
+    async function sendQuery() {
+      const input = document.getElementById("query-input");
+      const text = input.value.trim();
+      if (!text) return;
+
+      // Immediately update UI
+      input.value = "";
+      const wrapper = document.getElementById("content-wrapper");
+      
+      // Clear welcome screen if present
+      if (wrapper.querySelector(".landing-card")) {
+        wrapper.innerHTML = "";
+      }
+
+      // Render user message immediately
+      const userDiv = document.createElement("div");
+      userDiv.className = "message-user";
+      userDiv.textContent = text;
+      wrapper.appendChild(userDiv);
+
+      // Render temporary loading AI message
+      const loadingDiv = document.createElement("div");
+      loadingDiv.className = "message-ai";
+      loadingDiv.id = "loading-message-ai";
+      loadingDiv.innerHTML = `
+        <div style="display: inline-flex; gap: 6px; padding: 12px; align-items: center; background: rgba(212,175,55,0.1); border-radius: 8px;">
+          <span class="stream-cursor" style="height: 12px;"></span>
+          <span id="loading-agent-text" style="font-size: 13px; color: #D4AF37;">Understanding Agent...</span>
+        </div>
+      `;
+      wrapper.appendChild(loadingDiv);
+      wrapper.parentElement.scrollTop = wrapper.parentElement.scrollHeight;
+
+      // Lazy cycler: stops at last agent, self-cleans when removed
+      let loadStep = 0;
+      const loadStates = [
+        "Understanding Agent...", 
+        "Analysis Agent...", 
+        "Retrieval Layer...", 
+        "Execution Agent..."
+      ];
+      const loadInterval = setInterval(() => {
+        const span = document.getElementById("loading-agent-text");
+        if (!span || ++loadStep >= loadStates.length - 1) clearInterval(loadInterval);
+        if (span) span.textContent = loadStates[Math.min(loadStep, loadStates.length - 1)];
+      }, 2000);
+
+      const simulateStream = true;
+
+      try {
+        const res = await fetch("http://localhost:8000/api/query", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query: text })
+        });
+        
+        const responseObj = await res.json();
+        
+        // Remove loading div
+        const ld = document.getElementById("loading-message-ai");
+        if (ld) ld.remove();
+        
+        if (simulateStream) {
+          // Pass the wrapper innerHTML handling to the stream simulator
+          // BUT wait, simulateStreamingResponse clears the wrapper!
+          // We must NOT clear the wrapper in simulateStreamingResponse if we want chat history, 
+          // or if we clear it, we just let it redraw the user message.
+          simulateStreamingResponse(text, responseObj);
+        } else {
+          renderChatResponse(text, responseObj);
+        }
+      } catch (e) {
+        console.error(e);
+        const errorObj = {
+          response_type: "error",
+          layout: "PLAIN_TEXT",
+          format_reason: "Connection failed",
+          formatted_answer: "Failed to connect to backend API. Please make sure test_pipeline.py is running with --api flag."
+        };
+        
+        const ld = document.getElementById("loading-message-ai");
+        if (ld) ld.remove();
+
+        if (simulateStream) {
+          simulateStreamingResponse(text, errorObj);
+        } else {
+          renderChatResponse(text, errorObj);
+        }
+      }
+    }
+
+    // Init with Welcome screen
+    renderWelcome();
+  </script>
+</body>
+</html>
