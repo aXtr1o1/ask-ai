@@ -15,8 +15,13 @@ Log format per question:
     STEP 1  do_math          → result=0.48
     STEP 2  final_answer     → 0.48
   -------------------------------------------------------
-  STATUS   : COMPLETE  (3/3 steps)
+  STATUS   : COMPLETE  (3/3 steps, 0 errors)
   ANSWER   : 0.48
+
+Status values:
+  COMPLETE — all steps ran, zero errors
+  PARTIAL  — all steps ran, ≥1 intermediate step errored
+  FAILED   — final_answer_tool itself errored, no usable answer
 """
 import logging
 
@@ -113,8 +118,27 @@ def log_step(step_idx: int, tool_name: str, result: dict):
             f"unmatched_b={result.get('unmatched_in_b')}"
         )
 
+    elif "sorted_data" in result:
+        summary = (
+            f"{result.get('total_out')}/{result.get('total_in')} items  "
+            f"sort_by={result.get('sort_by')}  order={result.get('order')}"
+        )
+
+    elif "agg_field" in result and "groups" in result:
+        summary = (
+            f"op={result.get('operation')}  "
+            f"total={result.get('total_records')}  "
+            f"groups={result.get('unique_groups')}"
+        )
+
+    elif "condition_field_1" in result:
+        summary = f"count={result['count']}"
+
     elif "result" in result:
         summary = f"result={result['result']}"
+
+    elif "_dep_failed" in result:
+        summary = f"DEPENDENCY_FAILED: {result['_dep_failed']}"
 
     elif "error" in result:
         summary = f"ERROR: {result['error']}"
@@ -125,9 +149,39 @@ def log_step(step_idx: int, tool_name: str, result: dict):
     logger.info("  STEP %-2d  %-22s → %s", step_idx, tool_name, summary)
 
 
-def log_completion(status: str, tools_called: int, queue_total: int, final_value):
-    """Log the final status and answer after all steps complete."""
+def log_completion(
+    status:       str,
+    tools_called: int,
+    queue_total:  int,
+    error_count:  int,
+    final_value,
+):
+    """
+    Log the final status and answer after all steps complete.
+
+    status values:
+      COMPLETE — all steps ran, zero errors
+      PARTIAL  — all steps ran, ≥1 intermediate step errored
+      FAILED   — final_answer_tool itself errored
+    """
     logger.info(DASH)
-    logger.info("STATUS   : %s  (%d/%d steps)", status, tools_called, queue_total)
+    if error_count > 0:
+        logger.info(
+            "STATUS   : %s  (%d/%d steps, %d error(s))",
+            status, tools_called, queue_total, error_count,
+        )
+    else:
+        logger.info(
+            "STATUS   : %s  (%d/%d steps)",
+            status, tools_called, queue_total,
+        )
     logger.info("ANSWER   : %s", final_value)
     logger.info("")
+
+def log_formatting_context(context: dict):
+    """Log the payload that will be sent to the Formatting Agent."""
+    import json
+    logger.info(DASH)
+    logger.info("FORMATTING AGENT PAYLOAD (Steps + Final Answer):")
+    logger.info(json.dumps(context, indent=2))
+    logger.info(DASH)

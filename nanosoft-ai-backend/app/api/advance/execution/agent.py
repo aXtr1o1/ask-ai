@@ -11,7 +11,12 @@ Flow:
 
   Final output:
     Raw tool results. LLM is never involved after Phase 1.
-    Completion verified by: tools_called == queue_total
+    Status: COMPLETE | PARTIAL | FAILED
+
+Fix 3 — Pre-execution $ref key validation:
+  _validate_queue() now checks every $step_N.key reference against the
+  known OUTPUT KEYS of the referenced tool BEFORE the queue runs.
+  This catches LLM hallucinations (wrong key names) at zero latency cost.
 
 Public API:
   run_execution(question, filter_fields, modules, filtered_records) → ExecutionResult
@@ -27,8 +32,9 @@ from app.config import settings
 from app.api.advance.execution.prompts      import PLANNER_SYSTEM_PROMPT
 from app.api.advance.execution.queue_runner import run_queue
 from app.api.advance.execution.agent_logger import (
-    log_question, log_queue, log_completion
+    log_question, log_queue, log_completion, log_formatting_context
 )
+from app.api.advance.execution.context_builder import build_formatting_context
 
 logger = logging.getLogger("advance.execution.agent")
 
@@ -57,15 +63,107 @@ def _strip_markdown(raw: str) -> str:
     return raw
 
 
+# =============================================================================
+# TOOL OUTPUT KEYS — Fix 3: used to validate $ref keys before execution
+# Each entry lists the keys that tool is guaranteed to return on success.
+# Keep in sync with tools.py.
+# =============================================================================
+_TOOL_OUTPUT_KEYS: dict[str, set[str]] = {
+    "count_records":          {"count", "module", "condition_field", "condition_value"},
+    "sum_values":             {"total_sum", "records_used", "module", "field"},
+    "get_average":            {"average", "records_used", "module", "field"},
+    "get_minimum":            {"minimum", "records_used", "module", "field"},
+    "get_maximum":            {"maximum", "records_used", "module", "field"},
+    "calculate_time_between": {"stats", "calculated", "missing_dates", "total_records",
+                               "module", "start_field", "end_field"},
+    "group_by_and_count":     {"groups", "total_records", "unique_groups",
+                               "module", "group_field", "filter_field", "filter_value"},
+    "get_unique_values":      {"unique_values", "count", "module", "field"},
+    "join_records":           {"matched_count", "unmatched_in_a", "unmatched_in_b",
+                               "records_in_a", "records_in_b",
+                               "module_a", "module_b", "join_field"},
+    "do_math":                {"result", "operation", "a", "b"},
+    "sort_and_limit":         {"sorted_data", "total_in", "total_out",
+                               "sort_by", "order", "limit"},
+    "group_by_and_aggregate": {"groups", "total_records", "unique_groups",
+                               "module", "group_field", "agg_field", "operation"},
+    "count_records_multi":    {"count", "module",
+                               "condition_field_1", "condition_value_1",
+                               "condition_field_2", "condition_value_2"},
+    "final_answer_tool":      {"status", "final_value"},
+}
+
+
 def _validate_queue(queue: list) -> None:
-    """Basic structural validation of the planned queue."""
+    """
+    Structural + $ref validation of the planned queue.
+
+    Checks:
+      1. Queue is a non-empty list of dicts with 'step' and 'tool' keys.
+      2. The last step is always 'final_answer_tool'.
+      3. Fix 3 — Every $step_N.key reference points to:
+           a. A step index that exists and comes BEFORE the current step.
+           b. A key that is in the known OUTPUT KEYS of that tool.
+         This catches LLM hallucinations before the queue runner starts.
+    """
     if not isinstance(queue, list) or len(queue) == 0:
         raise ValueError("Agent returned an empty or non-list queue.")
+
+    # Build a map: step_index → tool_name for all steps seen so far
+    step_tool_map: dict[int, str] = {}
+
     for i, step in enumerate(queue):
         if not isinstance(step, dict):
             raise ValueError(f"Queue step {i} is not a dict: {step}")
         if "step" not in step or "tool" not in step:
             raise ValueError(f"Queue step {i} missing 'step' or 'tool' key: {step}")
+
+        current_idx  = step["step"]
+        current_tool = step["tool"]
+        args         = step.get("args", {})
+
+        # Validate all arg values that are $step_N.key references
+        for arg_name, arg_val in args.items():
+            refs = arg_val if isinstance(arg_val, list) else [arg_val]
+            for ref in refs:
+                if not isinstance(ref, str) or not ref.startswith("$step_"):
+                    continue  # plain value — skip
+
+                inner = ref[1:]                    # "step_2.count"
+                parts = inner.split(".", 1)
+                ref_idx_str = parts[0][len("step_"):]  # "2"
+
+                # (a) The referenced step must already exist before this one
+                try:
+                    ref_idx = int(ref_idx_str)
+                except ValueError:
+                    raise ValueError(
+                        f"Queue step {i} ({current_tool}) arg '{arg_name}': "
+                        f"invalid step reference '{ref}' — cannot parse step index."
+                    )
+
+                if ref_idx not in step_tool_map:
+                    raise ValueError(
+                        f"Queue step {i} ({current_tool}) arg '{arg_name}': "
+                        f"'{ref}' references step {ref_idx} which does not exist "
+                        f"before step {current_idx}. Steps defined so far: "
+                        f"{sorted(step_tool_map.keys())}"
+                    )
+
+                # (b) The key must exist in the referenced tool's OUTPUT KEYS
+                if len(parts) == 2:
+                    ref_key      = parts[1]          # "count"
+                    ref_tool     = step_tool_map[ref_idx]
+                    allowed_keys = _TOOL_OUTPUT_KEYS.get(ref_tool, set())
+                    if allowed_keys and ref_key not in allowed_keys:
+                        raise ValueError(
+                            f"Queue step {i} ({current_tool}) arg '{arg_name}': "
+                            f"'{ref}' uses key '{ref_key}' but tool '{ref_tool}' "
+                            f"only outputs: {sorted(allowed_keys)}"
+                        )
+
+        step_tool_map[current_idx] = current_tool
+
     last_tool = queue[-1].get("tool")
     if last_tool != "final_answer_tool":
         raise ValueError(
@@ -108,8 +206,13 @@ def run_execution(
           "step_results": { "step_0": {tool output}, "step_1": {tool output}, ... },
           "queue_total":  int,
           "tools_called": int,
-          "status":       "COMPLETE" | "INCOMPLETE",
+          "error_count":  int,
+          "status":       "COMPLETE" | "PARTIAL" | "FAILED",
         }
+
+        COMPLETE — all steps ran with zero errors
+        PARTIAL  — all steps ran but ≥1 intermediate step errored; answer may still be useful
+        FAILED   — final_answer_tool itself errored; no usable answer
     """
     # ── Phase 1: Plan the queue (LLM called once) ──────────────────────────
     log_question(question, modules)
@@ -148,7 +251,6 @@ def run_execution(
 
     raw_text = _extract_text(response.content)
     raw_json = _strip_markdown(raw_text)
-    logger.info("[Agent] Raw queue (first 500 chars): %s", raw_json[:500])
 
     try:
         queue = json.loads(raw_json)
@@ -174,7 +276,15 @@ def run_execution(
         status       = result["status"],
         tools_called = result["tools_called"],
         queue_total  = result["queue_total"],
+        error_count  = result.get("error_count", 0),
         final_value  = final_value,
     )
+
+    # ── Build and log the context for the Formatting Agent ──────────────────
+    formatting_context = build_formatting_context(result)
+    log_formatting_context(formatting_context)
+
+    # We also attach it to the result so the caller (pipeline) has it
+    result["formatting_context"] = formatting_context
 
     return result

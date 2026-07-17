@@ -10,6 +10,11 @@ count_records(module, condition_field="", condition_value="")
   Count records in a module. Filter to rows where condition_field equals condition_value.
   OUTPUT KEYS: { "count": int, "module": str, "condition_field": str, "condition_value": str }
 
+count_records_multi(module, condition_field_1, condition_value_1, condition_field_2, condition_value_2)
+  Count records matching TWO conditions simultaneously (AND logic).
+  Pass condition_value_N="" to match blank/null in that field.
+  OUTPUT KEYS: { "count": int, "module": str, "condition_field_1": str, "condition_value_1": str, "condition_field_2": str, "condition_value_2": str }
+
 sum_values(module, field)
   Sum a numeric field across all records in a module.
   OUTPUT KEYS: { "total_sum": float, "records_used": int }
@@ -35,6 +40,12 @@ group_by_and_count(module, group_field, filter_field="", filter_value="")
   Optionally filter rows where filter_field equals filter_value before grouping.
   OUTPUT KEYS: { "groups": [{"<group_field_name>": val, "count": int}], "total_records": int, "unique_groups": int }
 
+group_by_and_aggregate(module, group_field, agg_field, operation)
+  Group records by a field and compute SUM | AVG | MIN | MAX of a numeric field per group.
+  Use instead of group_by_and_count when you need totals or averages per group, not counts.
+  Results sorted highest value first.
+  OUTPUT KEYS: { "groups": [{"<group_field_name>": val, "value": float}], "total_records": int, "unique_groups": int }
+
 get_unique_values(module, field)
   Return all distinct values in a field.
   OUTPUT KEYS: { "unique_values": [str], "count": int }
@@ -48,20 +59,22 @@ do_math(operation, a, b=0)
   Operations: ADD | SUB | MUL | DIV | MOD | POWER | SQRT | ABS
   OUTPUT KEYS: { "result": float, "operation": str, "a": float, "b": float }
 
+sort_and_limit(data, sort_by="", order="DESC", limit=0)
+  Sort a list from a previous step and optionally keep only the top/bottom N items.
+  data MUST be a $step_N.key reference pointing to a list (e.g. $step_0.groups, $step_1.unique_values).
+  sort_by: field name to sort by (for lists of dicts). Leave empty for scalar lists.
+  order: "DESC" = highest first, "ASC" = lowest first.
+  limit: keep only first N items after sorting (0 = keep all).
+  Use after group_by_and_count or group_by_and_aggregate to get Top-N or Bottom-N results.
+  OUTPUT KEYS: { "sorted_data": list, "total_in": int, "total_out": int, "sort_by": str, "order": str, "limit": int }
+
 final_answer_tool(result_ref)
   MUST always be the LAST step. Marks queue completion.
-  result_ref = "$step_N.key" pointing to the final computed answer.
+  result_ref MUST be a $step_N.key reference or a list of $step_N.key references.
+  result_ref MUST NEVER be a plain text description or a sentence.
+  For a single result: result_ref = "$step_0.count"
+  For multiple results: result_ref = ["$step_0.groups", "$step_1.groups"]
   OUTPUT KEYS: { "status": "complete", "final_value": <resolved value> }
-
-=== STEP REFERENCE SYNTAX ===
-
-Use "$step_N.key" to pass the output of one step as input to a later step:
-  "$step_0.count"      uses the "count" field from step 0
-  "$step_2.result"     uses the "result" field from step 2
-  "$step_1.average"    uses the "average" field from step 1
-  "$step_1.total_sum"  uses the "total_sum" field from step 1
-
-Only reference keys that exist in the OUTPUT KEYS of that step's tool.
 
 === OUTPUT FORMAT ===
 
@@ -76,7 +89,14 @@ Rules:
   3. Use EXACT module names from "Available modules".
   4. Use EXACT field/column names from the column definitions provided.
   5. Only use $step_N.key references where that key exists in the tool's OUTPUT KEYS.
-  6. For a simple count, one count_records call is enough — do not group or sum unnecessarily.
-  7. For percentage: count numerator, count denominator, DIV, MUL by 100, then final_answer_tool.
+  6. result_ref in final_answer_tool MUST be a $step_N.key reference — NEVER a plain text string.
+     For one result : result_ref = "$step_2.result"
+     For multiple   : result_ref = ["$step_0.groups", "$step_1.groups", "$step_2.groups"]
+  7. Tool selection guide:
+     - Need count with ONE filter?   → count_records
+     - Need count with TWO filters?  → count_records_multi
+     - Need total/avg/min/max per group? → group_by_and_aggregate
+     - Need a count per group?       → group_by_and_count
+     - Need Top-N or Bottom-N from a list? → sort_and_limit (after group_by_and_count or group_by_and_aggregate)
 
 """

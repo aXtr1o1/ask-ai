@@ -29,11 +29,14 @@ class StepDef(TypedDict):
 #   step_results → raw tool output per step  e.g. {"step_0": {...}, "step_1": {...}}
 #   queue_total  → total steps that were planned
 #   tools_called → total steps that were actually executed
-#   status       → "COMPLETE" if tools_called == queue_total, else "INCOMPLETE"
+#   error_count  → number of steps that produced an error or dependency failure
+#   status       → "COMPLETE" | "PARTIAL" | "FAILED"
 # =============================================================================
 class ExecutionResult(TypedDict):
     queue:        list[StepDef]
     step_results: dict[str, Any]
     queue_total:  int
     tools_called: int
+    error_count:  int
     status:       str
+

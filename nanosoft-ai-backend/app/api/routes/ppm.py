@@ -1,4 +1,4 @@
-"""
+﻿"""
 PPM Route (Planned Preventive Maintenance)
 """
 from fastapi import APIRouter, HTTPException
@@ -28,7 +28,7 @@ if not logger.handlers:
 def format_response(data):
     out = merge_format_response(data)
     logger.info(
-        "📊 format_response | p_list_length=%s | p_count=%s",
+        "📊 PPM format_response | p_list_length=%s | p_count=%s",
         len(out.get("p_list", [])),
         out.get("p_count", 0),
     )
@@ -90,7 +90,7 @@ def get_ppm(req: PPMRequest):
             validate_aggregate_request(True, req.group_by_columns)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
-        logger.info("📊 [GET-PPM] AGGREGATE MODE detected → calling sp_ppm_aggregate")
+        logger.info("ðŸ“Š [GET-PPM] AGGREGATE MODE detected â†’ calling sp_ppm_aggregate")
         try:
             conn = get_pool()
             _pld = {k: v for k, v in req.model_dump().items() if v not in (None, "")}
@@ -98,7 +98,7 @@ def get_ppm(req: PPMRequest):
             cursor = conn.cursor()
             group_by_str = ",".join(req.group_by_columns) if req.group_by_columns else None
             agg_function = req.aggregate_function or "COUNT"
-            logger.info("📊 [GET-PPM] group_by=%s | function=%s", group_by_str, agg_function)
+            logger.info("ðŸ“Š [GET-PPM] group_by=%s | function=%s", group_by_str, agg_function)
             cursor.callproc("sp_ppm_aggregate", [
                 req.user_name,
                 req.user_id,
@@ -123,7 +123,7 @@ def get_ppm(req: PPMRequest):
             if isinstance(raw, str):
                 raw = json.loads(raw)
             formatted = format_response(raw)
-            logger.info("✅ [GET-PPM] Aggregate result | count=%s", formatted["p_count"])
+            logger.info("âœ… [GET-PPM] Aggregate result | count=%s", formatted["p_count"])
             return formatted
         except Exception as e:
             err_msg = str(e)
