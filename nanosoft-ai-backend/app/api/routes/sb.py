@@ -71,6 +71,8 @@ def _call_sp_sb_query(req: SBRequest) -> dict:
     row = cursor.fetchone()
     cursor.close()
     raw = row[0] if row else {}
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8", errors="replace")  # safe: replace bad bytes instead of crashing
     if isinstance(raw, str):
         raw = json.loads(raw)
     return format_response_sb(raw)
@@ -117,6 +119,8 @@ def get_sb(req: SBRequest):
             row = cursor.fetchone()
             cursor.close()
             raw = row[0] if row else {}
+            if isinstance(raw, bytes):
+                raw = raw.decode("utf-8", errors="replace")  # safe: replace bad bytes instead of crashing
             if isinstance(raw, str):
                 raw = json.loads(raw)
             formatted = format_response_sb(raw)

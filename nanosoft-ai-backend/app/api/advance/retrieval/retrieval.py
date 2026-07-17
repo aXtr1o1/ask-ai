@@ -42,7 +42,9 @@ def _apply_filters(
 
     for column_name, filter_value in filter_values.items():
         if not filter_value:
-            continue   # skip empty filter values
+            continue   # skip None / "" / 0 / False
+        if isinstance(filter_value, str) and filter_value.strip().lower() in ("null", "none"):
+            continue   # skip literal "null"/"none" strings — treat as no filter
 
         # Only filter on columns that are defined for this module
         if column_name not in filter_fields:

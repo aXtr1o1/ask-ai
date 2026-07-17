@@ -1,19 +1,20 @@
 """
-FM Understanding Agent
+Understanding Agent
 
-First stage of the pipeline. Reads the raw user query, classifies its intent,
-and produces a clean query summary.
-
-This agent has NO knowledge of database schema, field names, or modules.
-Its only job is intent classification and query cleaning.
+First stage of the FM pipeline. Reads the raw user query and produces:
+  - intent          : general | db_query | web_search
+  - query_summary   : clean, complete restatement of the query
+  - modules         : which FM modules are relevant (db_query only)
+  - general_response: direct answer for general queries
+  - web_search_summary: live web results for web_search queries
 
 Flow:
   Raw user query
     → LLM with structured output (UnderstandingOutput)
     → If web_search: run Google Search grounding
-    → Return { intent, query_summary, general_response, web_search_summary }
+    → Return result dict
 
-Only db_query results are passed to the Analysis Agent.
+Only db_query results (with modules) are forwarded to the Analysis Agent.
 general and web_search are returned directly to the caller.
 """
 import logging
@@ -25,23 +26,27 @@ from google.genai import types
 
 from app.config import settings
 from app.api.advance.Understanding_Agent.schemas import UnderstandingOutput
-from app.api.advance.Understanding_Agent.prompt import SYSTEM_PROMPT
+from app.api.advance.Understanding_Agent.prompt import build_system_prompt
 
 logger = logging.getLogger("advance.understanding")
 
+# Build the system prompt once at startup (MODULE_FIELDS is static)
+_SYSTEM_PROMPT = build_system_prompt()
+
 
 # =============================================================================
-# MAIN FUNCTION: classify_query
+# MAIN FUNCTION
 # =============================================================================
 def classify_query(query: str) -> dict:
     """
-    Classify a user query and return a clean summary.
+    Classify a user query and return a structured result.
 
     Returns a dict with:
-      intent            — "general" | "db_query" | "web_search"
-      query_summary     — cleaned, standardised query text
-      web_search_summary— web search result (web_search only)
-      general_response  — direct answer (general only)
+      intent             — "general" | "db_query" | "web_search"
+      query_summary      — cleaned, complete restatement of the query
+      modules            — FM modules relevant to the query (db_query only)
+      web_search_summary — web search result (web_search only)
+      general_response   — direct answer (general only)
     """
     llm = ChatGoogleGenerativeAI(
         model="gemini-2.5-flash",
@@ -49,15 +54,28 @@ def classify_query(query: str) -> dict:
         temperature=1,
         thinking_budget=512,
     )
-    structured_llm = llm.with_structured_output(UnderstandingOutput)
+    # include_raw=True gives us the raw AIMessage (with usage_metadata)
+    # alongside the parsed Pydantic output
+    structured_llm = llm.with_structured_output(UnderstandingOutput, include_raw=True)
 
     messages = [
-        SystemMessage(content=SYSTEM_PROMPT),
+        SystemMessage(content=_SYSTEM_PROMPT),
         HumanMessage(content=f'Query: "{query}"'),
     ]
-    response = structured_llm.invoke(messages)
+    result      = structured_llm.invoke(messages)
+    response: UnderstandingOutput = result["parsed"]
+    usage       = result["raw"].usage_metadata or {}
 
+    logger.info(
+        "[Understanding Agent] tokens — input: %d | output: %d | total: %d",
+        usage.get("input_tokens",  0),
+        usage.get("output_tokens", 0),
+        usage.get("total_tokens",  0),
+    )
+
+    # -------------------------------------------------------------------------
     # Web search grounding — only when intent is web_search
+    # -------------------------------------------------------------------------
     web_search_summary = None
     if response.intent == "web_search":
         try:
@@ -82,11 +100,10 @@ def classify_query(query: str) -> dict:
             logger.error("web_search_failed error=%s", e)
             web_search_summary = f"Web search failed: {e}"
 
-    result = {
-        "intent":             response.intent,
-        "query_summary":      response.query_summary,
-        "web_search_summary": web_search_summary,
-        "general_response":   response.general_response,
+    return {
+        "intent":              response.intent,
+        "query_summary":       response.query_summary,
+        "modules":             response.modules,          # <-- new
+        "web_search_summary":  web_search_summary,
+        "general_response":    response.general_response,
     }
-
-    return result

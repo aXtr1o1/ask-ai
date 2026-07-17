@@ -16,6 +16,9 @@ Tools:
   8. get_unique_values      → list all distinct values in a field
   9. join_records           → match records from two modules on a shared key field
  10. do_math                → arithmetic: ADD | SUB | MUL | DIV | MOD | POWER | SQRT | ABS
+ 11. sort_and_limit         → sort a list from a prior step and optionally keep top/bottom N
+ 12. group_by_and_aggregate → SUM | AVG | MIN | MAX of a numeric field per group
+ 13. count_records_multi    → count records matching TWO conditions simultaneously (AND)
 """
 import math
 from typing import Annotated
@@ -265,20 +268,31 @@ def group_by_and_count(
     module: str,
     group_field: str,
     state: Annotated[dict, InjectedState()],
+    filter_field: str = "",
+    filter_value: str = "",
 ) -> dict:
     """
     Group records by a field and count how many records fall in each group.
     Results are sorted from highest count to lowest.
-    The retrieval layer is responsible for returning already-filtered data;
-    this tool only groups and counts what it receives.
+    Optionally filter rows to only those where filter_field equals filter_value before grouping.
 
     Args:
-        module:      Data module name
-        group_field: Column to group by
+        module:       Data module name
+        group_field:  Column to group by
+        filter_field: Column to filter on before grouping (optional)
+        filter_value: Value to match in filter_field; "" matches blank/null rows
     """
     df = load_records_as_dataframe(state, module)
     if df.empty:
         return {"module": module, "group_field": group_field, "total_records": 0, "groups": []}
+
+    # Apply optional pre-filter before grouping
+    if filter_field and filter_field in df.columns:
+        col = df[filter_field].fillna("").astype(str).str.strip()
+        if filter_value == "":
+            df = df[col == ""]
+        else:
+            df = df[col.str.lower() == filter_value.lower()]
 
     if group_field not in df.columns:
         return {
@@ -296,7 +310,6 @@ def group_by_and_count(
     )
 
     # Replace NaN with None so the output is always valid JSON
-    # (NaN appears when a group field has null values — not valid in JSON)
     groups_raw = grouped.to_dict(orient="records")
     groups_clean = [
         {k: (None if isinstance(v, float) and math.isnan(v) else v) for k, v in row.items()}
@@ -306,6 +319,8 @@ def group_by_and_count(
     return {
         "module":        module,
         "group_field":   group_field,
+        "filter_field":  filter_field,
+        "filter_value":  filter_value,
         "total_records": len(df),
         "unique_groups": len(grouped),
         "groups":        groups_clean,
@@ -454,8 +469,188 @@ def do_math(
 
 
 # =============================================================================
-# ALL TOOLS — imported by agent.py
-# The LLM reads each tool's docstring to decide which one to call.
+# TOOL 11: sort_and_limit
+# =============================================================================
+@tool
+def sort_and_limit(
+    data: list,
+    sort_by: str = "",
+    order: str = "DESC",
+    limit: int = 0,
+) -> dict:
+    """
+    Sort a list from a previous step and optionally keep only the top/bottom N items.
+    Use after group_by_and_count, group_by_and_aggregate, or get_unique_values.
+
+    Args:
+        data:    The list to sort (’data’ MUST be a $step_N.key reference).
+        sort_by: Field name to sort by (for lists of dicts). Leave empty for scalar lists.
+        order:   "DESC" (highest first) or "ASC" (lowest first). Default: "DESC".
+        limit:   Keep only the first N items after sorting. 0 = keep all.
+    """
+    if not isinstance(data, list):
+        return {"error": f"'data' must be a list, got {type(data).__name__}"}
+
+    reverse = order.upper() != "ASC"
+    try:
+        if data and isinstance(data[0], dict):
+            # List of dicts: sort by the specified field; push None/missing to the end
+            sorted_data = sorted(
+                data,
+                key=lambda row: (row.get(sort_by) is None, row.get(sort_by, 0)),
+                reverse=reverse,
+            )
+        else:
+            # List of scalars: plain sort
+            sorted_data = sorted(data, reverse=reverse)
+    except Exception as exc:
+        return {"error": f"Sort failed: {exc}"}
+
+    if limit and limit > 0:
+        sorted_data = sorted_data[:limit]
+
+    return {
+        "sorted_data":  sorted_data,
+        "total_in":     len(data),
+        "total_out":    len(sorted_data),
+        "sort_by":      sort_by,
+        "order":        order.upper(),
+        "limit":        limit,
+    }
+
+
+# =============================================================================
+# TOOL 12: group_by_and_aggregate
+# =============================================================================
+@tool
+def group_by_and_aggregate(
+    module: str,
+    group_field: str,
+    agg_field: str,
+    operation: str,
+    state: Annotated[dict, InjectedState()],
+) -> dict:
+    """
+    Group records by a field and compute SUM | AVG | MIN | MAX of a numeric
+    field per group. Results are sorted highest value first.
+
+    Args:
+        module:      Data module name
+        group_field: Column to group by
+        agg_field:   Numeric column to aggregate
+        operation:   SUM | AVG | MIN | MAX
+    """
+    df = load_records_as_dataframe(state, module)
+    if df.empty:
+        return {
+            "module": module, "group_field": group_field, "agg_field": agg_field,
+            "operation": operation.upper(), "total_records": 0, "unique_groups": 0, "groups": [],
+        }
+
+    if group_field not in df.columns:
+        return {"error": f"Column '{group_field}' not found in '{module}'."}
+    if agg_field not in df.columns:
+        return {"error": f"Column '{agg_field}' not found in '{module}'."}
+
+    op = operation.upper()
+    agg_fn_map = {"SUM": "sum", "AVG": "mean", "MIN": "min", "MAX": "max"}
+    if op not in agg_fn_map:
+        return {"error": f"Unknown operation '{op}'. Valid: SUM | AVG | MIN | MAX"}
+
+    df = df.copy()
+    df[agg_field] = pd.to_numeric(df[agg_field], errors="coerce")
+
+    grouped = (
+        df.groupby(group_field, dropna=False)[agg_field]
+        .agg(agg_fn_map[op])
+        .round(4)
+        .reset_index()
+        .rename(columns={agg_field: "value"})
+        .sort_values("value", ascending=False)
+    )
+
+    groups_raw   = grouped.to_dict(orient="records")
+    groups_clean = [
+        {k: (None if isinstance(v, float) and math.isnan(v) else v) for k, v in row.items()}
+        for row in groups_raw
+    ]
+
+    return {
+        "module":        module,
+        "group_field":   group_field,
+        "agg_field":     agg_field,
+        "operation":     op,
+        "total_records": int(df[agg_field].notna().sum()),
+        "unique_groups": len(grouped),
+        "groups":        groups_clean,
+    }
+
+
+# =============================================================================
+# TOOL 13: count_records_multi
+# =============================================================================
+@tool
+def count_records_multi(
+    module: str,
+    condition_field_1: str,
+    condition_value_1: str,
+    condition_field_2: str,
+    condition_value_2: str,
+    state: Annotated[dict, InjectedState()],
+) -> dict:
+    """
+    Count records matching TWO conditions simultaneously (AND logic).
+    Pass condition_value_N="" to match rows where that field is blank or null.
+
+    Args:
+        module:             Data module name
+        condition_field_1:  First column to filter on
+        condition_value_1:  Value to match in condition_field_1; "" matches blank/null
+        condition_field_2:  Second column to filter on
+        condition_value_2:  Value to match in condition_field_2; "" matches blank/null
+    """
+    df = load_records_as_dataframe(state, module)
+
+    for field, value in [
+        (condition_field_1, condition_value_1),
+        (condition_field_2, condition_value_2),
+    ]:
+        if field and field in df.columns:
+            col = df[field].fillna("").astype(str).str.strip()
+            df  = df[col == ""] if value == "" else df[col.str.lower() == value.lower()]
+
+    return {
+        "module":             module,
+        "count":              len(df),
+        "condition_field_1": condition_field_1,
+        "condition_value_1": condition_value_1,
+        "condition_field_2": condition_field_2,
+        "condition_value_2": condition_value_2,
+    }
+
+
+# =============================================================================
+# TOOL 14: final_answer_tool
+# =============================================================================
+@tool
+def final_answer_tool(result_ref: str) -> dict:
+    """
+    Completion marker. Always the LAST step in the execution queue.
+    Signals that all computation steps have been completed successfully.
+    result_ref receives the resolved value of the final computed answer.
+
+    Args:
+        result_ref: The final computed answer (a $step_N.key reference resolved
+                    by the queue runner before this tool is called)
+    """
+    return {
+        "status":      "complete",
+        "final_value": result_ref,
+    }
+
+
+# =============================================================================
+# ALL TOOLS — used by the planner for tool descriptions
 # =============================================================================
 ALL_TOOLS = [
     count_records,
@@ -468,4 +663,8 @@ ALL_TOOLS = [
     get_unique_values,
     join_records,
     do_math,
+    sort_and_limit,
+    group_by_and_aggregate,
+    count_records_multi,
+    final_answer_tool,
 ]

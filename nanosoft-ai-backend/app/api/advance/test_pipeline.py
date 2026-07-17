@@ -3,10 +3,11 @@ Full Pipeline Test — Interactive Mode
 
 Flow:
   User types a query
-    → Understanding Agent  : intent + rich query_summary
-    → Analysis Agent       : modules + filter_values + filter_fields
-    → Retrieval Layer      : filtered DB records per module
-    → Execution Agent      : tools run on records → final answer
+    → Step 1 — Understanding Agent : intent + query_summary + modules
+    → Step 2 — Analysis Agent      : filter_fields + filter_values
+                                     (receives only the selected modules' metadata)
+    → Step 3 — Retrieval Layer     : filtered DB records per module
+    → Step 4 — Execution Agent     : runs tools on records → final answer
 
 Usage:
   cd D:\\nonosoft_client_demo\\ask-ai\\nanosoft-ai-backend
@@ -24,7 +25,7 @@ from langchain_core.messages import HumanMessage
 from app.api.advance.Understanding_Agent.agent import classify_query
 from app.api.advance.analysis.agent import analyze_query
 from app.api.advance.retrieval.retrieval import get_filtered_records
-from app.api.advance.execution.agent import get_agent
+from app.api.advance.execution.agent import run_execution
 
 
 # =============================================================================
@@ -43,7 +44,7 @@ logging.basicConfig(
 )
 logging.getLogger("advance").setLevel(logging.INFO)
 
-# Suppress noisy route / library loggers
+# Suppress noisy library loggers
 for _name in [
     "httpx", "httpcore", "google", "langchain", "langgraph",
     "assets_route", "bdm_route", "ppm_route", "fa_route", "sb_route",
@@ -58,65 +59,57 @@ DASH = "-" * 50
 
 
 # =============================================================================
-# BUILD QUESTION MESSAGE FOR EXECUTION AGENT
+# BUILD SCHEMA MESSAGE — for display/logging only (NOT sent to execution agent)
+# The execution agent receives schema via run_execution(), not a HumanMessage.
 # =============================================================================
-def build_question_message(question: str, filter_fields: dict, filtered_records: dict) -> HumanMessage:
-    """
-    Build the message that the Execution Agent receives.
-    Contains: the question, column definitions, and actual data records.
-    """
-    filter_context = (
-        json.dumps(filter_fields, indent=2)
-        if filter_fields
-        else "No column definitions provided."
-    )
+def _schema_summary(filter_fields: dict) -> str:
+    """Return a compact string summarising the schema for display."""
+    parts = []
+    for mod, fields in filter_fields.items():
+        if isinstance(fields, dict):
+            parts.append(f"  [{mod}] {list(fields.keys())}")
+    return "\n".join(parts) if parts else "  (no schema)"
 
-    data_sections = []
-    for module, records in filtered_records.items():
-        data_sections.append(
-            f"--- Module: {module} ({len(records)} records) ---\n"
-            + json.dumps(records, indent=2, default=str)
-        )
-    data_context = "\n\n".join(data_sections) if data_sections else "No data loaded."
-
-    return HumanMessage(content=(
-        f"Question: {question}\n\n"
-        f"Modules loaded: {list(filtered_records.keys())}\n"
-        f"(Use only these module names when calling tools)\n\n"
-        f"Column definitions per module:\n"
-        f"{filter_context}\n\n"
-        f"Actual data records:\n"
-        f"{data_context}\n\n"
-        f"Think through your approach, call the necessary tools, then deliver your final answer.\n"
-        f"Your answer must include: Approach, Formula, Computed Result, and Business Insight.\n"
-        f"The Computed Result must be a concrete value — a number, duration, or percentage."
-    ))
 
 
 # =============================================================================
-# PRINT EXECUTION AGENT RESULT
+# PRINT EXECUTION RESULT
 # =============================================================================
 def print_result(result: dict):
-    trace = result.get("execution_trace", [])
-    for entry in trace:
-        if entry["type"] == "llm_decides_tool":
-            print(f"\n  [STEP {entry['step']}] REASONING:")
-            print(f"  {DASH}")
-            reasoning_text = (entry.get("reasoning") or "").strip()
-            if reasoning_text and reasoning_text != "[]":
-                for line in reasoning_text.split("\n"):
-                    print(f"    {line}")
-            for i, t in enumerate(entry.get("tools", []), 1):
-                print(f"\n  -> Tool {i}: {t['tool']}")
-                print(f"     Args   : {t['args']}")
-                print(f"     Output :")
-                for line in json.dumps(t["output"], indent=6, default=str).split("\n"):
-                    print(f"     {line}")
-        elif entry["type"] == "final_answer":
-            print(f"\n  [FINAL ANSWER]")
-            print(f"  {DASH}")
-            for line in (entry.get("answer") or "").strip().split("\n"):
-                print(f"    {line}")
+    """Print the planned queue and each step's tool output."""
+    queue        = result.get("queue", [])
+    step_results = result.get("step_results", {})
+    status       = result.get("status", "?")
+    tools_called = result.get("tools_called", 0)
+    queue_total  = result.get("queue_total", 0)
+
+    print(f"\n  [PLANNED QUEUE]  ({len(queue)} steps)")
+    print(f"  {DASH}")
+    for step in queue:
+        print(f"    Step {step['step']}: {step['tool']}  args={step.get('args', {})}")
+
+    print(f"\n  [EXECUTION TRACE]")
+    print(f"  {DASH}")
+    for step in queue:
+        step_key  = f"step_{step['step']}"
+        tool_name = step["tool"]
+        output    = step_results.get(step_key, {})
+        print(f"\n  Step {step['step']}: {tool_name}")
+        print(f"     Args   : {step.get('args', {})}")
+        print(f"     Output :")
+        for line in json.dumps(output, indent=6, default=str).split("\n"):
+            print(f"     {line}")
+
+    print(f"\n  [STATUS] {status}  |  {tools_called}/{queue_total} steps")
+
+    if step_results:
+        last_key    = f"step_{len(queue) - 1}"
+        last_output = step_results.get(last_key, {})
+        final_value = last_output.get("final_value", last_output)
+        print(f"\n  [FINAL ANSWER]")
+        print(f"  {DASH}")
+        print(f"    {json.dumps(final_value, indent=4, default=str)}")
+
 
 
 # =============================================================================
@@ -139,13 +132,23 @@ def run_query(query: str, sample_rows: int = 3):
 
     if intent == "general":
         print(f"  [GENERAL RESPONSE]\n  {DASH}")
-        print(f"  {understanding.get('response', '')}\n")
-        return
+        print(f"  {understanding.get('general_response', '')}\n")
+        return {
+            "response_type": "general",
+            "layout": "PLAIN_TEXT",
+            "format_reason": "General conversational intent",
+            "formatted_answer": understanding.get("general_response", "")
+        }
 
     if intent == "web_search":
         print(f"  [WEB SEARCH NEEDED]\n  {DASH}")
-        print(f"  {understanding.get('response', 'Search the web for this query.')}\n")
-        return
+        print(f"  {understanding.get('web_search_summary', 'Search the web for this query.')}\n")
+        return {
+            "response_type": "web_search",
+            "layout": "PLAIN_TEXT",
+            "format_reason": "Web search intent",
+            "formatted_answer": understanding.get("web_search_summary", "Search the web for this query.")
+        }
 
     # ------------------------------------------------------------------
     # Step 2: Analysis Agent
@@ -154,7 +157,7 @@ def run_query(query: str, sample_rows: int = 3):
     print(f"  [ Analysis Agent ]")
     print(f"  {DASH}\n")
 
-    analysis = analyze_query(summary)
+    analysis = analyze_query(summary, understanding.get("modules", []))
     modules = analysis.get("modules", [])
     filter_values = analysis.get("filter_values", {})
     filter_fields = analysis.get("filter_fields", {})
@@ -171,8 +174,13 @@ def run_query(query: str, sample_rows: int = 3):
         print(f"    [{mod}] {ff}")
 
     if not modules:
-        print("\n  [No modules identified — cannot retrieve data.]\n")
-        return
+        print("\n  [No modules identified - cannot retrieve data.]\n")
+        return {
+            "response_type": "no-modules",
+            "layout": "PLAIN_TEXT",
+            "format_reason": "No valid modules found for data retrieval",
+            "formatted_answer": "Cannot retrieve data because no matching modules were found."
+        }
 
     # ------------------------------------------------------------------
     # Step 3: Retrieval Layer
@@ -196,81 +204,146 @@ def run_query(query: str, sample_rows: int = 3):
 
     for module, records in filtered_records.items():
         label = module.upper()
-        print(f"  [{label}] → {len(records)} records retrieved after filtering")
-        if records:
-            sample = records[:sample_rows]
-            print(f"  Sample ({min(sample_rows, len(records))} rows):")
-            for row in sample:
-                print(f"    {json.dumps(row, default=str)}")
-        else:
+        print(f"  [{label}] -> {len(records)} records retrieved after filtering")
+        # sample rows commented out - uncomment to debug individual records
+        # if records:
+        #     sample = records[:sample_rows]
+        #     print(f"  Sample ({min(sample_rows, len(records))} rows):")
+        #     for row in sample:
+        #         print(f"    {json.dumps(row, default=str)}")
+        if not records:
             print(f"  (no records returned)")
 
     total_records = sum(len(r) for r in filtered_records.values())
     if total_records == 0:
-        print(f"\n  [No records retrieved — skipping Execution Agent.]\n")
+        print(f"\n  [No records retrieved - skipping Execution Agent.]\n")
         print(f"{LINE}\n")
-        return
+        return {
+            "response_type": "no-data",
+            "layout": "PLAIN_TEXT",
+            "format_reason": "No data retrieved",
+            "formatted_answer": "No records retrieved for this query."
+        }
 
     # ------------------------------------------------------------------
-    # Step 4: Execution Agent
+    # Step 4: Execution Agent (Queue-Driven)
     # ------------------------------------------------------------------
     print(f"\n  {DASH}")
-    print(f"  [ Execution Agent ]")
+    print(f"  [ Execution Agent — Queue-Driven ]")
     print(f"  {DASH}\n")
 
-    question_message = build_question_message(summary, filter_fields, filtered_records)
-
-    initial_state = {
-        "messages":             [question_message],
-        "question":             summary,
-        "modules":              modules,
-        "filter_fields":        filter_fields,
-        "module_filter_values": filter_values,
-        "filtered_records":     filtered_records,
-        "result":               {},
-    }
+    print(f"  Schema being sent to planner:")
+    print(_schema_summary(filter_fields))
+    print(f"\n  (Actual data rows go to Execution Context only — LLM never sees them)\n")
 
     print(f"  [AGENT] Running ...\n")
-    agent = get_agent()
-    final_state = agent.invoke(initial_state, {"recursion_limit": 50})
+    result = run_execution(
+        question         = summary,
+        filter_fields    = filter_fields,
+        modules          = modules,
+        filtered_records = filtered_records,
+    )
 
-    result = final_state.get("result", {})
     print_result(result)
 
+    # Extract final answer from the last step's tool output
+    step_results = result.get("step_results", {})
+    queue        = result.get("queue", [])
+    final_answer = ""
+    if step_results and queue:
+        last_key    = f"step_{len(queue) - 1}"
+        last_output = step_results.get(last_key, {})
+        final_value = last_output.get("final_value", last_output)
+        final_answer = json.dumps(final_value, default=str)
+
     print(f"\n{LINE}\n")
+    return {
+        "response_type":    "analytical-answer",
+        "layout":           "MARKDOWN",
+        "format_reason":    "Queue-driven tool execution result",
+        "formatted_answer": final_answer,
+        "step_results":     result.get("step_results", {}),
+        "status":           result.get("status", ""),
+    }
 
 
 # =============================================================================
-# INTERACTIVE MAIN LOOP
+# INTERACTIVE MAIN LOOP OR FASTAPI SERVER
 # =============================================================================
 if __name__ == "__main__":
+    import sys
     from datetime import datetime
     logger.info("=" * 60)
     logger.info("NEW RUN  %s", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     logger.info("=" * 60)
 
-    print(f"\n{LINE}")
-    print(f"  FM Full Pipeline — Interactive Mode")
-    print(f"  Understanding -> Analysis -> Retrieval -> Execution")
-    print(f"  Type your query and press Enter. Type 'exit' to quit.")
-    print(f"{LINE}\n")
+    if "--api" in sys.argv:
+        print(f"\n{LINE}")
+        print(f"  FM Full Pipeline - API Mode")
+        print(f"  Starting FastAPI server on http://localhost:8000")
+        print(f"{LINE}\n")
+        
+        import uvicorn
+        from fastapi import FastAPI
+        from fastapi.middleware.cors import CORSMiddleware
+        from pydantic import BaseModel
 
-    while True:
-        try:
-            query = input("  Query: ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print("\n  Exiting.\n")
-            break
+        app = FastAPI()
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
 
-        if query.lower() in ("exit", "quit", "q"):
-            print("\n  Exiting.\n")
-            break
+        class QueryRequest(BaseModel):
+            query: str
 
-        if not query:
-            continue
+        @app.post("/api/query")
+        def api_query(request: QueryRequest):
+            try:
+                res = run_query(request.query)
+                return res if res else {
+                    "response_type": "error",
+                    "layout": "PLAIN_TEXT",
+                    "format_reason": "No response returned",
+                    "formatted_answer": "Pipeline failed to produce an answer."
+                }
+            except Exception as exc:
+                logger.error("Pipeline error: %s", exc, exc_info=True)
+                return {
+                    "response_type": "error",
+                    "layout": "PLAIN_TEXT",
+                    "format_reason": "Internal server error",
+                    "formatted_answer": str(exc)
+                }
 
-        try:
-            run_query(query)
-        except Exception as exc:
-            logger.error("Pipeline error: %s", exc, exc_info=True)
-            print(f"\n  [ERROR] {exc}\n")
+        uvicorn.run(app, host="0.0.0.0", port=8000)
+
+    else:
+        print(f"\n{LINE}")
+        print(f"  FM Full Pipeline - Interactive Mode")
+        print(f"  Understanding -> Analysis -> Retrieval -> Execution")
+        print(f"  Type your query and press Enter. Type 'exit' to quit.")
+        print(f"  (Run with --api to start the REST server)")
+        print(f"{LINE}\n")
+
+        while True:
+            try:
+                query = input("  Query: ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print("\n  Exiting.\n")
+                break
+
+            if query.lower() in ("exit", "quit", "q"):
+                print("\n  Exiting.\n")
+                break
+
+            if not query:
+                continue
+
+            try:
+                run_query(query)
+            except Exception as exc:
+                logger.error("Pipeline error: %s", exc, exc_info=True)
+                print(f"\n  [ERROR] {exc}\n")

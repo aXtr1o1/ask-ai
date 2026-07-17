@@ -1,215 +1,290 @@
 """
-FM Analytics Agent
-
-Each question is independent. No history between questions.
+FM Analytics Execution Agent — Queue-Driven, Tool-Only Architecture
 
 Flow:
-  test_agent.py builds the question message and puts it in initial_state["messages"]
-  START
-    → ask_llm       : send messages to LLM → LLM picks a tool
-    → run_tool      : LangGraph runs the tool on filtered data
-    → ask_llm       : LLM reads tool result → gives final answer
-    → collect_result: package tool output + answer into clean result
+  Phase 1 — Planning (LLM called ONCE):
+    question + schema  →  LLM  →  JSON queue of tool steps
+
+  Phase 2 — Execution (no LLM, no loop):
+    queue  →  run step by step  →  tools only  →  Execution Context
+    filtered_records sit in Execution Context — tools read from there
+
+  Final output:
+    Raw tool results. LLM is never involved after Phase 1.
+    Status: COMPLETE | PARTIAL | FAILED
+
+Fix 3 — Pre-execution $ref key validation:
+  _validate_queue() now checks every $step_N.key reference against the
+  known OUTPUT KEYS of the referenced tool BEFORE the queue runs.
+  This catches LLM hallucinations (wrong key names) at zero latency cost.
+
+Public API:
+  run_execution(question, filter_fields, modules, filtered_records) → ExecutionResult
 """
 import json
 import logging
+import re
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
-from langgraph.graph import END, START, StateGraph
-from langgraph.prebuilt import ToolNode, tools_condition
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.config import settings
-from app.api.advance.execution.prompts import SYSTEM_PROMPT
-from app.api.advance.execution.tools import ALL_TOOLS
-from app.api.advance.execution.schemas import AgentState
+from app.api.advance.execution.prompts      import PLANNER_SYSTEM_PROMPT
+from app.api.advance.execution.queue_runner import run_queue
 from app.api.advance.execution.agent_logger import (
-    log_question, log_why, log_tool_call, log_tool_result, log_answer
+    log_question, log_queue, log_completion, log_formatting_context
 )
+from app.api.advance.execution.context_builder import build_formatting_context
 
 logger = logging.getLogger("advance.execution.agent")
 
 
 # =============================================================================
-# HELPER: read text from a Gemini AI message
-#
-# Gemini returns content in two formats:
-#   1. Plain string       → normal text reply
-#   2. List of blocks     → thinking mode (Gemini 2.5 Flash)
-#      Each block is {"type": "thinking", "thinking": "..."} or {"type": "text", "text": "..."}
-#
-# This function always returns a plain string from either format.
-# Called by: ask_llm, collect_result
+# HELPERS — JSON extraction from LLM response
 # =============================================================================
-def get_text_from_ai_message(msg: AIMessage) -> str:
-    """Read the plain text out of a Gemini AI message."""
-    content = msg.content
 
-    if isinstance(content, str):
-        return content
-
-    if isinstance(content, list):
-        # Check for "text" block FIRST — this is the actual answer.
-        # "thinking" is internal reasoning and should only be used as a last resort fallback.
-        for block in content:
+def _extract_text(response_content) -> str:
+    """Pull plain text from a Gemini response (handles list-of-blocks format)."""
+    if isinstance(response_content, str):
+        return response_content
+    if isinstance(response_content, list):
+        for block in response_content:
             if isinstance(block, dict) and block.get("type") == "text" and block.get("text"):
                 return block["text"]
-        # Fallback: if no text block found, return the thinking content
-        for block in content:
-            if isinstance(block, dict) and block.get("type") == "thinking" and block.get("thinking"):
-                return block["thinking"]
+    return str(response_content)
 
-    return str(content)
+
+def _strip_markdown(raw: str) -> str:
+    """Remove markdown code fences if the model wrapped JSON in them."""
+    raw = raw.strip()
+    if raw.startswith("```"):
+        raw = re.sub(r"^```[a-z]*\n?", "", raw, flags=re.IGNORECASE)
+        raw = raw.rstrip("`").strip()
+    return raw
 
 
 # =============================================================================
-# NODE 1: ask_llm
-#
-# Sends all current messages to the LLM and returns its response.
-# The question is already in state["messages"] (built by test_agent.py).
-# After a tool runs, the tool result is also in state["messages"] automatically.
+# TOOL OUTPUT KEYS — Fix 3: used to validate $ref keys before execution
+# Each entry lists the keys that tool is guaranteed to return on success.
+# Keep in sync with tools.py.
 # =============================================================================
-def ask_llm(state: AgentState) -> dict:
-    """Send all current messages to the LLM and return its response."""
-    from langchain_google_genai import ChatGoogleGenerativeAI
+_TOOL_OUTPUT_KEYS: dict[str, set[str]] = {
+    "count_records":          {"count", "module", "condition_field", "condition_value"},
+    "sum_values":             {"total_sum", "records_used", "module", "field"},
+    "get_average":            {"average", "records_used", "module", "field"},
+    "get_minimum":            {"minimum", "records_used", "module", "field"},
+    "get_maximum":            {"maximum", "records_used", "module", "field"},
+    "calculate_time_between": {"stats", "calculated", "missing_dates", "total_records",
+                               "module", "start_field", "end_field"},
+    "group_by_and_count":     {"groups", "total_records", "unique_groups",
+                               "module", "group_field", "filter_field", "filter_value"},
+    "get_unique_values":      {"unique_values", "count", "module", "field"},
+    "join_records":           {"matched_count", "unmatched_in_a", "unmatched_in_b",
+                               "records_in_a", "records_in_b",
+                               "module_a", "module_b", "join_field"},
+    "do_math":                {"result", "operation", "a", "b"},
+    "sort_and_limit":         {"sorted_data", "total_in", "total_out",
+                               "sort_by", "order", "limit"},
+    "group_by_and_aggregate": {"groups", "total_records", "unique_groups",
+                               "module", "group_field", "agg_field", "operation"},
+    "count_records_multi":    {"count", "module",
+                               "condition_field_1", "condition_value_1",
+                               "condition_field_2", "condition_value_2"},
+    "final_answer_tool":      {"status", "final_value"},
+}
+
+
+def _validate_queue(queue: list) -> None:
+    """
+    Structural + $ref validation of the planned queue.
+
+    Checks:
+      1. Queue is a non-empty list of dicts with 'step' and 'tool' keys.
+      2. The last step is always 'final_answer_tool'.
+      3. Fix 3 — Every $step_N.key reference points to:
+           a. A step index that exists and comes BEFORE the current step.
+           b. A key that is in the known OUTPUT KEYS of that tool.
+         This catches LLM hallucinations before the queue runner starts.
+    """
+    if not isinstance(queue, list) or len(queue) == 0:
+        raise ValueError("Agent returned an empty or non-list queue.")
+
+    # Build a map: step_index → tool_name for all steps seen so far
+    step_tool_map: dict[int, str] = {}
+
+    for i, step in enumerate(queue):
+        if not isinstance(step, dict):
+            raise ValueError(f"Queue step {i} is not a dict: {step}")
+        if "step" not in step or "tool" not in step:
+            raise ValueError(f"Queue step {i} missing 'step' or 'tool' key: {step}")
+
+        current_idx  = step["step"]
+        current_tool = step["tool"]
+        args         = step.get("args", {})
+
+        # Validate all arg values that are $step_N.key references
+        for arg_name, arg_val in args.items():
+            refs = arg_val if isinstance(arg_val, list) else [arg_val]
+            for ref in refs:
+                if not isinstance(ref, str) or not ref.startswith("$step_"):
+                    continue  # plain value — skip
+
+                inner = ref[1:]                    # "step_2.count"
+                parts = inner.split(".", 1)
+                ref_idx_str = parts[0][len("step_"):]  # "2"
+
+                # (a) The referenced step must already exist before this one
+                try:
+                    ref_idx = int(ref_idx_str)
+                except ValueError:
+                    raise ValueError(
+                        f"Queue step {i} ({current_tool}) arg '{arg_name}': "
+                        f"invalid step reference '{ref}' — cannot parse step index."
+                    )
+
+                if ref_idx not in step_tool_map:
+                    raise ValueError(
+                        f"Queue step {i} ({current_tool}) arg '{arg_name}': "
+                        f"'{ref}' references step {ref_idx} which does not exist "
+                        f"before step {current_idx}. Steps defined so far: "
+                        f"{sorted(step_tool_map.keys())}"
+                    )
+
+                # (b) The key must exist in the referenced tool's OUTPUT KEYS
+                if len(parts) == 2:
+                    ref_key      = parts[1]          # "count"
+                    ref_tool     = step_tool_map[ref_idx]
+                    allowed_keys = _TOOL_OUTPUT_KEYS.get(ref_tool, set())
+                    if allowed_keys and ref_key not in allowed_keys:
+                        raise ValueError(
+                            f"Queue step {i} ({current_tool}) arg '{arg_name}': "
+                            f"'{ref}' uses key '{ref_key}' but tool '{ref_tool}' "
+                            f"only outputs: {sorted(allowed_keys)}"
+                        )
+
+        step_tool_map[current_idx] = current_tool
+
+    last_tool = queue[-1].get("tool")
+    if last_tool != "final_answer_tool":
+        raise ValueError(
+            f"Last step must be 'final_answer_tool', got '{last_tool}'."
+        )
+
+
+# =============================================================================
+# PUBLIC API
+# =============================================================================
+
+def run_execution(
+    question:         str,
+    filter_fields:    dict,
+    modules:          list[str],
+    filtered_records: dict,
+) -> dict:
+    """
+    Main entry point for the execution layer.
+
+    Phase 1 — Planning (LLM called once):
+      Receives: question + schema (field names only — NO actual data rows).
+      Returns: a complete queue of tool steps as JSON.
+
+    Phase 2 — Execution (no LLM):
+      Executes each step using tools directly.
+      Tools read filtered_records from the Execution Context.
+      No data goes back to the LLM.
+
+    Args:
+        question:         FM analytics question text
+        filter_fields:    Schema metadata { module: { field: description } }
+        modules:          Module names e.g. ["ppm", "bdm"]
+        filtered_records: Actual data rows per module (never sent to LLM)
+
+    Returns:
+        ExecutionResult:
+        {
+          "queue":        list of planned steps,
+          "step_results": { "step_0": {tool output}, "step_1": {tool output}, ... },
+          "queue_total":  int,
+          "tools_called": int,
+          "error_count":  int,
+          "status":       "COMPLETE" | "PARTIAL" | "FAILED",
+        }
+
+        COMPLETE — all steps ran with zero errors
+        PARTIAL  — all steps ran but ≥1 intermediate step errored; answer may still be useful
+        FAILED   — final_answer_tool itself errored; no usable answer
+    """
+    # ── Phase 1: Plan the queue (LLM called once) ──────────────────────────
+    log_question(question, modules)
+
     llm = ChatGoogleGenerativeAI(
-        model="gemini-3.5-flash",
+        model="gemini-2.5-flash",
         google_api_key=settings.GOOGLE_API_KEY,
         temperature=1,
-        thinking_level="medium",
-    ).bind_tools(ALL_TOOLS)
-
-    # Always send: [SystemMessage] + all current messages (question + any tool results)
-    response = llm.invoke([SystemMessage(content=SYSTEM_PROMPT)] + list(state["messages"]))
-    return {"messages": [response]}
-
-
-
-# =============================================================================
-# NODE 2: collect_result
-#
-# What it does:
-#   After the agent is done, walks through all messages and builds a clean result:
-#     - tool_outputs    : what each tool returned
-#     - answer          : the LLM's final text answer
-#     - execution_trace : step-by-step log (which tool was called, what it returned)
-# =============================================================================
-def collect_result(state: AgentState) -> dict:
-    """Package tool outputs and the final answer into a clean structured result."""
-    messages = state["messages"]
-
-    log_question(state["question"], state.get("module_filter_values"))
-
-    # Collect tool outputs keyed by tool_call_id
-    tool_outputs_by_id: dict[str, dict] = {}
-    for msg in messages:
-        if isinstance(msg, ToolMessage):
-            try:
-                tool_outputs_by_id[msg.tool_call_id] = json.loads(msg.content)
-            except Exception:
-                tool_outputs_by_id[msg.tool_call_id] = {"raw": msg.content}
-
-    # Build execution trace from AI messages
-    execution_trace = []
-    step = 0
-    final_answer_logged = False
-
-    for msg in messages:
-        if not isinstance(msg, AIMessage):
-            continue
-
-        if msg.tool_calls:
-            step += 1
-            reasoning = get_text_from_ai_message(msg)
-            log_why(reasoning)
-
-            tools_called = []
-            for tc in msg.tool_calls:
-                output = tool_outputs_by_id.get(tc["id"], {})
-                log_tool_call(tc["name"], tc["args"])
-                log_tool_result(output, tc["args"])
-                tools_called.append({"tool": tc["name"], "args": tc["args"], "output": output})
-
-            execution_trace.append({
-                "step":      step,
-                "type":      "llm_decides_tool",
-                "reasoning": reasoning,
-                "tools":     tools_called,
-            })
-
-        else:
-            final_text = get_text_from_ai_message(msg)
-            log_answer(final_text)
-            execution_trace.append({"type": "final_answer", "answer": final_text})
-            final_answer_logged = True
-
-    last_ai = next((m for m in reversed(messages) if isinstance(m, AIMessage)), None)
-
-    # Fallback: if LLM never sent a pure-text message (e.g. it returned both
-    # tool_calls AND text in its last message, which Gemini can do), extract
-    # the text from the last AI message and treat it as the final answer.
-    if not final_answer_logged and last_ai is not None:
-        final_text = get_text_from_ai_message(last_ai)
-        if not final_text:
-            # Last resort: pull from thinking block
-            content = last_ai.content
-            if isinstance(content, list):
-                for block in content:
-                    if isinstance(block, dict) and block.get("type") == "thinking" and block.get("thinking"):
-                        final_text = block["thinking"]
-                        break
-        log_answer(final_text)
-        execution_trace.append({"type": "final_answer", "answer": final_text})
-
-    return {
-        "result": {
-            "question":        state["question"],
-            "tool_outputs":    list(tool_outputs_by_id.values()),
-            "answer":          get_text_from_ai_message(last_ai) if last_ai else "",
-            "execution_trace": execution_trace,
-        }
-    }
-
-
-# =============================================================================
-# GRAPH: wire the nodes together
-#
-# START → ask_llm
-#   ↓ (LLM chose a tool)
-# run_tool → ask_llm → (LLM gives final answer) → collect_result → END
-# =============================================================================
-def create_agent_graph():
-    """Build and compile the LangGraph agent graph."""
-    graph = StateGraph(AgentState)
-
-    graph.add_node("ask_llm",        ask_llm)
-    graph.add_node("run_tool",       ToolNode(ALL_TOOLS))
-    graph.add_node("collect_result", collect_result)
-
-    graph.add_edge(START, "ask_llm")
-
-    # tools_condition (LangGraph built-in):
-    #   last message has tool_calls? → go to run_tool
-    #   last message is a plain answer? → go to collect_result
-    graph.add_conditional_edges(
-        "ask_llm",
-        tools_condition,
-        {"tools": "run_tool", END: "collect_result"}
+        thinking_budget=512,
     )
 
-    graph.add_edge("run_tool", "ask_llm")      # tool result goes back to LLM
-    graph.add_edge("collect_result", END)
+    schema_text = (
+        json.dumps(filter_fields, indent=2)
+        if filter_fields
+        else "No column definitions provided."
+    )
 
-    return graph.compile()
+    response = llm.invoke([
+        SystemMessage(content=PLANNER_SYSTEM_PROMPT),
+        HumanMessage(content=(
+            f"Question: {question}\n\n"
+            f"Available modules: {modules}\n\n"
+            f"Column definitions per module:\n{schema_text}\n\n"
+            f"Produce the execution queue as a JSON array."
+        )),
+    ])
 
+    if hasattr(response, "usage_metadata") and response.usage_metadata:
+        usage = response.usage_metadata
+        logger.info(
+            "[Agent] LLM tokens — input: %d | output: %d | total: %d",
+            usage.get("input_tokens", 0),
+            usage.get("output_tokens", 0),
+            usage.get("total_tokens", 0),
+        )
 
-# =============================================================================
-# SINGLETON: build the agent once, reuse on every call
-# =============================================================================
-_agent_instance = None
+    raw_text = _extract_text(response.content)
+    raw_json = _strip_markdown(raw_text)
 
-def get_agent():
-    """Return the compiled agent (built once, reused on every call)."""
-    global _agent_instance
-    if _agent_instance is None:
-        _agent_instance = create_agent_graph()
-    return _agent_instance
+    try:
+        queue = json.loads(raw_json)
+    except json.JSONDecodeError as exc:
+        logger.error("[Agent] JSON parse failed: %s\nRaw: %s", exc, raw_json)
+        raise ValueError(
+            f"Agent returned invalid JSON.\nError: {exc}\nRaw:\n{raw_json}"
+        ) from exc
+
+    _validate_queue(queue)
+    log_queue(queue)
+
+    # ── Phase 2: Execute the queue (no LLM) ────────────────────────────────
+    result = run_queue(queue, filtered_records)
+
+    # ── Log completion ──────────────────────────────────────────────────────
+    step_results = result.get("step_results", {})
+    last_key     = f"step_{len(queue) - 1}"
+    last_output  = step_results.get(last_key, {})
+    final_value  = last_output.get("final_value", last_output)
+
+    log_completion(
+        status       = result["status"],
+        tools_called = result["tools_called"],
+        queue_total  = result["queue_total"],
+        error_count  = result.get("error_count", 0),
+        final_value  = final_value,
+    )
+
+    # ── Build and log the context for the Formatting Agent ──────────────────
+    formatting_context = build_formatting_context(result)
+    log_formatting_context(formatting_context)
+
+    # We also attach it to the result so the caller (pipeline) has it
+    result["formatting_context"] = formatting_context
+
+    return result

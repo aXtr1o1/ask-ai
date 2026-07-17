@@ -1,258 +1,187 @@
 """
-agent_logger.py — All logging logic for the execution agent.
-
-Keeps agent.py clean by isolating every log line here.
-The log file is: app/api/advance/advance_agent.log
+agent_logger.py — Logging for the Queue-Driven Execution Agent.
 
 Log format per question:
-    QUESTION : <question text>
-    -------------------------------------------------------
-      WHY  : <why this tool is needed>
-      CALL : <tool name> | module=<x> | <key args>
-      GOT  : <one-line summary of tool result>
 
-      ANSWER : <insight from final answer>
+  QUESTION : <question text>
+  MODULES  : ['ppm', 'bdm']
+  -------------------------------------------------------
+  QUEUE    : 3 steps planned
+    [0] count_records        module=ppm
+    [1] do_math              operation=DIV | a=$step_0.count | b=100
+    [2] final_answer_tool    result_ref=$step_1.result
+  -------------------------------------------------------
+    STEP 0  count_records    → count=48
+    STEP 1  do_math          → result=0.48
+    STEP 2  final_answer     → 0.48
+  -------------------------------------------------------
+  STATUS   : COMPLETE  (3/3 steps, 0 errors)
+  ANSWER   : 0.48
+
+Status values:
+  COMPLETE — all steps ran, zero errors
+  PARTIAL  — all steps ran, ≥1 intermediate step errored
+  FAILED   — final_answer_tool itself errored, no usable answer
 """
-import re
 import logging
 
 logger = logging.getLogger("advance.execution")
 
+DASH = "-" * 55
+
 
 # =============================================================================
-# Public functions — called from collect_result in agent.py
+# Public functions — called from agent.py, planner.py, queue_runner.py
 # =============================================================================
 
-def log_question(question: str, pre_filters: dict = None):
-    """Log the question being answered and any pre-filters."""
+def log_question(question: str, modules: list):
+    """Log the incoming question and which modules are involved."""
     logger.info("")
     logger.info("QUESTION : %s", question)
-    if pre_filters:
-        logger.info("PRE-FILTERS : %s", pre_filters)
-    logger.info("-" * 55)
+    logger.info("MODULES  : %s", modules)
+    logger.info(DASH)
 
 
-def log_why(reasoning: str):
+def log_queue(queue: list):
+    """Log the planned queue of steps produced by the planner."""
+    logger.info("QUEUE    : %d steps planned", len(queue))
+    for step in queue:
+        args = step.get("args", {})
+        # Format args as key=value pairs (exclude step index from display)
+        args_str = " | ".join(f"{k}={v}" for k, v in args.items()) if args else ""
+        logger.info(
+            "  [%d] %-24s %s",
+            step["step"],
+            step["tool"],
+            args_str,
+        )
+    logger.info(DASH)
+
+
+def log_step(step_idx: int, tool_name: str, result: dict):
     """
-    Extract and log the formula the LLM decided to use.
+    Log one step's execution result in a single readable line.
 
-    Priority order:
-      1. Line that contains '=' and math operators → most likely the formula
-      2. Line that starts with 'Formula:' or 'Approach:'
-      3. First meaningful non-preamble line
-    Skips: empty lines, lines starting with Step/Note/I will/I need
+    Extracts the most meaningful value from each tool's output:
+      count_records          → count=N
+      sum_values             → total_sum=N  (M records)
+      get_average            → average=N    (M records)
+      get_minimum            → minimum=N
+      get_maximum            → maximum=N
+      calculate_time_between → avg=N min
+      group_by_and_count     → total=N  groups=M
+      get_unique_values      → count=N unique values
+      join_records           → matched=N
+      do_math                → result=N
+      final_answer_tool      → <final_value>
     """
-    if not reasoning:
-        return
+    if tool_name == "final_answer_tool":
+        summary = str(result.get("final_value", result))
 
-    skip_prefixes = (
-        "step ", "note", "i will", "i need", "i'll", "let me",
-        "first", "next", "then", "finally", "to answer",
-    )
-    formula_keywords = ("=", "/", "×", "*", "%", "count", "group", "sum", "ratio", "divide")
+    elif "count" in result and "groups" not in result and "stats" not in result:
+        summary = f"count={result['count']}"
 
-    lines = [l.strip().lstrip("*#-•").strip() for l in reasoning.strip().split("\n")]
-    lines = [re.sub(r"^\d+\.\s*", "", l) for l in lines]  # remove "1. " prefixes
-    lines = [l for l in lines if l]  # remove empty
+    elif "total_sum" in result:
+        summary = f"total_sum={result['total_sum']}  ({result.get('records_used')} records)"
 
-    best_formula = None
-    best_approach = None
-    first_meaningful = None
+    elif "average" in result and "stats" not in result:
+        summary = f"average={result['average']}  ({result.get('records_used')} records)"
 
-    for line in lines:
-        lower = line.lower()
+    elif "minimum" in result and "stats" not in result:
+        summary = f"minimum={result['minimum']}"
 
-        # skip preamble lines
-        if any(lower.startswith(p) for p in skip_prefixes):
-            continue
+    elif "maximum" in result and "stats" not in result:
+        summary = f"maximum={result['maximum']}"
 
-        # priority 1: line looks like a formula
-        if any(kw in lower for kw in formula_keywords) and best_formula is None:
-            clean = re.sub(r"^formula:\s*", "", line, flags=re.IGNORECASE).strip()
-            clean = re.sub(r"^approach:\s*", "", clean, flags=re.IGNORECASE).strip()
-            best_formula = clean
+    elif "stats" in result:
+        s = result["stats"]
+        summary = (
+            f"avg={s.get('average')} min  "
+            f"min={s.get('minimum')}  "
+            f"max={s.get('maximum')}  "
+            f"({result.get('calculated')} records)"
+        )
 
-        # priority 2: explicit formula/approach label
-        if re.match(r"^(formula|approach)\s*:", lower) and best_approach is None:
-            after = re.sub(r"^(formula|approach)\s*:\s*", "", line, flags=re.IGNORECASE).strip()
-            if after:
-                best_approach = after
+    elif "groups" in result:
+        summary = (
+            f"total={result.get('total_records')}  "
+            f"groups={result.get('unique_groups')}"
+        )
 
-        # priority 3: first meaningful line
-        if first_meaningful is None and len(line) > 10:
-            first_meaningful = line
+    elif "unique_values" in result:
+        summary = f"{result.get('count')} unique values"
 
-    result = best_formula or best_approach or first_meaningful
-    if result:
-        logger.info("  THOUGHT : %s", result)
+    elif "matched_count" in result:
+        summary = (
+            f"matched={result['matched_count']}  "
+            f"unmatched_a={result.get('unmatched_in_a')}  "
+            f"unmatched_b={result.get('unmatched_in_b')}"
+        )
 
+    elif "sorted_data" in result:
+        summary = (
+            f"{result.get('total_out')}/{result.get('total_in')} items  "
+            f"sort_by={result.get('sort_by')}  order={result.get('order')}"
+        )
 
-def log_tool_call(tool_name: str, args: dict):
-    """
-    Log what tool was called and its key arguments.
-    Format: ACTION : <tool> | module=<x> | <key>=<val> | ...
-    Excludes 'top_n' (not meaningful to the reader).
-    """
-    module = args.get("module", "")
-    key_args = {k: v for k, v in args.items() if k not in ("module", "top_n")}
-    line = f"{tool_name} | module={module}"
-    if key_args:
-        line += " | " + " | ".join(f"{k}={v}" for k, v in key_args.items())
-    logger.info("  ACTION : %s", line)
+    elif "agg_field" in result and "groups" in result:
+        summary = (
+            f"op={result.get('operation')}  "
+            f"total={result.get('total_records')}  "
+            f"groups={result.get('unique_groups')}"
+        )
 
+    elif "condition_field_1" in result:
+        summary = f"count={result['count']}"
 
-def log_tool_result(output: dict, args: dict):
-    """
-    Log a one-line summary of what the tool returned.
-    Shows: what tool returned + key numbers + top groups if any.
+    elif "result" in result:
+        summary = f"result={result['result']}"
 
-    count_records      → OBSERVATION : count = 10
-    sum_values         → OBSERVATION : sum = 45.0  (6 records)
-    get_average        → OBSERVATION : average = 11.16  (3 records)
-    group_by_and_count → OBSERVATION : total = 10  |  top → Building A=3, Building B=2
-    calculate_time_between → OBSERVATION : avg = 11.16 min  min = 8.27  max = 13.27  (3 records)
-    do_math            → OBSERVATION : 9 DIV 10 = 0.9
-    join_records       → OBSERVATION : matched = 5  unmatched_a = 2  unmatched_b = 1
-    get_unique_values  → OBSERVATION : 4 unique values → [val1, val2, ...]
-    """
-    if "count" in output and "ranked" not in output and "stats" not in output:
-        logger.info("  OBSERVATION : count = %s", output["count"])
+    elif "_dep_failed" in result:
+        summary = f"DEPENDENCY_FAILED: {result['_dep_failed']}"
 
-    elif "total_sum" in output:
-        logger.info("  OBSERVATION : sum = %s  (%s records)",
-                    output["total_sum"], output.get("records_used"))
-
-    elif "average" in output and "ranked" not in output:
-        logger.info("  OBSERVATION : average = %s  (%s records)",
-                    output["average"], output.get("records_used"))
-
-    elif "ranked" in output:
-        top   = output.get("ranked", [])[:5]
-        total = output.get("total_records", "?")
-        parts = []
-        for r in top:
-            # first non-count value is the group label
-            label = next(
-                (v for k, v in r.items() if k != "count"),
-                "(unknown)"
-            )
-            if label is None or label == "":
-                label = "(unassigned)"
-            parts.append(f"{label} = {r.get('count')}")
-        logger.info("  OBSERVATION : total = %s  |  top → %s", total, ",  ".join(parts))
-
-    elif "stats" in output:
-        s = output.get("stats", {})
-        calc = output.get("calculated", "?")
-        missing = output.get("missing_dates", 0)
-        logger.info("  OBSERVATION : avg = %s min  |  min = %s min  |  max = %s min  "
-                    "(%s records, %s missing dates)",
-                    s.get("average"), s.get("minimum"), s.get("maximum"),
-                    calc, missing)
-
-    elif "result" in output:
-        # do_math output
-        logger.info("  OBSERVATION : %s %s %s = %s",
-                    output.get("a"), output.get("operation"),
-                    output.get("b"), output.get("result"))
-
-    elif "matched_count" in output:
-        logger.info("  OBSERVATION : matched = %s  |  unmatched_a = %s  |  unmatched_b = %s",
-                    output.get("matched_count"),
-                    output.get("unmatched_in_a"),
-                    output.get("unmatched_in_b"))
-
-    elif "unique_values" in output:
-        vals = output.get("unique_values", [])[:6]
-        logger.info("  OBSERVATION : %s unique values → %s",
-                    output.get("count"), vals)
+    elif "error" in result:
+        summary = f"ERROR: {result['error']}"
 
     else:
-        logger.info("  OBSERVATION : %s", {k: v for k, v in output.items() if k != "module"})
+        summary = str(result)
+
+    logger.info("  STEP %-2d  %-22s → %s", step_idx, tool_name, summary)
 
 
-def log_answer(final_text: str):
+def log_completion(
+    status:       str,
+    tools_called: int,
+    queue_total:  int,
+    error_count:  int,
+    final_value,
+):
     """
-    Log the final answer in 4 parts:
-      APPROACH        : how the LLM approached it
-      FORMULA         : the calculation performed
-      COMPUTED RESULT : the numeric result
-      BUSINESS INSIGHT: the one-line conclusion
+    Log the final status and answer after all steps complete.
+
+    status values:
+      COMPLETE — all steps ran, zero errors
+      PARTIAL  — all steps ran, ≥1 intermediate step errored
+      FAILED   — final_answer_tool itself errored
     """
-    if not final_text:
-        logger.info("  BUSINESS INSIGHT : (no answer text returned by LLM)")
-        logger.info("")
-        return
-
-    # ------------------------------------------------------------------
-    # Step 1: Clean Markdown and LaTeX noise from the raw text
-    # ------------------------------------------------------------------
-    def clean_line(text: str) -> str:
-        # Remove LaTeX math blocks: $$...$$ (single or multiline)
-        text = re.sub(r"\$\$.*?\$\$", "", text, flags=re.DOTALL)
-        # Remove inline LaTeX: $...$
-        text = re.sub(r"\$[^$]+\$", "", text)
-        # Remove all Markdown bold/italic markers: ** and *
-        text = re.sub(r"\*+", "", text)
-        # Remove Markdown headers: # ## ###
-        text = re.sub(r"^#+\s*", "", text, flags=re.MULTILINE)
-        # Remove backtick code spans
-        text = re.sub(r"`[^`]*`", lambda m: m.group(0).strip("`"), text)
-        return text.strip()
-
-    cleaned_text = clean_line(final_text)
-
-    # ------------------------------------------------------------------
-    # Step 2: Extract sections by label prefix
-    # ------------------------------------------------------------------
-    approach_line  = None
-    formula_line   = None
-    computed_line  = None
-    insight_line   = None
-
-    section_map = {
-        "approach":        "approach",
-        "formula":         "formula",
-        "computed result": "computed",
-        "business insight":"insight",
-        "insight":         "insight",
-        "conclusion":      "insight",
-    }
-
-    for raw_line in cleaned_text.split("\n"):
-        line = raw_line.strip().lstrip("-•").strip()
-        if not line:
-            continue
-        lower = line.lower()
-
-        for label, section in section_map.items():
-            if lower.startswith(label):
-                value = re.sub(rf"^{re.escape(label)}\s*[:\-]?\s*", "", line, flags=re.IGNORECASE).strip()
-                if not value:
-                    continue
-                if section == "approach" and approach_line is None:
-                    approach_line = value
-                elif section == "formula" and formula_line is None:
-                    formula_line = value
-                elif section == "computed" and computed_line is None:
-                    computed_line = value
-                elif section == "insight" and insight_line is None:
-                    insight_line = value
-                break
-
-    # Fallback for business insight: use last substantial line
-    if not insight_line:
-        for line in reversed(cleaned_text.split("\n")):
-            clean = line.strip()
-            if clean and len(clean) > 15:
-                insight_line = clean
-                break
-
-    if approach_line:
-        logger.info("  APPROACH        : %s", approach_line)
-    if formula_line:
-        logger.info("  FORMULA         : %s", formula_line)
-    if computed_line:
-        logger.info("  COMPUTED RESULT : %s", computed_line)
-    logger.info("  BUSINESS INSIGHT: %s", insight_line or cleaned_text.split("\n")[0])
+    logger.info(DASH)
+    if error_count > 0:
+        logger.info(
+            "STATUS   : %s  (%d/%d steps, %d error(s))",
+            status, tools_called, queue_total, error_count,
+        )
+    else:
+        logger.info(
+            "STATUS   : %s  (%d/%d steps)",
+            status, tools_called, queue_total,
+        )
+    logger.info("ANSWER   : %s", final_value)
     logger.info("")
+
+def log_formatting_context(context: dict):
+    """Log the payload that will be sent to the Formatting Agent."""
+    import json
+    logger.info(DASH)
+    logger.info("FORMATTING AGENT PAYLOAD (Steps + Final Answer):")
+    logger.info(json.dumps(context, indent=2))
+    logger.info(DASH)
