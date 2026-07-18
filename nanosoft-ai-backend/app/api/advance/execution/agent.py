@@ -24,6 +24,7 @@ Public API:
 import json
 import logging
 import re
+import time
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -89,7 +90,9 @@ _TOOL_OUTPUT_KEYS: dict[str, set[str]] = {
                                "module", "group_field", "agg_field", "operation"},
     "count_records_multi":    {"count", "module",
                                "condition_field_1", "condition_value_1",
-                               "condition_field_2", "condition_value_2"},
+                               "condition_field_2", "condition_value_2",
+                               "condition_field_3", "condition_value_3",
+                               "condition_field_4", "condition_value_4"},
     "final_answer_tool":      {"status", "final_value"},
 }
 
@@ -208,19 +211,22 @@ def run_execution(
           "tools_called": int,
           "error_count":  int,
           "status":       "COMPLETE" | "PARTIAL" | "FAILED",
+          "latency":      {"llm_time": float, "execution_time": float, "total_time": float}
         }
 
         COMPLETE — all steps ran with zero errors
         PARTIAL  — all steps ran but ≥1 intermediate step errored; answer may still be useful
         FAILED   — final_answer_tool itself errored; no usable answer
     """
+    start_total = time.perf_counter()
+    
     # ── Phase 1: Plan the queue (LLM called once) ──────────────────────────
     log_question(question, modules)
 
     llm = ChatGoogleGenerativeAI(
         model="gemini-2.5-flash",
         google_api_key=settings.GOOGLE_API_KEY,
-        temperature=1,
+        temperature=0,
         thinking_budget=512,
     )
 
@@ -230,6 +236,7 @@ def run_execution(
         else "No column definitions provided."
     )
 
+    start_llm = time.perf_counter()
     response = llm.invoke([
         SystemMessage(content=PLANNER_SYSTEM_PROMPT),
         HumanMessage(content=(
@@ -239,6 +246,7 @@ def run_execution(
             f"Produce the execution queue as a JSON array."
         )),
     ])
+    llm_time = time.perf_counter() - start_llm
 
     if hasattr(response, "usage_metadata") and response.usage_metadata:
         usage = response.usage_metadata
@@ -264,7 +272,17 @@ def run_execution(
     log_queue(queue)
 
     # ── Phase 2: Execute the queue (no LLM) ────────────────────────────────
+    start_exec = time.perf_counter()
     result = run_queue(queue, filtered_records)
+    execution_time = time.perf_counter() - start_exec
+    
+    total_time = time.perf_counter() - start_total
+    
+    result["latency"] = {
+        "llm_time": round(llm_time, 2),
+        "execution_time": round(execution_time, 2),
+        "total_time": round(total_time, 2),
+    }
 
     # ── Log completion ──────────────────────────────────────────────────────
     step_results = result.get("step_results", {})
@@ -278,6 +296,7 @@ def run_execution(
         queue_total  = result["queue_total"],
         error_count  = result.get("error_count", 0),
         final_value  = final_value,
+        latency      = result["latency"],
     )
 
     # ── Build and log the context for the Formatting Agent ──────────────────

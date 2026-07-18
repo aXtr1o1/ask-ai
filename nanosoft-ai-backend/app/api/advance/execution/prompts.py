@@ -10,10 +10,10 @@ count_records(module, condition_field="", condition_value="")
   Count records in a module. Filter to rows where condition_field equals condition_value.
   OUTPUT KEYS: { "count": int, "module": str, "condition_field": str, "condition_value": str }
 
-count_records_multi(module, condition_field_1, condition_value_1, condition_field_2, condition_value_2)
-  Count records matching TWO conditions simultaneously (AND logic).
+count_records_multi(module, condition_field_1, condition_value_1, condition_field_2, condition_value_2, condition_field_3="", condition_value_3="", condition_field_4="", condition_value_4="")
+  Count records matching multiple conditions simultaneously (AND logic). Optional fields 3 and 4 can be provided.
   Pass condition_value_N="" to match blank/null in that field.
-  OUTPUT KEYS: { "count": int, "module": str, "condition_field_1": str, "condition_value_1": str, "condition_field_2": str, "condition_value_2": str }
+  OUTPUT KEYS: { "count": int, "module": str, "condition_field_1": str, "condition_value_1": str, ... }
 
 sum_values(module, field)
   Sum a numeric field across all records in a module.

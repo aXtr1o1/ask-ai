@@ -597,9 +597,13 @@ def count_records_multi(
     condition_field_2: str,
     condition_value_2: str,
     state: Annotated[dict, InjectedState()],
+    condition_field_3: str = None,
+    condition_value_3: str = None,
+    condition_field_4: str = None,
+    condition_value_4: str = None,
 ) -> dict:
     """
-    Count records matching TWO conditions simultaneously (AND logic).
+    Count records matching multiple conditions simultaneously (AND logic).
     Pass condition_value_N="" to match rows where that field is blank or null.
 
     Args:
@@ -608,14 +612,20 @@ def count_records_multi(
         condition_value_1:  Value to match in condition_field_1; "" matches blank/null
         condition_field_2:  Second column to filter on
         condition_value_2:  Value to match in condition_field_2; "" matches blank/null
+        condition_field_3:  Third column to filter on (optional)
+        condition_value_3:  Value to match in condition_field_3
+        condition_field_4:  Fourth column to filter on (optional)
+        condition_value_4:  Value to match in condition_field_4
     """
     df = load_records_as_dataframe(state, module)
 
     for field, value in [
         (condition_field_1, condition_value_1),
         (condition_field_2, condition_value_2),
+        (condition_field_3, condition_value_3),
+        (condition_field_4, condition_value_4),
     ]:
-        if field and field in df.columns:
+        if field and value is not None and field in df.columns:
             col = df[field].fillna("").astype(str).str.strip()
             df  = df[col == ""] if value == "" else df[col.str.lower() == value.lower()]
 
@@ -626,6 +636,10 @@ def count_records_multi(
         "condition_value_1": condition_value_1,
         "condition_field_2": condition_field_2,
         "condition_value_2": condition_value_2,
+        "condition_field_3": condition_field_3,
+        "condition_value_3": condition_value_3,
+        "condition_field_4": condition_field_4,
+        "condition_value_4": condition_value_4,
     }
 
 

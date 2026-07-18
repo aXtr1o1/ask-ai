@@ -102,6 +102,10 @@ def print_result(result: dict):
 
     print(f"\n  [STATUS] {status}  |  {tools_called}/{queue_total} steps")
 
+    latency = result.get("latency")
+    if latency:
+        print(f"  [LATENCY] Total: {latency.get('total_time', 0):.2f}s | LLM Plan: {latency.get('llm_time', 0):.2f}s | Tool Exec: {latency.get('execution_time', 0):.2f}s")
+
     if step_results:
         last_key    = f"step_{len(queue) - 1}"
         last_output = step_results.get(last_key, {})
