@@ -38,6 +38,7 @@ def format_pipeline_response(
     response: dict,
     *,
     query: str | None = None,
+    analysis_context: dict | None = None,
     default_response_type: str = "analytical-answer",
     default_reason: str = "Normalized by formatting agent",
 ) -> dict:
@@ -49,37 +50,35 @@ def format_pipeline_response(
     # Check if a layout was already hardcoded upstream (e.g. error)
     hardcoded_layout = (response.get("layout") or "").upper().strip()
     
-    # [PONYTAIL] If the caller explicitly gave us a layout, they don't need the LLM 
+    # If the caller explicitly gave us a layout, they don't need the LLM 
     # to invent a header or explanation. Return exactly what was requested.
     if hardcoded_layout:
         return {
             "response_type": response.get("response_type", default_response_type),
             "layout": hardcoded_layout,
             "format_reason": "Layout hardcoded by upstream pipeline",
-            "header": "",
-            "explanation": "",
             "formatted_answer": formatted_answer
         }
 
     llm = ChatGoogleGenerativeAI(
         model="gemini-2.5-flash",
         google_api_key=settings.GOOGLE_API_KEY,
-        temperature=1,
+        temperature=0.7,  
     )
     llm_with_tools = llm.bind_tools(FORMATTING_TOOLS)
 
-    # Inject only the context the formatter needs: query, final answer, and any upstream hint.
+    execution_trace = response.get("execution_trace", "No trace provided.")
+    step_results = response.get("step_results", {})
+
+    # Inject context the formatter needs: query, execution trace, and data
+    analysis_str = f"- Analysis Context:\n{json.dumps(analysis_context, indent=2)}\n" if analysis_context else ""
     human_content = (
-        "Context for layout selection:\n"
+        "Context for layout selection and explanation:\n"
         f"- Original user query: {query or 'None'}\n"
-        f"- Final answer text:\n{formatted_answer}\n"
+        f"{analysis_str}"
+        f"- Execution Trace:\n{execution_trace}\n"
+        f"- Step Results Data:\n{json.dumps(step_results, indent=2, default=str)}\n"
     )
-    if hardcoded_layout:
-        human_content += (
-            "\n- Upstream layout hint: "
-            f"{hardcoded_layout}\n"
-            "Use this hint only if it still fits the structure of the answer."
-        )
 
     messages = [
         SystemMessage(content=SYSTEM_PROMPT),
@@ -90,7 +89,6 @@ def format_pipeline_response(
     chosen_layout = "PLAIN_TEXT"
     chosen_response_type = default_response_type
     chosen_reason = default_reason
-    chosen_header = ""
     chosen_explanation = ""
 
     try:
@@ -113,16 +111,12 @@ def format_pipeline_response(
                 chosen_layout = result.get("layout", chosen_layout)
                 chosen_response_type = result.get("response_type", chosen_response_type)
                 chosen_reason = result.get("format_reason", chosen_reason)
-                chosen_header = result.get("header", "")
-                chosen_explanation = result.get("explanation", "")
-                
-                
-               
-                if result.get("rewritten_text"):
-                    formatted_answer = result["rewritten_text"]
+                chosen_explanation = result.get("explanation", chosen_explanation)
+
             else:
                 logger.warning(f"Formatting LLM called unknown tool: {tool_name}")
                 chosen_reason = args.get("format_reason", chosen_reason)
+                chosen_explanation = args.get("explanation", chosen_explanation)
         else:
             logger.warning("Formatting LLM returned without calling a tool. Using fallback.")
 
@@ -134,7 +128,6 @@ def format_pipeline_response(
         "response_type": chosen_response_type,
         "layout": chosen_layout,
         "format_reason": chosen_reason,
-        "header": chosen_header,
         "explanation": chosen_explanation,
         "formatted_answer": formatted_answer
     }

@@ -26,6 +26,7 @@ from app.api.advance.Understanding_Agent.agent import classify_query
 from app.api.advance.analysis.agent import analyze_query
 from app.api.advance.retrieval.retrieval import get_filtered_records
 from app.api.advance.execution.agent import run_execution
+from app.api.advance.Formatting_agent.agent import format_pipeline_response
 
 
 # =============================================================================
@@ -257,14 +258,47 @@ def run_query(query: str, sample_rows: int = 3):
         final_answer = json.dumps(final_value, default=str)
 
     print(f"\n{LINE}\n")
-    return {
-        "response_type":    "analytical-answer",
-        "layout":           "MARKDOWN",
-        "format_reason":    "Queue-driven tool execution result",
-        "formatted_answer": final_answer,
-        "step_results":     result.get("step_results", {}),
-        "status":           result.get("status", ""),
+    print(f"  Formatting Agent (Generating UI Layout from Trace)")
+    print(f"{LINE}\n")
+
+    # Only pass the execution trace (steps taken), NOT the raw data, to save tokens
+    trace_lines = [f"Step {q.get('step', i)}: {q.get('tool', 'unknown')}" for i, q in enumerate(queue)]
+    trace_summary = "\n".join(trace_lines)
+    if not trace_summary:
+        trace_summary = "No steps were taken."
+        
+    execution_trace_input = {
+        "execution_trace": trace_summary,
+        "step_results": step_results
     }
+
+    try:
+        formatted_result = format_pipeline_response(
+            execution_trace_input,
+            query=summary,
+            analysis_context={
+                "reasoning": analysis.get("reasoning", ""),
+                "modules": modules,
+                "filter_fields": filter_fields
+            }
+        )
+        
+        # Keep the formatted_answer as the raw data, allowing the Formatting Agent's explanation 
+        # to provide the rich context on the frontend instead of hardcoding it here.
+        formatted_result["formatted_answer"] = final_answer
+        formatted_result["step_results"] = result.get("step_results", {})
+        formatted_result["status"] = result.get("status", "")
+        return formatted_result
+    except Exception as e:
+        logger.error(f"Formatting Agent failed: {e}")
+        return {
+            "response_type":    "analytical-answer",
+            "layout":           "MARKDOWN",
+            "format_reason":    "Formatting failed, returning raw execution result",
+            "formatted_answer": final_answer,
+            "step_results":     result.get("step_results", {}),
+            "status":           result.get("status", ""),
+        }
 
 
 # =============================================================================

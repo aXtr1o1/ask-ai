@@ -730,6 +730,16 @@
       const response_type = responseObj.response_type || "general";
       const layout = responseObj.layout || "PLAIN_TEXT";
       const format_reason = responseObj.format_reason || "";
+      
+      const formatTypeName = (name) => {
+        return name
+          .split(/[-_\s]+/)
+          .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+          .join(" ");
+      };
+      
+      const headerText = responseObj.header || formatTypeName(response_type);
+      const explanationText = responseObj.explanation || "";
       const formatted_answer = responseObj.formatted_answer || "";
 
       // Determine Icon
@@ -747,24 +757,29 @@
         typeIconHtml = `<svg class="btn-svg" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>`;
       }
 
-      const formatTypeName = (name) => {
-        return name
-          .split(/[-_\s]+/)
-          .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
-          .join(" ");
-      };
-
-      // Table layout conversion detector
       let finalLayout = layout || "PLAIN_TEXT";
       let finalAnswer = formatted_answer || "";
 
-      const hasTableInQuery = (query || "").toLowerCase().includes("table");
-      if (!hasTableInQuery) {
-        // Automatically downgrade table layout if query doesn't specify table
-        if (finalLayout === "TABLE" || (finalAnswer.includes("|") && (finalAnswer.includes("\n|") || finalAnswer.includes("\r|")))) {
-          finalAnswer = convertTableToBullets(finalAnswer);
-          finalLayout = "BULLET_LIST";
+      // Smart JSON layout detection override
+      try {
+        const obj = JSON.parse(finalAnswer);
+        let data = obj;
+        if (!Array.isArray(data)) {
+          if (obj.records) data = obj.records;
+          else if (obj.sorted_data) data = obj.sorted_data;
+          else if (obj.unique_values) data = obj.unique_values;
+          else if (obj.groups) data = obj.groups;
         }
+
+        if (Array.isArray(data) && finalLayout !== "TABLE" && finalLayout !== "BULLET_LIST" && finalLayout !== "NUMBERED_LIST") {
+           if (data.length > 0 && typeof data[0] === "object" && data[0] !== null && !Array.isArray(data[0])) {
+               finalLayout = "TABLE";
+           } else {
+               finalLayout = "BULLET_LIST";
+           }
+        }
+      } catch(e) {
+        // Not JSON, keep LLM layout
       }
 
       // Generate layout specific renderer HTML
@@ -779,9 +794,6 @@
         case "NUMBERED_LIST":
           renderedContentHtml = renderListLayout(finalAnswer, true, isDark);
           break;
-        case "JSON":
-          renderedContentHtml = renderJsonLayout(finalAnswer, isDark);
-          break;
         case "GRAPH":
           renderedContentHtml = renderGraphLayout(finalAnswer, isDark);
           break;
@@ -789,6 +801,21 @@
         default:
           renderedContentHtml = renderMarkdownLayout(finalAnswer);
           break;
+      }
+
+      let explanationHtml = "";
+      if (explanationText) {
+        explanationHtml = `
+          <div style="
+            font-size: 13px;
+            color: ${isDark ? "rgba(255,255,255,0.7)" : "rgba(15,23,42,0.8)"};
+            margin-bottom: 8px;
+            font-family: var(--font-sans);
+            line-height: 1.5;
+          ">
+            ${escapeHtml(explanationText)}
+          </div>
+        `;
       }
 
       aiDiv.innerHTML = `
@@ -836,7 +863,7 @@
                   color: ${isDark ? "#f8fafc" : "#0f172a"};
                   letter-spacing: 0.2px;
                 ">
-                  ${formatTypeName(response_type)}
+                  ${escapeHtml(headerText)}
                 </h4>
                 <span style="
                   font-size: 11px;
@@ -865,6 +892,8 @@
               </button>
             </div>
           </div>
+          
+          ${explanationHtml}
 
           <!-- Structured Content Area -->
           <div style="overflow-x: auto; width: 100%; font-family: var(--font-sans);">
@@ -947,19 +976,43 @@
 
     // Custom layout renderers
     function renderTableLayout(text, isDark) {
-      const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
-      const tableLines = lines.filter(l => l.includes("|"));
-      if (tableLines.length < 2) return renderMarkdownLayout(text);
+      let headers = [];
+      let rows = [];
 
-      const parseRow = (rowStr) => {
-        let cells = rowStr.split("|").map(c => c.trim());
-        if (rowStr.startsWith("|")) cells.shift();
-        if (rowStr.endsWith("|")) cells.pop();
-        return cells;
-      };
+      try {
+        const obj = JSON.parse(text);
+        let data = obj;
+        
+        // Find the array inside the tool output
+        if (!Array.isArray(data)) {
+          if (obj.records) data = obj.records;
+          else if (obj.sorted_data) data = obj.sorted_data;
+          else if (obj.unique_values) data = obj.unique_values;
+          else if (obj.groups) data = obj.groups;
+        }
 
-      const headers = parseRow(tableLines[0]);
-      const rows = tableLines.slice(2).map(parseRow);
+        if (Array.isArray(data) && data.length > 0) {
+          headers = Object.keys(data[0]);
+          rows = data.map(item => headers.map(h => (item[h] !== undefined && item[h] !== null) ? String(item[h]) : ""));
+        } else {
+          return renderMarkdownLayout(text);
+        }
+      } catch (e) {
+        // Fallback to Markdown parsing
+        const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+        const tableLines = lines.filter(l => l.includes("|"));
+        if (tableLines.length < 2) return renderMarkdownLayout(text);
+
+        const parseRow = (rowStr) => {
+          let cells = rowStr.split("|").map(c => c.trim());
+          if (rowStr.startsWith("|")) cells.shift();
+          if (rowStr.endsWith("|")) cells.pop();
+          return cells;
+        };
+
+        headers = parseRow(tableLines[0]);
+        rows = tableLines.slice(2).map(parseRow);
+      }
 
       let tableRowsHtml = rows.map((row, rIdx) => {
         let cellsHtml = row.map((cell, cIdx) => {
@@ -1007,18 +1060,47 @@
     }
 
     function renderListLayout(text, isNumbered, isDark) {
-      const lines = text.split("\n").map(l => l.trim()).filter(l => l.length > 0);
-      const parsedItems = [];
-      
-      for (const line of lines) {
-        if (/^([\s]*(?:[-*•]|\d+[.)]))\s*/.test(line)) {
-          const clean = line.replace(/^([\s]*(?:[-*•]|\d+[.)]))\s*/, "");
-          parsedItems.push(clean);
+      let parsedItems = [];
+
+      try {
+        const obj = JSON.parse(text);
+        let data = obj;
+        if (!Array.isArray(data)) {
+          if (obj.records) data = obj.records;
+          else if (obj.sorted_data) data = obj.sorted_data;
+          else if (obj.unique_values) data = obj.unique_values;
+          else if (obj.groups) data = obj.groups;
+        }
+        
+        if (Array.isArray(data) && data.length > 0) {
+          // Flatten nested arrays so items like [["A", "B"]] render as distinct bullet points
+          const flatData = data.flat(Infinity);
+          parsedItems = flatData.map(item => {
+            if (typeof item === "object" && item !== null) {
+              // Convert raw JSON object to a clean human-readable string
+              return Object.entries(item)
+                .map(([key, value]) => `<span style="opacity:0.8">${key}:</span> <b>${value}</b>`)
+                .join(" &nbsp;|&nbsp; ");
+            }
+            return String(item);
+          });
         } else {
-          if (parsedItems.length > 0) {
-            parsedItems[parsedItems.length - 1] += "\n" + line;
+          throw new Error("Not an array");
+        }
+      } catch (e) {
+        // Fallback to Markdown regex parsing
+        const lines = text.split("\n").map(l => l.trim()).filter(l => l.length > 0);
+        
+        for (const line of lines) {
+          if (/^([\s]*(?:[-*•]|\d+[.)]))\s*/.test(line)) {
+            const clean = line.replace(/^([\s]*(?:[-*•]|\d+[.)]))\s*/, "");
+            parsedItems.push(clean);
           } else {
-            parsedItems.push(line);
+            if (parsedItems.length > 0) {
+              parsedItems[parsedItems.length - 1] += "\n" + line;
+            } else {
+              parsedItems.push(line);
+            }
           }
         }
       }
@@ -1113,21 +1195,6 @@
               <svg class="btn-svg" style="width:14px; height:14px;" viewBox="0 0 24 24"><path d="M12 21a9 9 0 0 1 0-18M12 3v18"/></svg>
               JSON Output
             </span>
-            <button onclick="handleCopy(\`${formattedJson.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`, this)" style="
-              background: none;
-              border: none;
-              color: rgba(255,255,255,0.5);
-              cursor: pointer;
-              font-size: 11px;
-              display: flex;
-              align-items: center;
-              gap: 4px;
-              padding: 2px 6px;
-              border-radius: 4px;
-            ">
-              <svg class="btn-svg" style="width:12px; height:12px;" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-              Copy
-            </button>
           </div>
           <pre style="margin: 0; overflow-x: auto; white-space: pre-wrap;"><code>${escapeHtml(formattedJson)}</code></pre>
         </div>
@@ -1244,6 +1311,23 @@
     }
 
     function renderMarkdownLayout(text) {
+      // If the text is raw JSON, render it nicely instead of raw text
+      try {
+        const obj = JSON.parse(text);
+        if (typeof obj === "object" && obj !== null) {
+          if (!Array.isArray(obj) && Object.keys(obj).length === 1) {
+            // E.g. {"count": 1} -> "count: 1"
+            const key = Object.keys(obj)[0];
+            return `<div style="font-weight: 600; color: #ffd700; font-size: 16px;">${key}: ${obj[key]}</div>`;
+          }
+          return renderJsonLayout(text, document.documentElement.classList.contains("dark"));
+        } else if (typeof obj === "number" || typeof obj === "string") {
+            return `<div style="font-weight: 600; color: #ffd700; font-size: 16px;">${obj}</div>`;
+        }
+      } catch (e) {
+        // Not JSON, continue with Markdown
+      }
+
       return `
         <div style="width: 100%; word-break: break-word; line-height: 1.6;">
           ${parseMarkdownBlocks(text)}
@@ -1427,4 +1511,4 @@
     renderWelcome();
   </script>
 </body>
-</html>  
+</html>
