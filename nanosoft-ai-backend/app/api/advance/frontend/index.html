@@ -640,8 +640,8 @@
       aiDiv.className = "message-ai";
       wrapper.appendChild(aiDiv);
       
-      // Stream just the answer instead of raw JSON
-      const answerStr = responseObj.formatted_answer || "No response provided.";
+      // Stream just the explanation, ensure raw data (formatted_answer) is never streamed
+      const answerStr = responseObj.explanation || "Processing data layout...";
       let index = 0;
       const speed = 6; // chars per tick
       
@@ -872,24 +872,6 @@
                   Advance Ask-AI Engine
                 </span>
               </div>
-            </div>
-
-            <div style="display: flex; align-items: center; gap: 8px;">
-
-
-              <button onclick="handleCopy(\`${finalAnswer.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`, this)" title="Copy answer content" style="
-                background: none;
-                border: none;
-                padding: 4px;
-                cursor: pointer;
-                color: ${isDark ? "rgba(255,255,255,0.55)" : "rgba(15, 23, 42, 0.55)"};
-                border-radius: 4px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-              ">
-                <svg class="btn-svg" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-              </button>
             </div>
           </div>
           
@@ -1462,7 +1444,6 @@
         if (!span || ++loadStep >= loadStates.length - 1) clearInterval(loadInterval);
         if (span) span.textContent = loadStates[Math.min(loadStep, loadStates.length - 1)];
       }, 2000);
-
       const simulateStream = true;
 
       try {
