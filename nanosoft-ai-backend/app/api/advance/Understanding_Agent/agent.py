@@ -18,6 +18,7 @@ Only db_query results (with modules) are forwarded to the Analysis Agent.
 general and web_search are returned directly to the caller.
 """
 import logging
+import time
 
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -48,6 +49,8 @@ def classify_query(query: str) -> dict:
       web_search_summary — web search result (web_search only)
       general_response   — direct answer (general only)
     """
+    start_total = time.perf_counter()
+
     llm = ChatGoogleGenerativeAI(
         model="gemini-2.5-flash",
         google_api_key=settings.GOOGLE_API_KEY,
@@ -62,7 +65,10 @@ def classify_query(query: str) -> dict:
         SystemMessage(content=_SYSTEM_PROMPT),
         HumanMessage(content=f'Query: "{query}"'),
     ]
+    start_llm   = time.perf_counter()
     result      = structured_llm.invoke(messages)
+    llm_time    = time.perf_counter() - start_llm
+
     response: UnderstandingOutput = result["parsed"]
     usage       = result["raw"].usage_metadata or {}
 
@@ -72,12 +78,18 @@ def classify_query(query: str) -> dict:
         usage.get("output_tokens", 0),
         usage.get("total_tokens",  0),
     )
+    logger.info(
+        "[Understanding Agent] latency — llm: %.2fs",
+        llm_time,
+    )
 
     # -------------------------------------------------------------------------
     # Web search grounding — only when intent is web_search
     # -------------------------------------------------------------------------
     web_search_summary = None
+    web_search_time    = 0.0
     if response.intent == "web_search":
+        start_ws = time.perf_counter()
         try:
             client = genai.Client(api_key=settings.GOOGLE_API_KEY)
             search_response = client.models.generate_content(
@@ -99,6 +111,18 @@ def classify_query(query: str) -> dict:
         except Exception as e:
             logger.error("web_search_failed error=%s", e)
             web_search_summary = f"Web search failed: {e}"
+        finally:
+            web_search_time = time.perf_counter() - start_ws
+        logger.info(
+            "[Understanding Agent] latency — web_search: %.2fs",
+            web_search_time,
+        )
+
+    total_time = time.perf_counter() - start_total
+    logger.info(
+        "[Understanding Agent] latency — total: %.2fs",
+        total_time,
+    )
 
     return {
         "intent":              response.intent,
@@ -106,4 +130,9 @@ def classify_query(query: str) -> dict:
         "modules":             response.modules,          # <-- new
         "web_search_summary":  web_search_summary,
         "general_response":    response.general_response,
+        "latency": {
+            "llm_time":         round(llm_time,         2),
+            "web_search_time":  round(web_search_time,  2),
+            "total_time":       round(total_time,        2),
+        },
     }

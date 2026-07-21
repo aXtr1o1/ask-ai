@@ -62,6 +62,8 @@ nanosoft-ai-backend/app/api/advance/analysis/metadata/__pycache__/*
 nanosoft-ai-backend/app/api/advance/execution/__pycache__/*
 nanosoft-ai-backend/app/api/advance/retrieval/__pycache__/*
 nanosoft-ai-backend/app/api/advance/Understanding_Agent/__pycache__/*
+nanosoft-ai-backend/app/api/advance/Formatting_agent/__pycache__/*
+
 
 nanosoft-ai-backend/app/config/__pycache__/*
 nanosoft-ai-backend/app/models/__pycache__/*

@@ -18,6 +18,7 @@ Flow:
     → Return { modules, filter_fields, filter_values }
 """
 import logging
+import time
 
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -54,6 +55,8 @@ def analyze_query(query_summary: str, modules: list[str]) -> dict:
     # Log what metadata is being loaded (field count per module)
     # This lets you verify the lean-prompt effect before the LLM call
     # -------------------------------------------------------------------------
+    start_total = time.perf_counter()
+
     loaded_meta = get_metadata(modules)
     meta_summary = ", ".join(
         f"{mod}({len(fields)} fields)" for mod, fields in loaded_meta.items()
@@ -82,7 +85,10 @@ def analyze_query(query_summary: str, modules: list[str]) -> dict:
         SystemMessage(content=system_prompt),
         HumanMessage(content=query_summary),
     ]
+    start_llm   = time.perf_counter()
     result      = structured_llm.invoke(messages)
+    llm_time    = time.perf_counter() - start_llm
+
     response: AnalysisOutput = result["parsed"]
     usage       = result["raw"].usage_metadata or {}
 
@@ -91,6 +97,10 @@ def analyze_query(query_summary: str, modules: list[str]) -> dict:
         usage.get("input_tokens",  0),
         usage.get("output_tokens", 0),
         usage.get("total_tokens",  0),
+    )
+    logger.info(
+        "[Analysis Agent] latency — llm: %.2fs",
+        llm_time,
     )
 
     # -------------------------------------------------------------------------
@@ -115,9 +125,19 @@ def analyze_query(query_summary: str, modules: list[str]) -> dict:
             if field in MODULE_SCHEMAS.get(mod, {})
         }
 
+    total_time = time.perf_counter() - start_total
+    logger.info(
+        "[Analysis Agent] latency — total: %.2fs",
+        total_time,
+    )
+
     return {
         "reasoning":     response.reasoning,
         "modules":       valid_modules,
         "filter_fields": valid_filter_fields,
         "filter_values": valid_filter_values,
+        "latency": {
+            "llm_time":   round(llm_time,   2),
+            "total_time": round(total_time, 2),
+        },
     }
