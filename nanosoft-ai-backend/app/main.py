@@ -8,6 +8,7 @@ import logging
 from app.api.routes.app_endpoints import app_endpoints_router
 from app.services.chat_websocket_handler import chat_websocket_router
 from app.voiceAgent_endpoint import voice_agent_router
+from app.api.routes.asset_analytics_endpoint import asset_analytics_router
 
 logger = logging.getLogger("chatbot_app")
 logger.setLevel(logging.INFO)
@@ -34,3 +35,4 @@ chatbot_app.add_middleware(
 chatbot_app.include_router(chat_websocket_router, prefix="/api", tags=["websocket"])
 chatbot_app.include_router(app_endpoints_router, prefix="/api", tags=["api"])
 chatbot_app.include_router(voice_agent_router, prefix="/api", tags=["voice_agent"])
+chatbot_app.include_router(asset_analytics_router, prefix="/api", tags=["asset_analytics"])
