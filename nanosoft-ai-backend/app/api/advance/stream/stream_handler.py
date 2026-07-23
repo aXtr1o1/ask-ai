@@ -43,7 +43,7 @@ def get_agent_thought(agent_name: str, raw_data: dict) -> dict:
 
     return payload
 
-async def run_query_stream(query: str) -> AsyncGenerator[str, None]:
+async def run_query_stream(query: str, session_id: str = "default") -> AsyncGenerator[str, None]:
     loop = asyncio.get_running_loop()
     q = asyncio.Queue()
 
@@ -88,7 +88,7 @@ async def run_query_stream(query: str) -> AsyncGenerator[str, None]:
     def _worker():
         try:
             # --- STEP 1: UNDERSTANDING ---
-            understanding = classify_query(query)
+            understanding = classify_query(query, session_id=session_id)
             thought = get_agent_thought("Understanding", understanding)
             send_thinking_chunked("Understanding Agent", thought)
             
@@ -165,12 +165,9 @@ async def run_query_stream(query: str) -> AsyncGenerator[str, None]:
             try:
                 formatted_result = format_pipeline_response(
                     execution_trace_input,
-                    query=summary,
-                    analysis_context={
-                        "reasoning": analysis.get("reasoning", ""),
-                        "modules": modules,
-                        "filter_fields": filter_fields
-                    }
+                    session_id=session_id,
+                    user_query=query,
+                    query_summary=summary
                 )
                 
                 # ✅ FIX 2: Extract the actual final_value instead of dumping raw JSON

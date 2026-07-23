@@ -448,13 +448,14 @@ if __name__ == "__main__":
 
         class QueryRequest(BaseModel):
             query: str
+            session_id: str = "test-session"
 
         @app.post("/api/query")
         def api_query(request: QueryRequest):
             try:
                 res = run_query(
                     request.query,
-                    "test-session",   # for testing
+                    request.session_id,
  )
                 return res if res else {
                     "response_type": "error",
@@ -473,7 +474,7 @@ if __name__ == "__main__":
 
         @app.post("/api/query_stream")
         def api_query_stream(request: QueryRequest):
-            return StreamingResponse(run_query_stream(request.query), media_type="application/x-ndjson")
+            return StreamingResponse(run_query_stream(request.query, request.session_id), media_type="application/x-ndjson")
 
         uvicorn.run(app, host="0.0.0.0", port=8000)
 
