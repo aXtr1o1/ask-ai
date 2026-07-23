@@ -187,21 +187,4 @@ def log_completion(
         )
     
     logger.info("")
-
-def log_formatting_context(context: dict):
-    """Log a compact summary of what is being handed off to the Formatting Agent."""
-    planned_steps = context.get("planned_steps", [])
-    final_answer  = context.get("final_answer")
-
-    # Compact list of tools used (excluding final_answer_tool)
-    tools_used = [
-        f"[{s['step']}] {s['tool']}"
-        for s in planned_steps
-        if s["tool"] != "final_answer_tool"
-    ]
-
-    logger.info(DASH)
-    logger.info("→ FORMATTING AGENT INPUT")
-    logger.info("  Steps  : %s", "  |  ".join(tools_used) if tools_used else "(none)")
-    logger.info("  Answer : %s", final_answer)
-    logger.info(DASH)
+

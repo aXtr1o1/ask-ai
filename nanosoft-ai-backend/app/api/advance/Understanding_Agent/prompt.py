@@ -77,6 +77,16 @@ Write query_summary as a rich, self-contained description of what the user wants
     technician names, equipment types) exactly as stated.
   • The Analysis Agent will receive ONLY this summary — make it complete enough
     to act on without seeing the original query.
+
+════════════════════════════════════════════════
+PART 4 — RESPONSE FORMAT  (db_query only)
+════════════════════════════════════════════════
+
+Choose the format that best serves how a facility manager would naturally consume this answer.
+Honor the user's presentation intent if expressed; otherwise let the shape of the data decide.
+Available: TABLE, GRAPH, NUMBERED_LIST, BULLET_LIST, PLAIN_TEXT.
+
+Set response_format ONLY when intent is db_query. Leave it null otherwise.
 """
 
 

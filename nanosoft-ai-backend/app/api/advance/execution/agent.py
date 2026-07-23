@@ -33,7 +33,7 @@ from app.config import settings
 from app.api.advance.execution.prompts      import PLANNER_SYSTEM_PROMPT
 from app.api.advance.execution.queue_runner import run_queue
 from app.api.advance.execution.agent_logger import (
-    log_question, log_queue, log_completion, log_formatting_context
+    log_question, log_queue, log_completion
 )
 from app.api.advance.execution.context_builder import build_formatting_context
 
@@ -183,6 +183,7 @@ def run_execution(
     filter_fields:    dict,
     modules:          list[str],
     filtered_records: dict,
+    response_format:  str = "PLAIN_TEXT",
 ) -> dict:
     """
     Main entry point for the execution layer.
@@ -224,11 +225,11 @@ def run_execution(
     log_question(question, modules)
 
     llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
-        google_api_key=settings.GOOGLE_API_KEY,
-        temperature=0,
-        thinking_budget=512,
-    )
+            model="gemini-2.5-flash",
+            google_api_key=settings.GOOGLE_API_KEY,
+            temperature=0.3,
+            thinking_budget=256,
+        )
 
     schema_text = (
         json.dumps(filter_fields, indent=2)
@@ -243,6 +244,7 @@ def run_execution(
             f"Question: {question}\n\n"
             f"Available modules: {modules}\n\n"
             f"Column definitions per module:\n{schema_text}\n\n"
+            f"Intended presentation format: {response_format}\n\n"
             f"Produce the execution queue as a JSON array."
         )),
     ])
@@ -299,11 +301,8 @@ def run_execution(
         latency      = result["latency"],
     )
 
-    # ── Build and log the context for the Formatting Agent ──────────────────
-    formatting_context = build_formatting_context(result)
-    log_formatting_context(formatting_context)
-
-    # We also attach it to the result so the caller (pipeline) has it
+    # Build context for the Formatting Agent and attach to result
+    formatting_context = build_formatting_context(result, response_format=response_format)
     result["formatting_context"] = formatting_context
 
     return result

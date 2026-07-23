@@ -72,11 +72,11 @@ def analyze_query(query_summary: str, modules: list[str]) -> dict:
     # LLM call
     # -------------------------------------------------------------------------
     llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
-        google_api_key=settings.GOOGLE_API_KEY,
-        temperature=1,
-        thinking_budget=512,
-    )
+            model="gemini-2.5-flash",
+            google_api_key=settings.GOOGLE_API_KEY,
+            temperature=0.3,
+            thinking_budget=256,
+        )
     # include_raw=True gives us the raw AIMessage (with usage_metadata)
     # alongside the parsed Pydantic output
     structured_llm = llm.with_structured_output(AnalysisOutput, include_raw=True)

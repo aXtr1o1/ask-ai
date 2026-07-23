@@ -194,10 +194,12 @@ def run_query(query: str, sample_rows: int = 3):
     # ------------------------------------------------------------------
     understanding = classify_query(query)
     latency_understanding = understanding.get("latency", {})
-    intent  = understanding.get("intent")
-    summary = understanding.get("query_summary", query)
+    intent          = understanding.get("intent")
+    summary         = understanding.get("query_summary")
+    response_format = understanding.get("response_format")
 
     print(f"  INTENT      : {intent}")
+    print(f"  FORMAT      : {response_format}")
     print(f"  SUMMARY     : {summary}\n")
     print(f"  [UNDERSTANDING] LLM: {latency_understanding.get('llm_time', 0):.2f}s | Total: {latency_understanding.get('total_time', 0):.2f}s")
 
@@ -339,20 +341,20 @@ def run_query(query: str, sample_rows: int = 3):
         filter_fields    = filter_fields,
         modules          = modules,
         filtered_records = filtered_records,
+        response_format  = response_format,
     )
     latency_execution = result.get("latency", {})
 
-    print_result(result)
+    # Print planned queue only — no verbose execution trace
+    queue = result.get("queue", [])
+    print(f"\n  [PLANNED QUEUE]  ({len(queue)} steps)")
+    print(f"  {DASH}")
+    for step in queue:
+        args_str = " | ".join(f"{k}={v}" for k, v in step.get("args", {}).items())
+        print(f"    [{step['step']}] {step['tool']}  {args_str}")
 
-    grand_total = time.perf_counter() - run_start
-    _print_latency_summary(
-        latency_understanding, latency_analysis, latency_execution,
-        grand_total=grand_total,
-    )
-
-    # Extract final answer from the last step's tool output
+    # Final answer summary
     step_results = result.get("step_results", {})
-    queue        = result.get("queue", [])
     final_answer = ""
     if step_results and queue:
         last_key    = f"step_{len(queue) - 1}"
@@ -360,49 +362,43 @@ def run_query(query: str, sample_rows: int = 3):
         final_value = last_output.get("final_value", last_output)
         final_answer = json.dumps(final_value, default=str)
 
-    print(f"\n{LINE}\n")
-    print(f"  Formatting Agent (Generating UI Layout from Trace)")
+    status = result.get("status", "?")
+    print(f"\n  [STATUS] {status}  |  {result.get('tools_called', 0)}/{result.get('queue_total', 0)} steps")
+    print(f"  [FINAL ANSWER] {final_answer[:200]}")
+
+    grand_total = time.perf_counter() - run_start
+    _print_latency_summary(
+        latency_understanding, latency_analysis, latency_execution,
+        grand_total=grand_total,
+    )
+
+    print(f"\n{LINE}")
+    print(f"  Formatting Agent")
     print(f"{LINE}\n")
 
-    # Only pass the execution trace (steps taken), NOT the raw data, to save tokens
-    trace_lines = [f"Step {q.get('step', i)}: {q.get('tool', 'unknown')}" for i, q in enumerate(queue)]
-    trace_summary = "\n".join(trace_lines)
-    if not trace_summary:
-        trace_summary = "No steps were taken."
-        
-    execution_trace_input = {
-        "execution_trace": trace_summary,
-        "step_results": step_results
-    }
+    # Pass result directly — it already contains formatting_context built by the execution layer.
+    # Attach the raw final_answer so the frontend can render TABLE/GRAPH data directly.
+    result["formatted_answer"] = final_answer
 
     try:
         formatted_result = format_pipeline_response(
-            execution_trace_input,
-            query=summary,
-            analysis_context={
-                "reasoning": analysis.get("reasoning", ""),
-                "modules": modules,
-                "filter_fields": filter_fields
-            }
+            result,
+            query_summary=summary,
         )
-
-        # Keep the formatted_answer as the raw data, allowing the Formatting Agent's explanation
-        # to provide the rich context on the frontend instead of hardcoding it here.
-        formatted_result["formatted_answer"] = final_answer
-        formatted_result["step_results"]     = result.get("step_results", {})
-        formatted_result["status"]           = result.get("status", "")
-        formatted_result["latency"]          = _build_latency_dict(
+        formatted_result["step_results"] = step_results
+        formatted_result["status"]       = result.get("status", "")
+        formatted_result["latency"]      = _build_latency_dict(
             latency_understanding, latency_analysis, latency_execution, grand_total
         )
         return formatted_result
     except Exception as e:
-        logger.error(f"Formatting Agent failed: {e}")
+        logger.error("Formatting Agent failed: %s", e)
         return {
             "response_type":    "analytical-answer",
-            "layout":           "MARKDOWN",
+            "layout":           "PLAIN_TEXT",
             "format_reason":    "Formatting failed, returning raw execution result",
             "formatted_answer": final_answer,
-            "step_results":     result.get("step_results", {}),
+            "step_results":     step_results,
             "status":           result.get("status", ""),
             "latency":          _build_latency_dict(
                 latency_understanding, latency_analysis, latency_execution, grand_total

@@ -52,11 +52,11 @@ def classify_query(query: str) -> dict:
     start_total = time.perf_counter()
 
     llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
-        google_api_key=settings.GOOGLE_API_KEY,
-        temperature=1,
-        thinking_budget=512,
-    )
+            model="gemini-2.5-flash",
+            google_api_key=settings.GOOGLE_API_KEY,
+            temperature=0.3,
+            thinking_budget=256,
+        )
     # include_raw=True gives us the raw AIMessage (with usage_metadata)
     # alongside the parsed Pydantic output
     structured_llm = llm.with_structured_output(UnderstandingOutput, include_raw=True)
@@ -127,7 +127,8 @@ def classify_query(query: str) -> dict:
     return {
         "intent":              response.intent,
         "query_summary":       response.query_summary,
-        "modules":             response.modules,          # <-- new
+        "modules":             response.modules,
+        "response_format":     response.response_format,
         "web_search_summary":  web_search_summary,
         "general_response":    response.general_response,
         "latency": {

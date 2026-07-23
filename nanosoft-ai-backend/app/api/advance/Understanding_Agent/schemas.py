@@ -48,6 +48,17 @@ class UnderstandingOutput(BaseModel):
         )
     )
 
+    response_format: Literal["TABLE", "BULLET_LIST", "NUMBERED_LIST", "GRAPH", "PLAIN_TEXT"] | None = Field(
+        default=None,
+        description=(
+            "The most natural presentation format for the answer to this query. "
+            "Only populate for 'db_query' intent. "
+            "Think about the shape of the data the answer will carry — not the words "
+            "in the query, but what a facility manager would most naturally want to see. "
+            "Leave null for 'general' and 'web_search' intents."
+        )
+    )
+
     general_response: str | None = Field(
         default=None,
         description=(
