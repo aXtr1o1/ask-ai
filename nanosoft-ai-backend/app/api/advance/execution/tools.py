@@ -6,19 +6,21 @@ The tools only need to perform the requested operation on the data they receive.
 No additional filtering inside tools — operations only.
 
 Tools:
-  1. count_records          → count all records in a module
-  2. sum_values             → sum a numeric field
-  3. get_average            → mean of a numeric field
-  4. get_minimum            → minimum value of a numeric field
-  5. get_maximum            → maximum value of a numeric field
-  6. calculate_time_between → elapsed minutes between two datetime fields
-  7. group_by_and_count     → group by a field and count per group
-  8. get_unique_values      → list all distinct values in a field
-  9. join_records           → match records from two modules on a shared key field
- 10. do_math                → arithmetic: ADD | SUB | MUL | DIV | MOD | POWER | SQRT | ABS
- 11. sort_and_limit         → sort a list from a prior step and optionally keep top/bottom N
- 12. group_by_and_aggregate → SUM | AVG | MIN | MAX of a numeric field per group
- 13. count_records_multi    → count records matching TWO conditions simultaneously (AND)
+   1. count_records          → count all records or records matching a condition
+   2. sum_values             → sum a numeric field
+   3. get_average            → mean of a numeric field
+   4. get_minimum            → minimum value of a numeric field
+   5. get_maximum            → maximum value of a numeric field
+   6. calculate_time_between → elapsed minutes between two datetime fields
+   7. group_by_and_count     → group by a field and count per group
+   8. get_unique_values      → list all distinct values in a field
+   9. join_records           → match records from two modules on a shared key field
+  10. do_math                → arithmetic: ADD | SUB | MUL | DIV | MOD | POWER | SQRT | ABS
+  11. sort_and_limit         → sort a list from a prior step and optionally keep top/bottom N
+  12. group_by_and_aggregate → SUM | AVG | MIN | MAX of a numeric field per group
+  13. count_records_multi    → count records matching multiple conditions simultaneously (AND)
+  14. get_record_fields      → return actual record data — specific fields or all fields
+  15. final_answer_tool      → marks queue complete, MUST be the last step
 """
 import math
 from typing import Annotated
@@ -64,6 +66,29 @@ def get_numeric_column(df: pd.DataFrame, field: str) -> pd.Series:
     return pd.to_numeric(df[field], errors="coerce").dropna()
 
 
+def resolve_column(df: pd.DataFrame, field: str) -> str | None:
+    """
+    Resolve a field name to an actual DataFrame column name using case-insensitive matching.
+
+    The LLM uses PascalCase names from module_fields (e.g. 'Complainer', 'AnalysisTechName'),
+    but the stored procedure may return columns with different casing or slight name variations.
+    This resolver finds the best match so tools don't fail on casing mismatches.
+
+    Returns the actual column name if found, or None if no match exists.
+
+    Called by: group_by_and_count, get_unique_values, count_records, and other field-dependent tools
+    """
+    if field in df.columns:
+        return field  # exact match — fast path
+
+    field_lower = field.lower()
+    for col in df.columns:
+        if col.lower() == field_lower:
+            return col  # case-insensitive match
+
+    return None  # no match found
+
+
 
 #for the question how the data is being sent to the tool ..state: 
 # Annotated[dict, InjectedState()], this is the input argument where the data is 
@@ -91,12 +116,14 @@ def count_records(
         condition_value: Value to match in condition_field; "" matches blank/null
     """
     df = load_records_as_dataframe(state, module)
-    if condition_field and condition_field in df.columns:
-        col = df[condition_field].fillna("").astype(str).str.strip()
-        if condition_value == "":
-            df = df[col == ""]
-        else:
-            df = df[col.str.lower() == condition_value.lower()]
+    if condition_field:
+        actual_field = resolve_column(df, condition_field)
+        if actual_field:
+            col = df[actual_field].fillna("").astype(str).str.strip()
+            if condition_value == "":
+                df = df[col == ""]
+            else:
+                df = df[col.str.lower() == condition_value.lower()]
     return {
         "module":          module,
         "count":           len(df),
@@ -121,7 +148,9 @@ def sum_values(
         module: Data module name
         field:  Numeric column to sum
     """
-    numbers = get_numeric_column(load_records_as_dataframe(state, module), field)
+    df = load_records_as_dataframe(state, module)
+    actual_field = resolve_column(df, field)
+    numbers = get_numeric_column(df, actual_field) if actual_field else pd.Series(dtype=float)
     return {
         "module":       module,
         "field":        field,
@@ -146,7 +175,9 @@ def get_average(
         module: Data module name
         field:  Numeric column to average
     """
-    numbers = get_numeric_column(load_records_as_dataframe(state, module), field)
+    df = load_records_as_dataframe(state, module)
+    actual_field = resolve_column(df, field)
+    numbers = get_numeric_column(df, actual_field) if actual_field else pd.Series(dtype=float)
     if numbers.empty:
         return {"module": module, "field": field, "average": None, "records_used": 0}
     return {
@@ -173,7 +204,9 @@ def get_minimum(
         module: Data module name
         field:  Numeric column to find the minimum of
     """
-    numbers = get_numeric_column(load_records_as_dataframe(state, module), field)
+    df = load_records_as_dataframe(state, module)
+    actual_field = resolve_column(df, field)
+    numbers = get_numeric_column(df, actual_field) if actual_field else pd.Series(dtype=float)
     return {
         "module":       module,
         "field":        field,
@@ -198,7 +231,9 @@ def get_maximum(
         module: Data module name
         field:  Numeric column to find the maximum of
     """
-    numbers = get_numeric_column(load_records_as_dataframe(state, module), field)
+    df = load_records_as_dataframe(state, module)
+    actual_field = resolve_column(df, field)
+    numbers = get_numeric_column(df, actual_field) if actual_field else pd.Series(dtype=float)
     return {
         "module":       module,
         "field":        field,
@@ -231,9 +266,16 @@ def calculate_time_between(
     if df.empty:
         return {"module": module, "total_records": 0, "stats": {}}
 
+    actual_start = resolve_column(df, start_field)
+    actual_end   = resolve_column(df, end_field)
+
+    if actual_start is None or actual_end is None:
+        missing = [f for f, a in [(start_field, actual_start), (end_field, actual_end)] if a is None]
+        return {"module": module, "error": f"Column(s) not found: {missing}. Available: {list(df.columns)}", "stats": {}}
+
     df = df.copy()
-    df["_start_dt"]     = pd.to_datetime(df.get(start_field), dayfirst=True, errors="coerce")
-    df["_end_dt"]       = pd.to_datetime(df.get(end_field),   dayfirst=True, errors="coerce")
+    df["_start_dt"]     = pd.to_datetime(df[actual_start], dayfirst=True, errors="coerce")
+    df["_end_dt"]       = pd.to_datetime(df[actual_end],   dayfirst=True, errors="coerce")
     df["_elapsed_mins"] = (df["_end_dt"] - df["_start_dt"]).dt.total_seconds() / 60
 
     valid_rows    = df.dropna(subset=["_elapsed_mins"])
@@ -286,28 +328,35 @@ def group_by_and_count(
     if df.empty:
         return {"module": module, "group_field": group_field, "total_records": 0, "groups": []}
 
-    # Apply optional pre-filter before grouping
-    if filter_field and filter_field in df.columns:
-        col = df[filter_field].fillna("").astype(str).str.strip()
-        if filter_value == "":
-            df = df[col == ""]
-        else:
-            df = df[col.str.lower() == filter_value.lower()]
+    # Apply optional pre-filter before grouping (case-insensitive field resolution)
+    if filter_field:
+        actual_filter = resolve_column(df, filter_field)
+        if actual_filter:
+            col = df[actual_filter].fillna("").astype(str).str.strip()
+            if filter_value == "":
+                df = df[col == ""]
+            else:
+                df = df[col.str.lower() == filter_value.lower()]
 
-    if group_field not in df.columns:
+    # Resolve group_field case-insensitively
+    actual_group = resolve_column(df, group_field)
+    if actual_group is None:
         return {
             "module":      module,
             "group_field": group_field,
-            "error":       f"Column '{group_field}' does not exist in '{module}' data.",
-            "groups":      [],
+            "error":       f"Column '{group_field}' does not exist in '{module}' data. Available columns: {list(df.columns)}",
+            "total":       None,
+            "groups":      None,
         }
 
     grouped = (
-        df.groupby(group_field, dropna=False)
+        df.groupby(actual_group, dropna=False)
           .size()
           .reset_index(name="count")
           .sort_values("count", ascending=False)
     )
+    # Rename back to the requested name so the LLM sees what it expected
+    grouped = grouped.rename(columns={actual_group: group_field})
 
     # Replace NaN with None so the output is always valid JSON
     groups_raw = grouped.to_dict(orient="records")
@@ -335,24 +384,38 @@ def get_unique_values(
     module: str,
     field: str,
     state: Annotated[dict, InjectedState()],
+    filter_field: str = "",
+    filter_value: str = "",
 ) -> dict:
     """
-    Return all distinct values in a field across all records in a module.
+    Return all distinct values in a field across records in a module.
+    Optionally filter rows where filter_field equals filter_value before extracting.
 
     Args:
-        module: Data module name
-        field:  Column to extract unique values from
+        module:       Data module name
+        field:        Column to extract unique values from
+        filter_field: Optional column to filter on before extracting unique values
+        filter_value: Value that filter_field must equal (case-insensitive)
     """
     df = load_records_as_dataframe(state, module)
-    if df.empty or field not in df.columns:
+    actual_field = resolve_column(df, field)
+    if df.empty or actual_field is None:
         return {"module": module, "field": field, "unique_values": [], "count": 0}
 
-    unique_set    = set(df[field].dropna().astype(str).tolist())
+    # Apply optional pre-filter
+    if filter_field and filter_value:
+        actual_filter = resolve_column(df, filter_field)
+        if actual_filter is not None:
+            df = df[df[actual_filter].astype(str).str.lower() == filter_value.lower()]
+
+    unique_set    = set(df[actual_field].dropna().astype(str).tolist())
     unique_sorted = sorted(unique_set)
 
     return {
         "module":        module,
         "field":         field,
+        "filter_field":  filter_field,
+        "filter_value":  filter_value,
         "unique_values": unique_sorted,
         "count":         len(unique_sorted),
     }
@@ -390,29 +453,36 @@ def join_records(
             "matched_count": 0,
         }
 
-    if join_field not in df_a.columns or join_field not in df_b.columns:
-        missing = [m for m, df in [(module_a, df_a), (module_b, df_b)] if join_field not in df.columns]
+    actual_a = resolve_column(df_a, join_field)
+    actual_b = resolve_column(df_b, join_field)
+
+    missing = [m for m, a in [(module_a, actual_a), (module_b, actual_b)] if a is None]
+    if missing:
         return {
-            "module_a":     module_a,
-            "module_b":     module_b,
-            "join_field":   join_field,
-            "error":        f"Column '{join_field}' not found in: {missing}",
+            "module_a":      module_a,
+            "module_b":      module_b,
+            "join_field":    join_field,
+            "error":         f"Column '{join_field}' not found in: {missing}",
             "matched_count": 0,
         }
 
-    keys_a = set(df_a[join_field].dropna().astype(str))
-    keys_b = set(df_b[join_field].dropna().astype(str))
+    keys_a = set(df_a[actual_a].dropna().astype(str))
+    keys_b = set(df_b[actual_b].dropna().astype(str))
 
-    matched_keys = keys_a & keys_b     # set intersection — present in both modules
-    only_in_a    = keys_a - keys_b     # only in module_a
-    only_in_b    = keys_b - keys_a     # only in module_b
+    matched_keys = keys_a & keys_b
+    only_in_a    = keys_a - keys_b
+    only_in_b    = keys_b - keys_a
 
     df_a_str = df_a.copy()
     df_b_str = df_b.copy()
-    df_a_str[join_field] = df_a_str[join_field].astype(str)
-    df_b_str[join_field] = df_b_str[join_field].astype(str)
+    df_a_str[actual_a] = df_a_str[actual_a].astype(str)
+    df_b_str[actual_b] = df_b_str[actual_b].astype(str)
 
-    joined = pd.merge(df_a_str, df_b_str, on=join_field, how="inner")
+    # Align column name for merge if they differ in casing
+    if actual_a != actual_b:
+        df_b_str = df_b_str.rename(columns={actual_b: actual_a})
+
+    joined = pd.merge(df_a_str, df_b_str, on=actual_a, how="inner")
 
     return {
         "module_a":       module_a,
@@ -547,10 +617,13 @@ def group_by_and_aggregate(
             "operation": operation.upper(), "total_records": 0, "unique_groups": 0, "groups": [],
         }
 
-    if group_field not in df.columns:
-        return {"error": f"Column '{group_field}' not found in '{module}'."}
-    if agg_field not in df.columns:
-        return {"error": f"Column '{agg_field}' not found in '{module}'."}
+    actual_group = resolve_column(df, group_field)
+    actual_agg   = resolve_column(df, agg_field)
+
+    if actual_group is None:
+        return {"error": f"Column '{group_field}' not found in '{module}'. Available: {list(df.columns)}"}
+    if actual_agg is None:
+        return {"error": f"Column '{agg_field}' not found in '{module}'. Available: {list(df.columns)}"}
 
     op = operation.upper()
     agg_fn_map = {"SUM": "sum", "AVG": "mean", "MIN": "min", "MAX": "max"}
@@ -558,14 +631,14 @@ def group_by_and_aggregate(
         return {"error": f"Unknown operation '{op}'. Valid: SUM | AVG | MIN | MAX"}
 
     df = df.copy()
-    df[agg_field] = pd.to_numeric(df[agg_field], errors="coerce")
+    df[actual_agg] = pd.to_numeric(df[actual_agg], errors="coerce")
 
     grouped = (
-        df.groupby(group_field, dropna=False)[agg_field]
+        df.groupby(actual_group, dropna=False)[actual_agg]
         .agg(agg_fn_map[op])
         .round(4)
         .reset_index()
-        .rename(columns={agg_field: "value"})
+        .rename(columns={actual_agg: "value", actual_group: group_field})
         .sort_values("value", ascending=False)
     )
 
@@ -580,7 +653,7 @@ def group_by_and_aggregate(
         "group_field":   group_field,
         "agg_field":     agg_field,
         "operation":     op,
-        "total_records": int(df[agg_field].notna().sum()),
+        "total_records": int(df[actual_agg].notna().sum()),
         "unique_groups": len(grouped),
         "groups":        groups_clean,
     }
@@ -597,9 +670,13 @@ def count_records_multi(
     condition_field_2: str,
     condition_value_2: str,
     state: Annotated[dict, InjectedState()],
+    condition_field_3: str = None,
+    condition_value_3: str = None,
+    condition_field_4: str = None,
+    condition_value_4: str = None,
 ) -> dict:
     """
-    Count records matching TWO conditions simultaneously (AND logic).
+    Count records matching multiple conditions simultaneously (AND logic).
     Pass condition_value_N="" to match rows where that field is blank or null.
 
     Args:
@@ -608,16 +685,24 @@ def count_records_multi(
         condition_value_1:  Value to match in condition_field_1; "" matches blank/null
         condition_field_2:  Second column to filter on
         condition_value_2:  Value to match in condition_field_2; "" matches blank/null
+        condition_field_3:  Third column to filter on (optional)
+        condition_value_3:  Value to match in condition_field_3
+        condition_field_4:  Fourth column to filter on (optional)
+        condition_value_4:  Value to match in condition_field_4
     """
     df = load_records_as_dataframe(state, module)
 
     for field, value in [
         (condition_field_1, condition_value_1),
         (condition_field_2, condition_value_2),
+        (condition_field_3, condition_value_3),
+        (condition_field_4, condition_value_4),
     ]:
-        if field and field in df.columns:
-            col = df[field].fillna("").astype(str).str.strip()
-            df  = df[col == ""] if value == "" else df[col.str.lower() == value.lower()]
+        if field and value is not None:
+            actual = resolve_column(df, field)
+            if actual:
+                col = df[actual].fillna("").astype(str).str.strip()
+                df  = df[col == ""] if value == "" else df[col.str.lower() == value.lower()]
 
     return {
         "module":             module,
@@ -626,11 +711,66 @@ def count_records_multi(
         "condition_value_1": condition_value_1,
         "condition_field_2": condition_field_2,
         "condition_value_2": condition_value_2,
+        "condition_field_3": condition_field_3,
+        "condition_value_3": condition_value_3,
+        "condition_field_4": condition_field_4,
+        "condition_value_4": condition_value_4,
     }
 
 
 # =============================================================================
-# TOOL 14: final_answer_tool
+# TOOL 14: get_record_fields
+# =============================================================================
+@tool
+def get_record_fields(
+    module: str,
+    state: Annotated[dict, InjectedState()],
+    fields: list = [],
+) -> dict:
+    """
+    Return the actual record data from a module.
+    Use when the question asks for the details, attributes, or field values
+    of specific records — not a count, sum, or aggregate.
+
+    Examples of when to use:
+      "Show me the details of complaint 1443"
+      "What is the complainer name for complaint 1443?"
+      "List all open PPM tasks with their assigned technician and building"
+      "What is the status of work order 5001?"
+
+    Args:
+        module: Data module name.
+        fields: Optional list of field names to include. If empty, returns all fields.
+                Use to return only the columns relevant to the question.
+    """
+    df = load_records_as_dataframe(state, module)
+    if df.empty:
+        return {"module": module, "total": 0, "records": [], "fields_returned": []}
+
+    # Resolve each requested field case-insensitively
+    if fields:
+        resolved = [resolve_column(df, f) for f in fields]
+        selected_cols = [c for c in resolved if c is not None]
+        if selected_cols:
+            df = df[selected_cols]
+
+    # Replace NaN with None for clean JSON output
+    records = [
+        {k: (None if (isinstance(v, float) and math.isnan(v)) else v)
+         for k, v in row.items()}
+        for row in df.to_dict(orient="records")
+    ]
+
+    return {
+        "module":          module,
+        "total":           len(records),
+        "fields_returned": list(df.columns),
+        "records":         records,
+    }
+
+
+# =============================================================================
+# TOOL 15: final_answer_tool
 # =============================================================================
 @tool
 def final_answer_tool(result_ref: str) -> dict:
@@ -666,5 +806,6 @@ ALL_TOOLS = [
     sort_and_limit,
     group_by_and_aggregate,
     count_records_multi,
+    get_record_fields,
     final_answer_tool,
 ]

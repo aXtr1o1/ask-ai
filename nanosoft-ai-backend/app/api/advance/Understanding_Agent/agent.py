@@ -18,9 +18,11 @@ Only db_query results (with modules) are forwarded to the Analysis Agent.
 general and web_search are returned directly to the caller.
 """
 import logging
+import time
 
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
+from app.api.advance.Understanding_Agent.conversation_memory import conversation_memory
 from google import genai
 from google.genai import types
 
@@ -37,7 +39,7 @@ _SYSTEM_PROMPT = build_system_prompt()
 # =============================================================================
 # MAIN FUNCTION
 # =============================================================================
-def classify_query(query: str) -> dict:
+def classify_query(query: str, session_id: str) -> dict:
     """
     Classify a user query and return a structured result.
 
@@ -48,22 +50,48 @@ def classify_query(query: str) -> dict:
       web_search_summary — web search result (web_search only)
       general_response   — direct answer (general only)
     """
+    start_total = time.perf_counter()
+
     llm = ChatGoogleGenerativeAI(
         model="gemini-2.5-flash",
         google_api_key=settings.GOOGLE_API_KEY,
-        temperature=1,
-        thinking_budget=512,
+        temperature=0.3,
+        thinking_budget=256,
         include_thoughts=True,
     )
+
     # include_raw=True gives us the raw AIMessage (with usage_metadata)
     # alongside the parsed Pydantic output
-    structured_llm = llm.with_structured_output(UnderstandingOutput, include_raw=True, method="json_mode")
+    structured_llm = llm.with_structured_output(
+        UnderstandingOutput,
+        include_raw=True, method="json_mode",
+    )
 
+    # Retrieve previous conversation
+    history = conversation_memory.get_history(session_id)
+
+    # Build messages
     messages = [
         SystemMessage(content=_SYSTEM_PROMPT),
-        HumanMessage(content=f'Query: "{query}"'),
     ]
-    result      = structured_llm.invoke(messages)
+
+    # Add previous conversation if available
+    if history:
+        messages.extend(history)
+
+    # Add current query
+    messages.append(
+        HumanMessage(content=f'Query: "{query}"')
+    )
+
+    start_llm = time.perf_counter()
+    logger.info("===== Messages sent to Understanding Agent =====")
+    for i, msg in enumerate(messages):
+        logger.info("%d: %s", i, msg)
+    logger.info("===============================================")
+    result = structured_llm.invoke(messages)
+    llm_time    = time.perf_counter() - start_llm
+
     response: UnderstandingOutput = result["parsed"]
     usage       = result["raw"].usage_metadata or {}
 
@@ -72,6 +100,10 @@ def classify_query(query: str) -> dict:
         usage.get("input_tokens",  0),
         usage.get("output_tokens", 0),
         usage.get("total_tokens",  0),
+    )
+    logger.info(
+        "[Understanding Agent] latency — llm: %.2fs",
+        llm_time,
     )
 
     # Extract thought
@@ -109,7 +141,9 @@ def classify_query(query: str) -> dict:
     # Web search grounding — only when intent is web_search
     # -------------------------------------------------------------------------
     web_search_summary = None
+    web_search_time    = 0.0
     if response.intent == "web_search":
+        start_ws = time.perf_counter()
         try:
             client = genai.Client(api_key=settings.GOOGLE_API_KEY)
             search_response = client.models.generate_content(
@@ -131,13 +165,31 @@ def classify_query(query: str) -> dict:
         except Exception as e:
             logger.error("web_search_failed error=%s", e)
             web_search_summary = f"Web search failed: {e}"
+        finally:
+            web_search_time = time.perf_counter() - start_ws
+        logger.info(
+            "[Understanding Agent] latency — web_search: %.2fs",
+            web_search_time,
+        )
+
+    total_time = time.perf_counter() - start_total
+    logger.info(
+        "[Understanding Agent] latency — total: %.2fs",
+        total_time,
+    )
 
     return {
         "intent":              response.intent,
         "query_summary":       response.query_summary,
         "modules":             response.modules,
+        "response_format":     response.response_format,
         "web_search_summary":  web_search_summary,
         "general_response":    response.general_response,
         "thought":             getattr(response, "thought", ""),
         "ui_messages":         getattr(response, "ui_messages", {}),
+        "latency": {
+            "llm_time":         round(llm_time,         2),
+            "web_search_time":  round(web_search_time,  2),
+            "total_time":       round(total_time,        2),
+        },
     }

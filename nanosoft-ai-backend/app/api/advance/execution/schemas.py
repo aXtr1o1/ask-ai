@@ -31,6 +31,7 @@ class StepDef(TypedDict):
 #   tools_called → total steps that were actually executed
 #   error_count  → number of steps that produced an error or dependency failure
 #   status       → "COMPLETE" | "PARTIAL" | "FAILED"
+#   latency      → dict with "llm_time", "execution_time", "total_time" in seconds
 # =============================================================================
 class ExecutionResult(TypedDict):
     queue:        list[StepDef]
@@ -39,4 +40,6 @@ class ExecutionResult(TypedDict):
     tools_called: int
     error_count:  int
     status:       str
+    latency:      dict[str, float]
+
 

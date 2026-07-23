@@ -17,7 +17,7 @@ def retrieve(
     if module_filter_values:
         filters.update(module_filter_values)
 
-    # Case-insensitive key lookup — treats "" same as None (not a valid filter)
+    # Case-insensitive key lookup ï¿½ treats "" same as None (not a valid filter)
     def get_filter_value(*keys):
         for k in keys:
             if k in filters and filters[k] is not None and filters[k] != "":
@@ -40,7 +40,7 @@ def retrieve(
     # Snapshot base keys before optional filters are added (used for retry relaxation)
     base_payload_keys = set(payload.keys())
 
-    # String fields — metadata col name -> SP param name (from mappings.py)
+    # String fields ï¿½ metadata col name -> SP param name (from mappings.py)
     for meta_col, sp_param in PPM_MAPPINGS.items():
         val = get_filter_value(meta_col)
         if val is not None:
@@ -70,7 +70,7 @@ def retrieve(
             for field in reversed(optional_fields):
                 current_payload = {k: v for k, v in current_payload.items() if k != field}
                 dropped.append(field)
-                logger.info("PPM retry — dropped fields: %s | retrying payload: %s", dropped, current_payload)
+                logger.info("PPM retry  dropped fields: %s | retrying payload: %s", dropped, current_payload)
                 try:
                     retry_req = PPMRequest(**current_payload)
                     retry_response = get_ppm(retry_req)

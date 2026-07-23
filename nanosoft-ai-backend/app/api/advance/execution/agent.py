@@ -24,6 +24,7 @@ Public API:
 import json
 import logging
 import re
+import time
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -32,9 +33,10 @@ from app.config import settings
 from app.api.advance.execution.prompts      import PLANNER_SYSTEM_PROMPT
 from app.api.advance.execution.queue_runner import run_queue
 from app.api.advance.execution.agent_logger import (
-    log_question, log_queue, log_completion, log_formatting_context
+    log_question, log_queue, log_completion
 )
 from app.api.advance.execution.context_builder import build_formatting_context
+from app.api.advance.analysis.metadata.enum_values import get_enum_block
 
 logger = logging.getLogger("advance.execution.agent")
 
@@ -78,7 +80,8 @@ _TOOL_OUTPUT_KEYS: dict[str, set[str]] = {
                                "module", "start_field", "end_field"},
     "group_by_and_count":     {"groups", "total_records", "unique_groups",
                                "module", "group_field", "filter_field", "filter_value"},
-    "get_unique_values":      {"unique_values", "count", "module", "field"},
+    "get_unique_values":      {"unique_values", "count", "module", "field",
+                               "filter_field", "filter_value"},
     "join_records":           {"matched_count", "unmatched_in_a", "unmatched_in_b",
                                "records_in_a", "records_in_b",
                                "module_a", "module_b", "join_field"},
@@ -89,7 +92,9 @@ _TOOL_OUTPUT_KEYS: dict[str, set[str]] = {
                                "module", "group_field", "agg_field", "operation"},
     "count_records_multi":    {"count", "module",
                                "condition_field_1", "condition_value_1",
-                               "condition_field_2", "condition_value_2"},
+                               "condition_field_2", "condition_value_2",
+                               "condition_field_3", "condition_value_3",
+                               "condition_field_4", "condition_value_4"},
     "final_answer_tool":      {"status", "final_value"},
 }
 
@@ -122,6 +127,32 @@ def _validate_queue(queue: list) -> None:
         current_tool = step["tool"]
         args         = step.get("args", {})
 
+        # Check required arguments are present for known tools
+        _REQUIRED_ARGS: dict[str, list[str]] = {
+            "get_unique_values":      ["module", "field"],
+            "count_records":          ["module"],
+            "count_records_multi":    ["module", "condition_field_1", "condition_value_1",
+                                       "condition_field_2", "condition_value_2"],
+            "sum_values":             ["module", "field"],
+            "get_average":            ["module", "field"],
+            "get_minimum":            ["module", "field"],
+            "get_maximum":            ["module", "field"],
+            "calculate_time_between": ["module", "start_field", "end_field"],
+            "group_by_and_count":     ["module", "group_field"],
+            "group_by_and_aggregate": ["module", "group_field", "agg_field", "operation"],
+            "get_record_fields":      ["module"],
+            "sort_and_limit":         ["data"],
+            "join_records":           ["module_a", "module_b", "join_field"],
+            "do_math":                ["operation", "a"],
+        }
+        required = _REQUIRED_ARGS.get(current_tool, [])
+        for req in required:
+            if req not in args:
+                raise ValueError(
+                    f"Queue step {i} ({current_tool}): missing required argument '{req}'. "
+                    f"Args provided: {list(args.keys())}"
+                )
+
         # Validate all arg values that are $step_N.key references
         for arg_name, arg_val in args.items():
             refs = arg_val if isinstance(arg_val, list) else [arg_val]
@@ -152,13 +183,14 @@ def _validate_queue(queue: list) -> None:
 
                 # (b) The key must exist in the referenced tool's OUTPUT KEYS
                 if len(parts) == 2:
-                    ref_key      = parts[1]          # "count"
+                    ref_key      = parts[1]              # "stats.average" or "count"
+                    root_key     = ref_key.split(".")[0]  # "stats" or "count"
                     ref_tool     = step_tool_map[ref_idx]
                     allowed_keys = _TOOL_OUTPUT_KEYS.get(ref_tool, set())
-                    if allowed_keys and ref_key not in allowed_keys:
+                    if allowed_keys and root_key not in allowed_keys:
                         raise ValueError(
                             f"Queue step {i} ({current_tool}) arg '{arg_name}': "
-                            f"'{ref}' uses key '{ref_key}' but tool '{ref_tool}' "
+                            f"'{ref}' uses key '{root_key}' but tool '{ref_tool}' "
                             f"only outputs: {sorted(allowed_keys)}"
                         )
 
@@ -181,6 +213,8 @@ def run_execution(
     modules:          list[str],
     filtered_records: dict,
     progress_callback: callable = None,
+    response_format:  str  = "PLAIN_TEXT",
+    user_specified:   bool = False,
 ) -> dict:
     """
     Main entry point for the execution layer.
@@ -209,12 +243,15 @@ def run_execution(
           "tools_called": int,
           "error_count":  int,
           "status":       "COMPLETE" | "PARTIAL" | "FAILED",
+          "latency":      {"llm_time": float, "execution_time": float, "total_time": float}
         }
 
         COMPLETE — all steps ran with zero errors
         PARTIAL  — all steps ran but ≥1 intermediate step errored; answer may still be useful
         FAILED   — final_answer_tool itself errored; no usable answer
     """
+    start_total = time.perf_counter()
+    
     # ── Phase 1: Plan the queue (LLM called once) ──────────────────────────
     log_question(question, modules)
 
@@ -232,15 +269,21 @@ def run_execution(
         else "No column definitions provided."
     )
 
+    enum_text = get_enum_block(modules)
+
+    start_llm = time.perf_counter()
     response = llm.invoke([
         SystemMessage(content=PLANNER_SYSTEM_PROMPT),
         HumanMessage(content=(
             f"Question: {question}\n\n"
             f"Available modules: {modules}\n\n"
             f"Column definitions per module:\n{schema_text}\n\n"
+            f"Allowed enum values (use these EXACTLY as filter_value — no paraphrasing):\n{enum_text}\n\n"
+            f"Intended presentation format: {response_format}\n\n"
             f"Produce the execution queue as a JSON array."
         )),
     ])
+    llm_time = time.perf_counter() - start_llm
 
     if hasattr(response, "usage_metadata") and response.usage_metadata:
         usage = response.usage_metadata
@@ -305,7 +348,17 @@ def run_execution(
     log_queue(queue)
 
     # ── Phase 2: Execute the queue (no LLM) ────────────────────────────────
+    start_exec = time.perf_counter()
     result = run_queue(queue, filtered_records, progress_callback)
+    execution_time = time.perf_counter() - start_exec
+    
+    total_time = time.perf_counter() - start_total
+    
+    result["latency"] = {
+        "llm_time": round(llm_time, 2),
+        "execution_time": round(execution_time, 2),
+        "total_time": round(total_time, 2),
+    }
 
     # ── Log completion ──────────────────────────────────────────────────────
     step_results = result.get("step_results", {})
@@ -319,13 +372,16 @@ def run_execution(
         queue_total  = result["queue_total"],
         error_count  = result.get("error_count", 0),
         final_value  = final_value,
+        latency      = result["latency"],
     )
 
-    # ── Build and log the context for the Formatting Agent ──────────────────
-    formatting_context = build_formatting_context(result)
-    log_formatting_context(formatting_context)
-
-    # We also attach it to the result so the caller (pipeline) has it
+    # Build context for the Formatting Agent and attach to result
+    formatting_context = build_formatting_context(
+        result,
+        response_format  = response_format,
+        suggested_format = response_format,
+        user_specified   = user_specified,
+    )
     result["formatting_context"] = formatting_context
     result["thought"] = thought
 

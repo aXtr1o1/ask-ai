@@ -980,6 +980,9 @@
         case "GRAPH":
           renderedContentHtml = renderGraphLayout(finalAnswer, isDark);
           break;
+        case "PLAIN_TEXT":
+          renderedContentHtml = renderMarkdownLayout(finalAnswer);
+          break;
         case "MARKDOWN":
         default:
           renderedContentHtml = renderMarkdownLayout(finalAnswer);
@@ -1169,8 +1172,13 @@
         }
 
         if (Array.isArray(data) && data.length > 0) {
-          headers = Object.keys(data[0]);
-          rows = data.map(item => headers.map(h => (item[h] !== undefined && item[h] !== null) ? String(item[h]) : ""));
+          const flatData = data.flat(Infinity);
+          if (flatData.length > 0 && typeof flatData[0] === "object" && flatData[0] !== null) {
+            headers = Object.keys(flatData[0]);
+            rows = flatData.map(item => headers.map(h => (item[h] !== undefined && item[h] !== null) ? String(item[h]) : ""));
+          } else {
+             return renderMarkdownLayout(text);
+          }
         } else {
           return renderMarkdownLayout(text);
         }
@@ -1238,6 +1246,7 @@
 
     function renderListLayout(text, isNumbered, isDark) {
       let parsedItems = [];
+      let itemsAreHtml = false;  // true when items are pre-built HTML (from JSON objects)
 
       try {
         const obj = JSON.parse(text);
@@ -1250,17 +1259,25 @@
         }
         
         if (Array.isArray(data) && data.length > 0) {
-          // Flatten nested arrays so items like [["A", "B"]] render as distinct bullet points
           const flatData = data.flat(Infinity);
-          parsedItems = flatData.map(item => {
-            if (typeof item === "object" && item !== null) {
-              // Convert raw JSON object to a clean human-readable string
-              return Object.entries(item)
-                .map(([key, value]) => `<span style="opacity:0.8">${key}:</span> <b>${value}</b>`)
-                .join(" &nbsp;|&nbsp; ");
-            }
-            return String(item);
-          });
+          itemsAreHtml = true;
+          parsedItems = flatData
+            .map(item => {
+              if (typeof item === "object" && item !== null) {
+                const filtered = Object.entries(item).filter(([key, value]) => {
+                  const v = (value === null || value === undefined) ? "" : String(value).trim();
+                  return v !== "" && v !== "null" && v !== "undefined";
+                });
+                if (filtered.length === 0) return null;
+                return filtered
+                  .map(([key, value]) => `<span style="opacity:0.75; font-size:12px;">${escapeHtml(key)}:</span> <b>${escapeHtml(String(value))}</b>`)
+                  .join(" <span style='opacity:0.3; margin:0 4px;'>|</span> ");
+              }
+              const strVal = String(item).trim();
+              if (strVal === "" || strVal === "null") return null;
+              return escapeHtml(strVal);
+            })
+            .filter(item => item !== null);
         } else {
           throw new Error("Not an array");
         }
@@ -1322,11 +1339,15 @@
           `;
         }
 
+        // Items from JSON objects are pre-built HTML — inject directly.
+        // Items from plain text fallback — run through markdown parser.
+        const contentHtml = itemsAreHtml ? item : parseMarkdownTokens(item);
+
         return `
           <div style="display: flex; align-items: flex-start; gap: 10px;">
             ${markerHtml}
-            <div style="fontSize: 13.5px; line-height: 1.6; color: ${isDark ? "#cbd5e1" : "#475569"}; flex: 1;">
-              ${parseMarkdownTokens(item)}
+            <div style="font-size: 13.5px; line-height: 1.6; color: ${isDark ? "#cbd5e1" : "#475569"}; flex: 1;">
+              ${contentHtml}
             </div>
           </div>
         `;
@@ -1379,110 +1400,98 @@
     }
 
     function renderGraphLayout(text, isDark) {
-      let data = { nodes: [], links: [] };
+      // Parse grouped data: [{group_field: name, count/value: N}, ...]
+      let data = [];
       try {
-        data = JSON.parse(text);
+        const obj = JSON.parse(text);
+        let raw = obj;
+        // Support wrapped keys from backend tools
+        if (!Array.isArray(raw)) {
+          if (obj.groups)      raw = obj.groups;
+          else if (obj.sorted_data) raw = obj.sorted_data;
+        }
+        if (Array.isArray(raw) && raw.length > 0) {
+          data = raw;
+        } else {
+          return `<div style="font-size:14px; white-space:pre-wrap; color:var(--text-secondary);">${escapeHtml(text)}</div>`;
+        }
       } catch (e) {
-        // Fallback layout
-        return `<div style="font-size:14px; white-space:pre-wrap;">${text}</div>`;
+        return `<div style="font-size:14px; white-space:pre-wrap; color:var(--text-secondary);">${escapeHtml(text)}</div>`;
       }
 
-      // Compute visual positions for SVG display
-      const width = 760;
-      const height = 280;
-      const radius = 22;
+      // Identify the label key (first key) and value key ("count" or "value")
+      const firstItem   = data[0];
+      const keys        = Object.keys(firstItem);
+      const valueKey    = keys.find(k => k === "count" || k === "value") || keys[keys.length - 1];
+      const labelKey    = keys.find(k => k !== valueKey) || keys[0];
 
-      // Layout algorithm: rank nodes by level or simple spacing
-      const count = data.nodes.length;
-      data.nodes.forEach((n, idx) => {
-        // Linear chain layout or simple ring layout fallback
-        n.x = 80 + (idx * ((width - 160) / (count - 1 || 1)));
-        n.y = height / 2 + (idx % 2 === 0 ? -40 : 40);
-        
-        // Custom override for prettier flow if it is the preset architecture graph
-        if (n.id === "A") { n.x = 80; n.y = height/2; }
-        else if (n.id === "B") { n.x = 220; n.y = height/2; }
-        else if (n.id === "C") { n.x = 380; n.y = height/2 - 50; }
-        else if (n.id === "D") { n.x = 380; n.y = height/2 + 50; }
-        else if (n.id === "E") { n.x = 540; n.y = height/2; }
-        else if (n.id === "F") { n.x = 680; n.y = height/2; }
-      });
+      const values      = data.map(d => Number(d[valueKey]) || 0);
+      const maxVal      = Math.max(...values, 1);
+      const barColor    = isDark ? "#D4AF37" : "#AA7C11";
+      const textColor   = isDark ? "#cbd5e1" : "#475569";
+      const labelColor  = isDark ? "#94a3b8" : "#64748b";
+      const bgBar       = isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.04)";
 
-      // Render links
-      let linksHtml = data.links.map(l => {
-        const sourceNode = data.nodes.find(n => n.id === l.source);
-        const targetNode = data.nodes.find(n => n.id === l.target);
-        if (!sourceNode || !targetNode) return "";
-        
+      const barsHtml = data.map((item, idx) => {
+        const label   = String(item[labelKey] ?? "");
+        const val     = Number(item[valueKey]) || 0;
+        const pct     = Math.max((val / maxVal) * 100, 0).toFixed(1);
         return `
-          <line 
-            class="link" 
-            x1="${sourceNode.x}" 
-            y1="${sourceNode.y}" 
-            x2="${targetNode.x}" 
-            y2="${targetNode.y}" 
-            stroke="${isDark ? "rgba(212, 175, 55, 0.4)" : "rgba(170, 124, 17, 0.3)"}"
-          />
-        `;
-      }).join("");
-
-      // Render nodes
-      let nodesHtml = data.nodes.map(n => {
-        let colorGrad = "url(#gold-grad)";
-        let textCol = isDark ? "#ffffff" : "#0f172a";
-        let subTextCol = isDark ? "#94a3b8" : "#64748b";
-        
-        return `
-          <g class="node" transform="translate(0,0)">
-            <circle 
-              cx="${n.x}" 
-              cy="${n.y}" 
-              r="${radius}" 
-              fill="${isDark ? "#1e293b" : "#f1f5f9"}" 
-              stroke="${isDark ? "#D4AF37" : "#aa7c11"}" 
-              stroke-width="2" 
-            />
-            <circle 
-              cx="${n.x}" 
-              cy="${n.y}" 
-              r="${radius - 6}" 
-              fill="${colorGrad}" 
-              opacity="0.85" 
-            />
-            <text 
-              x="${n.x}" 
-              y="${n.y + radius + 16}" 
-              text-anchor="middle" 
-              fill="${textCol}" 
-              font-weight="600"
-            >
-              ${n.label}
-            </text>
-            <text 
-              x="${n.x}" 
-              y="${n.y + radius + 28}" 
-              text-anchor="middle" 
-              fill="${subTextCol}" 
-              font-size="9px"
-            >
-              ${n.type.toUpperCase()}
-            </text>
-          </g>
+          <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+            <div style="
+              width:130px;
+              flex-shrink:0;
+              font-size:12px;
+              color:${labelColor};
+              text-align:right;
+              overflow:hidden;
+              text-overflow:ellipsis;
+              white-space:nowrap;
+              title='${escapeHtml(label)}';
+            ">${escapeHtml(label)}</div>
+            <div style="flex:1; background:${bgBar}; border-radius:4px; height:22px; position:relative; overflow:hidden;">
+              <div style="
+                width:${pct}%;
+                height:100%;
+                background:linear-gradient(90deg, ${barColor} 0%, ${isDark ? '#AA7C11' : '#D4AF37'} 100%);
+                border-radius:4px;
+                transition: width 0.4s ease;
+                min-width:2px;
+              "></div>
+            </div>
+            <div style="
+              width:48px;
+              flex-shrink:0;
+              font-size:12px;
+              font-weight:600;
+              color:${textColor};
+              text-align:left;
+            ">${val.toLocaleString()}</div>
+          </div>
         `;
       }).join("");
 
       return `
-        <div class="graph-container">
-          <svg class="graph-svg" viewBox="0 0 ${width} ${height}">
-            <defs>
-              <linearGradient id="gold-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stop-color="#D4AF37" />
-                <stop offset="100%" stop-color="#AA7C11" />
-              </linearGradient>
-            </defs>
-            ${linksHtml}
-            ${nodesHtml}
-          </svg>
+        <div style="padding:4px 0;">
+          <div style="
+            font-size:11px;
+            color:${labelColor};
+            text-transform:uppercase;
+            letter-spacing:0.05em;
+            margin-bottom:12px;
+            display:flex;
+            justify-content:space-between;
+          ">
+            <span>${escapeHtml(labelKey)}</span>
+            <span>${escapeHtml(valueKey)}</span>
+          </div>
+          ${barsHtml}
+          <div style="
+            margin-top:10px;
+            font-size:11px;
+            color:${labelColor};
+            text-align:right;
+          ">${data.length} group${data.length !== 1 ? 's' : ''}</div>
         </div>
       `;
     }

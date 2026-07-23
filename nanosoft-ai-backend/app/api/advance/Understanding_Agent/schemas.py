@@ -48,6 +48,24 @@ class UnderstandingOutput(BaseModel):
         )
     )
 
+    response_format: Literal["TABLE", "BULLET_LIST", "NUMBERED_LIST", "GRAPH", "PLAIN_TEXT"] | None = Field(
+        default=None,
+        description=(
+            "The format the answer should be presented in. "
+            "Only populate for 'db_query' intent. "
+            "Base this on the question TYPE (what is being asked) — you do not see the data. "
+            "Leave null for 'general' and 'web_search' intents."
+        )
+    )
+
+    user_specified_format: bool = Field(
+        default=False,
+        description=(
+            "True ONLY if the user explicitly stated a format preference in their query. "
+            "False if you chose the format autonomously based on question type."
+        )
+    )
+
     general_response: str | None = Field(
         default=None,
         description=(

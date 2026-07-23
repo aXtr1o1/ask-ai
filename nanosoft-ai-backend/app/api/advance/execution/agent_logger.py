@@ -155,6 +155,7 @@ def log_completion(
     queue_total:  int,
     error_count:  int,
     final_value,
+    latency:      dict = None,
 ):
     """
     Log the final status and answer after all steps complete.
@@ -176,12 +177,14 @@ def log_completion(
             status, tools_called, queue_total,
         )
     logger.info("ANSWER   : %s", final_value)
+    
+    if latency:
+        logger.info(
+            "LATENCY  : Total: %.2fs | LLM Plan: %.2fs | Tool Exec: %.2fs", 
+            latency.get("total_time", 0),
+            latency.get("llm_time", 0),
+            latency.get("execution_time", 0)
+        )
+    
     logger.info("")
-
-def log_formatting_context(context: dict):
-    """Log the payload that will be sent to the Formatting Agent."""
-    import json
-    logger.info(DASH)
-    logger.info("FORMATTING AGENT PAYLOAD (Steps + Final Answer):")
-    logger.info(json.dumps(context, indent=2))
-    logger.info(DASH)
+
