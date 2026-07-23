@@ -59,13 +59,46 @@ def retrieve(
         if val is not None:
             payload[sp_param] = to_bool(val)
 
+        asset_tags = payload.get("asset_tag_no")
+
+    # Handle multiple asset tags
+    if asset_tags and "," in asset_tags:
+        all_records = []
+
+        for tag in asset_tags.split(","):
+            single_payload = payload.copy()
+            single_payload["asset_tag_no"] = tag.strip()
+
+            logger.info(
+                "Retrieving Assets from DB using payload: %s",
+                single_payload,
+            )
+
+            try:
+                req = AssetRequest(**single_payload)
+                response = get_assets(req)
+                all_records.extend(response.get("p_list") or [])
+            except Exception as e:
+                logger.error(
+                    "Error retrieving asset %s: %s",
+                    tag,
+                    e,
+                    exc_info=True,
+                )
+
+        logger.info("Successfully retrieved %d Asset records", len(all_records))
+        return all_records
+
+    # Existing logic for a single asset tag
     logger.info("Retrieving Assets from DB using payload: %s", payload)
+
     try:
         req = AssetRequest(**payload)
         response = get_assets(req)
         records = response.get("p_list") or []
         logger.info("Successfully retrieved %d Asset records", len(records))
         return records
+
     except Exception as e:
         logger.error("Error retrieving Assets: %s", e, exc_info=True)
         return []

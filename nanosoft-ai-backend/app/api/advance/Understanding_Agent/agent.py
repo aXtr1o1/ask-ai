@@ -22,6 +22,7 @@ import time
 
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
+from app.api.advance.Understanding_Agent.conversation_memory import conversation_memory
 from google import genai
 from google.genai import types
 
@@ -38,7 +39,7 @@ _SYSTEM_PROMPT = build_system_prompt()
 # =============================================================================
 # MAIN FUNCTION
 # =============================================================================
-def classify_query(query: str) -> dict:
+def classify_query(query: str, session_id: str) -> dict:
     """
     Classify a user query and return a structured result.
 
@@ -52,21 +53,42 @@ def classify_query(query: str) -> dict:
     start_total = time.perf_counter()
 
     llm = ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash",
-            google_api_key=settings.GOOGLE_API_KEY,
-            temperature=0.3,
-            thinking_budget=256,
-        )
+        model="gemini-2.5-flash",
+        google_api_key=settings.GOOGLE_API_KEY,
+        temperature=0.3,
+        thinking_budget=256,
+    )
+
     # include_raw=True gives us the raw AIMessage (with usage_metadata)
     # alongside the parsed Pydantic output
-    structured_llm = llm.with_structured_output(UnderstandingOutput, include_raw=True)
+    structured_llm = llm.with_structured_output(
+        UnderstandingOutput,
+        include_raw=True,
+    )
 
+    # Retrieve previous conversation
+    history = conversation_memory.get_history(session_id)
+
+    # Build messages
     messages = [
         SystemMessage(content=_SYSTEM_PROMPT),
-        HumanMessage(content=f'Query: "{query}"'),
     ]
-    start_llm   = time.perf_counter()
-    result      = structured_llm.invoke(messages)
+
+    # Add previous conversation if available
+    if history:
+        messages.extend(history)
+
+    # Add current query
+    messages.append(
+        HumanMessage(content=f'Query: "{query}"')
+    )
+
+    start_llm = time.perf_counter()
+    logger.info("===== Messages sent to Understanding Agent =====")
+    for i, msg in enumerate(messages):
+        logger.info("%d: %s", i, msg)
+    logger.info("===============================================")
+    result = structured_llm.invoke(messages)
     llm_time    = time.perf_counter() - start_llm
 
     response: UnderstandingOutput = result["parsed"]

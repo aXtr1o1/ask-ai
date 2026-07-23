@@ -25,6 +25,7 @@ from typing import Any
 
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
+from app.api.advance.Understanding_Agent.conversation_memory import conversation_memory
 
 from app.config import settings
 from app.api.advance.Formatting_agent.prompt import build_formatting_prompt
@@ -146,6 +147,8 @@ def _log_output(
 def format_pipeline_response(
     response: dict,
     *,
+    session_id: str,
+    user_query: str,
     query_summary: str | None = None,
     default_response_type: str = "analytical-answer",
 ) -> dict:
@@ -260,7 +263,13 @@ def format_pipeline_response(
     except Exception as e:
         logger.error("[FORMATTING AGENT] LLM failed: %s", e)
         explanation = ""
-        confidence  = 10
+    conversation_memory.add_conversation(
+    session_id=session_id,
+    user_query=user_query,
+    assistant_response=explanation,
+)
+    
+    
 
     return {
         "response_type":     _FORMAT_TO_RESPONSE_TYPE.get(response_format, default_response_type),

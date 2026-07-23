@@ -179,7 +179,11 @@ def print_result(result: dict):
 # =============================================================================
 # FULL PIPELINE RUN FOR ONE QUERY
 # =============================================================================
-def run_query(query: str, sample_rows: int = 3):
+def run_query(
+    query: str,
+    session_id: str,
+    sample_rows: int = 3,
+):
     print(f"\n{LINE}")
     print(f"  [RAW QUERY] : {query}")
     print(f"{LINE}\n")
@@ -192,7 +196,10 @@ def run_query(query: str, sample_rows: int = 3):
     # ------------------------------------------------------------------
     # Step 1: Understanding Agent
     # ------------------------------------------------------------------
-    understanding = classify_query(query)
+    understanding = classify_query(
+    query=query,
+    session_id="test-session",
+)
     latency_understanding = understanding.get("latency", {})
     intent          = understanding.get("intent")
     summary         = understanding.get("query_summary")
@@ -383,8 +390,10 @@ def run_query(query: str, sample_rows: int = 3):
     try:
         formatted_result = format_pipeline_response(
             result,
+            session_id=session_id,
+            user_query=query,
             query_summary=summary,
-        )
+)
         formatted_result["step_results"] = step_results
         formatted_result["status"]       = result.get("status", "")
         formatted_result["latency"]      = _build_latency_dict(
@@ -441,7 +450,10 @@ if __name__ == "__main__":
         @app.post("/api/query")
         def api_query(request: QueryRequest):
             try:
-                res = run_query(request.query)
+                res = run_query(
+                    request.query,
+                    "test-session",   # for testing
+ )
                 return res if res else {
                     "response_type": "error",
                     "layout": "PLAIN_TEXT",
