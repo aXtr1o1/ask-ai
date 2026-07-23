@@ -6,19 +6,21 @@ The tools only need to perform the requested operation on the data they receive.
 No additional filtering inside tools — operations only.
 
 Tools:
-  1. count_records          → count all records in a module
-  2. sum_values             → sum a numeric field
-  3. get_average            → mean of a numeric field
-  4. get_minimum            → minimum value of a numeric field
-  5. get_maximum            → maximum value of a numeric field
-  6. calculate_time_between → elapsed minutes between two datetime fields
-  7. group_by_and_count     → group by a field and count per group
-  8. get_unique_values      → list all distinct values in a field
-  9. join_records           → match records from two modules on a shared key field
- 10. do_math                → arithmetic: ADD | SUB | MUL | DIV | MOD | POWER | SQRT | ABS
- 11. sort_and_limit         → sort a list from a prior step and optionally keep top/bottom N
- 12. group_by_and_aggregate → SUM | AVG | MIN | MAX of a numeric field per group
- 13. count_records_multi    → count records matching TWO conditions simultaneously (AND)
+   1. count_records          → count all records or records matching a condition
+   2. sum_values             → sum a numeric field
+   3. get_average            → mean of a numeric field
+   4. get_minimum            → minimum value of a numeric field
+   5. get_maximum            → maximum value of a numeric field
+   6. calculate_time_between → elapsed minutes between two datetime fields
+   7. group_by_and_count     → group by a field and count per group
+   8. get_unique_values      → list all distinct values in a field
+   9. join_records           → match records from two modules on a shared key field
+  10. do_math                → arithmetic: ADD | SUB | MUL | DIV | MOD | POWER | SQRT | ABS
+  11. sort_and_limit         → sort a list from a prior step and optionally keep top/bottom N
+  12. group_by_and_aggregate → SUM | AVG | MIN | MAX of a numeric field per group
+  13. count_records_multi    → count records matching multiple conditions simultaneously (AND)
+  14. get_record_fields      → return actual record data — specific fields or all fields
+  15. final_answer_tool      → marks queue complete, MUST be the last step
 """
 import math
 from typing import Annotated
@@ -382,18 +384,29 @@ def get_unique_values(
     module: str,
     field: str,
     state: Annotated[dict, InjectedState()],
+    filter_field: str = "",
+    filter_value: str = "",
 ) -> dict:
     """
-    Return all distinct values in a field across all records in a module.
+    Return all distinct values in a field across records in a module.
+    Optionally filter rows where filter_field equals filter_value before extracting.
 
     Args:
-        module: Data module name
-        field:  Column to extract unique values from
+        module:       Data module name
+        field:        Column to extract unique values from
+        filter_field: Optional column to filter on before extracting unique values
+        filter_value: Value that filter_field must equal (case-insensitive)
     """
     df = load_records_as_dataframe(state, module)
     actual_field = resolve_column(df, field)
     if df.empty or actual_field is None:
         return {"module": module, "field": field, "unique_values": [], "count": 0}
+
+    # Apply optional pre-filter
+    if filter_field and filter_value:
+        actual_filter = resolve_column(df, filter_field)
+        if actual_filter is not None:
+            df = df[df[actual_filter].astype(str).str.lower() == filter_value.lower()]
 
     unique_set    = set(df[actual_field].dropna().astype(str).tolist())
     unique_sorted = sorted(unique_set)
@@ -401,6 +414,8 @@ def get_unique_values(
     return {
         "module":        module,
         "field":         field,
+        "filter_field":  filter_field,
+        "filter_value":  filter_value,
         "unique_values": unique_sorted,
         "count":         len(unique_sorted),
     }
@@ -704,7 +719,58 @@ def count_records_multi(
 
 
 # =============================================================================
-# TOOL 14: final_answer_tool
+# TOOL 14: get_record_fields
+# =============================================================================
+@tool
+def get_record_fields(
+    module: str,
+    state: Annotated[dict, InjectedState()],
+    fields: list = [],
+) -> dict:
+    """
+    Return the actual record data from a module.
+    Use when the question asks for the details, attributes, or field values
+    of specific records — not a count, sum, or aggregate.
+
+    Examples of when to use:
+      "Show me the details of complaint 1443"
+      "What is the complainer name for complaint 1443?"
+      "List all open PPM tasks with their assigned technician and building"
+      "What is the status of work order 5001?"
+
+    Args:
+        module: Data module name.
+        fields: Optional list of field names to include. If empty, returns all fields.
+                Use to return only the columns relevant to the question.
+    """
+    df = load_records_as_dataframe(state, module)
+    if df.empty:
+        return {"module": module, "total": 0, "records": [], "fields_returned": []}
+
+    # Resolve each requested field case-insensitively
+    if fields:
+        resolved = [resolve_column(df, f) for f in fields]
+        selected_cols = [c for c in resolved if c is not None]
+        if selected_cols:
+            df = df[selected_cols]
+
+    # Replace NaN with None for clean JSON output
+    records = [
+        {k: (None if (isinstance(v, float) and math.isnan(v)) else v)
+         for k, v in row.items()}
+        for row in df.to_dict(orient="records")
+    ]
+
+    return {
+        "module":          module,
+        "total":           len(records),
+        "fields_returned": list(df.columns),
+        "records":         records,
+    }
+
+
+# =============================================================================
+# TOOL 15: final_answer_tool
 # =============================================================================
 @tool
 def final_answer_tool(result_ref: str) -> dict:
@@ -740,5 +806,6 @@ ALL_TOOLS = [
     sort_and_limit,
     group_by_and_aggregate,
     count_records_multi,
+    get_record_fields,
     final_answer_tool,
 ]

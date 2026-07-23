@@ -1,99 +1,131 @@
 """
 Analysis Metadata — sb module
 
-Schedule Booking (Housekeeping / Cleanliness Inspections).
-Records represent pre-scheduled service bookings and cleanliness
-inspection tasks at specific location spots.
+Schedule Bookings (Housekeeping / Environmental / Cleanliness services).
+Records represent pre-scheduled recurring service bookings generated
+for contracts at specific locations.
+
+Field names verified against actual SP response data.
 """
 
 SB_SCHEMA: dict[str, str] = {
 
     # --- Identifiers ---
-    "SBRequestNo": (
-        "Unique schedule booking request number identifying this SB record. "
-        "Primary reference ID. Example: 'SB-2026-001'."
+    "SBCreWorkOrder": (
+        "Unique schedule booking work order number. Primary reference ID. "
+        "Format: 'AA-1-2026'."
     ),
 
     # --- Classification ---
-    "SBStatus": (
-        "Current lifecycle status of the schedule booking. "
-        "Known values: 'Open' (booking is scheduled or in progress, not yet completed), "
-        "'Closed' (booking has been completed and closed). "
-        "Filter on 'Open' to find active or upcoming bookings."
+    "PPMStageName": (
+        "Current workflow stage of the schedule booking. "
+        "Examples: 'Staff Yet to be Allocated' (no technician assigned), "
+        "'Technician Assigned' (allocated, work pending), "
+        "'Execution Completed & Closed' (done)."
     ),
-    "SBStageName": (
-        "Detailed workflow stage of the schedule booking. "
-        "Example: 'Service Booking Raised' (booking created, awaiting technician assignment). "
-        "More granular than SBStatus."
-    ),
-    "SBTypeName": (
-        "Type of the schedule booking defining the nature of the service. "
-        "Example: 'Scheduled Service' (a pre-planned, recurring service visit)."
-    ),
-    "PriorityName": (
-        "Priority level of the booking. "
-        "Known values: 'P1 Critical', 'P2 High', 'P3 Medium', 'P4 Low'. "
-        "Reflects the urgency of carrying out the booked service on time."
+    "FrequencyName": (
+        "How often this booking recurs. "
+        "Known values: 'MONTHLY', 'QUARTERLY', 'HALFYEARLY', 'ANNUAL'."
     ),
     "ServiceTypeName": (
-        "Category of service being performed under this booking. "
-        "Example: 'Air Conditioning Services'. "
-        "Use to filter bookings by the type of work being scheduled."
+        "Category of service. Examples: 'Environmental Services', "
+        "'Housekeeping Services', 'Air Conditioning Services'."
     ),
     "DivisionName": (
-        "Service division responsible for delivering this booked service. "
-        "Example: 'HVAC System'."
+        "Service division responsible for delivery. "
+        "Examples: 'Envrionmental Services', 'Housekeeping', 'HVAC System'."
+    ),
+    "DisciplineName": (
+        "Technical sub-category within the division. Example: 'Landscaping'."
     ),
     "ContractName": (
         "Maintenance contract under which this booking is scheduled. "
-        "Example: 'Facility Management Residential Area'."
+        "Example: 'Environmental Services - Annual Contract'."
+    ),
+    "LocalityCode": (
+        "Short locality code. Examples: 'AA' (Ajman), 'DM' (Doha), 'RUW' (Ruwi)."
+    ),
+    "Remarks": (
+        "Free-text remarks for this booking. Example: 'Generated'."
     ),
 
     # --- Personnel ---
-    "RequestedBy": (
-        "Username or name of the person who created and submitted this booking. "
-        "Example: 'admin'."
+    "SBTechName": (
+        "Name of the technician assigned to this booking. Null if not yet allocated."
     ),
-    "TechName": (
-        "Name of the technician assigned to carry out this scheduled visit. "
-        "Null if no technician has been assigned yet."
+    "PMTechRemarks": (
+        "Remarks entered by the technician on completion."
+    ),
+    "PMSBLastSBRemarks": (
+        "Most recent standby remarks entered when this booking was paused."
+    ),
+    "PMSBLastSBDateTime": (
+        "Date and time of the most recent standby event."
+    ),
+    "PMSBStaffAssignBy": (
+        "Name or ID of the person who assigned the technician to this booking."
     ),
 
     # --- Location ---
     "LocalityName": (
-        "Geographic locality or area where the booking is to be performed. "
-        "Example: 'Doha'."
+        "Geographic locality. Examples: 'Ajman', 'Doha', 'Ruwi'."
     ),
     "BuildingName": (
-        "Building or property where the scheduled service will take place. "
-        "Example: 'Building 1 - Residential High Rise'."
+        "Building where the service will be performed. Example: 'Al Safia Park'."
     ),
     "FloorName": (
-        "Floor level within the building for this booking. "
-        "Example: 'Floor 3'."
+        "Floor within the building. Null if floor-level tracking is not applicable."
     ),
     "SpotName": (
-        "Specific spot, apartment, room, or zone where the service will be delivered. "
-        "Example: 'Appartement-30'. For cleanliness inspections this is the inspected location."
+        "Specific spot, room, or zone. Null if not recorded."
     ),
 
     # --- Timestamps ---
-    "BookedDateTime": (
-        "Date and time when the booking was registered in the system. "
-        "Format: 'DD-MM-YYYY HH:MM:SS'. Represents when the request was created."
+    "SBCreWoDateTime": (
+        "Scheduled date for this booking. Format: 'DD-MM-YYYY'."
     ),
-    "ScheduledDateTime": (
-        "Planned date and time when the service is scheduled to be delivered. "
-        "Format: 'DD-MM-YYYY HH:MM:SS'. Used to track upcoming appointments."
+    "SBCreGeneratedTtm": (
+        "Date and time this booking record was system-generated. "
+        "Format: 'DD-MM-YYYY HH:MM:SS'."
     ),
-    "CompletedDateTime": (
-        "Date and time when the booked service was actually completed. "
-        "Null for open bookings that have not yet been delivered."
+    "SBCreActualDate": (
+        "Actual date of the booking. Format: 'DD-MM-YYYY HH:MM:SS'."
+    ),
+    "SBCreWoCompletedDate": (
+        "Date the booking was completed and closed. Null if still open."
+    ),
+    "SBTechStartDateTime": (
+        "Date and time the technician started the work. Null if not started."
+    ),
+    "SBTechEndDateTime": (
+        "Date and time the technician completed the work. Null if not finished."
     ),
 
-    # --- Notes ---
-    "Remarks": (
-        "Free-text remarks, notes, or special instructions related to this booking. "
-        "Example: 'Annual AC service booking for apartment block'."
+    # --- SLA / Metrics ---
+    "SBCreSLAHours": (
+        "SLA target in hours within which this booking must be completed."
+    ),
+    "SBCreMaintenanceHours": (
+        "Planned maintenance duration in hours for this booking."
+    ),
+
+    # --- Flags ---
+    "IsSBCreWithDraw": (
+        "Boolean — true if this booking has been withdrawn."
+    ),
+    "SBCreWithDrawRemarks": (
+        "Remarks entered when this booking was withdrawn."
+    ),
+    "IsSbCreReschedule": (
+        "Boolean — true if this booking has been rescheduled."
+    ),
+    "SBCreRescheduleRemarks": (
+        "Remarks entered when this booking was rescheduled."
+    ),
+    "IsSBCreRework": (
+        "Boolean — true if this booking has been marked for rework."
+    ),
+    "SBCreReworkRemarks": (
+        "Remarks entered when this booking was marked for rework."
     ),
 }

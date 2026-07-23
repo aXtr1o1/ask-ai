@@ -2,20 +2,24 @@
 FM Formatting Agent
 
 Sits after execution and before the API/frontend response.
-Normalises the raw pipeline output into a stable envelope the frontend can render.
 
-ONE MODE for all formats:
-  The LLM always receives: query_summary + planned_steps + final_answer.
-  It reasons over the actual computed data, understands the layout, and writes
-  the most appropriate response — whether that is a rich analytical paragraph
-  (for TABLE/GRAPH) or a full natural-language answer (for PLAIN_TEXT/LIST formats).
+RESPONSIBILITIES:
+  1. Write the explanation/context for the response.
+  2. Assess how well the Understanding Agent's chosen format fits the query
+     (confidence score 1–10).
+  3. If confidence < 8, append a format-suggestion line in the explanation
+     so the user knows they can ask for a different view.
 
-  Thinking is enabled so the model can reason deeply before writing.
+DATA FLOW:
+  TABLE / GRAPH   — LLM receives steps only (no final_answer). Frontend renders data.
+                    LLM writes the analytical context paragraph above the rendered data.
+  LIGHTWEIGHT     — LLM receives steps + final_answer. LLM writes the full answer.
 """
 from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from typing import Any
 
@@ -23,16 +27,12 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from app.config import settings
-from app.api.advance.Formatting_agent.prompt import FORMATTING_SYSTEM_PROMPT
+from app.api.advance.Formatting_agent.prompt import build_formatting_prompt
 
 logger = logging.getLogger("advance.formatting")
 
-DASH  = "-" * 60
+DASH = "-" * 60
 
-
-# ---------------------------------------------------------------------------
-# Format → frontend response_type mapping
-# ---------------------------------------------------------------------------
 _FORMAT_TO_RESPONSE_TYPE = {
     "TABLE":          "table-response",
     "GRAPH":          "graph-response",
@@ -40,6 +40,8 @@ _FORMAT_TO_RESPONSE_TYPE = {
     "NUMBERED_LIST":  "numbered-list-response",
     "PLAIN_TEXT":     "plain-response",
 }
+
+_DATA_HEAVY_FORMATS = {"TABLE", "GRAPH"}
 
 
 # ---------------------------------------------------------------------------
@@ -55,23 +57,50 @@ def _stringify(value: Any) -> str:
     return str(value).strip()
 
 
-def _log_input(
-    response_format: str,
-    query_summary: str,
-    planned_steps: list,
-    final_answer: Any,
-) -> None:
-    """Log exactly what is being sent into the Formatting Agent LLM."""
+def _parse_llm_response(raw: str) -> tuple[str, int]:
+    """
+    Parse the LLM output into (explanation, confidence_score).
+
+    Expected format:
+        [EXPLANATION]
+        <text>
+
+        [CONFIDENCE]
+        <integer>
+    """
+    explanation   = raw.strip()
+    confidence    = 10  # default if parsing fails
+
+    # Try to split on [CONFIDENCE]
+    parts = re.split(r"\[CONFIDENCE\]", raw, flags=re.IGNORECASE)
+    if len(parts) == 2:
+        conf_block = parts[1].strip()
+        expl_block = re.sub(r"^\[EXPLANATION\]", "", parts[0], flags=re.IGNORECASE).strip()
+        explanation = expl_block
+        # Extract first integer from confidence block
+        m = re.search(r"\d+", conf_block)
+        if m:
+            confidence = max(1, min(10, int(m.group())))
+    else:
+        # Fallback: strip [EXPLANATION] header if present, take the whole thing
+        explanation = re.sub(r"^\[EXPLANATION\]", "", raw, flags=re.IGNORECASE).strip()
+
+    return explanation, confidence
+
+
+def _log_input(response_format: str, query_summary: str, planned_steps: list, final_answer: Any) -> None:
+    is_data_heavy = response_format.upper() in _DATA_HEAVY_FORMATS
+    mode = "DATA-HEAVY (steps only)" if is_data_heavy else "LIGHTWEIGHT (steps + data)"
     logger.info("")
     logger.info(DASH)
-    logger.info("► FORMATTING AGENT — INPUT")
+    logger.info("► FORMATTING AGENT — INPUT  [%s]", mode)
     logger.info("  Format        : %s", response_format)
     logger.info("  Query Summary : %s", query_summary or "(not provided)")
     logger.info("  Planned Steps :")
     for s in planned_steps:
         args_str = " | ".join(f"{k}={v}" for k, v in s.get("args", {}).items())
         logger.info("    [step %s] %-22s %s", s.get("step", "?"), s.get("tool", "?"), args_str)
-    if final_answer is not None:
+    if not is_data_heavy and final_answer is not None:
         preview = str(final_answer)[:400]
         logger.info("  Final Answer  : %s%s", preview, "…" if len(str(final_answer)) > 400 else "")
     logger.info(DASH)
@@ -80,16 +109,18 @@ def _log_input(
 def _log_output(
     response_format: str,
     explanation: str,
+    confidence: int,
     input_tokens: int,
     output_tokens: int,
     total_tokens: int,
     latency_ms: float,
 ) -> None:
-    """Log the LLM output, token usage, and latency for the Formatting Agent."""
     logger.info("")
     logger.info(DASH)
     logger.info("► FORMATTING AGENT — OUTPUT")
     logger.info("  Format         : %s", response_format)
+    logger.info("  Confidence     : %d/10%s", confidence,
+                "  ✓ (no suggestion added)" if confidence >= 8 else "  ⚠ (format suggestion appended)")
     logger.info("  Latency        : %.0f ms", latency_ms)
     logger.info("  Tokens         : %d input  |  %d output  |  %d total",
                 input_tokens, output_tokens, total_tokens)
@@ -103,8 +134,8 @@ def _log_output(
             line = []
     if line:
         lines.append("    " + " ".join(line))
-    for l in lines:
-        logger.info("%s", l)
+    for ln in lines:
+        logger.info("%s", ln)
     logger.info(DASH)
     logger.info("")
 
@@ -119,21 +150,16 @@ def format_pipeline_response(
     default_response_type: str = "analytical-answer",
 ) -> dict:
     """
-    Format the pipeline output using an LLM with thinking enabled.
+    Format the pipeline output using an LLM with thinking.
 
-    Args:
-        response        : The full execution result dict.  Must contain
-                          response["formatting_context"] built by context_builder.
-        query_summary   : The clean query restatement from the Understanding Agent.
-        default_response_type: Fallback response_type string.
-
-    Returns a dict:
+    Returns:
         {
           "response_type":    str,
           "layout":           str,
-          "explanation":      str,
-          "formatted_answer": str | JSON,
-          "token_usage":      {"input": int, "output": int, "total": int},
+          "explanation":      str,     # may include format suggestion if confidence < 8
+          "formatted_answer": str,
+          "format_confidence": int,    # 1–10
+          "token_usage":      {input, output, total},
           "latency_ms":       float,
         }
     """
@@ -141,34 +167,49 @@ def format_pipeline_response(
     hardcoded_layout = (response.get("layout") or "").upper().strip()
     if hardcoded_layout:
         return {
-            "response_type": response.get("response_type", default_response_type),
-            "layout":        hardcoded_layout,
-            "explanation":   _stringify(response.get("formatted_answer")),
+            "response_type":     response.get("response_type", default_response_type),
+            "layout":            hardcoded_layout,
+            "explanation":       _stringify(response.get("formatted_answer")),
+            "format_confidence": 10,
         }
 
-    # ── Pull context built by the execution layer ──────────────────────────
-    formatting_context = response.get("formatting_context", {})
-    planned_steps   = formatting_context.get("planned_steps", [])
-    response_format = formatting_context.get("response_format", "PLAIN_TEXT").upper()
-    final_answer    = formatting_context.get("final_answer", None)
+    # ── Pull context ───────────────────────────────────────────────────────
+    formatting_context  = response.get("formatting_context", {})
+    planned_steps       = formatting_context.get("planned_steps", [])
+    response_format     = formatting_context.get("response_format", "PLAIN_TEXT").upper()
+    final_answer        = formatting_context.get("final_answer", None)  # None for data-heavy
+    shape_descriptor    = formatting_context.get("shape_descriptor", {})
+    alternatives        = formatting_context.get("alternatives", [])
+    format_overridden   = formatting_context.get("format_overridden", False)
 
-    # Raw data for the frontend (passed through untouched for TABLE/GRAPH)
     raw_data = _stringify(response.get("formatted_answer"))
 
-    # ── Log what goes into the LLM ────────────────────────────────────────
     _log_input(response_format, query_summary, planned_steps, final_answer)
 
-    # ── Build human message — same for all formats ─────────────────────────
-    human_content = (
-        f"Layout: {response_format}\n\n"
-        f"Question the user asked:\n{query_summary or '(not provided)'}\n\n"
-        f"Computation steps that were executed to produce the answer:\n"
-        f"{json.dumps(planned_steps, indent=2)}\n\n"
-        f"Computed result (the actual data from the pipeline):\n"
-        f"{json.dumps(final_answer, indent=2, default=str)}\n"
+    # ── Build human message ────────────────────────────────────────────────
+    is_data_heavy = response_format in _DATA_HEAVY_FORMATS
+    if is_data_heavy:
+        human_content = (
+            f"Format: {response_format}\n\n"
+            f"User question:\n{query_summary or '(not provided)'}\n\n"
+            f"Computation steps:\n{json.dumps(planned_steps, indent=2)}\n"
+        )
+    else:
+        human_content = (
+            f"Format: {response_format}\n\n"
+            f"User question:\n{query_summary or '(not provided)'}\n\n"
+            f"Computation steps:\n{json.dumps(planned_steps, indent=2)}\n\n"
+            f"Computed result:\n{json.dumps(final_answer, indent=2, default=str)}\n"
+        )
+
+    system_prompt = build_formatting_prompt(
+        response_format,
+        shape_descriptor   = shape_descriptor,
+        alternatives       = alternatives,
+        format_overridden  = format_overridden,
     )
 
-    # ── Invoke LLM with thinking enabled ─────────────────────────────────
+    # ── Invoke LLM ────────────────────────────────────────────────────────
     llm = ChatGoogleGenerativeAI(
         model="gemini-2.5-flash",
         google_api_key=settings.GOOGLE_API_KEY,
@@ -177,24 +218,25 @@ def format_pipeline_response(
     )
 
     explanation   = ""
+    confidence    = 10
     input_tokens  = 0
     output_tokens = 0
     total_tokens  = 0
     latency_ms    = 0.0
 
     try:
-        logger.info("[FORMATTING AGENT] Invoking LLM with thinking — format: %s", response_format)
+        logger.info("[FORMATTING AGENT] Invoking LLM — format: %s", response_format)
 
         t_start = time.perf_counter()
         llm_response = llm.invoke([
-            SystemMessage(content=FORMATTING_SYSTEM_PROMPT),
+            SystemMessage(content=system_prompt),
             HumanMessage(content=human_content),
         ])
         latency_ms = (time.perf_counter() - t_start) * 1000
 
-        explanation = llm_response.content.strip() if hasattr(llm_response, "content") else ""
+        raw_text    = llm_response.content.strip() if hasattr(llm_response, "content") else ""
+        explanation, confidence = _parse_llm_response(raw_text)
 
-        # ── Extract token usage from response metadata ─────────────────────
         usage = getattr(llm_response, "usage_metadata", None) or {}
         if isinstance(usage, dict):
             input_tokens  = usage.get("input_tokens",  0) or usage.get("prompt_token_count",     0)
@@ -208,6 +250,7 @@ def format_pipeline_response(
         _log_output(
             response_format=response_format,
             explanation=explanation,
+            confidence=confidence,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             total_tokens=total_tokens,
@@ -217,12 +260,14 @@ def format_pipeline_response(
     except Exception as e:
         logger.error("[FORMATTING AGENT] LLM failed: %s", e)
         explanation = ""
+        confidence  = 10
 
     return {
-        "response_type":    _FORMAT_TO_RESPONSE_TYPE.get(response_format, default_response_type),
-        "layout":           response_format,
-        "explanation":      explanation,
-        "formatted_answer": raw_data,
+        "response_type":     _FORMAT_TO_RESPONSE_TYPE.get(response_format, default_response_type),
+        "layout":            response_format,
+        "explanation":       explanation,
+        "formatted_answer":  raw_data,
+        "format_confidence": confidence,
         "token_usage": {
             "input":  input_tokens,
             "output": output_tokens,

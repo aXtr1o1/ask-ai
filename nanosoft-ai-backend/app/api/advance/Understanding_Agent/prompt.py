@@ -79,14 +79,25 @@ Write query_summary as a rich, self-contained description of what the user wants
     to act on without seeing the original query.
 
 ════════════════════════════════════════════════
-PART 4 — RESPONSE FORMAT  (db_query only)
+PART 4 — RESPONSE FORMAT HINT  (db_query only)
 ════════════════════════════════════════════════
 
-Choose the format that best serves how a facility manager would naturally consume this answer.
-Honor the user's presentation intent if expressed; otherwise let the shape of the data decide.
-Available: TABLE, GRAPH, NUMBERED_LIST, BULLET_LIST, PLAIN_TEXT.
+You do not see the data — you only see the question.
+Think about what kind of answer this question will produce and how a facility
+manager would most naturally want to read it.
+
+Available formats: TABLE, GRAPH, NUMBERED_LIST, BULLET_LIST, PLAIN_TEXT.
+
+Choose the format that best fits the nature of the expected answer.
+If the user has explicitly stated how they want the answer presented, use that
+and set user_specified_format to true. Otherwise reason about it and set
+user_specified_format to false.
 
 Set response_format ONLY when intent is db_query. Leave it null otherwise.
+
+Also set user_specified_format:
+  true   → if the user's query contains an explicit format preference
+  false  → if you chose the format based on your own reasoning
 """
 
 

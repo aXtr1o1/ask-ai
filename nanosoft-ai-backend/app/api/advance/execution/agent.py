@@ -36,6 +36,7 @@ from app.api.advance.execution.agent_logger import (
     log_question, log_queue, log_completion
 )
 from app.api.advance.execution.context_builder import build_formatting_context
+from app.api.advance.analysis.metadata.enum_values import get_enum_block
 
 logger = logging.getLogger("advance.execution.agent")
 
@@ -79,7 +80,8 @@ _TOOL_OUTPUT_KEYS: dict[str, set[str]] = {
                                "module", "start_field", "end_field"},
     "group_by_and_count":     {"groups", "total_records", "unique_groups",
                                "module", "group_field", "filter_field", "filter_value"},
-    "get_unique_values":      {"unique_values", "count", "module", "field"},
+    "get_unique_values":      {"unique_values", "count", "module", "field",
+                               "filter_field", "filter_value"},
     "join_records":           {"matched_count", "unmatched_in_a", "unmatched_in_b",
                                "records_in_a", "records_in_b",
                                "module_a", "module_b", "join_field"},
@@ -125,6 +127,32 @@ def _validate_queue(queue: list) -> None:
         current_tool = step["tool"]
         args         = step.get("args", {})
 
+        # Check required arguments are present for known tools
+        _REQUIRED_ARGS: dict[str, list[str]] = {
+            "get_unique_values":      ["module", "field"],
+            "count_records":          ["module"],
+            "count_records_multi":    ["module", "condition_field_1", "condition_value_1",
+                                       "condition_field_2", "condition_value_2"],
+            "sum_values":             ["module", "field"],
+            "get_average":            ["module", "field"],
+            "get_minimum":            ["module", "field"],
+            "get_maximum":            ["module", "field"],
+            "calculate_time_between": ["module", "start_field", "end_field"],
+            "group_by_and_count":     ["module", "group_field"],
+            "group_by_and_aggregate": ["module", "group_field", "agg_field", "operation"],
+            "get_record_fields":      ["module"],
+            "sort_and_limit":         ["data"],
+            "join_records":           ["module_a", "module_b", "join_field"],
+            "do_math":                ["operation", "a"],
+        }
+        required = _REQUIRED_ARGS.get(current_tool, [])
+        for req in required:
+            if req not in args:
+                raise ValueError(
+                    f"Queue step {i} ({current_tool}): missing required argument '{req}'. "
+                    f"Args provided: {list(args.keys())}"
+                )
+
         # Validate all arg values that are $step_N.key references
         for arg_name, arg_val in args.items():
             refs = arg_val if isinstance(arg_val, list) else [arg_val]
@@ -155,13 +183,14 @@ def _validate_queue(queue: list) -> None:
 
                 # (b) The key must exist in the referenced tool's OUTPUT KEYS
                 if len(parts) == 2:
-                    ref_key      = parts[1]          # "count"
+                    ref_key      = parts[1]              # "stats.average" or "count"
+                    root_key     = ref_key.split(".")[0]  # "stats" or "count"
                     ref_tool     = step_tool_map[ref_idx]
                     allowed_keys = _TOOL_OUTPUT_KEYS.get(ref_tool, set())
-                    if allowed_keys and ref_key not in allowed_keys:
+                    if allowed_keys and root_key not in allowed_keys:
                         raise ValueError(
                             f"Queue step {i} ({current_tool}) arg '{arg_name}': "
-                            f"'{ref}' uses key '{ref_key}' but tool '{ref_tool}' "
+                            f"'{ref}' uses key '{root_key}' but tool '{ref_tool}' "
                             f"only outputs: {sorted(allowed_keys)}"
                         )
 
@@ -183,7 +212,8 @@ def run_execution(
     filter_fields:    dict,
     modules:          list[str],
     filtered_records: dict,
-    response_format:  str = "PLAIN_TEXT",
+    response_format:  str  = "PLAIN_TEXT",
+    user_specified:   bool = False,
 ) -> dict:
     """
     Main entry point for the execution layer.
@@ -237,6 +267,8 @@ def run_execution(
         else "No column definitions provided."
     )
 
+    enum_text = get_enum_block(modules)
+
     start_llm = time.perf_counter()
     response = llm.invoke([
         SystemMessage(content=PLANNER_SYSTEM_PROMPT),
@@ -244,6 +276,7 @@ def run_execution(
             f"Question: {question}\n\n"
             f"Available modules: {modules}\n\n"
             f"Column definitions per module:\n{schema_text}\n\n"
+            f"Allowed enum values (use these EXACTLY as filter_value — no paraphrasing):\n{enum_text}\n\n"
             f"Intended presentation format: {response_format}\n\n"
             f"Produce the execution queue as a JSON array."
         )),
@@ -302,7 +335,12 @@ def run_execution(
     )
 
     # Build context for the Formatting Agent and attach to result
-    formatting_context = build_formatting_context(result, response_format=response_format)
+    formatting_context = build_formatting_context(
+        result,
+        response_format  = response_format,
+        suggested_format = response_format,
+        user_specified   = user_specified,
+    )
     result["formatting_context"] = formatting_context
 
     return result

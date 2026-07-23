@@ -1,114 +1,130 @@
 """
 Analysis Metadata — fa module
 
-Facility Audits & Remedial (Snags / Inspections).
+Facility Audits & Remedial.
 Records represent structured audit tasks, facility inspections,
-remedial snags identified during physical walkthroughs, and
-quality assurance checks.
+remedial snags, and quality assurance checks.
+
+Field names verified against actual SP response data.
+Note: FA records contain many internal DB keys — only operational fields listed here.
 """
 
 FA_SCHEMA: dict[str, str] = {
 
     # --- Identifiers ---
     "RMComplaintNo": (
-        "Unique audit or remedial complaint number identifying this FA record. "
-        "Primary reference ID for a facility audit task. Example: '63'."
+        "Unique audit / remedial complaint number. Primary reference ID. Example: '63'."
     ),
 
     # --- Classification ---
     "RMStageName": (
         "Current workflow stage of the audit or remedial task. "
-        "Examples: "
-        "'Facility Audit Request Raised' (task created, not yet assigned to anyone), "
-        "'Staf Assigned for Work Execution' (technician allocated, work is pending), "
-        "'Work Execution Completed' (audit or remedial work is done). "
-        "Use to track audit pipeline progress and identify backlogged tasks."
+        "Examples: 'Facility Audit Request Raised' (created, not yet assigned), "
+        "'Staf Assigned for Work Execution' (technician allocated), "
+        "'Work Execution Completed' (task done)."
     ),
     "PriorityName": (
-        "Priority level of the audit or remedial task. "
-        "Known values: 'P1 Critical', 'P2 High', 'P3 Medium', 'P4 Low'. "
-        "P2 High is typical for safety-related audits such as pest control. "
-        "Filter to find high-priority pending audits."
-    ),
-    "RMCategoryName": (
-        "High-level category of the audit or remedial task defining its purpose. "
-        "Examples: 'Pest Control Checks', 'Housekeeping Inspection', "
-        "'Electrical Safety Audit'. Groups audit records by their broad category."
-    ),
-    "RMCategorySubName": (
-        "Sub-category or specific audit checklist item within the main category. "
-        "Examples: 'RODENT ACTIVITY', 'COCKROACH ACTIVITY', "
-        "'FLOOR CLEANLINESS', 'WASHROOM CLEANLINESS', 'DB PANEL CHECK'. "
-        "The most granular classification of the audit type."
-    ),
-    "RMRequestDetailsDesc": (
-        "Descriptive text for the audit or remedial task explaining the work "
-        "required. Examples: 'Pest Control', 'Monthly Housekeeping Audit', "
-        "'Quarterly Electrical Audit'."
+        "Priority level of the audit task. "
+        "Known values: 'P1 Critical', 'P2 High', 'P3 Medium', 'P4 Low'."
     ),
     "FrequencyName": (
-        "How often this audit or remedial task recurs. "
-        "Known values: 'MONTHLY', 'QUARTERLY', 'HALFYEARLY', 'ANNUAL'. "
-        "Use to filter by audit schedule frequency."
+        "How often this audit recurs. "
+        "Known values: 'MONTHLY', 'QUARTERLY', 'HALFYEARLY', 'ANNUAL'."
+    ),
+    "RMCategoryName": (
+        "High-level category of the audit. "
+        "Examples: 'Pest Control Checks', 'Housekeeping Inspection'."
+    ),
+    "RMCategorySubName": (
+        "Specific audit checklist item within the category. "
+        "Examples: 'RODENT ACTIVITY', 'COCKROACH ACTIVITY', "
+        "'FLOOR CLEANLINESS', 'WASHROOM CLEANLINESS'."
+    ),
+    "RMRequestDetailsDesc": (
+        "Description of the audit or remedial task. "
+        "Examples: 'Pest Control', 'Monthly Housekeeping Audit'."
     ),
     "DivisionName": (
-        "Service division responsible for carrying out the audit. "
+        "Service division responsible for the audit. "
         "Examples: 'Housekeeping', 'Electrical System'."
     ),
     "ContractName": (
-        "Maintenance contract under which this audit task falls. "
-        "Examples: 'Facility Management Residential Area', "
-        "'Ground Handling Equipment Maintenance'."
+        "Maintenance contract under which this audit falls. "
+        "Example: 'Facility Management Residential Area'."
+    ),
+    "LocalityCode": (
+        "Short locality code. Examples: 'DM' (Doha), 'RUW' (Ruwi)."
     ),
 
     # --- Personnel ---
     "RMTechName": (
-        "Name of the technician, inspector, or janitor assigned to execute "
-        "the audit or remedial work. Null if not yet assigned, which means "
-        "the task is awaiting staff allocation."
+        "Technician assigned to execute the audit. Null if not yet assigned."
+    ),
+    "RMTechRemarks": (
+        "Remarks entered by the technician after completing the task."
+    ),
+    "RMMaintenanceRemarks": (
+        "Maintenance remarks recorded during or after the task."
+    ),
+    "RMTechnicalFindings": (
+        "Technical findings documented during the audit or inspection."
+    ),
+    "ReworkRemarks": (
+        "Remarks entered if the task was marked for rework."
     ),
 
     # --- Location ---
     "LocalityName": (
-        "Geographic locality or area where the audit is taking place. "
-        "Examples: 'Doha', 'Ajman', 'Dubai'."
+        "Geographic locality. Examples: 'Doha', 'Ruwi'."
     ),
     "BuildingName": (
-        "Building or property being audited. "
-        "Examples: 'Building 1 - Residential High Rise', 'Reef Mall'."
+        "Building being audited. "
+        "Example: 'Building 1 - Residential High Rise'."
     ),
     "FloorName": (
-        "Floor level within the building where the audit or snag is located. "
-        "Examples: 'Floor 1', 'Floor 2', '1st Level'."
+        "Floor within the building. Examples: 'Floor 1', 'Ground Floor'."
     ),
     "SpotName": (
-        "Specific spot, room, or zone within the floor being audited. "
-        "Examples: 'Garbage Room', 'Common Area'."
+        "Specific spot being audited. Examples: 'Garbage Room', 'Common Area'."
     ),
 
     # --- Timestamps ---
     "RMComplainedDateTime": (
-        "Date when the audit or remedial task was created or raised in the system. "
-        "Format: 'DD-MM-YYYY'. Represents the start of the audit lifecycle."
+        "Date the audit task was created. Format: 'DD-MM-YYYY'."
     ),
     "RMTeStartDateTime": (
-        "Date and time when the technician started executing the audit or remedial work. "
-        "Null if the work has not yet started."
+        "Date and time the technician started the audit work. Null if not started."
     ),
     "RMTeEndDateTime": (
-        "Date and time when the technician completed the audit or remedial work. "
-        "Null if the work is still in progress. "
-        "Elapsed time between RMTeStartDateTime and RMTeEndDateTime gives execution duration."
+        "Date and time the technician completed the audit. Null if not done."
     ),
     "RMBDMWOCompletedDate": (
-        "Date when the audit or remedial work order was officially completed and closed. "
-        "Null for open or still-in-progress tasks. This is the final completion date."
+        "Date the audit work order was officially closed. Null if still open."
+    ),
+    "RMXComplaintDate": (
+        "Original complaint/request date and time for this audit record. "
+        "Format: 'DD-MM-YYYY HH:MM:SS'."
     ),
 
     # --- Metrics ---
     "RMMaintenanceHrs": (
-        "Planned or allocated maintenance effort for this audit or remedial task, "
-        "expressed in minutes. Examples: 60 (1 hour), 90 (1.5 hours), 120 (2 hours). "
-        "Represents the budgeted time for the task."
+        "Planned maintenance effort in minutes. Example: 60 (1 hour)."
+    ),
+    "RMManPower": (
+        "Number of personnel allocated for this audit task."
+    ),
+    "RMManHours": (
+        "Total man-hours allocated for this audit task."
+    ),
+    "RMTotalAmount": (
+        "Total cost amount for this audit or remedial task."
+    ),
+
+    # --- Flags ---
+    "IsRMRework": (
+        "Boolean — true if this task has been marked for rework."
+    ),
+    "IsRMWithdraw": (
+        "Boolean — true if this task has been withdrawn."
     ),
 }
