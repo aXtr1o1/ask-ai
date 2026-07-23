@@ -180,6 +180,7 @@ def run_execution(
     filter_fields:    dict,
     modules:          list[str],
     filtered_records: dict,
+    progress_callback: callable = None,
 ) -> dict:
     """
     Main entry point for the execution layer.
@@ -222,6 +223,7 @@ def run_execution(
         google_api_key=settings.GOOGLE_API_KEY,
         temperature=1,
         thinking_budget=512,
+        include_thoughts=True,
     )
 
     schema_text = (
@@ -249,8 +251,47 @@ def run_execution(
             usage.get("total_tokens", 0),
         )
 
+    # Extract thought
+    thought = ""
+    try:
+        ak = getattr(response, "additional_kwargs", {})
+        rm = getattr(response, "response_metadata", {})
+        content = getattr(response, "content", None)
+        
+        if "thought" in ak:
+            thought = str(ak["thought"])
+        elif "thought" in rm:
+            thought = str(rm["thought"])
+        elif isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict) and part.get("type") in ("thought", "thinking"):
+                    thought = str(part.get("text") or part.get("thought", ""))
+                    break
+                elif isinstance(part, dict) and "thought" in part:
+                    thought = str(part["thought"])
+                    break
+        elif isinstance(content, str) and content.strip():
+            import re
+            m = re.search(r'<thought>(.*?)</thought>', content, re.DOTALL | re.IGNORECASE)
+            if m:
+                thought = m.group(1).strip()
+    except Exception as e:
+        logger.warning(f"Failed to extract thought: {e}")
+
+    # Stream the thought immediately before tool execution blocks the thread
+    if thought and progress_callback:
+        progress_callback({
+            "type": "execution_thought",
+            "thought": thought
+        })
+
     raw_text = _extract_text(response.content)
     raw_json = _strip_markdown(raw_text)
+    
+    # Strip <thought> tags before JSON parsing
+    if isinstance(raw_json, str):
+        import re
+        raw_json = re.sub(r'<thought>.*?</thought>', '', raw_json, flags=re.DOTALL | re.IGNORECASE).strip()
 
     try:
         queue = json.loads(raw_json)
@@ -264,7 +305,7 @@ def run_execution(
     log_queue(queue)
 
     # ── Phase 2: Execute the queue (no LLM) ────────────────────────────────
-    result = run_queue(queue, filtered_records)
+    result = run_queue(queue, filtered_records, progress_callback)
 
     # ── Log completion ──────────────────────────────────────────────────────
     step_results = result.get("step_results", {})
@@ -286,5 +327,6 @@ def run_execution(
 
     # We also attach it to the result so the caller (pipeline) has it
     result["formatting_context"] = formatting_context
+    result["thought"] = thought
 
     return result

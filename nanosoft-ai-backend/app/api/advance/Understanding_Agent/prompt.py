@@ -77,6 +77,18 @@ Write query_summary as a rich, self-contained description of what the user wants
     technician names, equipment types) exactly as stated.
   • The Analysis Agent will receive ONLY this summary — make it complete enough
     to act on without seeing the original query.
+
+════════════════════════════════════════════════
+PART 4 — UI STATUS MESSAGES (db_query only)
+════════════════════════════════════════════════
+
+For 'db_query' intents, generate a complete `ui_messages` dictionary containing human-readable sentences for the UI to display at each step of the pipeline.
+  • DO NOT use technical terms like "modules", "intents", or "queries".
+  • DO NOT mention exact raw values or expose sensitive data.
+  • Generate these exact keys: 'understanding_success', 'analysis', 'analysis_success', 'retrieval', 'retrieval_success', 'execution', 'execution_success', 'formatting'.
+  • Example 'analysis': "Extracting location filters for the assets database..."
+  • Example 'analysis_success': "Search parameters successfully configured."
+  • Example 'retrieval_success': "Data retrieved successfully."
 """
 
 

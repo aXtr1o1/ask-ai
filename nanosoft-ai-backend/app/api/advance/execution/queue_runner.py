@@ -172,7 +172,7 @@ def _resolve_args(args: dict, step_results: dict) -> dict:
 # PUBLIC API
 # =============================================================================
 
-def run_queue(queue: list[dict], filtered_records: dict) -> dict:
+def run_queue(queue: list[dict], filtered_records: dict, progress_callback: callable = None) -> dict:
     """
     Execute the queue step by step. Return all step results.
 
@@ -254,6 +254,9 @@ def run_queue(queue: list[dict], filtered_records: dict) -> dict:
         # ── 3. Call the tool's underlying Python function directly ──────────
         # We bypass LangGraph's ToolNode / schema validation so we can inject
         # 'state' (the execution_context) ourselves for tools that need it.
+        if progress_callback:
+            progress_callback(f"Running '{tool_name}' (step {step_idx})...")
+            
         raw_fn = getattr(tool_obj, "func", tool_obj)
         try:
             if _needs_state(tool_obj):

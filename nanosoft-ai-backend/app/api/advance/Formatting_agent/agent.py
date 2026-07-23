@@ -13,7 +13,7 @@ from typing import Any
 
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
-
+from google import genai
 from app.config import settings
 from app.api.advance.Formatting_agent.prompt import SYSTEM_PROMPT
 from app.api.advance.Formatting_agent.tools import FORMATTING_TOOLS
@@ -63,7 +63,9 @@ def format_pipeline_response(
     llm = ChatGoogleGenerativeAI(
         model="gemini-2.5-flash",
         google_api_key=settings.GOOGLE_API_KEY,
-        temperature=0.7,  
+        temperature=0.7,
+        thinking_budget=512,
+        include_thoughts=True,
     )
     llm_with_tools = llm.bind_tools(FORMATTING_TOOLS)
 
@@ -124,10 +126,40 @@ def format_pipeline_response(
         logger.error("Formatting LLM failed: %s. Falling back to default.", e)
         chosen_reason = f"Fallback: LLM failed to format ({e})"
 
+    # Extract thought
+    thought = ""
+    try:
+        # If we have llm_response from llm_with_tools
+        if 'llm_response' in locals() and llm_response:
+            ak = getattr(llm_response, "additional_kwargs", {})
+            rm = getattr(llm_response, "response_metadata", {})
+            content = getattr(llm_response, "content", None)
+            
+            if "thought" in ak:
+                thought = str(ak["thought"])
+            elif "thought" in rm:
+                thought = str(rm["thought"])
+            elif isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict) and part.get("type") in ("thought", "thinking"):
+                        thought = str(part.get("text") or part.get("thought", ""))
+                        break
+                    elif isinstance(part, dict) and "thought" in part:
+                        thought = str(part["thought"])
+                        break
+            elif isinstance(content, str) and content.strip():
+                import re
+                m = re.search(r'<thought>(.*?)</thought>', content, re.DOTALL)
+                if m:
+                    thought = m.group(1).strip()
+    except Exception as e:
+        logger.warning(f"Failed to extract thought: {e}")
+
     return {
         "response_type": chosen_response_type,
         "layout": chosen_layout,
         "format_reason": chosen_reason,
         "explanation": chosen_explanation,
-        "formatted_answer": formatted_answer
+        "formatted_answer": formatted_answer,
+        "thought": thought
     }

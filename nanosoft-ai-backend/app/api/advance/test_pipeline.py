@@ -320,7 +320,9 @@ if __name__ == "__main__":
         import uvicorn
         from fastapi import FastAPI
         from fastapi.middleware.cors import CORSMiddleware
+        from fastapi.responses import StreamingResponse
         from pydantic import BaseModel
+        from app.api.advance.stream.stream_handler import run_query_stream
 
         app = FastAPI()
         app.add_middleware(
@@ -351,6 +353,10 @@ if __name__ == "__main__":
                     "format_reason": "Internal server error",
                     "formatted_answer": str(exc)
                 }
+
+        @app.post("/api/query_stream")
+        def api_query_stream(request: QueryRequest):
+            return StreamingResponse(run_query_stream(request.query), media_type="application/x-ndjson")
 
         uvicorn.run(app, host="0.0.0.0", port=8000)
 

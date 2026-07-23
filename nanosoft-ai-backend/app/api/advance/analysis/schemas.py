@@ -55,3 +55,7 @@ class AnalysisOutput(BaseModel):
             "These conditions narrow the retrieved records before analysis begins."
         )
     )
+    thought: str = Field(
+        default="",
+        description="Your internal reasoning and step-by-step thinking process before generating the final output. Always provide your complete thought process here."
+    )

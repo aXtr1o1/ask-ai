@@ -55,3 +55,20 @@ class UnderstandingOutput(BaseModel):
             "Null for db_query and web_search."
         )
     )
+
+    thought: str = Field(
+        default="",
+        description="Your internal reasoning and step-by-step thinking process before generating the final output. Always provide your complete thought process here."
+    )
+
+    ui_messages: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "A dictionary of short, human-readable UI sentences explaining each step of the pipeline. "
+            "Required keys for db_query: 'understanding_success', 'analysis', 'analysis_success', "
+            "'retrieval', 'retrieval_success', 'execution', 'execution_success', 'formatting'. "
+            "Example 'analysis': 'Extracting location filters for the assets database...' "
+            "Do not mention exact values or share sensitive data in any sentence."
+        )
+    )
+

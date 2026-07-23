@@ -169,6 +169,10 @@
       100% { background-position: 0% 50%; }
     }
 
+    @keyframes spin {
+      100% { transform: rotate(360deg); }
+    }
+
     .landing-subtitle {
       font-size: 16px;
       color: var(--text-secondary);
@@ -365,7 +369,7 @@
       stroke-linejoin: round;
     }
 
-    /* GRAPH Layout styling */
+    /* GRAPH Layout styling */ 
     .graph-container {
       background: var(--bg-code);
       border: 1px solid var(--border-color);
@@ -414,6 +418,70 @@
       to {
         stroke-dashoffset: -40;
       }
+    }
+        /* Thinking Step Fade-In Animation */
+    @keyframes stepFadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    
+    .thinking-step-item {
+      animation: stepFadeIn 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+    }
+
+    .thinking-agent-block {
+      padding: 12px 14px;
+      background: rgba(212, 175, 55, 0.03);
+      border: 1px solid rgba(212, 175, 55, 0.12);
+      border-radius: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .thinking-agent-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #D4AF37;
+      font-weight: 600;
+      font-family: var(--font-heading);
+      font-size: 13px;
+    }
+
+    .thinking-agent-summary {
+      color: var(--text-secondary);
+      white-space: pre-wrap;
+      line-height: 1.5;
+      font-size: 13px;
+    }
+
+    .thinking-detail-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: 2px;
+    }
+
+    .thinking-detail-item {
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+      padding-left: 4px;
+      color: var(--text-secondary);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .thinking-detail-label {
+      color: #f5d36b;
+      font-weight: 600;
+      flex: 0 0 auto;
+    }
+
+    .thinking-detail-value {
+      flex: 1 1 auto;
+      word-break: break-word;
     }
   </style>
 </head>
@@ -627,51 +695,144 @@
              .replace(/'/g, "&#039;");
     }
 
-    // Stream simulation
-    function simulateStreamingResponse(query, responseObj) {
-      if (isStreamingActive) return;
-      isStreamingActive = true;
-      
-      const wrapper = document.getElementById("content-wrapper");
-      // Note: We don't clear wrapper here because sendQuery already cleared it and added the user bubble.
-      
-      // AI wrapper
-      const aiDiv = document.createElement("div");
-      aiDiv.className = "message-ai";
-      wrapper.appendChild(aiDiv);
-      
-      // Stream just the explanation, ensure raw data (formatted_answer) is never streamed
-      const answerStr = responseObj.explanation || "Processing data layout...";
-      let index = 0;
-      const speed = 6; // chars per tick
-      
-      const interval = setInterval(() => {
-        try {
-          if (index >= answerStr.length) {
-            clearInterval(interval);
-            isStreamingActive = false;
-            // Final clean render of parsed output
-            renderChatResponse(query, responseObj, aiDiv);
-            return;
-          }
-          
-          index += speed;
-          const currentText = answerStr.substring(0, index);
-            
-          aiDiv.innerHTML = `
-            <div style="display: inline-block; width: 100%; position: relative;">
-              <div style="font-size: 14px; line-height: 1.6; color: var(--text-secondary); white-space: pre-wrap;">${escapeHtml(currentText)}</div>
-              <span class="stream-cursor"></span>
-            </div>
-          `;
-          wrapper.parentElement.scrollTop = wrapper.parentElement.scrollHeight;
-        } catch (err) {
-          clearInterval(interval);
-          isStreamingActive = false;
-          aiDiv.innerHTML = `<div style="color:red; background:#330000; padding:10px; border-radius:5px;"><strong>Stream Error:</strong> ${err.message}<br/>${err.stack}</div>`;
-        }
-      }, 30);
+    function normalizeThinkingValue(value) {
+      if (value === null || value === undefined || value === "") {
+        return "";
+      }
+
+      if (Array.isArray(value)) {
+        return value.map(normalizeThinkingValue).filter(Boolean).join(", ");
+      }
+
+      if (typeof value === "object") {
+        return Object.entries(value)
+          .map(([key, val]) => `${key}: ${normalizeThinkingValue(val)}`)
+          .join(" | ");
+      }
+
+      return String(value);
     }
+
+    function appendThinkingContext(contentDiv, stageLabel, thinkingContext, fallbackDetail) {
+      if (!contentDiv) return;
+
+      const agentName = thinkingContext?.agent || stageLabel || "Agent";
+      const summary = thinkingContext?.summary || fallbackDetail || `${agentName} processing...`;
+      const details = Array.isArray(thinkingContext?.details) ? thinkingContext.details : [];
+
+      const block = document.createElement("div");
+      block.className = "thinking-agent-block thinking-step-item";
+
+      const title = document.createElement("div");
+      title.className = "thinking-agent-title";
+      title.innerHTML = `
+        <svg class="btn-svg" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"/><path d="M12 6v6l4 2"/></svg>
+        <span>${escapeHtml(agentName)}</span>
+      `;
+      block.appendChild(title);
+
+      const summaryDiv = document.createElement("div");
+      summaryDiv.className = "thinking-agent-summary";
+      summaryDiv.textContent = summary;
+      block.appendChild(summaryDiv);
+
+      if (details.length > 0) {
+        const detailList = document.createElement("div");
+        detailList.className = "thinking-detail-list";
+
+        details.forEach((item) => {
+          const row = document.createElement("div");
+          row.className = "thinking-detail-item";
+
+          const label = document.createElement("span");
+          label.className = "thinking-detail-label";
+          label.textContent = `${item.label}:`;
+
+          const value = document.createElement("span");
+          value.className = "thinking-detail-value";
+          value.textContent = normalizeThinkingValue(item.value);
+
+          row.appendChild(label);
+          row.appendChild(value);
+          detailList.appendChild(row);
+        });
+
+        block.appendChild(detailList);
+      }
+
+      const fullThought = thinkingContext?.full_thought;
+      if (fullThought && fullThought !== summary) {
+        const detailList = document.createElement("div");
+        detailList.className = "thinking-detail-list";
+
+        const row = document.createElement("div");
+        row.className = "thinking-detail-item";
+        row.style.flexDirection = "column";
+        row.style.alignItems = "flex-start";
+        row.style.gap = "4px";
+        
+        row.innerHTML = `
+          <span class="thinking-detail-label">Full Thought:</span>
+          <span class="thinking-detail-value" style="white-space: pre-wrap; margin-left: 0; margin-top: 4px;">${escapeHtml(fullThought)}</span>
+        `;
+        detailList.appendChild(row);
+        block.appendChild(detailList);
+      } else if (fallbackDetail && fallbackDetail !== summary) {
+        const detailList = document.createElement("div");
+        detailList.className = "thinking-detail-list";
+
+        const row = document.createElement("div");
+        row.className = "thinking-detail-item";
+        row.innerHTML = `
+          <span class="thinking-detail-label">detail:</span>
+          <span class="thinking-detail-value">${escapeHtml(fallbackDetail)}</span>
+        `;
+        detailList.appendChild(row);
+        block.appendChild(detailList);
+      }
+
+      contentDiv.appendChild(block);
+    }
+
+    // Stream simulation
+   function simulateStreamingResponse(query, responseObj) {
+  if (isStreamingActive) return;
+  isStreamingActive = true;
+  
+  const wrapper = document.getElementById("content-wrapper");
+  
+  // 1. Create the Thinking Bubble first
+  const thinkDiv = document.createElement("div");
+  thinkDiv.id = "thinking-bubble";
+  thinkDiv.className = "message-ai";
+  thinkDiv.innerHTML = `
+      <div id="thinking-content" style="display: flex; flex-direction: column; gap: 10px;"></div>
+  `;
+  wrapper.appendChild(thinkDiv);
+
+    // 2. Simulate streaming the "reasoning"
+  const reasoningText = "Analyzing query intent...\nIdentifying key entities: 'Q1 2026', 'Revenue'.\nSelecting TABLE layout for financial comparison.";
+  const contentDiv = document.getElementById("thinking-content");
+  let idx = 0;
+  
+  const thinkInterval = setInterval(() => {
+      if (idx >= reasoningText.length) {
+          clearInterval(thinkInterval);
+          // 3. Once thinking is done, remove it and show the real answer
+          setTimeout(() => {
+              if(thinkDiv) thinkDiv.remove();
+              renderChatResponse(query, responseObj);
+              isStreamingActive = false;
+          }, 800); // Small pause before showing final result
+          return;
+      }
+      if (contentDiv) {
+          contentDiv.textContent += reasoningText.charAt(idx);
+          idx++;
+          wrapper.parentElement.scrollTop = wrapper.parentElement.scrollHeight;
+      }
+  }, 20);
+}
 
     function escapeHtml(text) {
       return text
@@ -702,13 +863,35 @@
     }
 
     // Markdown / Plain Text renderer fallback
-    function renderMarkdownLayout(text) {
-      // Basic formatting for bold and newlines
-      let formatted = escapeHtml(text || "")
-        .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
-        .replace(/\n/g, "<br/>");
+        function renderMarkdownLayout(text) {
+      // ✅ FIX: Check if text is a JSON object that represents a simple result
+      try {
+        const obj = JSON.parse(text);
         
-      return `<div style="font-size: 14px; line-height: 1.6; color: var(--text-secondary); white-space: pre-wrap; font-family: var(--font-body);">${formatted}</div>`;
+        // If it has a final_value or count, display just that number
+        if (obj.step_1 && obj.step_1.final_value !== undefined) {
+            return `<div style="font-weight: 700; color: var(--accent-gold-light); font-size: 24px; padding: 8px 0;">
+                      ${obj.step_1.final_value}
+                    </div>`;
+        }
+        
+        // If it's a simple count object
+        if (typeof obj === "object" && !Array.isArray(obj) && Object.keys(obj).length <= 3) {
+            const val = obj.count || obj.value || obj.result || JSON.stringify(obj);
+            return `<div style="font-weight: 600; color: var(--accent-gold-light); font-size: 18px;">${val}</div>`;
+        }
+        
+        // Otherwise render as JSON code block
+        return renderJsonLayout(text, true);
+      } catch (e) {
+        // Not JSON, continue with normal Markdown rendering
+      }
+
+      return `
+        <div style="width: 100%; word-break: break-word; line-height: 1.6;">
+          ${parseMarkdownBlocks(text)}
+        </div>
+      `;
     }
 
     // Main Renderer for the Envelope Response
@@ -901,6 +1084,18 @@
       } else {
         content.style.maxHeight = content.scrollHeight + "px";
         arrow.style.transform = "rotate(180deg)";
+      }
+    }
+
+    function toggleThinking(btn) {
+      const content = btn.nextElementSibling;
+      const arrow = btn.querySelector(".accordion-arrow");
+      if (content.style.display === "none") {
+        content.style.display = "flex";
+        arrow.style.transform = "rotate(180deg)";
+      } else {
+        content.style.display = "none";
+        arrow.style.transform = "rotate(0deg)";
       }
     }
 
@@ -1398,6 +1593,8 @@
     }
 
     // Send query simulator
+      // Send query handler - Updated to match backend "running" status
+        // Send query handler - Premium Thinking Bubble with Fade Animation
     async function sendQuery() {
       const input = document.getElementById("query-input");
       const text = input.value.trim();
@@ -1423,71 +1620,189 @@
       loadingDiv.className = "message-ai";
       loadingDiv.id = "loading-message-ai";
       loadingDiv.innerHTML = `
-        <div style="display: inline-flex; gap: 6px; padding: 12px; align-items: center; background: rgba(212,175,55,0.1); border-radius: 8px;">
-          <span class="stream-cursor" style="height: 12px;"></span>
-          <span id="loading-agent-text" style="font-size: 13px; color: #D4AF37;">Understanding Agent...</span>
+        <div style="display: flex; flex-direction: column; padding: 0; background: transparent; width: 100%;">
+          <button onclick="toggleThinking(this)" style="display: flex; align-items: center; gap: 8px; background: rgba(212,175,55,0.1); border: 1px solid rgba(212,175,55,0.2); border-radius: 8px; padding: 8px 12px; cursor: pointer; color: #D4AF37; font-family: inherit; font-size: 13px; text-align: left; outline: none; width: fit-content; transition: background 0.2s;">
+            <!-- Claude-like Thinking Icon -->
+            <svg class="thinking-icon" viewBox="0 0 24 24" style="width: 16px; height: 16px; stroke: currentColor; stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; animation: spin 2s linear infinite;">
+              <path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/>
+            </svg>
+            <span id="loading-agent-text" style="font-weight: 500; letter-spacing: 0.3px;">Thinking...</span>
+          </button>
+          <div id="loading-agent-steps" style="display: flex; flex-direction: column; gap: 6px; margin-top: 8px; padding-left: 12px; border-left: 2px solid rgba(212,175,55,0.2); margin-left: 12px;">
+          </div>
         </div>
       `;
       wrapper.appendChild(loadingDiv);
       wrapper.parentElement.scrollTop = wrapper.parentElement.scrollHeight;
 
-      // Lazy cycler: stops at last agent, self-cleans when removed
-      let loadStep = 0;
-      const loadStates = [
-        "Understanding Agent...", 
-        "Analysis Agent...", 
-        "Retrieval Layer...", 
-        "Execution Agent..."
-      ];
-      const loadInterval = setInterval(() => {
-        const span = document.getElementById("loading-agent-text");
-        if (!span || ++loadStep >= loadStates.length - 1) clearInterval(loadInterval);
-        if (span) span.textContent = loadStates[Math.min(loadStep, loadStates.length - 1)];
-      }, 2000);
-      const simulateStream = true;
-
       try {
-        const res = await fetch("http://localhost:8000/api/query", {
+        const res = await fetch("http://localhost:8000/api/query_stream", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ query: text })
         });
         
-        const responseObj = await res.json();
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let done = false;
+        let buffer = "";
+        let currentStage = "";
         
-        // Remove loading div
-        const ld = document.getElementById("loading-message-ai");
-        if (ld) ld.remove();
-        
-        if (simulateStream) {
-          // Pass the wrapper innerHTML handling to the stream simulator
-          // BUT wait, simulateStreamingResponse clears the wrapper!
-          // We must NOT clear the wrapper in simulateStreamingResponse if we want chat history, 
-          // or if we clear it, we just let it redraw the user message.
-          simulateStreamingResponse(text, responseObj);
-        } else {
-          renderChatResponse(text, responseObj);
+        while (!done) {
+          const { value, done: readerDone } = await reader.read();
+          done = readerDone;
+          if (value) {
+            buffer += decoder.decode(value, { stream: true });
+            let newlineIdx;
+            while ((newlineIdx = buffer.indexOf('\n')) >= 0) {
+              const line = buffer.slice(0, newlineIdx).trim();
+              buffer = buffer.slice(newlineIdx + 1);
+              if (!line) continue;
+              
+              try {
+                const data = JSON.parse(line);
+                
+                // Handle backend-driven streaming events
+                if (data.status === "running_start") {
+                    currentStage = data.stage;
+                    const stepsContainer = document.getElementById("loading-agent-steps");
+                    if (stepsContainer) {
+                        // Hide the "Thinking..." button
+                        const btn = stepsContainer.previousElementSibling;
+                        if (btn && btn.tagName === 'BUTTON') btn.style.display = 'none';
+                        
+                        // Clear old agent container or fade it out
+                        const oldChild = stepsContainer.firstElementChild;
+                        if (oldChild) oldChild.remove();
+                        
+                        const stepDiv = document.createElement("div");
+                        stepDiv.style.transition = "opacity 0.3s ease";
+                        stepDiv.style.opacity = '1';
+                        stepDiv.style.display = 'flex';
+                        stepDiv.style.flexDirection = 'column';
+                        
+                        const streamContainer = document.createElement("div");
+                        streamContainer.id = "active-stream-container";
+                        streamContainer.dataset.wordCount = "0";
+                        streamContainer.style.background = "rgba(0,0,0,0.2)";
+                        streamContainer.style.border = "1px solid rgba(212,175,55,0.15)";
+                        streamContainer.style.borderRadius = "6px";
+                        streamContainer.style.padding = "10px 12px";
+                        streamContainer.style.marginTop = "4px";
+                        streamContainer.style.display = "flex";
+                        streamContainer.style.flexDirection = "column";
+                        
+                        const currentLine = document.createElement("span");
+                        currentLine.className = "active-stream-line";
+                        currentLine.style.fontFamily = "var(--font-mono)";
+                        currentLine.style.fontSize = "12px";
+                        currentLine.style.color = "#94a3b8";
+                        currentLine.style.lineHeight = "1.6";
+                        currentLine.style.whiteSpace = "pre-wrap";
+                        currentLine.style.transition = "all 1s ease-in-out";
+                        
+                        streamContainer.appendChild(currentLine);
+                        stepDiv.appendChild(streamContainer);
+                        stepsContainer.appendChild(stepDiv);
+                    }
+                }
+                else if (data.status === "running_chunk") {
+                    const streamContainer = document.getElementById("active-stream-container");
+                    if (streamContainer) {
+                        let activeLine = streamContainer.querySelector(".active-stream-line:last-child");
+                        if (!activeLine) return;
+                        
+                        let wc = parseInt(streamContainer.dataset.wordCount || "0");
+                        
+                        // If sentence ends or line is long, create new line and fade old ones
+                        if (wc >= 15 || (data.word.trim().match(/[.!?]$/) && wc > 5)) {
+                            const newLine = document.createElement("span");
+                            newLine.className = "active-stream-line";
+                            newLine.style.fontFamily = "var(--font-mono)";
+                            newLine.style.fontSize = "12px";
+                            newLine.style.color = "#94a3b8";
+                            newLine.style.lineHeight = "1.6";
+                            newLine.style.whiteSpace = "pre-wrap";
+                            newLine.style.transition = "all 1s ease-in-out";
+                            streamContainer.appendChild(newLine);
+                            
+                            // Fade older lines
+                            const lines = streamContainer.querySelectorAll(".active-stream-line");
+                            const totalLines = lines.length;
+                            lines.forEach((line, i) => {
+                                let age = totalLines - 1 - i;
+                                if (age === 0) {
+                                    line.style.opacity = "1";
+                                } else if (age === 1) {
+                                    line.style.opacity = "0.5";
+                                } else {
+                                    line.style.opacity = "0";
+                                    line.style.maxHeight = "0px";
+                                    line.style.margin = "0px";
+                                    line.style.padding = "0px";
+                                    line.style.overflow = "hidden";
+                                }
+                            });
+                            
+                            activeLine = newLine;
+                            wc = 0;
+                        }
+                        
+                        const wordSpan = document.createElement("span");
+                        wordSpan.textContent = data.word;
+                        wordSpan.style.opacity = "0";
+                        wordSpan.style.transition = "opacity 0.15s ease-in";
+                        activeLine.appendChild(wordSpan);
+                        
+                        // Trigger reflow
+                        void wordSpan.offsetWidth;
+                        wordSpan.style.opacity = "1";
+                        
+                        streamContainer.dataset.wordCount = (wc + 1).toString();
+                        
+                        const wrapper = document.getElementById("content-wrapper");
+                        wrapper.parentElement.scrollTop = wrapper.parentElement.scrollHeight;
+                    }
+                }
+                else if (data.status === "running_end") {
+                    // Stream finished for this agent
+                }
+                else if (data.status === "running") {
+                    // Fallback if full thought is sent directly
+                } 
+                else if (data.status === "complete") {
+                    // Smoothly remove loading bubble before showing answer
+                    const tb = document.getElementById("loading-message-ai");
+                    if (tb) {
+                        tb.style.transition = "opacity 0.3s ease, transform 0.3s ease";
+                        tb.style.opacity = "0";
+                        tb.style.transform = "translateY(-8px)";
+                        setTimeout(() => tb.remove(), 300);
+                    } 
+
+                    // Render final response
+                    renderChatResponse(text, data.result);
+                }
+              } catch(e) {
+                console.error("Parse error on stream chunk line:", line, e);
+              }
+            }
+          }
         }
       } catch (e) {
         console.error(e);
+        const tb = document.getElementById("thinking-bubble");
+        if (tb) tb.remove();
+
         const errorObj = {
           response_type: "error",
           layout: "PLAIN_TEXT",
           format_reason: "Connection failed",
           formatted_answer: "Failed to connect to backend API. Please make sure test_pipeline.py is running with --api flag."
         };
-        
-        const ld = document.getElementById("loading-message-ai");
-        if (ld) ld.remove();
-
-        if (simulateStream) {
-          simulateStreamingResponse(text, errorObj);
-        } else {
-          renderChatResponse(text, errorObj);
-        }
+        renderChatResponse(text, errorObj);
       }
     }
-
     // Init with Welcome screen
     renderWelcome();
   </script>

@@ -53,10 +53,11 @@ def classify_query(query: str) -> dict:
         google_api_key=settings.GOOGLE_API_KEY,
         temperature=1,
         thinking_budget=512,
+        include_thoughts=True,
     )
     # include_raw=True gives us the raw AIMessage (with usage_metadata)
     # alongside the parsed Pydantic output
-    structured_llm = llm.with_structured_output(UnderstandingOutput, include_raw=True)
+    structured_llm = llm.with_structured_output(UnderstandingOutput, include_raw=True, method="json_mode")
 
     messages = [
         SystemMessage(content=_SYSTEM_PROMPT),
@@ -72,6 +73,37 @@ def classify_query(query: str) -> dict:
         usage.get("output_tokens", 0),
         usage.get("total_tokens",  0),
     )
+
+    # Extract thought
+    thought = ""
+    raw_msg = result.get("raw")
+    if raw_msg:
+        try:
+            ak = getattr(raw_msg, "additional_kwargs", {})
+            rm = getattr(raw_msg, "response_metadata", {})
+            content = getattr(raw_msg, "content", None)
+            
+            if "thought" in ak:
+                thought = str(ak["thought"])
+            elif "thought" in rm:
+                thought = str(rm["thought"])
+            elif isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict) and part.get("type") in ("thought", "thinking"):
+                        thought = str(part.get("text") or part.get("thought", ""))
+                        break
+                    elif isinstance(part, dict) and "thought" in part:
+                        thought = str(part["thought"])
+                        break
+            elif isinstance(content, str) and content.strip():
+                import re
+                m = re.search(r'<thought>(.*?)</thought>', content, re.DOTALL)
+                if m:
+                    thought = m.group(1).strip()
+                else:
+                    thought = content.strip()
+        except Exception as e:
+            logger.warning(f"Failed to extract thought: {e}")
 
     # -------------------------------------------------------------------------
     # Web search grounding — only when intent is web_search
@@ -103,7 +135,9 @@ def classify_query(query: str) -> dict:
     return {
         "intent":              response.intent,
         "query_summary":       response.query_summary,
-        "modules":             response.modules,          # <-- new
+        "modules":             response.modules,
         "web_search_summary":  web_search_summary,
         "general_response":    response.general_response,
+        "thought":             getattr(response, "thought", ""),
+        "ui_messages":         getattr(response, "ui_messages", {}),
     }

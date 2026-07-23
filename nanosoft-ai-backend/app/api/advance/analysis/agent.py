@@ -73,10 +73,11 @@ def analyze_query(query_summary: str, modules: list[str]) -> dict:
         google_api_key=settings.GOOGLE_API_KEY,
         temperature=1,
         thinking_budget=512,
+        include_thoughts=True,
     )
     # include_raw=True gives us the raw AIMessage (with usage_metadata)
     # alongside the parsed Pydantic output
-    structured_llm = llm.with_structured_output(AnalysisOutput, include_raw=True)
+    structured_llm = llm.with_structured_output(AnalysisOutput, include_raw=True, method="json_mode")
 
     messages = [
         SystemMessage(content=system_prompt),
@@ -92,6 +93,37 @@ def analyze_query(query_summary: str, modules: list[str]) -> dict:
         usage.get("output_tokens", 0),
         usage.get("total_tokens",  0),
     )
+
+    # Extract thought
+    thought = ""
+    raw_msg = result.get("raw")
+    if raw_msg:
+        try:
+            ak = getattr(raw_msg, "additional_kwargs", {})
+            rm = getattr(raw_msg, "response_metadata", {})
+            content = getattr(raw_msg, "content", None)
+            
+            if "thought" in ak:
+                thought = str(ak["thought"])
+            elif "thought" in rm:
+                thought = str(rm["thought"])
+            elif isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict) and part.get("type") in ("thought", "thinking"):
+                        thought = str(part.get("text") or part.get("thought", ""))
+                        break
+                    elif isinstance(part, dict) and "thought" in part:
+                        thought = str(part["thought"])
+                        break
+            elif isinstance(content, str) and content.strip():
+                import re
+                m = re.search(r'<thought>(.*?)</thought>', content, re.DOTALL)
+                if m:
+                    thought = m.group(1).strip()
+                else:
+                    thought = content.strip()
+        except Exception as e:
+            logger.warning(f"Failed to extract thought: {e}")
 
     # -------------------------------------------------------------------------
     # Validate — strip any hallucinated modules or fields
@@ -120,4 +152,5 @@ def analyze_query(query_summary: str, modules: list[str]) -> dict:
         "modules":       valid_modules,
         "filter_fields": valid_filter_fields,
         "filter_values": valid_filter_values,
+        "thought":       getattr(response, "thought", ""),
     }
