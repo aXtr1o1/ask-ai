@@ -8,6 +8,7 @@ from typing import AsyncGenerator
 
 from app.api.advance.Understanding_Agent.agent import classify_query
 from app.api.advance.analysis.agent import analyze_query
+from app.api.advance.Understanding_Agent.conversation_memory import conversation_memory
 from app.api.advance.retrieval.retrieval import get_filtered_records
 from app.api.advance.execution.agent import run_execution
 from app.api.advance.Formatting_agent.agent import format_pipeline_response
@@ -83,10 +84,19 @@ async def run_query_stream(query: str, session_id: str = "default") -> AsyncGene
             user_specified_format = understanding.get("user_specified_format", False)
 
             if intent in ("general", "web_search"):
+                answer = understanding.get("general_response") or understanding.get("web_search_summary") or ""
+                
+                # Save general/web_search interaction into memory
+                conversation_memory.add_conversation(
+                    session_id=session_id,
+                    user_query=query,
+                    assistant_response=answer,
+                )
+
                 loop.call_soon_threadsafe(q.put_nowait, {"type": "result", "data": {
                     "response_type":    intent,
                     "layout":           "PLAIN_TEXT",
-                    "formatted_answer": understanding.get("general_response") or understanding.get("web_search_summary") or "",
+                    "formatted_answer": answer,
                 }})
                 return
 
@@ -104,10 +114,11 @@ async def run_query_stream(query: str, session_id: str = "default") -> AsyncGene
                     flat_filter_values.update(fv)
 
             filtered_records = get_filtered_records(
-                modules=modules,
-                filter_fields=filter_fields,
-                filter_values=flat_filter_values,
-                module_filter_values=filter_values,
+                modules=analysis.get("modules", []),
+                filter_fields=analysis.get("filter_fields", {}),
+                filter_values={},
+                module_filter_values=analysis.get("filter_values", {}),
+                limit=analysis.get("limit"),
             )
 
             total_records = sum(len(r) for r in filtered_records.values())

@@ -20,7 +20,7 @@ general and web_search are returned directly to the caller.
 import logging
 import time
 
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 from app.api.advance.Understanding_Agent.conversation_memory import conversation_memory
 from google import genai
@@ -69,15 +69,23 @@ def classify_query(query: str, session_id: str) -> dict:
 
     # Retrieve previous conversation
     history = conversation_memory.get_history(session_id)
+    logger.info("========== Conversation Retrieve ==========")
+    logger.info("Session ID : %s", session_id)
+    logger.info("History    : %s", history)
+    logger.info("===========================================")
 
     # Build messages
     messages = [
         SystemMessage(content=_SYSTEM_PROMPT),
     ]
 
-    # Add previous conversation if available
+    # Add previous conversation dynamically converting dicts to LangChain Message instances
     if history:
-        messages.extend(history)
+        for msg in history:
+            if msg.get("role") == "user":
+                messages.append(HumanMessage(content=msg["content"]))
+            elif msg.get("role") == "assistant":
+                messages.append(AIMessage(content=msg["content"]))
 
     # Add current query
     messages.append(
@@ -85,6 +93,10 @@ def classify_query(query: str, session_id: str) -> dict:
     )
 
     start_llm = time.perf_counter()
+    logger.info("========== Messages Sent to Gemini ==========")
+    for i, msg in enumerate(messages):
+        logger.info("%d : %s", i, type(msg).__name__)
+    logger.info("=============================================")
     result = structured_llm.invoke(messages)
     llm_time    = time.perf_counter() - start_llm
 

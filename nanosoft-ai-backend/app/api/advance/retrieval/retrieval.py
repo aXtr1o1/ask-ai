@@ -91,6 +91,7 @@ def get_filtered_records(
     filter_fields: dict[str, dict],         # { module → { column_name → description } }
     filter_values: dict[str, Any],          # { column_name → value } from HTTP request (flat, all modules)
     module_filter_values: dict[str, dict] | None = None,  # { module → { column → value } } from question definition
+    limit: int | None = None,
 ) -> dict[str, list[dict]]:
     """
     For each module:
@@ -102,6 +103,7 @@ def get_filtered_records(
 
     filter_values      — flat dict applied to all modules: {"BuildingName": "Tower A"}
     module_filter_values — per-module pre-filters: {"bdm": {"WoStatus": "Closed"}, "ppm": {"PPMStatus": "Closed"}}
+    limit              — max records to retrieve from database
     """
     output: dict[str, list[dict]] = {}
 
@@ -115,19 +117,19 @@ def get_filtered_records(
 
             if module == "assets":
                 from app.api.advance.retrieval.assets import retrieve as assets_retrieve
-                raw_records = assets_retrieve(filter_values, this_module_filters)
+                raw_records = assets_retrieve(filter_values, this_module_filters, limit=limit)
             elif module == "bdm":
                 from app.api.advance.retrieval.bdm import retrieve as bdm_retrieve
-                raw_records = bdm_retrieve(filter_values, this_module_filters)
+                raw_records = bdm_retrieve(filter_values, this_module_filters, limit=limit)
             elif module == "fa":
                 from app.api.advance.retrieval.fa import retrieve as fa_retrieve
-                raw_records = fa_retrieve(filter_values, this_module_filters)
+                raw_records = fa_retrieve(filter_values, this_module_filters, limit=limit)
             elif module == "ppm":
                 from app.api.advance.retrieval.ppm import retrieve as ppm_retrieve
-                raw_records = ppm_retrieve(filter_values, this_module_filters)
+                raw_records = ppm_retrieve(filter_values, this_module_filters, limit=limit)
             elif module == "sb":
                 from app.api.advance.retrieval.sb import retrieve as sb_retrieve
-                raw_records = sb_retrieve(filter_values, this_module_filters)
+                raw_records = sb_retrieve(filter_values, this_module_filters, limit=limit)
         except Exception as e:
             logger.warning("[RETRIEVAL] Retrieval failed for module %s: %s", module, e)
             

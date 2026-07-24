@@ -30,6 +30,14 @@ class AnalysisOutput(BaseModel):
         description="A brief explanation of why you selected the specific modules, fields, and filter values based on the query."
     )
 
+    limit: int | None = Field(
+        default=None,
+        description=(
+            "Maximum number of records to return if the user explicitly specifies a numeric limit "
+            "in the query (e.g. 'top 5', 'first 10', 'give me 5 assets'). Set to null if no specific quantity/count is requested."
+        )
+    )
+
     modules: list[str] = Field(
         default_factory=list,
         description=(

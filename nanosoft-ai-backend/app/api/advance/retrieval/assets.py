@@ -8,7 +8,8 @@ logger = logging.getLogger("advance.retrieval.assets")
 
 def retrieve(
     filter_values: dict,
-    module_filter_values: dict | None = None
+    module_filter_values: dict | None = None,
+    limit: int | None = None,
 ) -> list[dict]:
     # Combine HTTP-level filters + this module's pre-filters
     filters = {}
@@ -43,7 +44,7 @@ def retrieve(
         "user_name": "poc",
         "user_id": "1",
         "offset": 0,
-        "limit": None,
+        "limit": limit,
         "is_aggregate": False
     }
 

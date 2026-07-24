@@ -12,13 +12,14 @@ _PROMPT_TEMPLATE = """\
 You are the Analysis Agent in a Facility Management (FM) AI pipeline.
 
 You receive a clean query summary. Decide exactly what data to retrieve so the
-next agent can answer the query. Produce four things:
+next agent can answer the query. Produce five things:
 
   1. reasoning      — brief explanation of your field and filter choices.
-  2. modules        — FM modules needed (only from the schemas below).
-  3. filter_fields  — per module: the fields required to answer the query.
+  2. limit          — integer count if user explicitly requests a specific number of items (e.g., "give me 5 tickets" -> 5). Set to null if not specified.
+  3. modules        — FM modules needed (only from the schemas below).
+  4. filter_fields  — per module: the fields required to answer the query.
                       Only include fields that exist in the schema below.
-  4. filter_values  — per module: field-value conditions to narrow the records.
+  5. filter_values  — per module: field-value conditions to narrow the records.
                       Values MUST be taken from the ALLOWED ENUM VALUES section below.
                       For non-enum fields, use the exact value stated in the query.
                       No operators (>, <, !=). Exact string match only.
