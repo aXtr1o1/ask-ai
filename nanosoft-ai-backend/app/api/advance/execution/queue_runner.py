@@ -42,6 +42,7 @@ from app.api.advance.execution.tools import (
     sort_and_limit,
     group_by_and_aggregate,
     count_records_multi,
+    get_record_fields,
     final_answer_tool,
 )
 from app.api.advance.execution.agent_logger import log_step
@@ -66,6 +67,7 @@ TOOL_REGISTRY: dict[str, Any] = {
     "sort_and_limit":          sort_and_limit,
     "group_by_and_aggregate":  group_by_and_aggregate,
     "count_records_multi":     count_records_multi,
+    "get_record_fields":       get_record_fields,
     "final_answer_tool":       final_answer_tool,
 }
 

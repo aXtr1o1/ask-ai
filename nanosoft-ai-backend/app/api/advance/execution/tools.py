@@ -732,12 +732,6 @@ def get_record_fields(
     Use when the question asks for the details, attributes, or field values
     of specific records — not a count, sum, or aggregate.
 
-    Examples of when to use:
-      "Show me the details of complaint 1443"
-      "What is the complainer name for complaint 1443?"
-      "List all open PPM tasks with their assigned technician and building"
-      "What is the status of work order 5001?"
-
     Args:
         module: Data module name.
         fields: Optional list of field names to include. If empty, returns all fields.

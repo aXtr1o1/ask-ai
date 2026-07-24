@@ -158,10 +158,13 @@ def analyze_query(query_summary: str, modules: list[str]) -> dict:
         }
 
     total_time = time.perf_counter() - start_total
-    logger.info(
-        "[Analysis Agent] latency — total: %.2fs",
-        total_time,
-    )
+    logger.info("[Analysis Agent] latency — total: %.2fs", total_time)
+    logger.info("[Analysis Agent] modules selected : %s", valid_modules)
+    for mod in valid_modules:
+        ff = list(valid_filter_fields.get(mod, {}).keys())
+        fv = valid_filter_values.get(mod, {})
+        logger.info("[Analysis Agent] [%s] filter_fields : %s", mod, ff)
+        logger.info("[Analysis Agent] [%s] filter_values : %s", mod, fv)
 
     return {
         "reasoning":     response.reasoning,
@@ -172,5 +175,5 @@ def analyze_query(query_summary: str, modules: list[str]) -> dict:
             "llm_time":   round(llm_time,   2),
             "total_time": round(total_time, 2),
         },
-        "thought":       getattr(response, "thought", ""),
+        "thought":       thought,
     }

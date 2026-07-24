@@ -34,11 +34,7 @@ class ConversationMemory:
                 }
             )
 
-            logger.info("=" * 60)
-            logger.info("Conversation Stored")
-            logger.info("Session ID : %s", session_id)
-            logger.info("History    : %s", self._memory[session_id])
-            logger.info("=" * 60)
+            logger.debug("[ConversationMemory] stored — session=%s turns=%d", session_id, len(self._memory[session_id]) // 2)
 
     def get_history(
         self,
@@ -51,11 +47,7 @@ class ConversationMemory:
         with self._lock:
             history = self._memory.get(session_id, [])
 
-            logger.info("=" * 60)
-            logger.info("Conversation Retrieved")
-            logger.info("Session ID : %s", session_id)
-            logger.info("History    : %s", history)
-            logger.info("=" * 60)
+            logger.debug("[ConversationMemory] retrieved — session=%s turns=%d", session_id, len(history) // 2)
 
             if max_turns <= 0:
                 return []

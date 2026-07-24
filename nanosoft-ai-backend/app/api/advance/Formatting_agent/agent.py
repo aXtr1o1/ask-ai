@@ -25,7 +25,6 @@ from typing import Any
 
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
-from google import genai
 from app.api.advance.Understanding_Agent.conversation_memory import conversation_memory
 
 from app.config import settings

@@ -85,10 +85,6 @@ def classify_query(query: str, session_id: str) -> dict:
     )
 
     start_llm = time.perf_counter()
-    logger.info("===== Messages sent to Understanding Agent =====")
-    for i, msg in enumerate(messages):
-        logger.info("%d: %s", i, msg)
-    logger.info("===============================================")
     result = structured_llm.invoke(messages)
     llm_time    = time.perf_counter() - start_llm
 
@@ -101,10 +97,12 @@ def classify_query(query: str, session_id: str) -> dict:
         usage.get("output_tokens", 0),
         usage.get("total_tokens",  0),
     )
-    logger.info(
-        "[Understanding Agent] latency — llm: %.2fs",
-        llm_time,
-    )
+    logger.info("[Understanding Agent] latency — llm: %.2fs", llm_time)
+    logger.info("[Understanding Agent] intent   : %s", response.intent)
+    logger.info("[Understanding Agent] summary  : %s", response.query_summary)
+    logger.info("[Understanding Agent] modules  : %s", response.modules)
+    logger.info("[Understanding Agent] format   : %s | user_specified: %s",
+                response.response_format, response.user_specified_format)
 
     # Extract thought
     thought = ""
@@ -179,17 +177,17 @@ def classify_query(query: str, session_id: str) -> dict:
     )
 
     return {
-        "intent":              response.intent,
-        "query_summary":       response.query_summary,
-        "modules":             response.modules,
-        "response_format":     response.response_format,
-        "web_search_summary":  web_search_summary,
-        "general_response":    response.general_response,
-        "thought":             getattr(response, "thought", ""),
-        "ui_messages":         getattr(response, "ui_messages", {}),
+        "intent":               response.intent,
+        "query_summary":        response.query_summary,
+        "modules":              response.modules,
+        "response_format":      response.response_format,
+        "user_specified_format": response.user_specified_format,
+        "web_search_summary":   web_search_summary,
+        "general_response":     response.general_response,
+        "thought":              thought,
         "latency": {
-            "llm_time":         round(llm_time,         2),
-            "web_search_time":  round(web_search_time,  2),
-            "total_time":       round(total_time,        2),
+            "llm_time":        round(llm_time,        2),
+            "web_search_time": round(web_search_time, 2),
+            "total_time":      round(total_time,       2),
         },
     }

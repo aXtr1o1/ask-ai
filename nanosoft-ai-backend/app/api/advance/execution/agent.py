@@ -95,6 +95,7 @@ _TOOL_OUTPUT_KEYS: dict[str, set[str]] = {
                                "condition_field_2", "condition_value_2",
                                "condition_field_3", "condition_value_3",
                                "condition_field_4", "condition_value_4"},
+    "get_record_fields":      {"module", "total", "fields_returned", "records"},
     "final_answer_tool":      {"status", "final_value"},
 }
 
@@ -314,7 +315,6 @@ def run_execution(
                     thought = str(part["thought"])
                     break
         elif isinstance(content, str) and content.strip():
-            import re
             m = re.search(r'<thought>(.*?)</thought>', content, re.DOTALL | re.IGNORECASE)
             if m:
                 thought = m.group(1).strip()
@@ -333,7 +333,6 @@ def run_execution(
     
     # Strip <thought> tags before JSON parsing
     if isinstance(raw_json, str):
-        import re
         raw_json = re.sub(r'<thought>.*?</thought>', '', raw_json, flags=re.DOTALL | re.IGNORECASE).strip()
 
     try:
