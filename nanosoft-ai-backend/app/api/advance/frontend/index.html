@@ -1684,9 +1684,18 @@
             if (stage === "Analysis Agent") {
               _showRetrievalIndicator(stepsContainer);
             }
+            // ── KEY FIX: if stream completed while we were fading (e.g. general/
+            // web_search intent — only one agent, complete fires right after
+            // running_end), the drain timer is gone so we must show result here.
+            if (streamDone && charQueue.length === 0 && stage !== "Analysis Agent") {
+              _showResult(pendingResult);
+            }
           }, 520);
         } else if (stage === "Analysis Agent" && stepsContainer) {
           _showRetrievalIndicator(stepsContainer);
+        } else if (streamDone && charQueue.length === 0) {
+          // No block to fade but stream is done — show result immediately
+          _showResult(pendingResult);
         }
       }
 

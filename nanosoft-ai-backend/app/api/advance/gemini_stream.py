@@ -80,7 +80,12 @@ def stream_with_thoughts(
         if not chunk.candidates:
             continue
 
-        for part in chunk.candidates[0].content.parts:
+        candidate = chunk.candidates[0]
+        content   = candidate.content
+        if content is None or content.parts is None:
+            continue          # metadata-only / safety-rating chunk — skip
+
+        for part in content.parts:
             text = part.text or ""
             if not text:
                 continue

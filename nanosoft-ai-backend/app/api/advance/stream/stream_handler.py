@@ -206,6 +206,14 @@ async def run_query_stream(
                     )
 
                 logger.info("[Stream] pipeline complete — layout=%s", layout)
+
+                # Save DB result into conversation memory for follow-up questions
+                conversation_memory.add_conversation(
+                    session_id       = session_id,
+                    user_query       = query,
+                    assistant_response = formatted_result.get("formatted_answer", ""),
+                )
+
                 loop.call_soon_threadsafe(q.put_nowait, {"type": "result", "data": formatted_result})
 
             except Exception as e:
