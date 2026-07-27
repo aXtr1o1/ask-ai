@@ -23,11 +23,9 @@ Public API:
 """
 import json
 import logging
-import re
 import time
 
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.messages import HumanMessage, SystemMessage
+from google.genai import types
 
 from app.config import settings
 from app.api.advance.execution.prompts      import PLANNER_SYSTEM_PROMPT
@@ -37,6 +35,7 @@ from app.api.advance.execution.agent_logger import (
 )
 from app.api.advance.execution.context_builder import build_formatting_context
 from app.api.advance.analysis.metadata.enum_values import get_enum_block
+from app.api.advance.gemini_stream import stream_with_thoughts
 
 logger = logging.getLogger("advance.execution.agent")
 
@@ -213,6 +212,7 @@ def run_execution(
     filter_fields:    dict,
     modules:          list[str],
     filtered_records: dict,
+    thought_callback: callable = None,
     progress_callback: callable = None,
     response_format:  str  = "PLAIN_TEXT",
     user_specified:   bool = False,
@@ -252,96 +252,84 @@ def run_execution(
         FAILED   — final_answer_tool itself errored; no usable answer
     """
     start_total = time.perf_counter()
-    
-    # ── Phase 1: Plan the queue (LLM called once) ──────────────────────────
-    log_question(question, modules)
 
-    llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
-        google_api_key=settings.GOOGLE_API_KEY,
-        temperature=1,
-        thinking_budget=512,
-        include_thoughts=True,
-    )
+    # ── Phase 1: Plan the queue (LLM called once, streaming) ──────────────────
+    log_question(question, modules)
 
     schema_text = (
         json.dumps(filter_fields, indent=2)
         if filter_fields
         else "No column definitions provided."
     )
-
     enum_text = get_enum_block(modules)
 
+    human_message = (
+        f"Question: {question}\n\n"
+        f"Available modules: {modules}\n\n"
+        f"Column definitions per module:\n{schema_text}\n\n"
+        f"Allowed enum values (use these EXACTLY as filter_value — no paraphrasing):\n{enum_text}\n\n"
+        f"Intended presentation format: {response_format}\n\n"
+        f"Produce the execution queue as a JSON array."
+    )
+
+    config = types.GenerateContentConfig(
+        system_instruction = PLANNER_SYSTEM_PROMPT,
+        response_mime_type = "application/json",
+        temperature        = 1,
+        thinking_config    = types.ThinkingConfig(
+            thinking_budget  = 512,
+            include_thoughts = True,
+        ),
+    )
+
     start_llm = time.perf_counter()
-    response = llm.invoke([
-        SystemMessage(content=PLANNER_SYSTEM_PROMPT),
-        HumanMessage(content=(
-            f"Question: {question}\n\n"
-            f"Available modules: {modules}\n\n"
-            f"Column definitions per module:\n{schema_text}\n\n"
-            f"Allowed enum values (use these EXACTLY as filter_value — no paraphrasing):\n{enum_text}\n\n"
-            f"Intended presentation format: {response_format}\n\n"
-            f"Produce the execution queue as a JSON array."
-        )),
-    ])
+    thought, raw_json, usage = stream_with_thoughts(
+        contents   = [{"role": "user", "parts": [{"text": human_message}]}],
+        config     = config,
+        thought_cb = thought_callback,
+    )
     llm_time = time.perf_counter() - start_llm
 
-    if hasattr(response, "usage_metadata") and response.usage_metadata:
-        usage = response.usage_metadata
-        logger.info(
-            "[Agent] LLM tokens — input: %d | output: %d | total: %d",
-            usage.get("input_tokens", 0),
-            usage.get("output_tokens", 0),
-            usage.get("total_tokens", 0),
-        )
-
-    # Extract thought
-    thought = ""
-    try:
-        ak = getattr(response, "additional_kwargs", {})
-        rm = getattr(response, "response_metadata", {})
-        content = getattr(response, "content", None)
-        
-        if "thought" in ak:
-            thought = str(ak["thought"])
-        elif "thought" in rm:
-            thought = str(rm["thought"])
-        elif isinstance(content, list):
-            for part in content:
-                if isinstance(part, dict) and part.get("type") in ("thought", "thinking"):
-                    thought = str(part.get("text") or part.get("thought", ""))
-                    break
-                elif isinstance(part, dict) and "thought" in part:
-                    thought = str(part["thought"])
-                    break
-        elif isinstance(content, str) and content.strip():
-            m = re.search(r'<thought>(.*?)</thought>', content, re.DOTALL | re.IGNORECASE)
-            if m:
-                thought = m.group(1).strip()
-    except Exception as e:
-        logger.warning(f"Failed to extract thought: {e}")
-
-    # Stream the thought immediately before tool execution blocks the thread
-    if thought and progress_callback:
-        progress_callback({
-            "type": "execution_thought",
-            "thought": thought
-        })
-
-    raw_text = _extract_text(response.content)
-    raw_json = _strip_markdown(raw_text)
-    
-    # Strip <thought> tags before JSON parsing
-    if isinstance(raw_json, str):
-        raw_json = re.sub(r'<thought>.*?</thought>', '', raw_json, flags=re.DOTALL | re.IGNORECASE).strip()
+    logger.info("[Execution Agent] tokens  : input=%d output=%d total=%d",
+                usage.get("input_tokens", 0), usage.get("output_tokens", 0), usage.get("total_tokens", 0))
+    logger.info("[Execution Agent] latency : llm=%.2fs", llm_time)
 
     try:
-        queue = json.loads(raw_json)
+        parsed = json.loads(raw_json)
     except json.JSONDecodeError as exc:
-        logger.error("[Agent] JSON parse failed: %s\nRaw: %s", exc, raw_json)
-        raise ValueError(
-            f"Agent returned invalid JSON.\nError: {exc}\nRaw:\n{raw_json}"
-        ) from exc
+        logger.error("[Execution Agent] JSON parse failed: %s\nRaw: %.300s", exc, raw_json)
+        raise ValueError(f"Execution Agent returned invalid JSON. Error: {exc}") from exc
+
+    # ── Coerce: model sometimes wraps the array in a dict ────────────────────
+    # e.g. {"queue": [...]} or {"steps": [...]} instead of [...]
+    if isinstance(parsed, dict):
+        for wrap_key in ("queue", "steps", "plan", "execution_plan", "tool_calls", "tools"):
+            if wrap_key in parsed and isinstance(parsed[wrap_key], list):
+                logger.info("[Execution Agent] unwrapped queue from key '%s'", wrap_key)
+                parsed = parsed[wrap_key]
+                break
+        else:
+            # Last resort: take the first list value found
+            for v in parsed.values():
+                if isinstance(v, list):
+                    parsed = v
+                    break
+
+    if not isinstance(parsed, list):
+        raise ValueError(f"Execution Agent queue is not a list. Got: {type(parsed).__name__}")
+
+    # ── Coerce step args: convert None / non-string scalars to strings ────────
+    for step in parsed:
+        if isinstance(step, dict):
+            args = step.get("args") or {}
+            for k, v in args.items():
+                if v is None:
+                    args[k] = ""                      # None → empty string
+                elif not isinstance(v, (str, list)):
+                    args[k] = str(v)                  # int/float → string
+            step["args"] = args
+
+    queue = parsed
 
     _validate_queue(queue)
     log_queue(queue)

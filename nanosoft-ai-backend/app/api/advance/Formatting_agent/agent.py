@@ -23,12 +23,11 @@ import re
 import time
 from typing import Any
 
-from langchain_core.messages import SystemMessage, HumanMessage
-from langchain_google_genai import ChatGoogleGenerativeAI
-from app.api.advance.Understanding_Agent.conversation_memory import conversation_memory
+from google.genai import types
 
-from app.config import settings
+from app.api.advance.Understanding_Agent.conversation_memory import conversation_memory
 from app.api.advance.Formatting_agent.prompt import build_formatting_prompt
+from app.api.advance.gemini_stream import stream_with_thoughts
 
 logger = logging.getLogger("advance.formatting")
 
@@ -151,6 +150,7 @@ def format_pipeline_response(
     user_query: str,
     query_summary: str | None = None,
     default_response_type: str = "analytical-answer",
+    thought_callback = None,
 ) -> dict:
     """
     Format the pipeline output using an LLM with thinking.
@@ -207,17 +207,19 @@ def format_pipeline_response(
 
     system_prompt = build_formatting_prompt(
         response_format,
-        shape_descriptor   = shape_descriptor,
-        alternatives       = alternatives,
-        format_overridden  = format_overridden,
+        shape_descriptor  = shape_descriptor,
+        alternatives      = alternatives,
+        format_overridden = format_overridden,
     )
 
-    # ── Invoke LLM ────────────────────────────────────────────────────────
-    llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
-        google_api_key=settings.GOOGLE_API_KEY,
-        temperature=0.3,
-        thinking_budget=256,
+    # ── Stream LLM ────────────────────────────────────────────────────────────
+    config = types.GenerateContentConfig(
+        system_instruction = system_prompt,
+        temperature        = 0.3,
+        thinking_config    = types.ThinkingConfig(
+            thinking_budget  = 256,
+            include_thoughts = True,
+        ),
     )
 
     explanation   = ""
@@ -228,48 +230,43 @@ def format_pipeline_response(
     latency_ms    = 0.0
 
     try:
-        logger.info("[FORMATTING AGENT] Invoking LLM — format: %s", response_format)
-
+        logger.info("[Formatting Agent] streaming — format: %s", response_format)
         t_start = time.perf_counter()
-        llm_response = llm.invoke([
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=human_content),
-        ])
+
+        # thought_callback streams the LLM's internal reasoning to the frontend.
+        # The text output contains [EXPLANATION] and [CONFIDENCE] which we parse below.
+        _, raw_text, usage = stream_with_thoughts(
+            contents   = [{"role": "user", "parts": [{"text": human_content}]}],
+            config     = config,
+            thought_cb = thought_callback,
+        )
         latency_ms = (time.perf_counter() - t_start) * 1000
 
-        raw_text    = llm_response.content.strip() if hasattr(llm_response, "content") else ""
         explanation, confidence = _parse_llm_response(raw_text)
 
-        usage = getattr(llm_response, "usage_metadata", None) or {}
-        if isinstance(usage, dict):
-            input_tokens  = usage.get("input_tokens",  0) or usage.get("prompt_token_count",     0)
-            output_tokens = usage.get("output_tokens", 0) or usage.get("candidates_token_count", 0)
-            total_tokens  = usage.get("total_tokens",  0) or (input_tokens + output_tokens)
-        elif hasattr(usage, "prompt_token_count"):
-            input_tokens  = usage.prompt_token_count     or 0
-            output_tokens = usage.candidates_token_count or 0
-            total_tokens  = (input_tokens + output_tokens)
+        input_tokens  = usage.get("input_tokens",  0)
+        output_tokens = usage.get("output_tokens", 0)
+        total_tokens  = usage.get("total_tokens",  0)
 
         _log_output(
-            response_format=response_format,
-            explanation=explanation,
-            confidence=confidence,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            total_tokens=total_tokens,
-            latency_ms=latency_ms,
+            response_format = response_format,
+            explanation     = explanation,
+            confidence      = confidence,
+            input_tokens    = input_tokens,
+            output_tokens   = output_tokens,
+            total_tokens    = total_tokens,
+            latency_ms      = latency_ms,
         )
 
     except Exception as e:
-        logger.error("[FORMATTING AGENT] LLM failed: %s", e)
+        logger.error("[Formatting Agent] LLM failed: %s", e)
         explanation = ""
+
     conversation_memory.add_conversation(
-    session_id=session_id,
-    user_query=user_query,
-    assistant_response=explanation,
-)
-    
-    
+        session_id        = session_id,
+        user_query        = user_query,
+        assistant_response= explanation,
+    )
 
     return {
         "response_type":     _FORMAT_TO_RESPONSE_TYPE.get(response_format, default_response_type),

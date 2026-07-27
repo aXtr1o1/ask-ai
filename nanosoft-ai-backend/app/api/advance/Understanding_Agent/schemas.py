@@ -12,7 +12,7 @@ Understanding Agent — Data Shapes
 Used by:
     agent.py  →  structured_llm.with_structured_output(UnderstandingOutput)
 """
-from typing import Literal
+from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 
@@ -26,7 +26,8 @@ class UnderstandingOutput(BaseModel):
         description="Classified intent of the query."
     )
 
-    query_summary: str = Field(
+    query_summary: Optional[str] = Field(
+        default=None,
         description=(
             "Clean, standardised restatement of the user query. "
             "Correct spelling, resolve abbreviations, and restate in plain FM language. "
@@ -34,7 +35,7 @@ class UnderstandingOutput(BaseModel):
             "equipment types, dates, technician names) exactly as stated by the user. "
             "This summary is the only information the Analysis Agent will receive, "
             "so it must be complete enough for the next stage to act on without seeing "
-            "the original query."
+            "the original query. Leave null for 'general' and 'web_search' intents."
         )
     )
 
@@ -58,11 +59,12 @@ class UnderstandingOutput(BaseModel):
         )
     )
 
-    user_specified_format: bool = Field(
+    user_specified_format: Optional[bool] = Field(
         default=False,
         description=(
             "True ONLY if the user explicitly stated a format preference in their query. "
-            "False if you chose the format autonomously based on question type."
+            "False if you chose the format autonomously based on question type. "
+            "Leave null for 'general' and 'web_search' intents."
         )
     )
 

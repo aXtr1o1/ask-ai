@@ -456,6 +456,36 @@
       font-size: 13px;
     }
 
+    /* ── Active stream container (thinking box) ──────────────────── */
+    #active-stream-container {
+      min-height: 140px;
+      max-height: 260px;
+      overflow-y: auto;
+    }
+
+    /* Retrieval gap pulse */
+    @keyframes retrievalPulse {
+      0%, 100% { opacity: 0.5; }
+      50%       { opacity: 1;   }
+    }
+    .retrieval-indicator {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      background: rgba(212,175,55,0.06);
+      border: 1px solid rgba(212,175,55,0.18);
+      border-radius: 8px;
+      margin-top: 4px;
+      color: #D4AF37;
+      font-size: 13px;
+      font-weight: 500;
+      animation: retrievalPulse 1.2s ease-in-out infinite;
+    }
+    .retrieval-indicator svg {
+      flex-shrink: 0;
+    }
+
     .thinking-detail-list {
       display: flex;
       flex-direction: column;
@@ -1602,12 +1632,144 @@
     }
 
     // Send query simulator
-      // Send query handler - Updated to match backend "running" status
-        // Send query handler - Premium Thinking Bubble with Fade Animation
     async function sendQuery() {
       const input = document.getElementById("query-input");
       const text = input.value.trim();
       if (!text) return;
+
+      // ── Typewriter character queue ───────────────────────────────────────────
+      // Backend sends words; we explode them into individual characters and
+      // render one character per tick — giving the classic typewriter effect.
+      // When an agent finishes (running_end), the thought block fades OUT after
+      // the queue drains — so all text is typed before it disappears.
+      const CHAR_INTERVAL_MS = 22;   // ms per character
+      let charQueue      = [];       // pending characters
+      let drainTimer     = null;     // setInterval handle
+      let streamDone     = false;    // true when 'complete' event received
+      let pendingResult  = null;     // held until charQueue drains
+      let fadePending    = false;    // true when running_end received — fade after drain
+      let fadePendingStage = "";     // which agent just ended
+
+      function startDrain() {
+        if (drainTimer) return;
+        drainTimer = setInterval(() => {
+          if (charQueue.length > 0) {
+            _renderChar(charQueue.shift());
+          } else if (fadePending) {
+            // All chars typed — now fade out the entire thought block
+            fadePending = false;
+            const stage = fadePendingStage;
+            clearInterval(drainTimer);
+            drainTimer = null;
+            _fadeOutCurrentBlock(stage);
+          } else if (streamDone) {
+            clearInterval(drainTimer);
+            drainTimer = null;
+            _showResult(pendingResult);
+          }
+        }, CHAR_INTERVAL_MS);
+      }
+
+      // Fade out the active stream block, then optionally show retrieval indicator
+      function _fadeOutCurrentBlock(stage) {
+        const stepsContainer = document.getElementById("loading-agent-steps");
+        const block = stepsContainer ? stepsContainer.firstElementChild : null;
+        if (block) {
+          block.style.transition = "opacity 0.5s ease, transform 0.5s ease";
+          block.style.opacity = "0";
+          block.style.transform = "translateY(-6px)";
+          setTimeout(() => {
+            if (block.parentNode) block.remove();
+            // After Analysis Agent fades: show retrieval indicator
+            if (stage === "Analysis Agent") {
+              _showRetrievalIndicator(stepsContainer);
+            }
+          }, 520);
+        } else if (stage === "Analysis Agent" && stepsContainer) {
+          _showRetrievalIndicator(stepsContainer);
+        }
+      }
+
+      function _showRetrievalIndicator(stepsContainer) {
+        const retDiv = document.createElement("div");
+        retDiv.id = "retrieval-indicator";
+        retDiv.className = "retrieval-indicator";
+        retDiv.innerHTML = `
+          <svg viewBox="0 0 24 24" style="width:16px;height:16px;stroke:#D4AF37;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;">
+            <ellipse cx="12" cy="5" rx="9" ry="3"/>
+            <path d="M3 5v14c0 1.657 4.03 3 9 3s9-1.343 9-3V5"/>
+            <path d="M3 12c0 1.657 4.03 3 9 3s9-1.343 9-3"/>
+          </svg>
+          Retrieving data from database...
+        `;
+        stepsContainer.appendChild(retDiv);
+        const agentText = document.getElementById("loading-agent-text");
+        if (agentText) agentText.textContent = "Retrieving data...";
+        const wrapEl = document.getElementById("content-wrapper");
+        if (wrapEl) wrapEl.parentElement.scrollTop = wrapEl.parentElement.scrollHeight;
+      }
+
+      function stopDrain() {
+        if (drainTimer) { clearInterval(drainTimer); drainTimer = null; }
+        charQueue = [];
+      }
+
+      // Append a single character to the active typing line
+      function _renderChar(ch) {
+        const sc = document.getElementById("active-stream-container");
+        if (!sc) return;
+
+        let line = sc.querySelector(".active-stream-line:last-child");
+        if (!line) return;
+
+        // Line wrap: break at space when line is getting long (~80 chars)
+        if (ch === ' ' && line.textContent.length >= 80) {
+          const newLine = document.createElement("span");
+          newLine.className = "active-stream-line";
+          newLine.style.cssText = [
+            "font-family:var(--font-mono)", "font-size:12px",
+            "color:#94a3b8", "line-height:1.6",
+            "white-space:pre-wrap", "transition:opacity 0.4s ease",
+            "display:block"
+          ].join(";");
+          sc.appendChild(newLine);
+
+          // Keep only 2 lines visible, fade older ones out
+          const lines = sc.querySelectorAll(".active-stream-line");
+          const total = lines.length;
+          lines.forEach((ln, i) => {
+            const age = total - 1 - i;
+            if      (age === 0) ln.style.opacity = "1";
+            else if (age === 1) ln.style.opacity = "0.4";
+            else {
+              ln.style.opacity = "0";
+              ln.style.maxHeight = "0";
+              ln.style.overflow = "hidden";
+            }
+          });
+          line = newLine;
+          return; // skip the space itself at start of new line
+        }
+
+        // Append character directly — pure typewriter
+        line.textContent += ch;
+
+        const wrapEl = document.getElementById("content-wrapper");
+        if (wrapEl) wrapEl.parentElement.scrollTop = wrapEl.parentElement.scrollHeight;
+      }
+
+      function _showResult(result) {
+        const tb = document.getElementById("loading-message-ai");
+        if (tb) {
+          tb.style.transition = "opacity 0.3s ease, transform 0.3s ease";
+          tb.style.opacity = "0";
+          tb.style.transform = "translateY(-8px)";
+          setTimeout(() => tb.remove(), 300);
+        }
+        renderChatResponse(text, result);
+      }
+      // ── End typewriter queue ─────────────────────────────────────────────────
+
 
       // Immediately update UI
       input.value = "";
@@ -1656,6 +1818,7 @@
         let done = false;
         let buffer = "";
         let currentStage = "";
+        let lastEndedStage = ""; // ← track retrieval gap
         
         while (!done) {
           const { value, done: readerDone } = await reader.read();
@@ -1671,25 +1834,47 @@
               try {
                 const data = JSON.parse(line);
                 
-                // Handle backend-driven streaming events
+                // ── running_start ─────────────────────────────────────────
                 if (data.status === "running_start") {
                     currentStage = data.stage;
+                    const agentText = document.getElementById("loading-agent-text");
+                    if (agentText) agentText.textContent = data.stage;
+
                     const stepsContainer = document.getElementById("loading-agent-steps");
                     if (stepsContainer) {
-                        // Hide the "Thinking..." button
+                        // Hide the "Thinking..." spinner button on first agent
                         const btn = stepsContainer.previousElementSibling;
                         if (btn && btn.tagName === 'BUTTON') btn.style.display = 'none';
-                        
-                        // Clear old agent container or fade it out
+
+                        // Remove retrieval indicator if present
+                        const retEl = document.getElementById("retrieval-indicator");
+                        if (retEl) retEl.remove();
+
+                        // Remove previous agent stream block
                         const oldChild = stepsContainer.firstElementChild;
                         if (oldChild) oldChild.remove();
                         
                         const stepDiv = document.createElement("div");
-                        stepDiv.style.transition = "opacity 0.3s ease";
-                        stepDiv.style.opacity = '1';
                         stepDiv.style.display = 'flex';
                         stepDiv.style.flexDirection = 'column';
-                        
+                        stepDiv.style.gap = '6px';
+
+                        // ── Stage label ──────────────────────────────────
+                        const stageLabel = document.createElement("div");
+                        stageLabel.style.cssText = [
+                          "display:flex", "align-items:center", "gap:6px",
+                          "font-size:11px", "font-weight:600", "letter-spacing:0.05em",
+                          "text-transform:uppercase", "color:#D4AF37", "padding:2px 0"
+                        ].join(";");
+                        stageLabel.innerHTML = `
+                          <svg viewBox="0 0 24 24" style="width:12px;height:12px;stroke:#D4AF37;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;animation:spin 2s linear infinite">
+                            <path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/>
+                          </svg>
+                          <span>${data.stage}</span>
+                        `;
+                        stepDiv.appendChild(stageLabel);
+
+                        // ── Stream text container ─────────────────────────
                         const streamContainer = document.createElement("div");
                         streamContainer.id = "active-stream-container";
                         streamContainer.dataset.wordCount = "0";
@@ -1697,100 +1882,51 @@
                         streamContainer.style.border = "1px solid rgba(212,175,55,0.15)";
                         streamContainer.style.borderRadius = "6px";
                         streamContainer.style.padding = "10px 12px";
-                        streamContainer.style.marginTop = "4px";
+                        streamContainer.style.minHeight = "140px";   // ← ensure medium height
+                        streamContainer.style.maxHeight = "260px";
+                        streamContainer.style.overflowY = "auto";
                         streamContainer.style.display = "flex";
                         streamContainer.style.flexDirection = "column";
                         
                         const currentLine = document.createElement("span");
                         currentLine.className = "active-stream-line";
+                        currentLine.style.display = "block";          // ← so lines stack vertically
                         currentLine.style.fontFamily = "var(--font-mono)";
                         currentLine.style.fontSize = "12px";
                         currentLine.style.color = "#94a3b8";
                         currentLine.style.lineHeight = "1.6";
                         currentLine.style.whiteSpace = "pre-wrap";
-                        currentLine.style.transition = "all 1s ease-in-out";
                         
                         streamContainer.appendChild(currentLine);
                         stepDiv.appendChild(streamContainer);
                         stepsContainer.appendChild(stepDiv);
                     }
                 }
+                // ── running_chunk: explode word → chars → typewriter queue ──
                 else if (data.status === "running_chunk") {
-                    const streamContainer = document.getElementById("active-stream-container");
-                    if (streamContainer) {
-                        let activeLine = streamContainer.querySelector(".active-stream-line:last-child");
-                        if (!activeLine) return;
-                        
-                        let wc = parseInt(streamContainer.dataset.wordCount || "0");
-                        
-                        // If sentence ends or line is long, create new line and fade old ones
-                        if (wc >= 15 || (data.word.trim().match(/[.!?]$/) && wc > 5)) {
-                            const newLine = document.createElement("span");
-                            newLine.className = "active-stream-line";
-                            newLine.style.fontFamily = "var(--font-mono)";
-                            newLine.style.fontSize = "12px";
-                            newLine.style.color = "#94a3b8";
-                            newLine.style.lineHeight = "1.6";
-                            newLine.style.whiteSpace = "pre-wrap";
-                            newLine.style.transition = "all 1s ease-in-out";
-                            streamContainer.appendChild(newLine);
-                            
-                            // Fade older lines
-                            const lines = streamContainer.querySelectorAll(".active-stream-line");
-                            const totalLines = lines.length;
-                            lines.forEach((line, i) => {
-                                let age = totalLines - 1 - i;
-                                if (age === 0) {
-                                    line.style.opacity = "1";
-                                } else if (age === 1) {
-                                    line.style.opacity = "0.5";
-                                } else {
-                                    line.style.opacity = "0";
-                                    line.style.maxHeight = "0px";
-                                    line.style.margin = "0px";
-                                    line.style.padding = "0px";
-                                    line.style.overflow = "hidden";
-                                }
-                            });
-                            
-                            activeLine = newLine;
-                            wc = 0;
-                        }
-                        
-                        const wordSpan = document.createElement("span");
-                        wordSpan.textContent = data.word;
-                        wordSpan.style.opacity = "0";
-                        wordSpan.style.transition = "opacity 0.15s ease-in";
-                        activeLine.appendChild(wordSpan);
-                        
-                        // Trigger reflow
-                        void wordSpan.offsetWidth;
-                        wordSpan.style.opacity = "1";
-                        
-                        streamContainer.dataset.wordCount = (wc + 1).toString();
-                        
-                        const wrapper = document.getElementById("content-wrapper");
-                        wrapper.parentElement.scrollTop = wrapper.parentElement.scrollHeight;
+                    for (const ch of data.word) {
+                        charQueue.push(ch);
                     }
+                    startDrain();   // no-op if already running
                 }
+                // ── running_end: queue a fade-out after all chars are typed ─
                 else if (data.status === "running_end") {
-                    // Stream finished for this agent
+                    lastEndedStage   = data.stage;
+                    fadePending      = true;
+                    fadePendingStage = data.stage;
+                    // If nothing is in the queue right now, start drain so
+                    // the fade-out logic fires on the next tick
+                    startDrain();
                 }
-                else if (data.status === "running") {
-                    // Fallback if full thought is sent directly
-                } 
+                // ── complete: wait for queue to drain, then show result ────
                 else if (data.status === "complete") {
-                    // Smoothly remove loading bubble before showing answer
-                    const tb = document.getElementById("loading-message-ai");
-                    if (tb) {
-                        tb.style.transition = "opacity 0.3s ease, transform 0.3s ease";
-                        tb.style.opacity = "0";
-                        tb.style.transform = "translateY(-8px)";
-                        setTimeout(() => tb.remove(), 300);
-                    } 
-
-                    // Render final response
-                    renderChatResponse(text, data.result);
+                    pendingResult = data.result;
+                    streamDone = true;
+                    // If charQueue is empty and drain is idle, show immediately
+                    if (charQueue.length === 0 && !drainTimer) {
+                        _showResult(pendingResult);
+                    }
+                    // Otherwise the drain interval calls _showResult when queue empties
                 }
               } catch(e) {
                 console.error("Parse error on stream chunk line:", line, e);
@@ -1800,16 +1936,13 @@
         }
       } catch (e) {
         console.error(e);
-        const tb = document.getElementById("thinking-bubble");
+        const tb = document.getElementById("loading-message-ai");
         if (tb) tb.remove();
-
-        const errorObj = {
+        renderChatResponse(text, {
           response_type: "error",
           layout: "PLAIN_TEXT",
-          format_reason: "Connection failed",
-          formatted_answer: "Failed to connect to backend API. Please make sure test_pipeline.py is running with --api flag."
-        };
-        renderChatResponse(text, errorObj);
+          formatted_answer: "Failed to connect to backend API. Make sure test_pipeline.py is running with --api flag."
+        });
       }
     }
     // Init with Welcome screen
