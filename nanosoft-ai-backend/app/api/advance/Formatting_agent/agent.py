@@ -261,7 +261,11 @@ def format_pipeline_response(
     except Exception as e:
         logger.error("[Formatting Agent] LLM failed: %s", e)
         explanation = ""
-
+    logger.info("========== Conversation Store ==========")
+    logger.info("Session ID : %s", session_id)
+    logger.info("User Query : %s", user_query)
+    logger.info("Assistant  : %s", explanation)
+    logger.info("========================================")
     conversation_memory.add_conversation(
         session_id        = session_id,
         user_query        = user_query,

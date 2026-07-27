@@ -13,6 +13,9 @@ Thought tokens are streamed in real-time via thought_callback.
 import logging
 import time
 
+from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_google_genai import ChatGoogleGenerativeAI
+from app.api.advance.Understanding_Agent.conversation_memory import conversation_memory
 from google import genai
 from google.genai import types
 
@@ -49,29 +52,41 @@ def classify_query(
     logger.info("[Understanding Agent] query    : %s", query)
     start_total = time.perf_counter()
 
-    # ── Build contents ────────────────────────────────────────────────────────
-    history  = conversation_memory.get_history(session_id)
-    contents = history_to_contents(history)
-    contents.append({"role": "user", "parts": [{"text": f'Query: "{query}"'}]})
-
-    config = types.GenerateContentConfig(
-        system_instruction = _SYSTEM_PROMPT,
-        response_mime_type = "application/json",
-        temperature        = 0.3,
-        thinking_config    = types.ThinkingConfig(
-            thinking_budget  = 256,
-            include_thoughts = True,
-        ),
+    llm = ChatGoogleGenerativeAI(
+        model="gemini-2.5-flash",
+        google_api_key=settings.GOOGLE_API_KEY,
+        temperature=0.3,
+        thinking_budget=256,
+        include_thoughts=True,
     )
 
-    # ── Stream ────────────────────────────────────────────────────────────────
+    # include_raw=True gives us the raw AIMessage (with usage_metadata)
+    # alongside the parsed Pydantic output
+    structured_llm = llm.with_structured_output(
+        UnderstandingOutput,
+        include_raw=True, method="json_mode",
+    )
+
+    # Retrieve previous conversation
+    history = conversation_memory.get_history(session_id)
+
+    # Build messages
+    messages = [
+        SystemMessage(content=_SYSTEM_PROMPT),
+    ]
+
+    # Add previous conversation if available
+    if history:
+        messages.extend(history)
+
+    # Add current query
+    messages.append(
+        HumanMessage(content=f'Query: "{query}"')
+    )
+
     start_llm = time.perf_counter()
-    thought, json_text, usage = stream_with_thoughts(
-        contents   = contents,
-        config     = config,
-        thought_cb = thought_callback,
-    )
-    llm_time = time.perf_counter() - start_llm
+    result = structured_llm.invoke(messages)
+    llm_time    = time.perf_counter() - start_llm
 
     # ── Parse structured output ───────────────────────────────────────────────
     try:

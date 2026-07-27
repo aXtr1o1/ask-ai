@@ -1,5 +1,6 @@
 from collections import defaultdict
 from threading import Lock
+from langchain_core.messages import HumanMessage, AIMessage
 import logging
 
 logger = logging.getLogger("advance.conversation_memory")

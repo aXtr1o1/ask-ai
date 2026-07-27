@@ -8,7 +8,8 @@ logger = logging.getLogger("advance.retrieval.ppm")
 
 def retrieve(
     filter_values: dict,
-    module_filter_values: dict | None = None
+    module_filter_values: dict | None = None,
+    limit: int | None = None,
 ) -> list[dict]:
     # Combine HTTP-level filters + this module's pre-filters
     filters = {}
@@ -17,7 +18,7 @@ def retrieve(
     if module_filter_values:
         filters.update(module_filter_values)
 
-    # Case-insensitive key lookup � treats "" same as None (not a valid filter)
+    # Case-insensitive key lookup  treats "" same as None (not a valid filter)
     def get_filter_value(*keys):
         for k in keys:
             if k in filters and filters[k] is not None and filters[k] != "":
@@ -34,7 +35,7 @@ def retrieve(
         "user_name": "poc",
         "user_id": "1",
         "offset": 0,
-        "limit": None,
+        "limit": limit,
         "is_aggregate": False
     }
     # Snapshot base keys before optional filters are added (used for retry relaxation)
