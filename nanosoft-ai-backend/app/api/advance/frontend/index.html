@@ -1828,6 +1828,7 @@
         let buffer = "";
         let currentStage = "";
         let lastEndedStage = ""; // ← track retrieval gap
+        let firstChunkLogged = {};  // track first chunk per stage
         
         while (!done) {
           const { value, done: readerDone } = await reader.read();
@@ -1846,6 +1847,7 @@
                 // ── running_start ─────────────────────────────────────────
                 if (data.status === "running_start") {
                     currentStage = data.stage;
+                    console.log(`[Frontend] ▶ ${data.stage} thinking started  @ ${new Date().toLocaleTimeString("en-GB", {hour12:false,hour:"2-digit",minute:"2-digit",second:"2-digit",fractionalSecondDigits:3})}`);
                     const agentText = document.getElementById("loading-agent-text");
                     if (agentText) agentText.textContent = data.stage;
 
@@ -1913,6 +1915,11 @@
                 }
                 // ── running_chunk: explode word → chars → typewriter queue ──
                 else if (data.status === "running_chunk") {
+                    // Log first chunk received per agent
+                    if (!firstChunkLogged[data.stage]) {
+                        firstChunkLogged[data.stage] = true;
+                        console.log(`[Frontend] ⚡ ${data.stage} first chunk received @ ${new Date().toLocaleTimeString("en-GB", {hour12:false,hour:"2-digit",minute:"2-digit",second:"2-digit",fractionalSecondDigits:3})}`);
+                    }
                     for (const ch of data.word) {
                         charQueue.push(ch);
                     }
