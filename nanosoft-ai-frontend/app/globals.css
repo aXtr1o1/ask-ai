@@ -1742,19 +1742,33 @@ body {
   transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease, box-shadow 0.3s ease;
 }
 
+/* ─── Advance message override (100% width, no bubble background) ─── */
+.message-bubble.ai.advance-message {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  max-width: 100% !important;
+  width: 100% !important;
+}
+
+.message-bubble.ai.advance-message::before {
+  display: none !important;
+}
+
 /* AI response content color is theme-specific (set below) */
-.message-bubble.ai * {
+.message-bubble.ai:not(.advance-message) * {
   color: inherit !important;
 }
 
 /* Light theme: black AI text */
-:root[data-theme='light'] .message-bubble.ai {
+:root[data-theme='light'] .message-bubble.ai:not(.advance-message) {
   color: #111827;
 }
 
 /* Dark theme (and default): white / off-white AI text */
-:root[data-theme='dark'] .message-bubble.ai,
-:root:not([data-theme]) .message-bubble.ai {
+:root[data-theme='dark'] .message-bubble.ai:not(.advance-message),
+:root:not([data-theme]) .message-bubble.ai:not(.advance-message) {
   color: #F9FAFB;
 }
 
@@ -4867,4 +4881,33 @@ body.upgrade-plan-open .main-content {
   margin-top: 8px;
   font-size: 0.85rem;
   color: var(--color-text-muted);
+}
+
+@keyframes spin {
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes retrievalPulse {
+  0%, 100% { opacity: 0.5; }
+  50%       { opacity: 1;   }
+}
+
+.retrieval-indicator {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: rgba(212,175,55,0.06);
+  border: 1px solid rgba(212,175,55,0.18);
+  border-radius: 8px;
+  margin-top: 4px;
+  color: #D4AF37;
+  font-size: 13px;
+  font-weight: 500;
+  animation: retrievalPulse 1.2s ease-in-out infinite;
+}
+.retrieval-indicator svg {
+  flex-shrink: 0;
 }

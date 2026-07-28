@@ -22,6 +22,7 @@ import GroupsChat, { FolderListItem, ChatListItem } from "./components/GroupsCha
 import { useGhostInputCompletion } from "./hooks/useGhostInputCompletion";
 import { recordPromptForGhostHistory, ghostPromptHistoryStorageKey } from "./lib/ghostInputCompletion";
 import SpaceBooking from "./components/Bookings/spacebooking";
+import AdvanceChatUI, { sendAdvanceQuery, renderTableLayout, renderListLayout, renderJsonLayout, renderGraphLayout, renderMarkdownLayout, AdvanceStreamMessage, renderCharToDom } from "./components/Advance/AdvanceChatUI";
 import SpaceBookingModal from "./components/Bookings/SpaceBookingModal";
 import ComplaintsModal from "./components/Bookings/ComplaintsModal";
 
@@ -49,6 +50,11 @@ interface Message {
   audioDuration?: number;
   audioUrl?: string;
   sendStatus?: "sent" | "failed" | "sending";
+  isAdvanceStream?: boolean;
+  advanceResult?: any;
+  agentStatus?: "thinking" | "retrieving" | "done";
+  stage?: string;
+  isRetrieving?: boolean;
   isGraphResponse?: boolean;  // ← Set to true if response is type="graph"
   chartType?: ChartType;      // ← chart type per message
   originalText?: string;      // ← Store original raw response before HTML processing
@@ -1297,6 +1303,7 @@ export default function Home() {
   const [activeBookingBubbleIndex, setActiveBookingBubbleIndex] = useState<number | null>(null);
   const [bookingStartDate, setBookingStartDate] = useState<string>("");
   const [bookingEndDate, setBookingEndDate] = useState<string>("");
+  const [isAdvanceAskAI, setIsAdvanceAskAI] = useState<boolean>(false);
   const [bookingStartTime, setBookingStartTime] = useState<string>("");
   const [bookingEndTime, setBookingEndTime] = useState<string>("");
 
@@ -2402,8 +2409,22 @@ export default function Home() {
 
         const jsonStr = raw.startsWith("data: ") ? raw.slice(6) : raw;
 
+        // Ignore Advance AI stream frames in the standard chat handler
+        try {
+          const parsedObj = JSON.parse(jsonStr);
+          if (parsedObj && typeof parsedObj === "object" && ("status" in parsedObj)) {
+            return;
+          }
+        } catch {
+          // Not JSON object
+        }
+
         // "[DONE]" = end of this response → finalize bubble, stay connected
         if (jsonStr.trim() === "[DONE]" || jsonStr.trim() === "__END__") {
+          if (!accRef.current || !accRef.current.trim()) {
+            accRef.current = "";
+            return;
+          }
           const finalText = accRef.current;
           let processedText = finalText;
           let isGraphResponse = false;
@@ -3538,11 +3559,121 @@ export default function Home() {
   };
 
   // ── Send message over the persistent WebSocket ────────────────────────────
+  const handleAdvanceAskAI = (userText: string) => {
+    recordPromptForGhostHistory(ghostPromptHistoryStorageKey(loggedInUser), userText);
+
+    const now = Date.now();
+    setChatSessions(prev => {
+      const existing = prev.find(s => s.id === sessionId);
+      const rest = prev.filter(s => s.id !== sessionId);
+      if (existing) {
+        return [{ ...existing, updatedAt: now }, ...rest];
+      }
+      return [{ id: sessionId, title: "New Chat", createdAt: now, updatedAt: now }, ...rest];
+    });
+
+    setShowFeaturePlaceholder(false);
+    
+    // Add user message & placeholder AI message
+    const placeholderMsg: Message = { role: "ai", text: "", streaming: true, isAdvanceStream: true, agentStatus: "thinking" };
+    setMessages(prev => {
+      const updated = [...prev, { role: "user" as const, text: userText }, placeholderMsg];
+      sessionMessagesRef.current.set(sessionId, updated);
+      return updated;
+    });
+
+    if (inputRef.current) inputRef.current.value = "";
+    rawInputRef.current = "";
+    setInput("");
+    syncGhostUserMirror();
+    setIsLoading(true);
+
+    sendAdvanceQuery(
+      userText,
+      baseUrl || "http://127.0.0.1:8001",
+      (stage) => {
+        // onStart
+        setMessages(prev => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last && last.role === "ai") {
+             last.stage = stage;
+             last.text = "";
+             last.isRetrieving = false;
+             last.agentStatus = "thinking";
+          }
+          return updated;
+        });
+      },
+      (chars) => {
+        // onChunk - Direct 60fps DOM injection matching index.html 100%
+        const str = Array.isArray(chars) ? chars.join("") : chars;
+        for (const ch of str) {
+          renderCharToDom(ch);
+        }
+      },
+      (stage) => {
+        // onEnd - stage ended (e.g. Analysis Agent ended -> trigger DB retrieval gap indicator)
+        setMessages(prev => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last && last.role === "ai") {
+            if (stage === "Analysis Agent") {
+              last.isRetrieving = true;
+            }
+          }
+          return updated;
+        });
+      },
+      (data) => {
+        // onComplete - full pipeline stream finished
+        console.log("Advance query complete:", data);
+        setMessages(prev => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last && last.role === "ai") {
+            last.streaming = false;
+            last.isRetrieving = false;
+            last.agentStatus = "done";
+            if (data) {
+              last.advanceResult = data;
+            }
+          }
+          sessionMessagesRef.current.set(sessionId, updated);
+          return updated;
+        });
+        setIsLoading(false);
+      },
+      (error) => {
+        console.error("Advance query error:", error);
+        setMessages(prev => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last && last.role === "ai") {
+            last.text = `Error: ${error.message}`;
+            last.streaming = false;
+            last.isRetrieving = false;
+            last.agentStatus = "done";
+          }
+          return updated;
+        });
+        setIsLoading(false);
+      },
+      wsRef.current,
+      sessionId
+    );
+  };
+
   const sendMessage = () => {
     const domVal = inputRef.current?.value ?? "";
     if (!domVal.trim() || isLoading) return;
     clearGhostCompletion();
     const userText = domVal.trim();
+    
+    if (isAdvanceAskAI) {
+      handleAdvanceAskAI(userText);
+      return;
+    }
 
     const ws = wsRef.current;
 
@@ -3703,8 +3834,28 @@ export default function Home() {
               setIsSpaceBooking={setIsSpaceBooking}
               isComplaints={isComplaints}
               setIsComplaints={setIsComplaints}
+              isAdvanceAskAI={isAdvanceAskAI}
+              setIsAdvanceAskAI={setIsAdvanceAskAI}
               isChatStarted={messages.length > 0}
-              onSwitchMode={handleSwitchMode}
+              onSwitchMode={(mode) => {
+                if (mode === "space_booking") {
+                  setIsSpaceBooking(true);
+                  setIsComplaints(false);
+                  setIsAdvanceAskAI(false);
+                } else if (mode === "complaints") {
+                  setIsComplaints(true);
+                  setIsSpaceBooking(false);
+                  setIsAdvanceAskAI(false);
+                } else if (mode === "ask_ai") {
+                  setIsSpaceBooking(false);
+                  setIsComplaints(false);
+                  setIsAdvanceAskAI(false);
+                } else if (mode === "advance_ask_ai") {
+                  setIsSpaceBooking(false);
+                  setIsComplaints(false);
+                  setIsAdvanceAskAI(true);
+                }
+              }}
             >
               {/* changes done by megnathan: Used correct CSS classes for perfect Ghost Text alignment */}
               <div className="main-input-stack" style={{ flexGrow: 1 }}>
@@ -4693,12 +4844,12 @@ export default function Home() {
 
                   return (
                     <div key={idx} className={`message-row ${msg.role}`}>
-                      {!isUser && !isError && (
+                      {!isUser && !isError && !msg.isAdvanceStream && (
                         <div className="avatar-box"><IconAI /></div>
                       )}
 
                       <div
-                        className={`message-bubble ${msg.role}${isGraphMsg ? ' graph-message' : ''}${(msg.tableData && msg.tableData.length > 0) || (msg.multipleDatasets && msg.multipleDatasets.length > 0) ? ' table-message' : ''}`}
+                        className={`message-bubble ${msg.role}${isGraphMsg ? ' graph-message' : ''}${(msg.tableData && msg.tableData.length > 0) || (msg.multipleDatasets && msg.multipleDatasets.length > 0) ? ' table-message' : ''}${msg.isAdvanceStream ? ' advance-message' : ''}`}
                         style={{ position: 'relative' }}
                       >
 
@@ -4771,10 +4922,14 @@ export default function Home() {
 
                         ) : isStreaming ? (
                           /* ── Streaming: pre-wrap plain text + blinking cursor ── */
-                          <div className="ai-bubble streaming-text">
-                            <span dangerouslySetInnerHTML={{ __html: injectCalendarIcon(msg.text, idx) }} />
-                            <span className="stream-cursor" />
-                          </div>
+                          msg.isAdvanceStream ? (
+                            <AdvanceStreamMessage msg={msg} isDark={true} />
+                          ) : (
+                            <div className={`ai-bubble streaming-text`}>
+                              <span dangerouslySetInnerHTML={{ __html: injectCalendarIcon(msg.text, idx) }} />
+                              <span className="stream-cursor" />
+                            </div>
+                          )
 
                         ) : isGraphMsg && graphData ? (
                           /* ── Graph: Render chart with per-message type switcher ── */
@@ -4870,23 +5025,27 @@ export default function Home() {
 
                         ) : (
                           /* ── Complete: already formatted at [DONE] time ── */
-                          <div className="ai-bubble" style={{
-                            fontSize: responsive.isMobile ? '13px' : responsive.isTablet ? '14px' : '15px',
-                            lineHeight: 1.5,
-                            maxWidth: responsive.isMobile ? '90%' : responsive.isTablet ? '85%' : '75%',
-                            display: 'flex',
-                            justifyContent: 'center',
-                            alignItems: 'flex-start',
-                          }}>
-                            <div dangerouslySetInnerHTML={{ __html: injectCalendarIcon(msg.text, idx) }} style={{
-                              width: '100%',
-                              textAlign: 'left',
-                            }} />
-                          </div>
+                          msg.isAdvanceStream ? (
+                            <AdvanceStreamMessage msg={msg} isDark={true} />
+                          ) : (
+                            <div className={`ai-bubble`} style={{
+                              fontSize: responsive.isMobile ? '13px' : responsive.isTablet ? '14px' : '15px',
+                              lineHeight: 1.5,
+                              maxWidth: responsive.isMobile ? '90%' : responsive.isTablet ? '85%' : '75%',
+                              display: 'flex',
+                              justifyContent: 'center',
+                              alignItems: 'flex-start',
+                            }}>
+                              <div dangerouslySetInnerHTML={{ __html: injectCalendarIcon(msg.text, idx) }} style={{
+                                width: '100%',
+                                textAlign: 'left',
+                              }} />
+                            </div>
+                          )
                         )}
 
                         {/* Copy button for text bubbles only */}
-                        {!isAudio && !isGraphMsg && !(msg.tableData && msg.tableData.length > 0) && !(msg.multipleDatasets && msg.multipleDatasets.length > 0) && (
+                        {!isAudio && !isGraphMsg && !msg.isAdvanceStream && !(msg.tableData && msg.tableData.length > 0) && !(msg.multipleDatasets && msg.multipleDatasets.length > 0) && (
                           <>
                             <button
                               className="copy-bubble-btn"
