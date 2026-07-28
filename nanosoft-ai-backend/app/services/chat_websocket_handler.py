@@ -337,6 +337,38 @@ async def ws_chat_endpoint(websocket: WebSocket):
 
             #  Track current session_id for disconnect save
             current_session_id = session_id
+
+            # ==================================================================
+            # ── ADVANCE AI STREAMING OVER WEBSOCKET ───────────────────────────
+            # ==================================================================
+            is_advance = bool(data.get("isAdvance", False) or data.get("isAdvanceStream", False))
+            if is_advance:
+                user_query = data.get("query", "").strip()
+                logger.info(f"⚡ Advance WS query received | session={session_id} | query={user_query}")
+                if not user_query:
+                    await websocket.send_text(json.dumps({"error": "Empty query"}))
+                    await websocket.send_text("[DONE]")
+                    continue
+
+                try:
+                    from app.api.advance.stream.stream_handler import run_query_stream
+                    async for line in run_query_stream(user_query, session_id=session_id):
+                        if line:
+                            await websocket.send_text(line.strip())
+                    await websocket.send_text("[DONE]")
+                except Exception as e:
+                    logger.error(f"❌ Advance WS stream error: {e}", exc_info=True)
+                    await websocket.send_text(json.dumps({
+                        "status": "complete",
+                        "result": {
+                            "response_type": "error",
+                            "layout": "PLAIN_TEXT",
+                            "formatted_answer": f"Stream error: {str(e)}"
+                        }
+                    }))
+                    await websocket.send_text("[DONE]")
+                continue
+
             audio_base64   = None   # will hold base64 string if audio
             query_to_store = None
             audio_seconds_effective = 0
