@@ -935,19 +935,14 @@ export function renderCharToDom(ch: string) {
     newLine.style.cssText = "font-family:var(--font-mono, 'Fira Code', monospace);font-size:12px;color:#94a3b8;line-height:1.6;white-space:pre-wrap;transition:opacity 0.4s ease;display:block;";
     sc.appendChild(newLine);
 
-    // Keep only 2 lines visible, fade older ones out
     const lines = sc.querySelectorAll(".active-stream-line");
     const total = lines.length;
     lines.forEach((ln, i) => {
       const age = total - 1 - i;
       const el = ln as HTMLElement;
       if (age === 0) el.style.opacity = "1";
-      else if (age === 1) el.style.opacity = "0.4";
-      else {
-        el.style.opacity = "0";
-        el.style.maxHeight = "0";
-        el.style.overflow = "hidden";
-      }
+      else if (age === 1) el.style.opacity = "0.7";
+      else el.style.opacity = "0.4";
     });
     line = newLine;
     return; // skip space at start of line
@@ -1020,8 +1015,7 @@ export function AdvanceStreamMessage({ msg, isDark = true }: { msg: any; isDark?
                   border: "1px solid rgba(212,175,55,0.15)",
                   borderRadius: "6px",
                   padding: "10px 12px",
-                  minHeight: "60px",
-                  maxHeight: "120px",
+                  height: "90px",
                   overflowY: "auto",
                   display: "flex",
                   flexDirection: "column"
