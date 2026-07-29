@@ -157,12 +157,8 @@ def enrich_with_search_fallback(
                 retry_req = req.model_copy(update=clear)
             else:
                 retry_req = req.model_copy(update={from_field: None, "keyword": keyword_val})
-            logger.info(
-                "%s Keyword fallback — 2nd %s payload:\n%s",
-                log_prefix,
-                sp_label,
-                json.dumps(retry_req.model_dump(exclude_none=True), indent=2, default=str),
-            )
+            # Note: _call_sp_bdm_query logs the payload internally — no need to repeat it here.
+
             retry_formatted = call_query(retry_req)
             if not is_empty_query_result(retry_formatted):
                 retry_formatted["keyword_fallback"] = {

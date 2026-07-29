@@ -1,6 +1,20 @@
+"""
+Conversation Memory — Structured Turn Storage
+
+Each turn stores:
+  user_query    : raw user input
+  query_summary : Understanding Agent's cleaned, self-contained restatement
+  intent        : general | db_query | web_search
+  modules       : FM modules queried (empty for general/web_search)
+  filter_fields : fields retrieved per module  (empty for general/web_search)
+  filter_values : filter conditions per module (empty for general/web_search)
+
+Two consumers:
+  Understanding Agent → get_history()      → last 5 turns (full structured turns)
+  Analysis Agent      → get_last_db_turn() → single most-recent db_query turn
+"""
 from collections import defaultdict
 from threading import Lock
-from langchain_core.messages import HumanMessage, AIMessage
 import logging
 
 logger = logging.getLogger("advance.conversation_memory")
@@ -8,62 +22,107 @@ logger = logging.getLogger("advance.conversation_memory")
 
 class ConversationMemory:
     def __init__(self):
-        self._memory = defaultdict(list)
+        self._memory: dict[str, list[dict]] = defaultdict(list)
         self._lock = Lock()
 
-    def add_conversation(
+    # ------------------------------------------------------------------
+    # Write
+    # ------------------------------------------------------------------
+    def add_turn(
         self,
-        session_id: str,
-        user_query: str,
-        assistant_response: str,
-    ):
+        session_id:       str,
+        user_query:       str,
+        query_summary:    str,
+        intent:           str,
+        modules:          list[str]       | None = None,
+        filter_fields:    dict[str, dict] | None = None,
+        filter_values:    dict[str, dict] | None = None,
+        general_response: str             | None = None,
+    ) -> None:
         """
-        Store the latest user query and assistant response.
+        Store one conversation turn.  Single write point — never call this
+        more than once per user query/response cycle.
         """
+        turn = {
+            "user_query":       user_query,
+            "query_summary":    query_summary,
+            "intent":           intent,
+            "modules":          modules          or [],
+            "filter_fields":    filter_fields    or {},
+            "filter_values":    filter_values    or {},
+            "general_response": general_response or "",
+        }
         with self._lock:
-            self._memory[session_id].append(
-                {
-                    "role": "user",
-                    "content": user_query,
-                }
-            )
+            self._memory[session_id].append(turn)
+            total = len(self._memory[session_id])
 
-            self._memory[session_id].append(
-                {
-                    "role": "assistant",
-                    "content": assistant_response,
-                }
-            )
+            logger.info("┌─ [Memory] STORED turn #%d — session=%s", total, session_id)
+            logger.info("│  intent        : %s", intent)
+            logger.info("│  user_query    : %s", user_query)
+            logger.info("│  query_summary : %s", query_summary)
+            logger.info("│  modules       : %s", modules or [])
+            if filter_values:
+                for mod, vals in (filter_values or {}).items():
+                    logger.info("│  filter_values : [%s] %s", mod, vals)
+            else:
+                logger.info("│  filter_values : (none)")
+            logger.info("└─ total turns in session: %d", total)
 
-            logger.debug("[ConversationMemory] stored — session=%s turns=%d", session_id, len(self._memory[session_id]) // 2)
-
+    # ------------------------------------------------------------------
+    # Read — Understanding Agent
+    # ------------------------------------------------------------------
     def get_history(
         self,
         session_id: str,
-        max_turns: int = 5,
+        max_turns:  int = 5,
     ) -> list[dict]:
         """
-        Retrieve the latest conversation history.
+        Return the last *max_turns* structured turns for the Understanding Agent.
         """
         with self._lock:
             history = self._memory.get(session_id, [])
-
-            logger.debug("[ConversationMemory] retrieved — session=%s turns=%d", session_id, len(history) // 2)
-
             if max_turns <= 0:
                 return []
+            result = history[-max_turns:]
+            logger.info(
+                "[Memory] get_history — session=%s returned=%d/%d turns",
+                session_id, len(result), len(history),
+            )
+            return result
 
-            return history[-max_turns * 2 :]
-
-    def clear(self, session_id: str):
+    # ------------------------------------------------------------------
+    # Read — Analysis Agent
+    # ------------------------------------------------------------------
+    def get_last_db_turn(self, session_id: str) -> dict | None:
         """
-        Clear conversation for a session.
+        Return the most recent db_query turn for the Analysis Agent context.
         """
         with self._lock:
+            history = self._memory.get(session_id, [])
+            for turn in reversed(history):
+                if turn.get("intent") == "db_query":
+                    logger.info(
+                        "[Memory] get_last_db_turn — session=%s → modules=%s | filters=%s",
+                        session_id,
+                        turn.get("modules"),
+                        {m: list(v.keys()) for m, v in turn.get("filter_values", {}).items()},
+                    )
+                    return turn
+            logger.info(
+                "[Memory] get_last_db_turn — session=%s → no db_query turn found (fresh query)",
+                session_id,
+            )
+            return None
+
+    # ------------------------------------------------------------------
+    # Clear
+    # ------------------------------------------------------------------
+    def clear(self, session_id: str) -> None:
+        """Clear all conversation history for a session."""
+        with self._lock:
             self._memory.pop(session_id, None)
+            logger.info("[ConversationMemory] cleared — session=%s", session_id)
 
-            logger.info("Conversation cleared for session %s", session_id)
 
-
-# Singleton instance
+# Singleton instance shared across all agents
 conversation_memory = ConversationMemory()

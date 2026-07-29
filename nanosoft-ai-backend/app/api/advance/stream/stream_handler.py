@@ -129,29 +129,45 @@ async def run_query_stream(
 
             # Short-circuit for non-DB intents
             if intent in ("general", "web_search"):
-                answer = understanding.get("general_response") or understanding.get("web_search_summary") or ""
-                
-                # Save general/web_search interaction into memory
-                conversation_memory.add_conversation(
-                    session_id=session_id,
-                    user_query=query,
-                    assistant_response=answer,
+                general_resp  = understanding.get("general_response") or ""
+                web_resp      = understanding.get("web_search_summary") or ""
+                # Fallback: LLM sometimes writes its answer in query_summary
+                # instead of general_response. Use it rather than returning blank.
+                fallback_resp = understanding.get("query_summary") or ""
+
+                answer = general_resp or web_resp or fallback_resp or "I'm not sure how to answer that. Could you rephrase?"
+
+                # ── Store structured turn — single write point ────────────────
+                conversation_memory.add_turn(
+                    session_id       = session_id,
+                    user_query       = query,
+                    query_summary    = summary,
+                    intent           = intent,
+                    modules          = [],
+                    filter_fields    = {},
+                    filter_values    = {},
+                    general_response = answer,
                 )
 
                 loop.call_soon_threadsafe(q.put_nowait, {"type": "result", "data": {
                     "response_type":    intent,
                     "layout":           "PLAIN_TEXT",
-                    "formatted_answer": (
-                        understanding.get("general_response")
-                        or understanding.get("web_search_summary")
-                        or ""
-                    ),
+                    "formatted_answer": answer,
                 }})
                 return
 
             # ── STEP 2: ANALYSIS ──────────────────────────────────────────────
+            # Fetch the last db_query turn so the Analysis Agent can inherit
+            # filter context for follow-up questions
+            last_db_turn = conversation_memory.get_last_db_turn(session_id)
+
             a_cb, a_done = _make_thought_cb("Analysis Agent")
-            analysis = analyze_query(summary, modules, thought_callback=a_cb)
+            analysis = analyze_query(
+                summary,
+                modules,
+                thought_callback = a_cb,
+                last_db_turn     = last_db_turn,
+            )
             a_done()
 
             filter_values = analysis.get("filter_values", {})
@@ -227,11 +243,18 @@ async def run_query_stream(
 
                 logger.info("[Stream] pipeline complete — layout=%s", layout)
 
-                # Save DB result into conversation memory for follow-up questions
-                conversation_memory.add_conversation(
-                    session_id       = session_id,
-                    user_query       = query,
-                    assistant_response = formatted_result.get("formatted_answer", ""),
+                # ── Store structured turn — single write point ────────────────
+                # Stores query_summary (Understanding Agent's clean output) +
+                # filter metadata (Analysis Agent's output) — NOT the formatted
+                # answer text, which can be noisy JSON/table data.
+                conversation_memory.add_turn(
+                    session_id    = session_id,
+                    user_query    = query,
+                    query_summary = summary,
+                    intent        = "db_query",
+                    modules       = analysis.get("modules", []),
+                    filter_fields = analysis.get("filter_fields", {}),
+                    filter_values = analysis.get("filter_values", {}),
                 )
 
                 loop.call_soon_threadsafe(q.put_nowait, {"type": "result", "data": formatted_result})
