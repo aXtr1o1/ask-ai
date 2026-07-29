@@ -54,19 +54,15 @@ async def run_query_stream(
     q:   asyncio.Queue = asyncio.Queue()
 
     # ── Callback factory ──────────────────────────────────────────────────────
-    def _make_thought_cb(stage: str):
+    def _make_thought_cb(stage: str, buffered: bool = False):
         """
         Returns (thought_cb, done_cb) for one agent stage.
-
-        thought_cb(text: str)  — called by stream_with_thoughts with each
-                                  thought chunk as it arrives from the Gemini API.
-        done_cb()              — call after the agent returns to close the stage.
+        If buffered=True, thoughts are held until done_cb(flush=True) is called.
         """
         started = [False]
+        buffer = []
 
-        def thought_cb(text: str):
-            if not text or not text.strip():
-                return
+        def _emit(text: str, split_words: bool = True):
             if not started[0]:
                 loop.call_soon_threadsafe(q.put_nowait, {
                     "type":  "thinking_start",
@@ -74,16 +70,37 @@ async def run_query_stream(
                 })
                 logger.info("[Stream] %-22s thinking started", stage)
                 started[0] = True
-            # Split into words so the frontend receives one word at a time.
-            # No sleep — timing is driven by the LLM generation pace.
-            for word in text.split():
+            
+            if split_words:
+                for word in text.split():
+                    loop.call_soon_threadsafe(q.put_nowait, {
+                        "type":  "thinking_chunk",
+                        "stage": stage,
+                        "word":  word + " ",
+                    })
+            else:
                 loop.call_soon_threadsafe(q.put_nowait, {
                     "type":  "thinking_chunk",
                     "stage": stage,
-                    "word":  word + " ",
+                    "word":  text,
                 })
 
-        def done_cb():
+        def thought_cb(text: str):
+            if not text or not text.strip():
+                return
+            if buffered:
+                buffer.append(text)
+            else:
+                _emit(text, split_words=True)
+
+        def flush_cb():
+            if buffer:
+                _emit("".join(buffer), split_words=False)
+            buffer.clear()
+
+        def done_cb(flush: bool = True):
+            if buffered and flush:
+                flush_cb()
             if started[0]:
                 loop.call_soon_threadsafe(q.put_nowait, {
                     "type":  "thinking_end",
@@ -97,15 +114,18 @@ async def run_query_stream(
     def _worker():
         try:
             # ── STEP 1: UNDERSTANDING ─────────────────────────────────────────
-            u_cb, u_done = _make_thought_cb("Understanding Agent")
+            # Use buffered=True to conditionally stream thoughts only for DB intents
+            u_cb, u_done = _make_thought_cb("Understanding Agent", buffered=True)
             understanding = classify_query(query, session_id, thought_callback=u_cb)
-            u_done()
-
+            
             intent                = understanding.get("intent")
             summary               = understanding.get("query_summary", query)
             modules               = understanding.get("modules", [])
             response_format       = understanding.get("response_format") or "PLAIN_TEXT"
             user_specified_format = understanding.get("user_specified_format", False)
+
+            # Stream thoughts for all intents except pure 'general' queries
+            u_done(flush=(intent != "general"))
 
             # Short-circuit for non-DB intents
             if intent in ("general", "web_search"):

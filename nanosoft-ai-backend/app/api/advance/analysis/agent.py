@@ -87,16 +87,28 @@ def analyze_query(
         logger.error("[Analysis Agent] JSON decode failed: %s\nRaw: %.300s", exc, json_text)
         raise ValueError(f"Analysis Agent returned invalid JSON: {exc}") from exc
 
+    if isinstance(raw_dict, list):
+        raw_dict = raw_dict[0] if raw_dict else {}
+
     # Coerce filter_fields: list → dict with empty description
-    for mod, fields in (raw_dict.get("filter_fields") or {}).items():
+    for mod, fields in list((raw_dict.get("filter_fields") or {}).items()):
         if isinstance(fields, list):
             raw_dict["filter_fields"][mod] = {f: "" for f in fields if isinstance(f, str)}
 
-    # Coerce filter_values: drop null/non-string values
-    for mod, vals in (raw_dict.get("filter_values") or {}).items():
+    # Coerce filter_values: handle list of dicts, drop null/non-string values
+    for mod, vals in list((raw_dict.get("filter_values") or {}).items()):
+        if isinstance(vals, list):
+            merged = {}
+            for item in vals:
+                if isinstance(item, dict):
+                    merged.update(item)
+            vals = merged
+            raw_dict["filter_values"][mod] = merged
+            
         if isinstance(vals, dict):
             raw_dict["filter_values"][mod] = {
-                k: str(v) for k, v in vals.items() if v is not None
+                k: (", ".join(str(i) for i in v) if isinstance(v, list) else str(v)) 
+                for k, v in vals.items() if v is not None
             }
 
     try:

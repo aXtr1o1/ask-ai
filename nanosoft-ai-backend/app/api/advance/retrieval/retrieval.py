@@ -50,10 +50,13 @@ def _apply_filters(
         if column_name not in filter_fields:
             continue
 
-        # Keep only rows where the column contains the filter value (case-insensitive)
+        # Treat comma-separated filter values as multiple targets (OR logic)
+        targets = [t.strip().lower() for t in str(filter_value).split(',')]
+
+        # Keep only rows where the column contains ANY of the targets (OR logic)
         result = [
             row for row in result
-            if str(filter_value).lower() in str(row.get(column_name, "")).lower()
+            if any(t in str(row.get(column_name, "")).lower() for t in targets)
         ]
         logger.info(
             "[RETRIEVAL] filter column=%s value=%s → %d records remaining",

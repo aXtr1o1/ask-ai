@@ -15,6 +15,7 @@ import time
 
 from google import genai
 from google.genai import types
+import json as _json
 
 from app.config import settings
 from app.api.advance.Understanding_Agent.conversation_memory import conversation_memory
@@ -75,7 +76,10 @@ def classify_query(
 
     # ── Parse structured output ───────────────────────────────────────────────
     try:
-        response = UnderstandingOutput.model_validate_json(json_text)
+        raw = _json.loads(json_text)
+        if isinstance(raw, list):
+            raw = raw[0] if raw else {}
+        response = UnderstandingOutput.model_validate(raw)
     except Exception as exc:
         logger.error("[Understanding Agent] JSON parse failed: %s\nRaw: %.300s", exc, json_text)
         raise ValueError(f"Understanding Agent returned unparseable JSON: {exc}") from exc

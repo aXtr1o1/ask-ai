@@ -4662,7 +4662,7 @@ export default function Home() {
                 <IconMenu2 size={24} />
               </button>
               <div style={{ fontSize: '14px', fontWeight: '500', flex: 1, textAlign: 'center' }}>
-                Ask AI
+                {isSpaceBooking ? "Space Booking" : isAdvanceAskAI ? "Advance Ask AI" : "Ask AI"}
               </div>
               <div style={{ width: '40px' }} />
             </div>
@@ -4753,16 +4753,20 @@ export default function Home() {
                   >
                     {isSpaceBooking
                       ? "Welcome to Space Booking"
-                      : selectedGroupName
-                        ? `📁 ${selectedGroupName}`
-                        : "Welcome to Ask AI"}
+                      : isAdvanceAskAI
+                        ? "Welcome to Advance Ask AI"
+                        : selectedGroupName
+                          ? `📁 ${selectedGroupName}`
+                          : "Welcome to Ask AI"}
                   </h1>
                   <p className="landing-subtitle">
                     {isSpaceBooking
                       ? "Let's book your space buddy"
-                      : selectedGroupName
-                        ? `Start a new chat in ${selectedGroupName}`
-                        : "Let's work together buddy"}
+                      : isAdvanceAskAI
+                        ? "Let's work together buddy"
+                        : selectedGroupName
+                          ? `Start a new chat in ${selectedGroupName}`
+                          : "Let's work together buddy"}
                   </p>
                 </div>
               </div>

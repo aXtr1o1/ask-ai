@@ -329,7 +329,7 @@ export function renderTableLayout(text: string, isDark: boolean) {
         headers = Object.keys(flatData[0]);
         rows = flatData.map((item: any) => headers.map(h => (item[h] !== undefined && item[h] !== null) ? String(item[h]) : ""));
       } else {
-         return renderMarkdownLayout(text);
+         return renderListLayout(text, false, isDark);
       }
     } else {
       return renderMarkdownLayout(text);
@@ -578,7 +578,13 @@ export function renderMarkdownLayout(text: string) {
         const key = Object.keys(obj)[0];
         return `<div style="font-weight: 600; color: #ffd700; font-size: 16px;">${key}: ${obj[key]}</div>`;
       }
-      return renderJsonLayout(text, true); // default to dark
+      
+      if (Array.isArray(obj)) {
+        return renderListLayout(text, false, true);
+      }
+      
+      // For any other object, stringify it and render as markdown
+      text = JSON.stringify(obj, null, 2);
     } else if (typeof obj === "number" || typeof obj === "string") {
         return `<div style="font-weight: 600; color: #ffd700; font-size: 16px;">${obj}</div>`;
     }
@@ -1002,8 +1008,8 @@ export function AdvanceStreamMessage({ msg, isDark = true }: { msg: any; isDark?
                   border: "1px solid rgba(212,175,55,0.15)",
                   borderRadius: "6px",
                   padding: "10px 12px",
-                  minHeight: "120px",
-                  maxHeight: "180px",
+                  minHeight: "60px",
+                  maxHeight: "120px",
                   overflowY: "auto",
                   display: "flex",
                   flexDirection: "column"
