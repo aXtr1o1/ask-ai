@@ -25,7 +25,7 @@ from typing import Any
 
 from google.genai import types
 
-from app.api.advance.Understanding_Agent.conversation_memory import conversation_memory
+
 from app.api.advance.Formatting_agent.prompt import build_formatting_prompt
 from app.api.advance.gemini_stream import stream_with_thoughts
 
@@ -261,16 +261,6 @@ def format_pipeline_response(
     except Exception as e:
         logger.error("[Formatting Agent] LLM failed: %s", e)
         explanation = ""
-    logger.info("========== Conversation Store ==========")
-    logger.info("Session ID : %s", session_id)
-    logger.info("User Query : %s", user_query)
-    logger.info("Assistant  : %s", explanation)
-    logger.info("========================================")
-    conversation_memory.add_conversation(
-        session_id        = session_id,
-        user_query        = user_query,
-        assistant_response= explanation,
-    )
 
     return {
         "response_type":     _FORMAT_TO_RESPONSE_TYPE.get(response_format, default_response_type),

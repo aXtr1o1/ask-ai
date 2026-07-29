@@ -75,8 +75,15 @@ def _project_columns(
     records: list[dict],
     filter_fields: dict[str, str],   # { column_name → description }
 ) -> list[dict]:
-    """Keep only the columns whose names are defined as keys in filter_fields."""
-    keep_columns = set(filter_fields.keys())   # keys are already the column names
+    """
+    Keep only the columns whose names are defined as keys in filter_fields.
+
+    If filter_fields is empty (Analysis Agent returned no fields), return
+    all columns so the Execution Agent still has usable data.
+    """
+    if not filter_fields:
+        return records   # no projection — keep everything
+    keep_columns = set(filter_fields.keys())
     return [{k: v for k, v in row.items() if k in keep_columns} for row in records]
 
 
@@ -138,6 +145,13 @@ def get_filtered_records(
 
         # Step 2: get this module's column definitions
         module_filter_fields = filter_fields.get(module, {})
+
+        if not module_filter_fields:
+            logger.warning(
+                "[RETRIEVAL] module=%s has empty filter_fields — Analysis Agent returned no fields. "
+                "Projecting all columns so Execution Agent has usable data.",
+                module,
+            )
 
         # Step 3: apply filters — merge HTTP-level + module pre-filters
         # Fields that couldn't be mapped to SP params (e.g. ResolutionTAT) still

@@ -109,18 +109,55 @@ def stream_with_thoughts(
 
 def history_to_contents(history: list[dict]) -> list:
     """
-    Convert conversation_memory history to google.genai contents format.
+    Convert structured ConversationTurn history to google.genai contents format
+    for the Understanding Agent.
 
-    Input  (LangChain-dict):  [{"role": "user", "content": "..."}, ...]
-    Output (google.genai):    [{"role": "user", "parts": [{"text": "..."}]}, ...]
+    Each turn produces TWO messages:
+      user  → the raw user_query (what the user actually typed)
+      model → "intent: X | modules: Y | summary: Z"
+              (the Understanding Agent's own prior output — feeds its own
+               reasoning back so it can resolve follow-up references cleanly)
 
-    Note: "assistant" role is mapped to "model" (google.genai convention).
+    Input (structured turns from ConversationMemory.get_history()):
+        [
+            {
+                "user_query":    "show me overdue assets",
+                "query_summary": "List all assets with overdue maintenance status",
+                "intent":        "db_query",
+                "modules":       ["assets"],
+                ...
+            },
+            ...
+        ]
+
+    Output (google.genai contents):
+        [
+            {"role": "user",  "parts": [{"text": "Query: \"show me overdue assets\""}]},
+            {"role": "model", "parts": [{"text": "intent: db_query | modules: assets | summary: List all assets with overdue maintenance status"}]},
+            ...
+        ]
     """
     contents = []
-    for msg in history:
-        role = "model" if msg.get("role") == "assistant" else "user"
+    for turn in history:
+        intent      = turn.get("intent", "general")
+        modules     = turn.get("modules", [])
+        summary     = turn.get("query_summary", "")
+        user_query  = turn.get("user_query", "")
+
+        # ── User message: the raw query the user sent ──────────────────────
         contents.append({
-            "role":  role,
-            "parts": [{"text": msg.get("content", "")}],
+            "role":  "user",
+            "parts": [{"text": f'Query: "{user_query}"'}],
         })
+
+        # ── Model message: the Understanding Agent's own prior output ──────
+        # Using structured text so the LLM can read its own prior reasoning
+        # clearly — no ambiguity, no verbose formatting agent text.
+        modules_str = ", ".join(modules) if modules else "none"
+        model_text  = f"intent: {intent} | modules: {modules_str} | summary: {summary}"
+        contents.append({
+            "role":  "model",
+            "parts": [{"text": model_text}],
+        })
+
     return contents

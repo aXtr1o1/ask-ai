@@ -39,7 +39,10 @@ def load_records_as_dataframe(state: dict, module: str) -> pd.DataFrame:
     """
     Load the already-filtered records for a module into a pandas DataFrame.
     'module' is one of: bdm, ppm, fa, assets, sb
-    Columns that contain numbers stored as strings are automatically converted.
+
+    Only converts columns to numeric when every non-null value in that column
+    is numeric. This prevents ID/code columns (e.g. '001', 'A-12') from being
+    silently coerced to float and losing their string identity.
 
     Called by: all tools
     """
@@ -50,7 +53,10 @@ def load_records_as_dataframe(state: dict, module: str) -> pd.DataFrame:
     df = pd.DataFrame(records)
     for col in df.columns:
         converted = pd.to_numeric(df[col], errors="coerce")
-        if converted.notna().sum() > 0:
+        non_null_original  = df[col].notna().sum()
+        non_null_converted = converted.notna().sum()
+        # Only apply numeric conversion when it succeeds for ALL non-null values
+        if non_null_original > 0 and non_null_converted == non_null_original:
             df[col] = converted
     return df
 
@@ -410,13 +416,16 @@ def get_unique_values(
 
     unique_set    = set(df[actual_field].dropna().astype(str).tolist())
     unique_sorted = sorted(unique_set)
+    
+    # Format as list of dicts for proper table rendering in frontend
+    formatted_unique = [{"module": module, field: v} for v in unique_sorted]
 
     return {
         "module":        module,
         "field":         field,
         "filter_field":  filter_field,
         "filter_value":  filter_value,
-        "unique_values": unique_sorted,
+        "unique_values": formatted_unique,
         "count":         len(unique_sorted),
     }
 
@@ -553,26 +562,76 @@ def sort_and_limit(
     Use after group_by_and_count, group_by_and_aggregate, or get_unique_values.
 
     Args:
-        data:    The list to sort (’data’ MUST be a $step_N.key reference).
-        sort_by: Field name to sort by (for lists of dicts). Leave empty for scalar lists.
+        data:    The list to sort ('data' MUST be a $step_N.key reference).
+        sort_by: Field name to sort by (for lists of dicts). Leave empty to skip sort.
         order:   "DESC" (highest first) or "ASC" (lowest first). Default: "DESC".
         limit:   Keep only the first N items after sorting. 0 = keep all.
+
+    Note: The Analysis Agent may have already applied a limit at the database level.
+    Use limit=0 here unless the user explicitly asked to re-rank and trim the result.
     """
     if not isinstance(data, list):
         return {"error": f"'data' must be a list, got {type(data).__name__}"}
 
-    reverse = order.upper() != "ASC"
+    # LLM sometimes serialises limit as a string — coerce to int
     try:
-        if data and isinstance(data[0], dict):
-            # List of dicts: sort by the specified field; push None/missing to the end
-            sorted_data = sorted(
-                data,
-                key=lambda row: (row.get(sort_by) is None, row.get(sort_by, 0)),
-                reverse=reverse,
-            )
+        limit = int(limit)
+    except (TypeError, ValueError):
+        limit = 0
+
+    if not data:
+        return {"sorted_data": [], "total_in": 0, "total_out": 0,
+                "sort_by": sort_by, "order": order.upper(), "limit": limit}
+
+    ascending = order.upper() == "ASC"
+
+    try:
+        if isinstance(data[0], dict):
+
+            if sort_by:
+                # Use pandas for sort — but coerce the sort column to a uniform
+                # type first so pandas never calls Python's > between str and int.
+                df_sort = pd.DataFrame(data)
+
+                if sort_by in df_sort.columns:
+                    col = df_sort[sort_by]
+                    numeric_col = pd.to_numeric(col, errors="coerce")
+
+                    if numeric_col.notna().sum() == col.notna().sum():
+                        # Every non-null value is numeric — sort as number
+                        df_sort[sort_by] = numeric_col
+                    else:
+                        # Mixed or string column — convert everything to str
+                        df_sort[sort_by] = col.astype(str)
+
+                    df_sort = df_sort.sort_values(
+                        sort_by, ascending=ascending, na_position="last"
+                    )
+
+                # Manual NaN → None (avoids df.where() which uses > internally)
+                raw = df_sort.to_dict(orient="records")
+                sorted_data = [
+                    {k: (None if isinstance(v, float) and math.isnan(v) else v)
+                     for k, v in row.items()}
+                    for row in raw
+                ]
+
+            else:
+                # No sort_by — DB already returned rows in order. Just copy.
+                sorted_data = list(data)
+
         else:
-            # List of scalars: plain sort
-            sorted_data = sorted(data, reverse=reverse)
+            # Scalar list: push None to end
+            def _scalar_key(v):
+                if v is None:
+                    return (1, "")
+                try:
+                    return (0, f"{float(v):020.6f}")
+                except (TypeError, ValueError):
+                    return (0, str(v))
+
+            sorted_data = sorted(data, key=_scalar_key, reverse=not ascending)
+
     except Exception as exc:
         return {"error": f"Sort failed: {exc}"}
 
@@ -725,7 +784,7 @@ def count_records_multi(
 def get_record_fields(
     module: str,
     state: Annotated[dict, InjectedState()],
-    fields: list = [],
+    fields: list | None = None,
 ) -> dict:
     """
     Return the actual record data from a module.
@@ -734,7 +793,7 @@ def get_record_fields(
 
     Args:
         module: Data module name.
-        fields: Optional list of field names to include. If empty, returns all fields.
+        fields: Optional list of field names to include. If empty or None, returns all fields.
                 Use to return only the columns relevant to the question.
     """
     df = load_records_as_dataframe(state, module)
@@ -747,6 +806,13 @@ def get_record_fields(
         selected_cols = [c for c in resolved if c is not None]
         if selected_cols:
             df = df[selected_cols]
+
+    # Drop internal/sensitive fields that shouldn't be shown to the user
+    internal_fields = ["user_id", "user_name", "created_at", "updated_at", "_matched_fields"]
+    cols_to_drop = [c for c in internal_fields if c in df.columns]
+    if cols_to_drop:
+        df = df.drop(columns=cols_to_drop)
+
 
     # Replace NaN with None for clean JSON output
     records = [

@@ -873,7 +873,19 @@ export async function sendAdvanceQuery(
         } else if (data.status === "complete") {
           pendingResult = data.result;
           streamDone = true;
-          startDrain();
+          // Clear the thought char queue immediately — don't wait for 22ms/char drain.
+          // The final answer should appear as soon as the backend finishes, not seconds later.
+          charQueue.length = 0;
+          fadePending = false;
+          if (drainTimer) {
+            clearInterval(drainTimer);
+            drainTimer = null;
+          }
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.removeEventListener("message", handleWsMessage);
+          }
+          onComplete(pendingResult);
+
         }
       } catch (e) {
         // Ignored

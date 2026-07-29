@@ -164,7 +164,16 @@ def _resolve_args(args: dict, step_results: dict) -> dict:
     for k, v in args.items():
         if isinstance(v, list):
             # Resolve each item in the list individually
-            resolved[k] = [_resolve_ref(item, step_results) for item in v]
+            res_list = [_resolve_ref(item, step_results) for item in v]
+            # If the result is a list of lists, flatten it into a single list
+            # so the frontend table renderer gets a clean flat list of dicts.
+            if res_list and all(isinstance(x, list) for x in res_list):
+                flattened = []
+                for sublist in res_list:
+                    flattened.extend(sublist)
+                resolved[k] = flattened
+            else:
+                resolved[k] = res_list
         else:
             resolved[k] = _resolve_ref(v, step_results)
     return resolved
