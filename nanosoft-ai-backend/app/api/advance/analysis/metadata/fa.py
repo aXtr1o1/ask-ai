@@ -13,118 +13,298 @@ FA_SCHEMA: dict[str, str] = {
 
     # --- Identifiers ---
     "RMComplaintNo": (
-        "Unique audit / remedial complaint number. Primary reference ID. Example: '63'."
+        "Unique audit / remedial complaint number. Primary reference ID. "
+        "Example: '63','124'"
     ),
 
     # --- Classification ---
     "RMStageName": (
         "Current workflow stage of the audit or remedial task. "
-        "Examples: 'Facility Audit Request Raised' (created, not yet assigned), "
-        "'Staf Assigned for Work Execution' (technician allocated), "
-        "'Work Execution Completed' (task done)."
     ),
+
     "PriorityName": (
         "Priority level of the audit task. "
-        "Known values: 'P1 Critical', 'P2 High', 'P3 Medium', 'P4 Low'."
     ),
+
     "FrequencyName": (
         "How often this audit recurs. "
-        "Known values: 'MONTHLY', 'QUARTERLY', 'HALFYEARLY', 'ANNUAL'."
     ),
+
     "RMCategoryName": (
         "High-level category of the audit. "
-        "Examples: 'Pest Control Checks', 'Housekeeping Inspection'."
     ),
+
     "RMCategorySubName": (
         "Specific audit checklist item within the category. "
-        "Examples: 'RODENT ACTIVITY', 'COCKROACH ACTIVITY', "
-        "'FLOOR CLEANLINESS', 'WASHROOM CLEANLINESS'."
+        "Example: 'RODENT ACTIVITY','FLOOR CLEANLINESS'"
     ),
+
     "RMRequestDetailsDesc": (
         "Description of the audit or remedial task. "
-        "Examples: 'Pest Control', 'Monthly Housekeeping Audit'."
+        "Example: 'Pest Control','Monthly Housekeeping Audit'"
     ),
+
     "DivisionName": (
         "Service division responsible for the audit. "
-        "Examples: 'Housekeeping', 'Electrical System'."
+        "Example: 'Housekeeping','Electrical System'"
     ),
+
     "ContractName": (
         "Maintenance contract under which this audit falls. "
-        "Example: 'Facility Management Residential Area'."
+        "Example: 'Facility Management Residential Area','Annual Maintenance Contract'"
     ),
+
     "LocalityCode": (
-        "Short locality code. Examples: 'DM' (Doha), 'RUW' (Ruwi)."
+        "Short locality code. "
+        "Example: 'DM','RUW'"
     ),
 
     # --- Personnel ---
     "RMTechName": (
-        "Technician assigned to execute the audit. Null if not yet assigned."
+        "Technician assigned to execute the audit. Null if not yet assigned. "
+        "Example: 'Mohamed Ali','Ramesh Kumar'"
     ),
+
     "RMTechRemarks": (
-        "Remarks entered by the technician after completing the task."
+        "Remarks entered by the technician after completing the task. "
+        "Example: 'Audit completed successfully','Defects rectified'"
     ),
+
     "RMMaintenanceRemarks": (
-        "Maintenance remarks recorded during or after the task."
+        "Maintenance remarks recorded during or after the task. "
+        "Example: 'Scheduled for follow-up','Maintenance completed'"
     ),
+
     "RMTechnicalFindings": (
-        "Technical findings documented during the audit or inspection."
+        "Technical findings documented during the audit or inspection. "
+        "Example: 'Water leakage observed','Loose electrical connection'"
     ),
+
     "ReworkRemarks": (
-        "Remarks entered if the task was marked for rework."
+        "Remarks entered if the task was marked for rework. "
+        "Example: 'Cleaning not satisfactory','Reinspection required'"
     ),
 
     # --- Location ---
     "LocalityName": (
-        "Geographic locality. Examples: 'Doha', 'Ruwi'."
+        "Geographic locality. "
+        "Example: 'Doha','Ruwi'"
     ),
+
     "BuildingName": (
         "Building being audited. "
-        "Example: 'Building 1 - Residential High Rise'."
+        "Example: 'Building 1 - Residential High Rise','Reef Mall'"
     ),
+
     "FloorName": (
-        "Floor within the building. Examples: 'Floor 1', 'Ground Floor'."
+        "Floor within the building. "
+        "Example: 'Floor 1','Ground Floor'"
     ),
+
     "SpotName": (
-        "Specific spot being audited. Examples: 'Garbage Room', 'Common Area'."
+        "Specific spot being audited. "
+        "Example: 'Garbage Room','Common Area'"
     ),
 
     # --- Timestamps ---
     "RMComplainedDateTime": (
-        "Date the audit task was created. Format: 'DD-MM-YYYY'."
+        "Date and time the audit task was created. Format: 'DD-MM-YYYY HH:MM:SS'. "
+        "Example: '15-07-2026 09:30:15','18-07-2026 14:45:00'"
     ),
+
     "RMTeStartDateTime": (
-        "Date and time the technician started the audit work. Null if not started."
+        "Date and time the technician started the audit work. Null if not started. "
+        "Example: '15-07-2026 10:00:00','18-07-2026 15:00:00'"
     ),
+
     "RMTeEndDateTime": (
-        "Date and time the technician completed the audit. Null if not done."
+        "Date and time the technician completed the audit. Null if not done. "
+        "Example: '15-07-2026 11:30:00','18-07-2026 16:20:00'"
     ),
+
     "RMBDMWOCompletedDate": (
-        "Date the audit work order was officially closed. Null if still open."
+        "Date the audit work order was officially closed. Null if still open. "
+        "Example: '15-07-2026 12:00:00','18-07-2026 17:00:00'"
     ),
+
     "RMXComplaintDate": (
-        "Original complaint/request date and time for this audit record. "
-        "Format: 'DD-MM-YYYY HH:MM:SS'."
+        "Date and time of the original complaint or request associated with this audit record. "
+        "Format: 'DD-MM-YYYY HH:MM:SS'. "
+        "Example: '14-07-2026 18:30:00','17-07-2026 08:45:00'"
     ),
 
     # --- Metrics ---
     "RMMaintenanceHrs": (
-        "Planned maintenance effort in minutes. Example: 60 (1 hour)."
+        "Planned maintenance duration for the audit task. "
+        "Example: '1','2'"
     ),
+
     "RMManPower": (
-        "Number of personnel allocated for this audit task."
+        "Number of personnel allocated for this audit task. "
+        "Example: '2','4'"
     ),
+
     "RMManHours": (
-        "Total man-hours allocated for this audit task."
+        "Total man-hours allocated for this audit task. "
+        "Example: '8','16'"
     ),
+
     "RMTotalAmount": (
-        "Total cost amount for this audit or remedial task."
+        "Total cost amount for this audit or remedial task. "
+        "Example: '1500.00','3250.50'"
     ),
 
     # --- Flags ---
     "IsRMRework": (
-        "Boolean — true if this task has been marked for rework."
+        "Boolean — true if this task has been marked for rework. "
+        "Example: 'true','false'"
     ),
+
     "IsRMWithdraw": (
-        "Boolean — true if this task has been withdrawn."
+        "Boolean — true if this task has been withdrawn. "
+        "Example: 'true','false'"
+    ),
+    "RMCCMComplaintIDPK": (
+        "Internal primary identifier for the RM complaint in the CCM system. "
+        "Example: '1001','2058'"
+    ),
+
+    "RMCCMComplaintCode": (
+        "Internal complaint code generated by the CCM system. "
+        "Example: 'RM-000123','RM-000456'"
+    ),
+
+    "RMOverDueTime": (
+        "Amount of time the audit or remedial task exceeded its scheduled deadline. "
+        "Example: '02:30:00','01:15:00'"
+    ),
+
+    "RMETADate": (
+        "Estimated completion date and time for the audit task. "
+        "Example: '20-07-2026 17:00:00','25-07-2026 18:30:00'"
+    ),
+
+    "RMDownloadStat": (
+        "Status indicating whether this audit record has been downloaded or synchronized. "
+        "Example: 'Downloaded','Pending'"
+    ),
+
+    "RMFlowSeqNo": (
+        "Workflow sequence number representing the current processing step. "
+        "Example: '1','5'"
+    ),
+
+    "RMBDMStageDesc": (
+        "Detailed description of the current workflow stage or status. "
+        "Example: 'Facility Audit Request Raised','Work Execution Completed'"
+    ),
+
+    "RMXComplaintNo": (
+        "External or cross-reference complaint number associated with this record. "
+        "Example: 'XC-10021','XC-10245'"
+    ),
+
+    "RMResponseTime": (
+        "Time taken to respond to the audit request. "
+        "Example: '00:45:00','01:20:00'"
+    ),
+
+    "RMResolutionTime": (
+        "Time taken to complete and resolve the audit request. "
+        "Example: '05:30:00','08:15:00'"
+    ),
+
+    "IsRMBMS": (
+        "Boolean — true if this record is integrated with the Building Management System (BMS). "
+        "Example: 'true','false'"
+    ),
+
+    "IsRMTechManual": (
+        "Boolean — true if technician intervention was recorded manually. "
+        "Example: 'true','false'"
+    ),
+
+    "IsRMCCMAnaliyseClosed": (
+        "Boolean — true if the analysis phase has been officially closed. "
+        "Example: 'true','false'"
+    ),
+
+    "IsDraft": (
+        "Boolean — true if the record is saved as a draft and not yet finalized. "
+        "Example: 'true','false'"
+    ),
+
+    "IsActive": (
+        "Boolean — true if the record is currently active. "
+        "Example: 'true','false'"
+    ),
+
+   "DeleStat": (
+        "Deletion status flag indicating whether the record has been marked as deleted. "
+        "Example: 'true','false'"
+    ),
+
+    "RMWithdrawRemarks": (
+        "Remarks explaining why the audit task was withdrawn. "
+        "Example: 'Duplicate request','Client cancelled the audit'"
+    ),
+
+    "BDMLongitude": (
+        "GPS longitude coordinate indicating the audit location. "
+        "Example: '55.2708','54.3773'"
+    ),
+
+    "BDMLattitude": (
+        "GPS latitude coordinate indicating the audit location. "
+        "Example: '25.2048','24.4539'"
+    ),
+
+    "BuildingCode": (
+        "Code identifying the building. "
+        "Example: 'BLD001','BLD025'"
+    ),
+
+    "ContractCode": (
+        "Code identifying the maintenance contract. "
+        "Example: 'CNT001','AMC2026'"
+    ),
+
+    "DivisionCode": (
+        "Code identifying the responsible service division. "
+        "Example: 'DIV001','DIV015'"
+    ),
+
+    "RMStageSeqNo": (
+        "Sequence number representing the current workflow stage. "
+    ),
+
+    "FrequencyCode": (
+        "Code representing the audit frequency. "
+        "Example: 'MTH','ANN'"
+    ),
+
+    "Remarks": (
+        "General remarks, observations, or additional notes associated with the audit record. "
+        "Example: 'Inspection completed successfully','Follow-up visit required'"
+    ),
+
+    "FilePath": (
+        "File path or document attachment associated with the audit record. "
+        "Example: '/uploads/audit_report.pdf','/attachments/image_001.jpg'"
+    ),
+
+    "CreatedUserID": (
+        "Identifier of the user who created the audit record. "
+        "Example: 'admin','tech001'"
+    ),
+
+    "CreatedTtm": (
+        "Date and time when the audit record was created. "
+        "Example: '15-07-2026 09:15:00','18-07-2026 14:20:00'"
+    ),
+
+    "UpdatedTtm": (
+        "Date and time when the audit record was last updated. "
+        "Example: '15-07-2026 17:30:00','18-07-2026 18:10:00'"
     ),
 }

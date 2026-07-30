@@ -15,33 +15,54 @@ MODULE_ENUMS: dict[str, dict[str, list[str]]] = {
     # =========================================================================
     "bdm": {
         "WoStatus": [
-            "Open",
+            "Cancelled",
             "Closed",
+            "Open",
         ],
         "PriorityName": [
+            "Critical",
+            "High",
+            "Low",
+            "Medium",
             "P1 Critical",
             "P2 High",
             "P3 Medium",
             "P4 Low",
         ],
         "ResponseTAT": [
-            "ROT",   # Responded On Time — SLA met
-            "NROT",  # Not Responded On Time — response SLA breached
+            "NROT",
+            "ROT",
+            "SNA",
         ],
         "ResolutionTAT": [
-            "COT",   # Closed On Time — resolved within SLA
-            "SNA",   # SLA Not Achieved — resolution breached SLA
+            "COT",
+            "NCOT",
+        ],
+        "WoTypeName": [
+            "Asset",
+            "BMS",
+            "Encode Nature",
+            "FA",
+            "FA (Facility Audits)",
+            "General",
+            "PM (Preventive Maintenance)",
         ],
         "ComplaintModeName": [
+            "BMS",
             "By Call",
+            "By Community Portal",
             "By Mail",
             "By Mobile Portal",
             "By Web Portal",
+            "Casual Maintenances",
+            "FA",
         ],
         "ComplaintTypeName": [
-            "Service Request",
             "Corrective Maintenance",
-            "Emergency",
+            "Incident",
+            "Proactive",
+            "Reactive Maintenance",
+            "Service Request",
         ],
     },
 
@@ -53,29 +74,66 @@ MODULE_ENUMS: dict[str, dict[str, list[str]]] = {
             "Open",
             "Closed",
         ],
+        "PPMStageName": [
+            "Defected Asset",
+            "Execution Completed",
+            "Execution Completed & Closed",
+            "Execution Completed & in Approval Process",
+            "Open",
+            "Preliminary Confirmed & Open",
+            "Staff Assigned",
+            "Staff Yet to be Allocated",
+            "Standby",
+            "Technician Assigned",
+            "Work in Progress",
+        ],
         "FrequencyName": [
+            "10000 KMS",
+            "ANNUAL",
+            "DAILY",
+            "HALFYEARLY",
             "MONTHLY",
             "QUARTERLY",
-            "HALFYEARLY",
-            "ANNUAL",
+            "WEEKLY",
         ],
+
+        
     },
 
     # =========================================================================
     # FA — Facility Audits & Remedial
     # =========================================================================
     "fa": {
+        
+        "FrequencyName": [
+            "ANNUAL",
+            "DAILY",
+            "HALFYEARLY",
+            "MONTHLY",
+            "QUARTERLY",
+            "WEEKLY",
+        ],
+        "RMStageName": [
+            "Facility Audit - Closed",
+            "Facility Audit Request Raised",
+            "Staf Assigned for Work Execution",
+        ],
         "PriorityName": [
+            "Critical",
+            "High",
+            "Low",
+            "Medium",
             "P1 Critical",
             "P2 High",
+            "P2-High",
             "P3 Medium",
             "P4 Low",
         ],
-        "FrequencyName": [
-            "MONTHLY",
-            "QUARTERLY",
-            "HALFYEARLY",
-            "ANNUAL",
+        "RMCategoryName": [
+            "APRON DAILY INSPECTION",
+            "Building Exterior Maintenance Checklist",
+            "Facility Condition Assessment Template",
+            "Pest Control Checks",
         ],
     },
 
@@ -84,37 +142,67 @@ MODULE_ENUMS: dict[str, dict[str, list[str]]] = {
     # =========================================================================
     "sb": {
         "FrequencyName": [
+            "ANNUAL",
+            "DAILY",
+            "HALFYEARLY",
             "MONTHLY",
             "QUARTERLY",
-            "HALFYEARLY",
-            "ANNUAL",
+            "WEEKLY",
         ],
         "PPMStageName": [
-            "Staff Yet to be Allocated",
-            "Technician Assigned",
+            "Defected Asset",
+            "Execution Completed",
             "Execution Completed & Closed",
-        ],
+            "Execution Completed & in Approval Process",
+            "Open",
+            "Preliminary Confirmed & Open",
+            "Staff Assigned",
+            "Staff Yet to be Allocated",
+            "Standby",
+            "Technician Assigned",
+            "Work in Progress",
+                ],
     },
 
     # =========================================================================
     # Assets — Physical Asset Register
     # =========================================================================
-    "assets": {
-        "StatusName": [
-            "Online",
-            "Offline",
-        ],
-        "ConditionName": [
-            "Good",
-            "Fair",
-            "Bad",
-        ],
-        "PriorityName": [
-            "P1 Critical",
-            "P2 High",
-            "P3 Medium",
-            "P4 Low",
-        ],
+        "assets": {
+            "StatusName": [
+                "Online",
+                "Offline",
+            ],
+            "ConditionName": [
+                "Bad",
+                "CDT",
+                "Good",
+                "Immobilized",
+                "Operational",
+                "ULD",
+            ],
+            "ServiceAreaName": [
+                "N/A",
+                "SAC012",
+                "SCA013",
+            ],
+            "TradeGroupName": [
+                "OWNED",
+                "Owned",
+                "RENTED",
+            ],
+            "PriorityName": [
+                "Critical",
+                "High",
+                "Low",
+                "Medium",
+                "P1 Critical",
+                "P2 High",
+                "P2-High",
+                "P3 Medium",
+                "P4 Low",
+            ],
+        
+
         "AssetTypeName": [
             "Fixed",
             "Movable",

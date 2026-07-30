@@ -69,12 +69,25 @@ Produce exactly five fields:
 ════════════════════════════════════════════════
 ALLOWED ENUM VALUES  (use these exactly)
 ════════════════════════════════════════════════
-{enum_block}
+
+This section applies only to fields listed in the ALLOWED ENUM VALUES block below.
+For all other fields, use the value exactly as expressed in the query summary.
+
+Users express intent in natural language. They will not use the exact enum strings stored in the database.
+When the query implies a filter on a field that has allowed enum values, reason about what the user means
+and map it to the single best-matching value from that field's allowed list.
+If no allowed value meaningfully represents the user's intent for that field, omit it from filter_values entirely.
+Never output a value that is not present verbatim in the ALLOWED ENUM VALUES section.
 
 ════════════════════════════════════════════════
 AVAILABLE FIELDS FOR SELECTED MODULES
 ════════════════════════════════════════════════
 {schema_block}
+
+════════════════════════════════════════════════
+ALLOWED ENUM VALUES FOR SELECTED MODULES
+════════════════════════════════════════════════
+{enum_block}
 """
 
 
@@ -84,3 +97,4 @@ def get_system_prompt(modules: list[str]) -> str:
     schema_block = json.dumps(selected_metadata, indent=2)
     enum_block   = get_enum_block(modules)
     return _PROMPT_TEMPLATE.format(schema_block=schema_block, enum_block=enum_block)
+
