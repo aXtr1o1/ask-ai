@@ -6,7 +6,7 @@ using credentials stored in the client_sync_config database table.
 import logging
 import asyncio
 import requests
-from app.api.database.postgres_client import get_pool
+from app.services.common_service import get_client_config_sync
 
 logger = logging.getLogger("asset_analytics_service")
 logger.setLevel(logging.INFO)
@@ -16,24 +16,7 @@ if not logger.handlers:
     logger.addHandler(ch)
 
 
-def _get_client_config_sync(user_name: str):
-    """Fetch base_url, jwt_token, user_id from client_sync_config by client_name."""
-    conn = get_pool()
-    if not conn:
-        return None
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT base_url, jwt_token, user_id FROM client_sync_config WHERE client_name = %s",
-            (user_name,)
-        )
-        row = cur.fetchone()
-        if row:
-            return {
-                "base_url": row[0],
-                "jwt_token": row[1],
-                "user_id": str(row[2]) if row[2] is not None else "1"
-            }
-    return None
+# ℹ️  get_client_config_sync is imported from common_service — no local copy needed.
 
 
 def _build_api_url(base_url: str, endpoint_path: str) -> str:
@@ -78,7 +61,7 @@ async def fetch_asset_analytics(barcode: str, user_name: str) -> dict:
       - error: top-level error string if config is missing
     """
     # 1. Get client configuration from the database
-    config = await asyncio.to_thread(_get_client_config_sync, user_name)
+    config = await asyncio.to_thread(get_client_config_sync, user_name)
     if not config:
         logger.error("❌ No config found for user: %s", user_name)
         return {"error": f"Configuration not found for client '{user_name}'."}
