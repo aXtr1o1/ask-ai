@@ -146,22 +146,35 @@ def sum_values(
     module: str,
     field: str,
     state: Annotated[dict, InjectedState()],
+    condition_field: str = "",
+    condition_value: str = "",
 ) -> dict:
     """
     Sum all values in a numeric field across all records in a module.
+    Optionally filter to rows where condition_field equals condition_value
+    before summing.
 
     Args:
-        module: Data module name
-        field:  Numeric column to sum
+        module:          Data module name
+        field:           Numeric column to sum
+        condition_field: Column to filter on (optional)
+        condition_value: Value to match in condition_field (optional)
     """
     df = load_records_as_dataframe(state, module)
+    if condition_field:
+        actual_cf = resolve_column(df, condition_field)
+        if actual_cf:
+            col = df[actual_cf].fillna("").astype(str).str.strip()
+            df = df[col.str.lower() == condition_value.strip().lower()]
     actual_field = resolve_column(df, field)
     numbers = get_numeric_column(df, actual_field) if actual_field else pd.Series(dtype=float)
     return {
-        "module":       module,
-        "field":        field,
-        "total_sum":    round(float(numbers.sum()), 4),
-        "records_used": int(numbers.count()),
+        "module":          module,
+        "field":           field,
+        "total_sum":       round(float(numbers.sum()), 4),
+        "records_used":    int(numbers.count()),
+        "condition_field": condition_field,
+        "condition_value": condition_value,
     }
 
 
@@ -173,24 +186,44 @@ def get_average(
     module: str,
     field: str,
     state: Annotated[dict, InjectedState()],
+    condition_field: str = "",
+    condition_value: str = "",
 ) -> dict:
     """
     Compute the mean of a numeric field across all records in a module.
+    Optionally filter to rows where condition_field equals condition_value
+    before averaging.
 
     Args:
-        module: Data module name
-        field:  Numeric column to average
+        module:          Data module name
+        field:           Numeric column to average
+        condition_field: Column to filter on (optional)
+        condition_value: Value to match in condition_field (optional)
     """
     df = load_records_as_dataframe(state, module)
+    if condition_field:
+        actual_cf = resolve_column(df, condition_field)
+        if actual_cf:
+            col = df[actual_cf].fillna("").astype(str).str.strip()
+            df = df[col.str.lower() == condition_value.strip().lower()]
     actual_field = resolve_column(df, field)
     numbers = get_numeric_column(df, actual_field) if actual_field else pd.Series(dtype=float)
     if numbers.empty:
-        return {"module": module, "field": field, "average": None, "records_used": 0}
+        return {
+            "module":          module,
+            "field":           field,
+            "average":         None,
+            "records_used":    0,
+            "condition_field": condition_field,
+            "condition_value": condition_value,
+        }
     return {
-        "module":       module,
-        "field":        field,
-        "average":      round(float(numbers.mean()), 4),
-        "records_used": int(numbers.count()),
+        "module":          module,
+        "field":           field,
+        "average":         round(float(numbers.mean()), 4),
+        "records_used":    int(numbers.count()),
+        "condition_field": condition_field,
+        "condition_value": condition_value,
     }
 
 
@@ -202,22 +235,34 @@ def get_minimum(
     module: str,
     field: str,
     state: Annotated[dict, InjectedState()],
+    condition_field: str = "",
+    condition_value: str = "",
 ) -> dict:
     """
     Find the minimum value in a numeric field across all records in a module.
+    Optionally filter to rows where condition_field equals condition_value first.
 
     Args:
-        module: Data module name
-        field:  Numeric column to find the minimum of
+        module:          Data module name
+        field:           Numeric column to find the minimum of
+        condition_field: Column to filter on (optional)
+        condition_value: Value to match in condition_field (optional)
     """
     df = load_records_as_dataframe(state, module)
+    if condition_field:
+        actual_cf = resolve_column(df, condition_field)
+        if actual_cf:
+            col = df[actual_cf].fillna("").astype(str).str.strip()
+            df = df[col.str.lower() == condition_value.strip().lower()]
     actual_field = resolve_column(df, field)
     numbers = get_numeric_column(df, actual_field) if actual_field else pd.Series(dtype=float)
     return {
-        "module":       module,
-        "field":        field,
-        "minimum":      float(numbers.min()) if not numbers.empty else None,
-        "records_used": int(numbers.count()),
+        "module":          module,
+        "field":           field,
+        "minimum":         float(numbers.min()) if not numbers.empty else None,
+        "records_used":    int(numbers.count()),
+        "condition_field": condition_field,
+        "condition_value": condition_value,
     }
 
 
@@ -228,23 +273,35 @@ def get_minimum(
 def get_maximum(
     module: str,
     field: str,
-    state: Annotated[dict, InjectedState()]
+    state: Annotated[dict, InjectedState()],
+    condition_field: str = "",
+    condition_value: str = "",
 ) -> dict:
     """
     Find the maximum value in a numeric field across all records in a module.
+    Optionally filter to rows where condition_field equals condition_value first.
 
     Args:
-        module: Data module name
-        field:  Numeric column to find the maximum of
+        module:          Data module name
+        field:           Numeric column to find the maximum of
+        condition_field: Column to filter on (optional)
+        condition_value: Value to match in condition_field (optional)
     """
     df = load_records_as_dataframe(state, module)
+    if condition_field:
+        actual_cf = resolve_column(df, condition_field)
+        if actual_cf:
+            col = df[actual_cf].fillna("").astype(str).str.strip()
+            df = df[col.str.lower() == condition_value.strip().lower()]
     actual_field = resolve_column(df, field)
     numbers = get_numeric_column(df, actual_field) if actual_field else pd.Series(dtype=float)
     return {
-        "module":       module,
-        "field":        field,
-        "maximum":      float(numbers.max()) if not numbers.empty else None,
-        "records_used": int(numbers.count()),
+        "module":          module,
+        "field":           field,
+        "maximum":         float(numbers.max()) if not numbers.empty else None,
+        "records_used":    int(numbers.count()),
+        "condition_field": condition_field,
+        "condition_value": condition_value,
     }
 
 
@@ -455,11 +512,15 @@ def join_records(
 
     if df_a.empty or df_b.empty:
         return {
-            "module_a":     module_a,
-            "module_b":     module_b,
-            "join_field":   join_field,
-            "error":        "One or both modules returned no records.",
+            "module_a":      module_a,
+            "module_b":      module_b,
+            "join_field":    join_field,
+            "error":         "One or both modules returned no records.",
             "matched_count": 0,
+            "unmatched_in_a": 0,
+            "unmatched_in_b": 0,
+            "records_in_a":  len(df_a),
+            "records_in_b":  len(df_b),
         }
 
     actual_a = resolve_column(df_a, join_field)
@@ -473,6 +534,10 @@ def join_records(
             "join_field":    join_field,
             "error":         f"Column '{join_field}' not found in: {missing}",
             "matched_count": 0,
+            "unmatched_in_a": 0,
+            "unmatched_in_b": 0,
+            "records_in_a":  len(df_a),
+            "records_in_b":  len(df_b),
         }
 
     keys_a = set(df_a[actual_a].dropna().astype(str))
@@ -511,8 +576,8 @@ def join_records(
 @tool
 def do_math(
     operation: str,
-    a: float,
-    b: float = 0,
+    a,
+    b = 0,
 ) -> dict:
     """
     Perform arithmetic on two numbers.
@@ -521,9 +586,21 @@ def do_math(
 
     Args:
         operation: ADD | SUB | MUL | DIV | MOD | POWER | SQRT | ABS
-        a:         First number
-        b:         Second number (unused for SQRT and ABS)
+        a:         First number (or $step_N.key reference resolved to a number)
+        b:         Second number (unused for SQRT and ABS). Default 0.
     """
+    # Safe coercion — upstream steps can return None or numeric strings
+    def _to_float(v, default=0.0):
+        if v is None:
+            return default
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return default
+
+    a = _to_float(a)
+    b = _to_float(b)
+
     op = operation.upper()
     try:
         if   op == "ADD":   result = a + b
@@ -658,16 +735,21 @@ def group_by_and_aggregate(
     agg_field: str,
     operation: str,
     state: Annotated[dict, InjectedState()],
+    filter_field: str = "",
+    filter_value: str = "",
 ) -> dict:
     """
     Group records by a field and compute SUM | AVG | MIN | MAX of a numeric
     field per group. Results are sorted highest value first.
+    Optionally filter rows before grouping.
 
     Args:
-        module:      Data module name
-        group_field: Column to group by
-        agg_field:   Numeric column to aggregate
-        operation:   SUM | AVG | MIN | MAX
+        module:       Data module name
+        group_field:  Column to group by
+        agg_field:    Numeric column to aggregate
+        operation:    SUM | AVG | MIN | MAX
+        filter_field: Column to filter on before grouping (optional)
+        filter_value: Value to match in filter_field (optional)
     """
     df = load_records_as_dataframe(state, module)
     if df.empty:
@@ -675,6 +757,13 @@ def group_by_and_aggregate(
             "module": module, "group_field": group_field, "agg_field": agg_field,
             "operation": operation.upper(), "total_records": 0, "unique_groups": 0, "groups": [],
         }
+
+    # Apply optional pre-filter before grouping
+    if filter_field:
+        actual_ff = resolve_column(df, filter_field)
+        if actual_ff:
+            col = df[actual_ff].fillna("").astype(str).str.strip()
+            df = df[col.str.lower() == filter_value.strip().lower()]
 
     actual_group = resolve_column(df, group_field)
     actual_agg   = resolve_column(df, agg_field)
@@ -712,6 +801,8 @@ def group_by_and_aggregate(
         "group_field":   group_field,
         "agg_field":     agg_field,
         "operation":     op,
+        "filter_field":  filter_field,
+        "filter_value":  filter_value,
         "total_records": int(df[actual_agg].notna().sum()),
         "unique_groups": len(grouped),
         "groups":        groups_clean,
@@ -800,6 +891,11 @@ def get_record_fields(
     if df.empty:
         return {"module": module, "total": 0, "records": [], "fields_returned": []}
 
+    # LLM sometimes sends fields as a plain string instead of a list
+    # e.g. fields="AssetTagNo"  instead of  fields=["AssetTagNo"]
+    if isinstance(fields, str):
+        fields = [f.strip() for f in fields.split(",") if f.strip()]
+
     # Resolve each requested field case-insensitively
     if fields:
         resolved = [resolve_column(df, f) for f in fields]
@@ -833,15 +929,15 @@ def get_record_fields(
 # TOOL 15: final_answer_tool
 # =============================================================================
 @tool
-def final_answer_tool(result_ref: str) -> dict:
+def final_answer_tool(result_ref) -> dict:
     """
     Completion marker. Always the LAST step in the execution queue.
     Signals that all computation steps have been completed successfully.
     result_ref receives the resolved value of the final computed answer.
 
     Args:
-        result_ref: The final computed answer (a $step_N.key reference resolved
-                    by the queue runner before this tool is called)
+        result_ref: The final computed answer — any type (number, string, dict, list).
+                    Resolved from a $step_N.key reference by the queue runner.
     """
     return {
         "status":      "complete",

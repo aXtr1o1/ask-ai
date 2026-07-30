@@ -71,10 +71,14 @@ def _strip_markdown(raw: str) -> str:
 # =============================================================================
 _TOOL_OUTPUT_KEYS: dict[str, set[str]] = {
     "count_records":          {"count", "module", "condition_field", "condition_value"},
-    "sum_values":             {"total_sum", "records_used", "module", "field"},
-    "get_average":            {"average", "records_used", "module", "field"},
-    "get_minimum":            {"minimum", "records_used", "module", "field"},
-    "get_maximum":            {"maximum", "records_used", "module", "field"},
+    "sum_values":             {"total_sum", "records_used", "module", "field",
+                               "condition_field", "condition_value"},
+    "get_average":            {"average", "records_used", "module", "field",
+                               "condition_field", "condition_value"},
+    "get_minimum":            {"minimum", "records_used", "module", "field",
+                               "condition_field", "condition_value"},
+    "get_maximum":            {"maximum", "records_used", "module", "field",
+                               "condition_field", "condition_value"},
     "calculate_time_between": {"stats", "calculated", "missing_dates", "total_records",
                                "module", "start_field", "end_field"},
     "group_by_and_count":     {"groups", "total_records", "unique_groups",
@@ -83,12 +87,13 @@ _TOOL_OUTPUT_KEYS: dict[str, set[str]] = {
                                "filter_field", "filter_value"},
     "join_records":           {"matched_count", "unmatched_in_a", "unmatched_in_b",
                                "records_in_a", "records_in_b",
-                               "module_a", "module_b", "join_field"},
+                               "module_a", "module_b", "join_field", "error"},
     "do_math":                {"result", "operation", "a", "b"},
     "sort_and_limit":         {"sorted_data", "total_in", "total_out",
                                "sort_by", "order", "limit"},
     "group_by_and_aggregate": {"groups", "total_records", "unique_groups",
-                               "module", "group_field", "agg_field", "operation"},
+                               "module", "group_field", "agg_field", "operation",
+                               "filter_field", "filter_value"},
     "count_records_multi":    {"count", "module",
                                "condition_field_1", "condition_value_1",
                                "condition_field_2", "condition_value_2",
@@ -183,8 +188,9 @@ def _validate_queue(queue: list) -> None:
 
                 # (b) The key must exist in the referenced tool's OUTPUT KEYS
                 if len(parts) == 2:
-                    ref_key      = parts[1]              # "stats.average" or "count"
-                    root_key     = ref_key.split(".")[0]  # "stats" or "count"
+                    ref_key  = parts[1]              # e.g. "stats.average" or "groups[0].value"
+                    # Strip list-index suffix before checking: "groups[0]" → "groups"
+                    root_key = ref_key.split(".")[0].split("[")[0]
                     ref_tool     = step_tool_map[ref_idx]
                     allowed_keys = _TOOL_OUTPUT_KEYS.get(ref_tool, set())
                     if allowed_keys and root_key not in allowed_keys:
@@ -319,13 +325,20 @@ def run_execution(
         raise ValueError(f"Execution Agent queue is not a list. Got: {type(parsed).__name__}")
 
     # ── Coerce step args: convert None / non-string scalars to strings ────────
+    # Rules:
+    #   None   → ""              (tools treat empty string as "not provided")
+    #   dict   → keep as-is     (result_ref in final_answer_tool may be a dict)
+    #   list   → keep as-is     (multi-step references)
+    #   int/float → str(v)      (field names or enum values passed as numbers)
     for step in parsed:
         if isinstance(step, dict):
             args = step.get("args") or {}
             for k, v in args.items():
                 if v is None:
                     args[k] = ""                      # None → empty string
-                elif not isinstance(v, (str, list)):
+                elif isinstance(v, (dict, list)):
+                    pass                              # keep structured values intact
+                elif not isinstance(v, str):
                     args[k] = str(v)                  # int/float → string
             step["args"] = args
 

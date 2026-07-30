@@ -142,8 +142,60 @@ def _resolve_ref(val: Any, step_results: dict) -> Any:
     if len(parts) == 1:
         return step_result  # whole dict
 
-    field = parts[1]        # "count"
+    field = parts[1]        # e.g. "count"  or  "groups[0].value"  or  "stats.average"
+
+    # ── List-index notation: "groups[0].value" ─────────────────────────────
+    # The LLM references the top item from a list field: $step_1.groups[0].value
+    import re
+    list_idx_match = re.match(r'^(\w+)\[(\d+)\]\.?(.*)?$', field)
+    if list_idx_match:
+        list_key   = list_idx_match.group(1)   # "groups"
+        idx        = int(list_idx_match.group(2))  # 0
+        sub_key    = list_idx_match.group(3)   # "value"  (may be empty)
+
+        if not isinstance(step_result, dict) or list_key not in step_result:
+            available = list(step_result.keys()) if isinstance(step_result, dict) else "N/A"
+            raise KeyError(
+                f"Reference '{val}': list field '{list_key}' not found in step '{step_key}'. "
+                f"Available keys: {available}"
+            )
+        the_list = step_result[list_key]
+        if not isinstance(the_list, list):
+            raise KeyError(
+                f"Reference '{val}': field '{list_key}' in step '{step_key}' "
+                f"is not a list (got {type(the_list).__name__})."
+            )
+        if idx >= len(the_list):
+            raise IndexError(
+                f"Reference '{val}': index [{idx}] out of range — "
+                f"list '{list_key}' has only {len(the_list)} item(s)."
+            )
+        item = the_list[idx]
+        if sub_key:
+            if not isinstance(item, dict) or sub_key not in item:
+                available = list(item.keys()) if isinstance(item, dict) else "N/A"
+                raise KeyError(
+                    f"Reference '{val}': sub-key '{sub_key}' not found in "
+                    f"{list_key}[{idx}]. Available keys: {available}"
+                )
+            return item[sub_key]
+        return item
+    # ── End list-index notation ─────────────────────────────────────────────
+
     if not isinstance(step_result, dict) or field not in step_result:
+        # Try dot-notation nested key: "stats.average" → step_result["stats"]["average"]
+        if "." in field:
+            top_key, sub_key = field.split(".", 1)
+            if isinstance(step_result, dict) and top_key in step_result:
+                nested = step_result[top_key]
+                if isinstance(nested, dict) and sub_key in nested:
+                    return nested[sub_key]
+                # nested is not a dict or sub_key missing
+                available_sub = list(nested.keys()) if isinstance(nested, dict) else "not a dict"
+                raise KeyError(
+                    f"Reference '{val}': sub-key '{sub_key}' not found in "
+                    f"step '{step_key}' → '{top_key}'. Available: {available_sub}"
+                )
         available = list(step_result.keys()) if isinstance(step_result, dict) else "N/A"
         raise KeyError(
             f"Reference '{val}': field '{field}' not found in step '{step_key}'. "
@@ -156,9 +208,116 @@ class _DependencyError(Exception):
     """Raised when a $ref points to a step that already failed."""
 
 
+class _SafeSkipError(Exception):
+    """
+    Raised when a resolved argument value is semantically dangerous for the
+    tool that will consume it (e.g. zero denominator for DIV, None for a
+    numeric field, empty list for sort_and_limit).
+
+    Unlike _DependencyError (upstream step crashed), _SafeSkipError means the
+    upstream step SUCCEEDED but its output value cannot safely be fed into this
+    tool.  We short-circuit the step with a pre-built safe_result so the chain
+    stays alive — subsequent steps that depend on THIS step via a $ref still
+    receive a usable (though possibly null) value.
+    """
+    def __init__(self, reason: str, safe_result: dict):
+        super().__init__(reason)
+        self.safe_result = safe_result
+
+
+# Mapping: tool_name → argument-specific guards
+# Each guard is  (arg_name, check_fn, safe_result_factory)
+#   arg_name          — the resolved arg key to inspect
+#   check_fn          — receives the resolved value, returns True if UNSAFE
+#   safe_result_factory — called with (tool_name, args) to produce the safe output
+_ARG_GUARDS: dict[str, list[tuple]] = {
+    # DIV / MOD with b == 0 → result undefined, avoid ZeroDivisionError
+    "do_math": [
+        (
+            "b",
+            lambda v, args: args.get("operation", "").upper() in ("DIV", "MOD")
+                            and _is_zero_or_none(v),
+            lambda tool, args: {
+                "operation": args.get("operation", "DIV").upper(),
+                "a": args.get("a"),
+                "b": args.get("b"),
+                "result": None,
+                "_safe_skip": "denominator_was_zero_or_null — result set to None",
+            },
+        ),
+        # Any numeric arg is None → coerce to 0 silently (not a hard skip)
+    ],
+    # sort_and_limit with an empty data list → return empty result immediately
+    "sort_and_limit": [
+        (
+            "data",
+            lambda v, args: isinstance(v, list) and len(v) == 0,
+            lambda tool, args: {
+                "sorted_data": [],
+                "total_in": 0,
+                "total_out": 0,
+                "sort_by": args.get("sort_by", ""),
+                "order": args.get("order", "DESC"),
+                "limit": args.get("limit", 0),
+                "_safe_skip": "input_data_list_was_empty — no records to sort",
+            },
+        ),
+    ],
+    # get_average / sum_values / get_minimum / get_maximum:
+    # If the resolved field arg is None or empty string → tools return gracefully
+    # already, but guard against None so we don't pass literal None as field name.
+    "get_average": [
+        (
+            "field",
+            lambda v, args: not v,
+            lambda tool, args: {
+                "module": args.get("module"),
+                "field": args.get("field"),
+                "average": None,
+                "records_used": 0,
+                "_safe_skip": "field_name_resolved_to_empty",
+            },
+        ),
+    ],
+}
+
+
+def _is_zero_or_none(v: Any) -> bool:
+    """Return True when v is None, the string 'None', 0, 0.0, or '0'."""
+    if v is None:
+        return True
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return v == 0
+    if isinstance(v, str):
+        s = v.strip().lower()
+        return s in ("0", "0.0", "none", "null", "")
+    return False
+
+
+def _guard_resolved_args(tool_name: str, resolved_args: dict) -> None:
+    """
+    Check resolved argument values against known dangerous patterns for the
+    given tool.  Raises _SafeSkipError with a pre-built safe_result if an
+    unsafe pattern is detected so the queue runner can short-circuit cleanly.
+
+    Called AFTER _resolve_args, BEFORE the tool is invoked.
+    """
+    guards = _ARG_GUARDS.get(tool_name, [])
+    for arg_name, check_fn, result_factory in guards:
+        value = resolved_args.get(arg_name)
+        if check_fn(value, resolved_args):
+            safe_result = result_factory(tool_name, resolved_args)
+            raise _SafeSkipError(
+                f"Tool '{tool_name}' arg '{arg_name}' = {value!r} is semantically "
+                f"unsafe — short-circuiting step with safe result.",
+                safe_result=safe_result,
+            )
+
+
 def _resolve_args(args: dict, step_results: dict) -> dict:
     """Resolve all $step_N.key references in an args dict.
-    Handles plain values, single string references, and lists of references.
+    Handles plain values, single string references, lists of references,
+    and nested dicts of references (e.g. result_ref in final_answer_tool).
     """
     resolved = {}
     for k, v in args.items():
@@ -174,9 +333,55 @@ def _resolve_args(args: dict, step_results: dict) -> dict:
                 resolved[k] = flattened
             else:
                 resolved[k] = res_list
+
+        elif isinstance(v, dict):
+            # Nested dict — resolve each value inside it individually.
+            # This covers final_answer_tool receiving:
+            #   result_ref = {"total": "$step_0.total_sum", "avg": "$step_1.average"}
+            # Without this the $step_N strings pass through as literal text and
+            # the Formatting Agent hallucinates real-looking numbers for them.
+            resolved[k] = {
+                inner_k: _resolve_ref(inner_v, step_results)
+                for inner_k, inner_v in v.items()
+            }
+
         else:
             resolved[k] = _resolve_ref(v, step_results)
     return resolved
+
+
+def _coerce_numeric_args(tool_name: str, resolved_args: dict) -> dict:
+    """
+    Silently coerce None numeric arguments to 0 for tools that do arithmetic.
+    This handles the case where an upstream step returns None (e.g. get_average
+    on zero records) and the LLM feeds that directly into do_math.
+
+    Only applied to do_math — other tools handle None internally via pandas.
+    """
+    if tool_name != "do_math":
+        return resolved_args
+
+    patched = dict(resolved_args)
+    for arg in ("a", "b"):
+        v = patched.get(arg)
+        if v is None or (isinstance(v, str) and v.strip().lower() in ("none", "null", "")):
+            logger.warning(
+                "[Queue Runner] do_math arg '%s' is None/null — coercing to 0 "
+                "to prevent crash. Check upstream step output.",
+                arg,
+            )
+            patched[arg] = 0
+        else:
+            try:
+                patched[arg] = float(str(v))
+            except (ValueError, TypeError):
+                logger.warning(
+                    "[Queue Runner] do_math arg '%s' = %r cannot be parsed as float — "
+                    "coercing to 0.",
+                    arg, v,
+                )
+                patched[arg] = 0
+    return patched
 
 
 # =============================================================================
@@ -250,6 +455,26 @@ def run_queue(queue: list[dict], filtered_records: dict, progress_callback: call
             tools_called += 1
             error_count  += 1
             log_step(step_idx, tool_name, step_results[step_key])
+            continue
+
+        # ── 1b. Coerce numeric args (None → 0) for arithmetic tools ─────────
+        resolved_args = _coerce_numeric_args(tool_name, resolved_args)
+
+        # ── 1c. Semantic value guard — catch dangerous values before tool call
+        try:
+            _guard_resolved_args(tool_name, resolved_args)
+        except _SafeSkipError as exc:
+            # The resolved value is semantically unsafe (e.g. zero denominator).
+            # Use the pre-built safe_result so downstream $refs still get a value
+            # and the chain can continue rather than hard-failing.
+            logger.warning(
+                "[Queue Runner] Step %d (%s) — safe-skipped: %s",
+                step_idx, tool_name, exc,
+            )
+            step_results[step_key] = exc.safe_result
+            tools_called += 1
+            # Not counted as error_count — it's a graceful skip, not a failure.
+            log_step(step_idx, tool_name, exc.safe_result)
             continue
 
         # ── 2. Look up the tool ─────────────────────────────────────────────

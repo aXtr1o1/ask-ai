@@ -23,6 +23,7 @@ _SHAPE_ALTERNATIVES: dict[str, list[str]] = {
     "grouped_many":     ["GRAPH"],
     "record_set":       [],
     "multi_result":     ["GRAPH"],
+    "error":            [],
 }
 
 
@@ -34,6 +35,17 @@ def _detect(final_value) -> tuple[str, dict]:
     Returns (shape_type, descriptor).
     Inspects structure only — never reads the actual values inside lists/dicts.
     """
+
+    # ── None / failed execution ───────────────────────────────────────────────
+    if final_value is None:
+        return "error", {"type": "error", "reason": "no_result"}
+
+    # ── Error dict from a failed step ─────────────────────────────────────────
+    if isinstance(final_value, dict) and ("error" in final_value or "_dep_failed" in final_value):
+        return "error", {
+            "type":   "error",
+            "reason": final_value.get("error") or final_value.get("_dep_failed"),
+        }
 
     # ── Multiple results (list of results from different steps) ──────────────
     if isinstance(final_value, list):
@@ -126,6 +138,7 @@ def _shape_to_format(shape_type: str, suggested_format: str) -> str:
         "grouped_many":     "TABLE",
         "record_set":       "TABLE",
         "multi_result":     "TABLE",
+        "error":            "PLAIN_TEXT",
     }
     resolved = mapping.get(shape_type, suggested_format)
 
@@ -156,6 +169,7 @@ _SHAPE_COMPATIBLE_FORMATS: dict[str, set[str]] = {
     "grouped_many":     {"TABLE", "GRAPH", "PLAIN_TEXT"},
     "record_set":       {"TABLE", "PLAIN_TEXT"},
     "multi_result":     {"TABLE", "GRAPH", "PLAIN_TEXT"},
+    "error":            {"PLAIN_TEXT"},
 }
 
 

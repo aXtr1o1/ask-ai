@@ -32,6 +32,7 @@ from app.api.advance.Understanding_Agent.agent import classify_query
 from app.api.advance.analysis.agent import analyze_query
 from app.api.advance.Understanding_Agent.conversation_memory import conversation_memory
 from app.api.advance.retrieval.retrieval import get_filtered_records
+from app.api.advance.preprocessing.preprocessor import preprocess_records
 from app.api.advance.execution.agent import run_execution
 from app.api.advance.Formatting_agent.agent import format_pipeline_response
 
@@ -186,6 +187,12 @@ async def run_query_stream(
                 module_filter_values=analysis.get("filter_values", {}),
                 limit=analysis.get("limit"),
             )
+
+            # ── STEP 3.5: PREPROCESSING ────────────────────────────────────
+            # Clean raw DB records before they reach the execution tools.
+            # Fixes: None in numeric/bool fields, malformed dates, numeric
+            # strings, whitespace padding. Zero runtime cost — pure Python.
+            filtered_records = preprocess_records(filtered_records)
 
             total_records = sum(len(r) for r in filtered_records.values())
             if total_records == 0:
