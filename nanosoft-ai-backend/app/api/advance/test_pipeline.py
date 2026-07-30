@@ -198,7 +198,7 @@ def run_query(
     # ------------------------------------------------------------------
     understanding = classify_query(
     query=query,
-    session_id="test-session",
+    session_id="session_id",
 )
     latency_understanding = understanding.get("latency", {})
     intent          = understanding.get("intent")
@@ -501,7 +501,10 @@ if __name__ == "__main__":
                 continue
 
             try:
-                run_query(query)
+                run_query(
+                    query=query,
+                    session_id="test-session",
+                )
             except Exception as exc:
                 logger.error("Pipeline error: %s", exc, exc_info=True)
                 print(f"\n  [ERROR] {exc}\n")
