@@ -38,10 +38,14 @@ interface SpaceBookingProps {
   isComplaints: boolean;
   setIsComplaints: (val: boolean) => void;
 
+  // Asset Analytics state
+  isAssetAnalytics: boolean;
+  setIsAssetAnalytics: (val: boolean) => void;
+
   // Chat locking state
   isChatStarted?: boolean;
   onLockedClick?: () => void;
-  onSwitchMode?: (newMode: "space_booking" | "complaints" | "ask_ai") => void;
+  onSwitchMode?: (newMode: "space_booking" | "complaints" | "ask_ai" | "asset_analytics") => void;
 }
 
 export default function SpaceBooking({
@@ -50,6 +54,8 @@ export default function SpaceBooking({
   setIsSpaceBooking,
   isComplaints,
   setIsComplaints,
+  isAssetAnalytics,
+  setIsAssetAnalytics,
   isChatStarted = false,
   onLockedClick,
   onSwitchMode,
@@ -201,10 +207,10 @@ export default function SpaceBooking({
                 justifyContent: "space-between",
                 width: "100%",
                 padding: "12px 14px",
-                background: (!isSpaceBooking && !isComplaints) ? "var(--color-primary-soft, rgba(212, 175, 55, 0.15))" : "transparent",
+                background: (!isSpaceBooking && !isComplaints && !isAssetAnalytics) ? "var(--color-primary-soft, rgba(212, 175, 55, 0.15))" : "transparent",
                 border: "none",
                 borderRadius: "10px",
-                color: (!isSpaceBooking && !isComplaints) ? "var(--tile-label-color, #F7EF8A)" : "var(--color-text, #FFFFFF)",
+                color: (!isSpaceBooking && !isComplaints && !isAssetAnalytics) ? "var(--tile-label-color, #F7EF8A)" : "var(--color-text, #FFFFFF)",
                 fontSize: "14px",
                 fontWeight: 500,
                 cursor: "pointer",
@@ -212,16 +218,16 @@ export default function SpaceBooking({
                 transition: "all 0.15s ease",
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.background = (!isSpaceBooking && !isComplaints)
+                e.currentTarget.style.background = (!isSpaceBooking && !isComplaints && !isAssetAnalytics)
                   ? "var(--color-primary-soft, rgba(212, 175, 55, 0.2))"
                   : "var(--color-primary-soft, rgba(255, 255, 255, 0.05))";
                 e.currentTarget.style.color = "var(--tile-label-color, #F7EF8A)";
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.background = (!isSpaceBooking && !isComplaints)
+                e.currentTarget.style.background = (!isSpaceBooking && !isComplaints && !isAssetAnalytics)
                   ? "var(--color-primary-soft, rgba(212, 175, 55, 0.15))"
                   : "transparent";
-                e.currentTarget.style.color = (!isSpaceBooking && !isComplaints)
+                e.currentTarget.style.color = (!isSpaceBooking && !isComplaints && !isAssetAnalytics)
                   ? "var(--tile-label-color, #F7EF8A)"
                   : "var(--color-text, #FFFFFF)";
               }}
@@ -232,7 +238,7 @@ export default function SpaceBooking({
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    color: (!isSpaceBooking && !isComplaints) ? "var(--tile-label-color, #F7EF8A)" : "var(--color-text-muted, rgba(255, 255, 255, 0.7))",
+                    color: (!isSpaceBooking && !isComplaints && !isAssetAnalytics) ? "var(--tile-label-color, #F7EF8A)" : "var(--color-text-muted, rgba(255, 255, 255, 0.7))",
                     transition: "color 0.15s ease",
                   }}
                 >
@@ -240,7 +246,88 @@ export default function SpaceBooking({
                 </span>
                 <span>Ask AI</span>
               </div>
-              {(!isSpaceBooking && !isComplaints) && (
+              {(!isSpaceBooking && !isComplaints && !isAssetAnalytics) && (
+                <span
+                  style={{
+                    width: "6px",
+                    height: "6px",
+                    borderRadius: "50%",
+                    backgroundColor: "var(--tile-label-color, #F7EF8A)",
+                    boxShadow: "0 0 8px var(--tile-label-color, #F7EF8A)",
+                  }}
+                />
+              )}
+            </button>
+
+            {/* Asset Analytics Mode */}
+            <button
+              type="button"
+              onClick={() => {
+                if (onSwitchMode) {
+                  onSwitchMode("asset_analytics");
+                } else {
+                  if (isChatStarted) {
+                    onLockedClick?.();
+                    return;
+                  }
+                  const newVal = !isAssetAnalytics;
+                  setIsAssetAnalytics(newVal);
+                  if (newVal) {
+                    setIsSpaceBooking(false);
+                    setIsComplaints(false);
+                  }
+                }
+                setIsOpen(false);
+              }}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                width: "100%",
+                padding: "12px 14px",
+                background: isAssetAnalytics ? "var(--color-primary-soft, rgba(212, 175, 55, 0.15))" : "transparent",
+                border: "none",
+                borderRadius: "10px",
+                color: isAssetAnalytics ? "var(--tile-label-color, #F7EF8A)" : "var(--color-text, #FFFFFF)",
+                fontSize: "14px",
+                fontWeight: 500,
+                cursor: "pointer",
+                textAlign: "left",
+                transition: "all 0.15s ease",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = isAssetAnalytics
+                  ? "var(--color-primary-soft, rgba(212, 175, 55, 0.2))"
+                  : "var(--color-primary-soft, rgba(255, 255, 255, 0.05))";
+                e.currentTarget.style.color = "var(--tile-label-color, #F7EF8A)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = isAssetAnalytics
+                  ? "var(--color-primary-soft, rgba(212, 175, 55, 0.15))"
+                  : "transparent";
+                e.currentTarget.style.color = isAssetAnalytics
+                  ? "var(--tile-label-color, #F7EF8A)"
+                  : "var(--color-text, #FFFFFF)";
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                <span
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: isAssetAnalytics ? "var(--tile-label-color, #F7EF8A)" : "var(--color-text-muted, rgba(255, 255, 255, 0.7))",
+                    transition: "color 0.15s ease",
+                  }}
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="11" cy="11" r="8" />
+                    <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                  </svg>
+                </span>
+                <span>Asset Lens</span>
+              </div>
+              {isAssetAnalytics && (
                 <span
                   style={{
                     width: "6px",
@@ -445,7 +532,65 @@ export default function SpaceBooking({
         </div>
       )}
 
-      {!isSpaceBooking && !isComplaints && (
+      {/* Asset Analytics badge */}
+      {isAssetAnalytics && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            padding: "4px 8px 8px 8px",
+            width: "100%",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              background: isChatStarted
+                ? "rgba(255, 255, 255, 0.08)"
+                : "var(--color-primary-soft, rgba(212, 175, 55, 0.15))",
+              border: isChatStarted
+                ? "1px solid rgba(255, 255, 255, 0.12)"
+                : "1px solid var(--color-primary, rgba(212, 175, 55, 0.3))",
+              borderRadius: "20px",
+              padding: "4px 12px",
+              fontSize: "12px",
+              fontWeight: 500,
+              color: isChatStarted
+                ? "#a0a0a0"
+                : "var(--tile-label-color, #F7EF8A)",
+              cursor: "pointer",
+            }}
+            onClick={() => {
+              if (isChatStarted) {
+                onLockedClick?.();
+              } else {
+                setIsAssetAnalytics(false);
+              }
+            }}
+            title={isChatStarted ? "Mode is locked for this chat" : "Click to turn off Asset Lens mode"}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginTop: 1 }}>
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+            <span>Asset Lens</span>
+            <span
+              style={{
+                width: "6px",
+                height: "6px",
+                borderRadius: "50%",
+                backgroundColor: isChatStarted ? "#a0a0a0" : "var(--tile-label-color, #F7EF8A)",
+                boxShadow: isChatStarted ? "none" : "0 0 8px var(--tile-label-color, #F7EF8A)",
+                marginLeft: "2px",
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      {!isSpaceBooking && !isComplaints && !isAssetAnalytics && (
         <div
           style={{
             display: "flex",

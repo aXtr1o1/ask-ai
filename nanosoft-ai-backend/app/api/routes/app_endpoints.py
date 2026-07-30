@@ -443,4 +443,3 @@ async def get_bookings_for_spot(spot_code: str):
 @app_endpoints_router.get("/health", tags=["Health"])
 def health():
     return {"status": "ok", "service": "Facility Management AI Assistant"}
-

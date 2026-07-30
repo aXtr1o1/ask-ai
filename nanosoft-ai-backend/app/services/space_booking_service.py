@@ -346,6 +346,8 @@ class SpaceBookingService:
             temp_human = HumanMessage(content=injected_query)
             prompt_messages = [sys_msg] + sb_thread[:-1] + [temp_human]
 
+            # (Confirmation pre-check removed as requested. The model will handle it via rule 7)
+
             # First model invoke
             ai_msg = await self.model.ainvoke(prompt_messages)
 
@@ -364,6 +366,43 @@ class SpaceBookingService:
                     # ── GET_SPOTS ─────────────────────────────────────────────
                     if tc["name"] == "GET_SPOTS":
                         s_term = tc["args"].get("search_term")
+                        want_buildings = bool(tc["args"].get("list_buildings_only", False))
+
+                        # ── Buildings-only fast path ──────────────────────────
+                        if want_buildings:
+                            # Try to build buildings list from __all__ cache first
+                            all_cached = _get_cached_spots(session_id, None) if session_id else None
+                            if all_cached is not None:
+                                p_list_all = all_cached.get("p_list", [])
+                                seen = set()
+                                unique_buildings = []
+                                for spot in p_list_all:
+                                    b = spot.get("BuildingName", "").strip()
+                                    if b and b not in seen:
+                                        seen.add(b)
+                                        unique_buildings.append({"BuildingName": b})
+                                logger.info("🏢 Buildings from __all__ cache | count=%d", len(unique_buildings))
+                            else:
+                                # Need to fetch all spots first
+                                logger.info("🌐 Buildings-only: fetching all spots from API")
+                                raw_str = await fetch_spots_api(user_name, None, list_buildings_only=True)
+                                raw_data = json.loads(raw_str)
+                                unique_buildings = raw_data.get("p_list", [])
+                            tool_data = {"type": "buildings_list", "p_list": unique_buildings}
+                            n_buildings = len(unique_buildings)
+                            tool_result_str = json.dumps({
+                                "total_buildings": n_buildings,
+                                "context_hint": (
+                                    f"There are {n_buildings} buildings available. "
+                                    f"Respond with ONE short natural sentence that tells the user the count and that the full list is shown below. "
+                                    f"Example: 'We have {n_buildings} buildings available — take a look at the list below and let me know which one interests you.'"
+                                ),
+                                "buildings": [b["BuildingName"] for b in unique_buildings]
+                            })
+                            prompt_messages.append(ToolMessage(
+                                name=tc["name"], tool_call_id=tc["id"], content=tool_result_str
+                            ))
+                            continue  # skip the normal spot cache/API path below
 
                         if "[CALENDAR_PAYLOAD]" in current_query:
                             logger.warning("⚠️ Programmatically blocked GET_SPOTS call during [CALENDAR_PAYLOAD] processing")
@@ -404,9 +443,10 @@ class SpaceBookingService:
 
                         # Send only 4 compressed fields to LLM (Stateless In-Context Retrieval / Ephemeral RAG)
                         if isinstance(tool_data, dict) and "p_list" in tool_data:
+                            sample = tool_data["p_list"][:15]
                             compressed = [
                                 {f: s.get(f) for f in _TABLE_FIELDS}
-                                for s in tool_data.get("p_list", [])
+                                for s in sample
                             ]
                             llm_payload = {
                                 "TotalCount": tool_data.get("TotalCount"),
@@ -720,10 +760,10 @@ class SpaceBookingService:
 
                     final_response = {
                         "type": "large_dataset",
-                        "context_summary": summary,
+                        "context_summary": content,
                         "records": _slim_records(p_list)  # ← 4 fields only
                     }
-                    return json.dumps(final_response), summary, messages
+                    return json.dumps(final_response), content, messages
                 else:
                     # Final fallback if LLM is completely silent
                     if not content.strip():
