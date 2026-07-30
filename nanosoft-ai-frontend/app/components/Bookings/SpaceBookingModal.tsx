@@ -647,7 +647,6 @@ export default function SpaceBookingModal({
           type="button"
           disabled={isDisabled}
           onClick={() => handleDateClick(dateStr)}
-          disabled={isPastDate}
           style={{
             background: isHighlighted
               ? "var(--color-primary, #d4af37)"
@@ -675,13 +674,12 @@ export default function SpaceBookingModal({
             fontSize: "13px",
             fontWeight: isHighlighted || isInRange ? 700 : 500,
             cursor: isDisabled ? "not-allowed" : "pointer",
-            opacity: isDisabled ? 0.5 : 1,
+            opacity: isPastDate ? 0.35 : isDisabled ? 0.5 : 1,
             transition: "all 0.15s ease",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             textDecoration: isPastDate ? "line-through" : "none",
-            opacity: isPastDate ? 0.35 : 1,
           }}
           onMouseEnter={(e) => {
             if (!isHighlighted && !isInRange && !isDisabled) e.currentTarget.style.background = "rgba(255, 255, 255, 0.08)";

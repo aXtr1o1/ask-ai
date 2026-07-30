@@ -682,7 +682,7 @@ const TableWithTile = React.memo(function TableWithTile({
                 </div>
 
                 {/* Tile View Pagination */}
-                {totalPages > 1 && (
+                {totalPages > 1 && !isSpaceBookingData && (
                   <div style={{ display: 'flex', gap: responsive.isMobile ? 6 : 8, justifyContent: 'center', alignItems: 'center', marginTop: responsive.isMobile ? 8 : 12 }}>
                     {(() => {
                       const disabledPrev = page <= 0;
