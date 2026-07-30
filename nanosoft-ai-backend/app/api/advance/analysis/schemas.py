@@ -27,31 +27,24 @@ from pydantic import BaseModel, Field
 class AnalysisOutput(BaseModel):
     """Structured output from the Analysis Agent."""
     reasoning: str = Field(
-        description="A brief explanation of why you selected the specific modules, fields, and filter values based on the query."
+        description="A brief explanation of why you chose these fields and filters for the query."
     )
 
     limit: int | None = Field(
         default=None,
         description=(
             "Maximum number of records to return if the user explicitly specifies a numeric limit "
-            "in the query (e.g. 'top 5', 'first 10', 'give me 5 assets'). Set to null if no specific quantity/count is requested."
+            "(e.g. 'top 5', 'first 10'). Set to null if no specific count is requested."
         )
     )
 
-    modules: list[str] = Field(
-        default_factory=list,
-        description=(
-            "FM database modules required to answer the query. "
-            "Only from: assets, bdm, ppm, fa, sb."
-        )
-    )
     filter_fields: dict[str, dict[str, str]] = Field(
         default_factory=dict,
         description=(
             "Per-module field projection. "
             "Maps module → { FieldName: short description of why this field is needed }. "
-            "Only include fields that exist in the module's metadata schema. "
-            "These are the columns that will be retrieved and passed to the execution agent."
+            "Only include fields that exist in the module's schema. "
+            "If unsure which fields are needed, leave this empty — the retrieval layer will fetch all fields."
         )
     )
     filter_values: dict[str, dict[str, str]] = Field(
@@ -59,11 +52,7 @@ class AnalysisOutput(BaseModel):
         description=(
             "Per-module pre-filter conditions. "
             "Maps module → { FieldName: value to filter on }. "
-            "Only include values that are explicitly present in or directly implied by the query. "
-            "These conditions narrow the retrieved records before analysis begins."
+            "Only include values explicitly stated in the query. "
+            "If unsure, leave this empty — the retrieval layer fetches all records."
         )
-    )
-    thought: str = Field(
-        default="",
-        description="Your internal reasoning and step-by-step thinking process before generating the final output. Always provide your complete thought process here."
     )

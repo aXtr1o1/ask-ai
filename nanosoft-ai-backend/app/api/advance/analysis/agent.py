@@ -140,13 +140,12 @@ def analyze_query(
         all_ff_str = all(isinstance(x, str) for x in raw_ff)
         all_fv_str = all(isinstance(x, str) for x in raw_fv)
         if all_ff_str and all_fv_str and len(raw_ff) > 0:
-            modules_hint = raw_dict.get("modules") or []
-            mod_key = modules_hint[0] if modules_hint else "unknown"
-            
+            mod_key = modules[0] if modules else "unknown"
+
             raw_dict["filter_fields"] = {mod_key: {f: "" for f in raw_ff}}
             raw_dict["filter_values"] = {mod_key: {k: v for k, v in zip(raw_ff, raw_fv)}}
             logger.warning("[Analysis Agent] filter_fields and filter_values were parallel arrays — zipped into dicts")
-            
+
             # Re-fetch for the rest of the coercion logic
             raw_ff = raw_dict.get("filter_fields")
             raw_fv = raw_dict.get("filter_values")
@@ -155,9 +154,8 @@ def analyze_query(
     # The LLM can return filter_fields in three shapes:
 
     if isinstance(raw_ff, list):
-        # Shape C: flat list — wrap under the first module the LLM chose
-        modules_hint = raw_dict.get("modules") or []
-        mod_key = modules_hint[0] if modules_hint else "unknown"
+        # Shape C: flat list — wrap under the first module from Understanding Agent
+        mod_key = modules[0] if modules else "unknown"
         raw_dict["filter_fields"] = {
             mod_key: {f: "" for f in raw_ff if isinstance(f, str)}
         }
@@ -187,8 +185,7 @@ def analyze_query(
         # Detect Shape B: all values are strings/None (flat, not nested)
         all_flat = all(not isinstance(v, dict) and not isinstance(v, list) for v in raw_fv.values())
         if all_flat and raw_fv:
-            modules_hint = raw_dict.get("modules") or []
-            mod_key = modules_hint[0] if modules_hint else "unknown"
+            mod_key = modules[0] if modules else "unknown"
             raw_dict["filter_values"] = {mod_key: raw_fv}
             logger.warning(
                 "[Analysis Agent] filter_values was flat dict — wrapped under module '%s'", mod_key
@@ -220,8 +217,7 @@ def analyze_query(
             if isinstance(item, dict):
                 merged.update(item)
         if merged:
-            modules_hint = raw_dict.get("modules") or []
-            mod_key = modules_hint[0] if modules_hint else "unknown"
+            mod_key = modules[0] if modules else "unknown"
             raw_dict["filter_values"] = {
                 mod_key: {k: str(v) for k, v in merged.items() if v is not None}
             }
@@ -246,8 +242,8 @@ def analyze_query(
                 usage.get("input_tokens", 0), usage.get("output_tokens", 0), usage.get("total_tokens", 0))
     logger.info("[Analysis Agent] latency : llm=%.2fs", llm_time)
 
-    # ── Validate — strip hallucinated modules / fields ────────────────────────
-    valid_modules = [m for m in response.modules if m in MODULE_SCHEMAS]
+    # ── Use modules from Understanding Agent — Analysis Agent does not predict modules ──
+    valid_modules = [m for m in modules if m in MODULE_SCHEMAS]
 
     # Map lowercase field names to actual schema field names
     schema_fields_lower = {
