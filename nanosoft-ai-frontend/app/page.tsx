@@ -2566,7 +2566,7 @@ export default function Home() {
               setBookingStartTime(parsed.fromTime);
               setBookingEndTime(parsed.toTime);
               setActiveBookingBubbleIndex(idx);
-              console.log("📅 [Auto] Phase 3 detected — auto-opening inline booking picker on message index:", idx);
+              console.log("📅 [Auto] Phase 3 / validation detected — auto-opening inline booking picker on message index:", idx);
               return prev;
             });
           }

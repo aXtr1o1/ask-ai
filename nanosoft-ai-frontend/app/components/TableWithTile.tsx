@@ -680,6 +680,51 @@ const TableWithTile = React.memo(function TableWithTile({
                     })}
                   </div>
                 </div>
+
+                {/* Tile View Pagination */}
+                {totalPages > 1 && (
+                  <div style={{ display: 'flex', gap: responsive.isMobile ? 6 : 8, justifyContent: 'center', alignItems: 'center', marginTop: responsive.isMobile ? 8 : 12 }}>
+                    {(() => {
+                      const disabledPrev = page <= 0;
+                      const disabledNext = page >= totalPages - 1;
+                      const tileNavBtnStyle = (disabled: boolean) => ({
+                        padding: responsive.isMobile ? '4px 8px' : '6px 12px',
+                        borderRadius: responsive.isMobile ? 6 : 8,
+                        border: disabled ? '1px solid rgba(212,175,55,0.28)' : '1px solid rgba(212,175,55,0.9)',
+                        cursor: disabled ? 'not-allowed' : 'pointer',
+                        background: disabled
+                          ? 'linear-gradient(180deg, rgba(212,175,55,0.14) 0%, rgba(212,175,55,0.08) 100%)'
+                          : 'linear-gradient(180deg, #ae8625 0%, #f7ef8a 35%, #d2ac47 65%, #edc967 100%)',
+                        color: disabled ? 'rgba(255,255,255,0.4)' : '#1f2937',
+                        fontWeight: 700,
+                        fontSize: responsive.isMobile ? 12 : 13,
+                        boxShadow: disabled ? 'none' : (isDark ? '0 6px 20px rgba(212,175,55,0.22)' : '0 6px 14px rgba(212,175,55,0.12)'),
+                        transition: 'transform 0.08s ease, box-shadow 0.12s ease',
+                      } as React.CSSProperties);
+                      return (
+                        <>
+                          <button
+                            onClick={() => setPage(Math.max(0, page - 1))}
+                            disabled={disabledPrev}
+                            style={tileNavBtnStyle(disabledPrev)}
+                          >
+                            Prev
+                          </button>
+                          <div style={{ fontSize: responsive.isMobile ? 11 : 12, color: tileTextMuted, padding: '0 6px' }}>
+                            Page {page + 1} / {totalPages} — Showing {visibleCount} of {displayTotal}
+                          </div>
+                          <button
+                            onClick={() => setPage(Math.min(totalPages - 1, page + 1))}
+                            disabled={disabledNext}
+                            style={tileNavBtnStyle(disabledNext)}
+                          >
+                            Next
+                          </button>
+                        </>
+                      );
+                    })()}
+                  </div>
+                )}
               </div>
             )}
           </div>
