@@ -455,7 +455,83 @@ def _coerce_numeric_args(tool_name: str, resolved_args: dict) -> dict:
                 )
                 patched[arg] = 0
     return patched
+def _resolve_value(value: Any, step_results: dict) -> Any:
+    """
+    Recursively resolve $step_N.key references inside any JSON structure.
 
+    Supported:
+      - "$step_0.count"
+      - ["$step_0.count", "$step_1.result"]
+      - {"Count": "$step_0.count"}
+      - Nested dict/list combinations
+    """
+
+    # ------------------------------------------------------------------
+    # String -> resolve $step reference
+    # ------------------------------------------------------------------
+    if isinstance(value, str):
+        # Guard: LLM sometimes serialises dicts/lists as a Python-style string.
+        # e.g. "{'By Mail': '$step_0.count', 'By Call': '$step_1.count'}"
+        # Parse it so nested $step refs get resolved correctly.
+        if value.startswith(("{", "[")):
+            import ast
+            try:
+                parsed = ast.literal_eval(value)
+                if isinstance(parsed, (dict, list)):
+                    return _resolve_value(parsed, step_results)
+            except (ValueError, SyntaxError):
+                pass
+        return _resolve_ref(value, step_results)
+
+    # ------------------------------------------------------------------
+    # List -> resolve every item recursively
+    # ------------------------------------------------------------------
+    if isinstance(value, list):
+        resolved_list = [_resolve_value(item, step_results) for item in value]
+
+        # Preserve existing flatten behaviour
+        if (
+            resolved_list
+            and all(isinstance(item, list) for item in resolved_list)
+        ):
+            flattened = []
+            for sublist in resolved_list:
+                flattened.extend(sublist)
+            return flattened
+
+        return resolved_list
+
+    # ------------------------------------------------------------------
+    # Dictionary -> resolve every value recursively
+    # ------------------------------------------------------------------
+    if isinstance(value, dict):
+        return {
+            key: _resolve_value(val, step_results)
+            for key, val in value.items()
+        }
+
+    # ------------------------------------------------------------------
+    # Numbers / bool / None / everything else
+    # ------------------------------------------------------------------
+    return value
+
+
+def _resolve_args(args: dict, step_results: dict) -> dict:
+    """
+    Resolve all $step_N.key references in the args dictionary.
+
+    Supports:
+      ✔ strings
+      ✔ lists
+      ✔ dictionaries
+      ✔ nested dictionaries
+      ✔ nested lists
+      ✔ any combination of the above
+    """
+    return {
+        key: _resolve_value(value, step_results)
+        for key, value in args.items()
+    }
 
 # =============================================================================
 # PUBLIC API

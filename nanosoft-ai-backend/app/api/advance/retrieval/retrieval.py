@@ -16,11 +16,42 @@ The filtered records go DIRECTLY to tools via agent state.
 They are NEVER sent to the LLM.
 """
 import logging
+from itertools import product
 from typing import Any
 
 logger = logging.getLogger("advance.retrieval")
 
 # Data is loaded dynamically via routes (assets.py, bdm.py, etc.)
+
+def _fanout_retrieve(retrieve_func, filter_values, this_module_filters, limit):
+    """
+    Helper to run DB queries. If any filter value is a list.
+    this fans out into multiple scalar calls and deduplicates the results.
+    Handles multiple list filters simultaneously via cartesian product.
+    """
+    merged = {}
+    if filter_values: merged.update(filter_values)
+    if this_module_filters: merged.update(this_module_filters)
+
+    list_items = [(k, v) for k, v in merged.items() if isinstance(v, list)]
+    if not list_items:
+        return retrieve_func(filter_values, this_module_filters, limit)
+
+    # Generate all scalar combinations across all list filters
+    # e.g. {A: [1,2], B: [x,y]} → (A=1,B=x), (A=1,B=y), (A=2,B=x), (A=2,B=y)
+    keys = [k for k, _ in list_items]
+    combos = product(*[v for _, v in list_items])
+
+    all_recs = []
+    seen = set()
+    for combo in combos:
+        item_filters = {**merged, **dict(zip(keys, combo))}
+        for r in retrieve_func(item_filters, None, limit):
+            rid = r.get("id") or str(tuple(r.values()))
+            if rid not in seen:
+                seen.add(rid)
+                all_recs.append(r)
+    return all_recs
 
 
 # =============================================================================
@@ -34,35 +65,49 @@ logger = logging.getLogger("advance.retrieval")
 # =============================================================================
 def _apply_filters(
     records: list[dict],
-    filter_fields: dict[str, str],   # { column_name → description }
-    filter_values: dict[str, Any],   # { column_name → value from HTTP request }
+    filter_fields: dict[str, str],  # { column_name → description }
+    filter_values: dict[str, Any],  # { column_name → value from HTTP request }
 ) -> list[dict]:
     """Filter records to only those matching the user-supplied filter values."""
-    result = records
+    if not filter_values:
+        return records
 
-    for column_name, filter_value in filter_values.items():
-        if not filter_value:
-            continue   # skip None / "" / 0 / False
-        if isinstance(filter_value, str) and filter_value.strip().lower() in ("null", "none"):
-            continue   # skip literal "null"/"none" strings — treat as no filter
+    result = []
+    for row in records:
+        match = True
+        for column_name, filter_value in filter_values.items():
+            if not filter_value:
+                continue  # skip None / "" / 0 / False
+                
+            if isinstance(filter_value, str) and filter_value.strip().lower() in ("null", "none"):
+                continue  # skip literal "null"/"none" strings
 
-        # Only filter on columns that are defined for this module
-        if column_name not in filter_fields:
-            continue
+            # Check if this column is in the row
+            if column_name not in row:
+                continue
+                
+            row_value = row.get(column_name)
+            if row_value is None:
+                match = False
+                break
 
-        # Treat comma-separated filter values as multiple targets (OR logic)
-        targets = [t.strip().lower() for t in str(filter_value).split(',')]
-
-        # Keep only rows where the column contains ANY of the targets (OR logic)
-        result = [
-            row for row in result
-            if any(t in str(row.get(column_name, "")).lower() for t in targets)
-        ]
-        logger.info(
-            "[RETRIEVAL] filter column=%s value=%s → %d records remaining",
-            column_name, filter_value, len(result),
-        )
-
+            # FIX: Properly handle list filters (e.g. ["By Call", "By Mail"])
+            if isinstance(filter_value, list):
+                valid_options = [str(v).strip().lower() for v in filter_value if v]
+                if str(row_value).strip().lower() not in valid_options:
+                    match = False
+                    break
+            else:
+                # Handle scalar filter
+                if str(filter_value).strip().lower() != str(row_value).strip().lower():
+                    # Fallback to substring matching just in case
+                    if str(filter_value).strip().lower() not in str(row_value).strip().lower():
+                        match = False
+                        break
+                    
+        if match:
+            result.append(row)
+            
     return result
 
 
@@ -127,19 +172,19 @@ def get_filtered_records(
 
             if module == "assets":
                 from app.api.advance.retrieval.assets import retrieve as assets_retrieve
-                raw_records = assets_retrieve(filter_values, this_module_filters, limit=limit)
+                raw_records = _fanout_retrieve(assets_retrieve, filter_values, this_module_filters, limit)
             elif module == "bdm":
                 from app.api.advance.retrieval.bdm import retrieve as bdm_retrieve
-                raw_records = bdm_retrieve(filter_values, this_module_filters, limit=limit)
+                raw_records = _fanout_retrieve(bdm_retrieve, filter_values, this_module_filters, limit)
             elif module == "fa":
                 from app.api.advance.retrieval.fa import retrieve as fa_retrieve
-                raw_records = fa_retrieve(filter_values, this_module_filters, limit=limit)
+                raw_records = _fanout_retrieve(fa_retrieve, filter_values, this_module_filters, limit)
             elif module == "ppm":
                 from app.api.advance.retrieval.ppm import retrieve as ppm_retrieve
-                raw_records = ppm_retrieve(filter_values, this_module_filters, limit=limit)
+                raw_records = _fanout_retrieve(ppm_retrieve, filter_values, this_module_filters, limit)
             elif module == "sb":
                 from app.api.advance.retrieval.sb import retrieve as sb_retrieve
-                raw_records = sb_retrieve(filter_values, this_module_filters, limit=limit)
+                raw_records = _fanout_retrieve(sb_retrieve, filter_values, this_module_filters, limit)
         except Exception as e:
             logger.warning("[RETRIEVAL] Retrieval failed for module %s: %s", module, e)
             
@@ -156,22 +201,18 @@ def get_filtered_records(
                 module,
             )
 
-        # Step 3: apply filters — merge HTTP-level + module pre-filters
-        # Fields that couldn't be mapped to SP params (e.g. ResolutionTAT) still
-        # get applied here as exact post-filters on the raw records.
-        combined_filters = {**this_module_filters, **filter_values}  # HTTP overrides pre-filter
-        filtered = _apply_filters(raw_records, module_filter_fields, combined_filters)
+        # Step 3: apply in-memory filters
+        filtered_records = _apply_filters(raw_records, module_filter_fields, filter_values)
 
-        # Step 5: keep only relevant columns
-        projected = _project_columns(filtered, module_filter_fields)
+        # Step 4: keep only relevant columns
+        projected = _project_columns(filtered_records, module_filter_fields)
 
         output[module] = projected
 
         logger.info(
-            "[RETRIEVAL] module=%s | raw=%d | after_filter=%d | columns_kept=%s",
+            "[RETRIEVAL] module=%s | raw=%d | columns_kept=%s",
             module,
             len(raw_records),
-            len(filtered),
             list(module_filter_fields.keys()),
         )
 

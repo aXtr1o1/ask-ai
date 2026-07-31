@@ -47,7 +47,7 @@ class AnalysisOutput(BaseModel):
             "If unsure which fields are needed, leave this empty — the retrieval layer will fetch all fields."
         )
     )
-    filter_values: dict[str, dict[str, str]] = Field(
+    filter_values: dict[str, dict[str, str | list[str]]] = Field(
         default_factory=dict,
         description=(
             "Per-module pre-filter conditions. "
