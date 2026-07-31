@@ -24,6 +24,13 @@ _SHAPE_ALTERNATIVES: dict[str, list[str]] = {
     "record_set":       [],
     "multi_result":     ["GRAPH"],
     "error":            [],
+    # Phase 3-5 new shapes
+    "time_series":      ["TABLE"],
+    "forecast":         ["TABLE"],
+    "flagged_set":      ["TABLE"],
+    "scored_records":   ["TABLE"],
+    "mtbf_data":        ["TABLE"],
+    "age_distribution": ["TABLE"],
 }
 
 
@@ -63,7 +70,78 @@ def _detect(final_value) -> tuple[str, dict]:
     if not isinstance(final_value, dict):
         return "single_number", {"type": "single_number"}
 
-    # ── Grouped data (group_by_and_count / group_by_and_aggregate) ───────────
+    # ── Phase 3-5: Time-series (group_by_time_period) ─────────────────────────
+    if "periods" in final_value:
+        periods = final_value["periods"]
+        period_count = len(periods) if isinstance(periods, list) else 0
+        return "time_series", {
+            "type":         "time_series",
+            "period_count": period_count,
+            "period":       final_value.get("period", "month"),
+            "operation":    final_value.get("operation", "COUNT"),
+        }
+
+    # ── Phase 3-5: Forecast (forecast_linear) ──────────────────────────────
+    if "forecast" in final_value:
+        forecast = final_value["forecast"]
+        forecast_count = len(forecast) if isinstance(forecast, list) else 0
+        return "forecast", {
+            "type":           "forecast",
+            "forecast_count": forecast_count,
+            "r_squared":      final_value.get("r_squared"),
+        }
+
+    # ── Phase 3-5: Flagged records (flag_by_threshold) ──────────────────────
+    if "flagged_count" in final_value:
+        return "flagged_set", {
+            "type":          "flagged_set",
+            "flagged_count": final_value.get("flagged_count", 0),
+            "total_records": final_value.get("total_records", 0),
+            "flag_ratio":    final_value.get("flag_ratio", 0.0),
+        }
+
+    # ── Phase 3-5: Composite scores (calculate_weighted_score) ──────────────
+    if "avg_score" in final_value:
+        scores = final_value.get("scores", [])
+        return "scored_records", {
+            "type":        "scored_records",
+            "score_count": len(scores) if isinstance(scores, list) else 0,
+            "avg_score":   final_value.get("avg_score"),
+        }
+
+    # ── Phase 3-5: MTBF data (calculate_mtbf) ──────────────────────────────
+    if "mtbf_by_asset" in final_value:
+        assets = final_value["mtbf_by_asset"]
+        asset_count = len(assets) if isinstance(assets, list) else 0
+        shape_type  = "mtbf_data"
+        return shape_type, {
+            "type":        "mtbf_data",
+            "asset_count": asset_count,
+            "overall_avg": final_value.get("overall_avg_mtbf_days"),
+        }
+
+    # ── Phase 3-5: Age distribution (calculate_age_from_now) ───────────────
+    if "avg_age_days" in final_value:
+        groups = final_value.get("groups", [])
+        return "age_distribution", {
+            "type":         "age_distribution",
+            "avg_age_days": final_value.get("avg_age_days"),
+            "group_count":  len(groups) if isinstance(groups, list) else 0,
+        }
+
+    # ── Phase 3-5: Percentile values (calculate_percentile) ────────────────
+    if "percentile_values" in final_value:
+        pct_keys = list(final_value["percentile_values"].keys()) if isinstance(final_value.get("percentile_values"), dict) else []
+        return "statistics", {
+            "type":      "percentile_stats",
+            "stat_keys": pct_keys,
+        }
+
+    # ── Rate of change (calculate_rate_of_change) ─────────────────────────
+    if "pct_change" in final_value:
+        return "single_number", {"type": "rate_of_change"}
+
+    # ── Grouped data (group_by_and_count / group_by_and_aggregate) ──────────
     if "groups" in final_value:
         groups     = final_value["groups"]
         group_count = len(groups) if isinstance(groups, list) else 0
@@ -128,7 +206,7 @@ def _detect(final_value) -> tuple[str, dict]:
 # Format resolution per shape type
 # ---------------------------------------------------------------------------
 def _shape_to_format(shape_type: str, suggested_format: str) -> str:
-    """Map shape → best format. Override Understanding Agent hint if mismatched."""
+    """Map shape → best display format. Override Understanding Agent hint if mismatched."""
     mapping = {
         "single_number":    "PLAIN_TEXT",
         "statistics":       "PLAIN_TEXT",
@@ -139,15 +217,23 @@ def _shape_to_format(shape_type: str, suggested_format: str) -> str:
         "record_set":       "TABLE",
         "multi_result":     "TABLE",
         "error":            "PLAIN_TEXT",
+        # Phase 3-5 shapes
+        "time_series":      "GRAPH",
+        "forecast":         "GRAPH",
+        "flagged_set":      "TABLE",
+        "scored_records":   "TABLE",
+        "mtbf_data":        "TABLE",
+        "age_distribution": "TABLE",
     }
     resolved = mapping.get(shape_type, suggested_format)
 
-    # If Understanding Agent suggested GRAPH and shape supports it, honour it
-    if suggested_format == "GRAPH" and shape_type in ("grouped_few", "grouped_many", "multi_result"):
+    if suggested_format == "GRAPH" and shape_type in (
+        "grouped_few", "grouped_many", "multi_result", "time_series", "forecast"
+    ):
         return "GRAPH"
-    # If Understanding Agent suggested TABLE and shape supports it, honour it
     if suggested_format == "TABLE" and shape_type in (
-        "grouped_few", "grouped_many", "record_set", "multi_result", "value_list_large"
+        "grouped_few", "grouped_many", "record_set", "multi_result", "value_list_large",
+        "flagged_set", "scored_records", "mtbf_data", "age_distribution", "time_series",
     ):
         return "TABLE"
 
@@ -170,6 +256,13 @@ _SHAPE_COMPATIBLE_FORMATS: dict[str, set[str]] = {
     "record_set":       {"TABLE", "PLAIN_TEXT"},
     "multi_result":     {"TABLE", "GRAPH", "PLAIN_TEXT"},
     "error":            {"PLAIN_TEXT"},
+    # Phase 3-5 new shapes
+    "time_series":      {"GRAPH", "TABLE", "PLAIN_TEXT"},
+    "forecast":         {"GRAPH", "TABLE", "PLAIN_TEXT"},
+    "flagged_set":      {"TABLE", "PLAIN_TEXT"},
+    "scored_records":   {"TABLE", "PLAIN_TEXT"},
+    "mtbf_data":        {"TABLE", "GRAPH", "PLAIN_TEXT"},
+    "age_distribution": {"TABLE", "PLAIN_TEXT"},
 }
 
 

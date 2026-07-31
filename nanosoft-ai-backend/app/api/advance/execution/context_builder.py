@@ -40,8 +40,10 @@ def build_formatting_context(
     queue        = execution_result.get("queue", [])
     step_results = execution_result.get("step_results", {})
 
-    # Pull final computed answer from last step
-    last_step_key = f"step_{len(queue) - 1}" if queue else None
+    # Pull final computed answer from the last step.
+    # Use the actual step index from the queue — not len(queue)-1 —
+    # because the LLM may number steps from 1 or use non-sequential indices.
+    last_step_key = f"step_{queue[-1]['step']}" if queue else None
     final_output  = step_results.get(last_step_key, {}) if last_step_key else {}
     final_answer  = final_output.get("final_value", final_output)
 

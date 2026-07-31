@@ -70,7 +70,9 @@ def _strip_markdown(raw: str) -> str:
 # Keep in sync with tools.py.
 # =============================================================================
 _TOOL_OUTPUT_KEYS: dict[str, set[str]] = {
-    "count_records":          {"count", "module", "condition_field", "condition_value"},
+    # ── Core tools ────────────────────────────────────────────────────────────
+    "count_records":          {"count", "module", "condition_field", "condition_value",
+                               "conditions"},
     "sum_values":             {"total_sum", "records_used", "module", "field",
                                "condition_field", "condition_value"},
     "get_average":            {"average", "records_used", "module", "field",
@@ -94,13 +96,35 @@ _TOOL_OUTPUT_KEYS: dict[str, set[str]] = {
     "group_by_and_aggregate": {"groups", "total_records", "unique_groups",
                                "module", "group_field", "agg_field", "operation",
                                "filter_field", "filter_value"},
-    "count_records_multi":    {"count", "module",
-                               "condition_field_1", "condition_value_1",
-                               "condition_field_2", "condition_value_2",
-                               "condition_field_3", "condition_value_3",
-                               "condition_field_4", "condition_value_4"},
     "get_record_fields":      {"module", "total", "fields_returned", "records"},
     "final_answer_tool":      {"status", "final_value"},
+    # ── Phase 3-5 Intelligence Tools ──────────────────────────────────────────
+    "calculate_age_from_now":   {"avg_age_days", "max_age_days", "min_age_days",
+                                 "total_records", "calculated", "groups",
+                                 "module", "date_field", "group_field",
+                                 "filter_field", "filter_value"},
+    "group_by_time_period":     {"periods", "total_records", "period_count",
+                                 "value_key", "module", "date_field", "period",
+                                 "operation", "agg_field",
+                                 "filter_field", "filter_value"},
+    "calculate_mtbf":           {"mtbf_by_asset", "overall_avg_mtbf_days",
+                                 "assets_analyzed", "total_records",
+                                 "module", "asset_field", "failure_date_field",
+                                 "filter_field", "filter_value"},
+    "calculate_weighted_score": {"scores", "avg_score", "max_score", "min_score",
+                                 "total_records", "components_used",
+                                 "module", "group_field"},
+    "flag_by_threshold":        {"flagged_count", "total_records", "flag_ratio",
+                                 "flagged_records", "groups",
+                                 "module", "field", "threshold", "operator",
+                                 "group_field", "filter_field", "filter_value"},
+    "calculate_rate_of_change": {"pct_change", "direction", "a", "b"},
+    "calculate_percentile":     {"percentile_values", "mean", "std_dev",
+                                 "records_used", "module", "field",
+                                 "condition_field", "condition_value"},
+    "forecast_linear":          {"forecast", "model_slope", "model_intercept",
+                                 "r_squared", "periods_ahead", "data_points",
+                                 "value_key"},
 }
 
 
@@ -134,21 +158,29 @@ def _validate_queue(queue: list) -> None:
 
         # Check required arguments are present for known tools
         _REQUIRED_ARGS: dict[str, list[str]] = {
-            "get_unique_values":      ["module", "field"],
-            "count_records":          ["module"],
-            "count_records_multi":    ["module", "condition_field_1", "condition_value_1",
-                                       "condition_field_2", "condition_value_2"],
-            "sum_values":             ["module", "field"],
-            "get_average":            ["module", "field"],
-            "get_minimum":            ["module", "field"],
-            "get_maximum":            ["module", "field"],
-            "calculate_time_between": ["module", "start_field", "end_field"],
-            "group_by_and_count":     ["module", "group_field"],
-            "group_by_and_aggregate": ["module", "group_field", "agg_field", "operation"],
-            "get_record_fields":      ["module"],
-            "sort_and_limit":         ["data"],
-            "join_records":           ["module_a", "module_b", "join_field"],
-            "do_math":                ["operation", "a"],
+            # ── Core tools ────────────────────────────────────────────────
+            "get_unique_values":         ["module", "field"],
+            "count_records":             ["module"],
+            "sum_values":                ["module", "field"],
+            "get_average":               ["module", "field"],
+            "get_minimum":               ["module", "field"],
+            "get_maximum":               ["module", "field"],
+            "calculate_time_between":    ["module", "start_field", "end_field"],
+            "group_by_and_count":        ["module", "group_field"],
+            "group_by_and_aggregate":    ["module", "group_field", "agg_field", "operation"],
+            "get_record_fields":         ["module"],
+            "sort_and_limit":            ["data"],
+            "join_records":              ["module_a", "module_b", "join_field"],
+            "do_math":                   ["operation", "a"],
+            # ── Phase 3-5 Intelligence Tools ──────────────────────────────
+            "calculate_age_from_now":    ["module", "date_field"],
+            "group_by_time_period":      ["module", "date_field"],
+            "calculate_mtbf":            ["module", "asset_field", "failure_date_field"],
+            "calculate_weighted_score":  ["module", "score_components"],
+            "flag_by_threshold":         ["module", "field", "threshold"],
+            "calculate_rate_of_change":  ["a", "b"],
+            "calculate_percentile":      ["module", "field"],
+            "forecast_linear":           ["data"],
         }
         required = _REQUIRED_ARGS.get(current_tool, [])
         for req in required:

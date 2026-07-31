@@ -22,11 +22,32 @@ If you are not sure which fields to include, leave filter_fields empty.
 If you are not sure which values to filter on, leave filter_values empty.
 The retrieval layer is already configured to fetch all data when these are empty.
 
-Previous query context may appear at the top of the user message when the
-current query is a follow-up. Use it as a signal to carry forward relevant
-filters — apply your judgment on what is still applicable.
+════════════════════════════════════════════════
+OUTPUT FORMAT
+════════════════════════════════════════════════
+Return a flat JSON object with exactly these four fields:
 
-{enum_block}
+  reasoning     — brief explanation of why you chose these fields and filters.
+
+  limit         — if the user's query requests a specific count (e.g. "top 5"),
+                  set this to that integer. Otherwise set to null.
+
+  filter_fields — per-module field projection.
+                  {{ "module_name": {{ "FieldName": "why this field is needed" }} }}
+                  Only include fields that exist in the schema below.
+
+  filter_values — per-module filter conditions.
+                  {{ "module_name": {{ "FieldName": "exact value to filter on" }} }}
+                  For enum fields, use only values from the ALLOWED ENUM VALUES section.
+                  Leave empty if no specific filter is needed.
+
+════════════════════════════════════════════════
+PREVIOUS QUERY CONTEXT  (when provided)
+════════════════════════════════════════════════
+The user message may begin with a [PREVIOUS QUERY CONTEXT] block describing what
+was queried in the prior turn — the query intent, modules used, fields retrieved,
+and filters applied.
+
 The Understanding Agent has already resolved the user's current query into a
 self-contained summary. Use the previous context as additional signal when determining
 filters — particularly when the current query is a continuation or refinement of the
@@ -38,30 +59,13 @@ Never apply filters that are not supported by the schema below, and never carry
 forward values that contradict what the current query summary specifies.
 
 ════════════════════════════════════════════════
-OUTPUT SPECIFICATION
+AVAILABLE FIELDS FOR SELECTED MODULES
 ════════════════════════════════════════════════
-Produce exactly five fields:
-
-  reasoning     — concise explanation of why you chose these modules, fields, and filters.
-
-  limit         — if the user's query requests a specific count of items, set this to
-                  that integer. Otherwise set to null.
-
-  modules       — the FM modules needed. Select only from the schemas below.
-
-  filter_fields — per module: the fields that must be present in the retrieved records
-                  to answer the query. Only include fields that exist in the schema.
-
-  filter_values — per module: exact field-value pairs to narrow the records.
-                  For enum fields, use only the values from the ALLOWED ENUM VALUES
-                  section below — no paraphrasing, no approximation.
-                  For non-enum fields, use the exact value stated in the query.
-                  No range operators. Exact string match only.
+{schema_block}
 
 ════════════════════════════════════════════════
 ALLOWED ENUM VALUES  (use these exactly)
 ════════════════════════════════════════════════
-
 This section applies only to fields listed in the ALLOWED ENUM VALUES block below.
 For all other fields, use the value exactly as expressed in the query summary.
 
@@ -71,11 +75,6 @@ and map it to the single best-matching value from that field's allowed list.
 If no allowed value meaningfully represents the user's intent for that field, omit it from filter_values entirely.
 Never output a value that is not present verbatim in the ALLOWED ENUM VALUES section.
 
-{schema_block}
-
-════════════════════════════════════════════════
-ALLOWED ENUM VALUES FOR SELECTED MODULES
-════════════════════════════════════════════════
 {enum_block}
 """
 
@@ -86,4 +85,3 @@ def get_system_prompt(modules: list[str]) -> str:
     schema_block = json.dumps(selected_metadata, indent=2)
     enum_block   = get_enum_block(modules)
     return _PROMPT_TEMPLATE.format(schema_block=schema_block, enum_block=enum_block)
-

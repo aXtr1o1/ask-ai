@@ -41,9 +41,17 @@ from app.api.advance.execution.tools import (
     do_math,
     sort_and_limit,
     group_by_and_aggregate,
-    count_records_multi,
     get_record_fields,
     final_answer_tool,
+    # Phase 3-5 Intelligence Tools
+    calculate_age_from_now,
+    group_by_time_period,
+    calculate_mtbf,
+    calculate_weighted_score,
+    flag_by_threshold,
+    calculate_rate_of_change,
+    calculate_percentile,
+    forecast_linear,
 )
 from app.api.advance.execution.agent_logger import log_step
 
@@ -54,6 +62,7 @@ logger = logging.getLogger("advance.execution.queue_runner")
 # TOOL REGISTRY — name → LangChain tool object
 # =============================================================================
 TOOL_REGISTRY: dict[str, Any] = {
+    # ── Core tools ──────────────────────────────────────────────────────────────
     "count_records":           count_records,
     "sum_values":              sum_values,
     "get_average":             get_average,
@@ -66,9 +75,17 @@ TOOL_REGISTRY: dict[str, Any] = {
     "do_math":                 do_math,
     "sort_and_limit":          sort_and_limit,
     "group_by_and_aggregate":  group_by_and_aggregate,
-    "count_records_multi":     count_records_multi,
     "get_record_fields":       get_record_fields,
     "final_answer_tool":       final_answer_tool,
+    # ── Phase 3-5 Intelligence Tools ────────────────────────────────────────
+    "calculate_age_from_now":   calculate_age_from_now,
+    "group_by_time_period":     group_by_time_period,
+    "calculate_mtbf":           calculate_mtbf,
+    "calculate_weighted_score": calculate_weighted_score,
+    "flag_by_threshold":        flag_by_threshold,
+    "calculate_rate_of_change": calculate_rate_of_change,
+    "calculate_percentile":     calculate_percentile,
+    "forecast_linear":          forecast_linear,
 }
 
 
@@ -245,7 +262,6 @@ _ARG_GUARDS: dict[str, list[tuple]] = {
                 "_safe_skip": "denominator_was_zero_or_null — result set to None",
             },
         ),
-        # Any numeric arg is None → coerce to 0 silently (not a hard skip)
     ],
     # sort_and_limit with an empty data list → return empty result immediately
     "sort_and_limit": [
@@ -262,10 +278,68 @@ _ARG_GUARDS: dict[str, list[tuple]] = {
                 "_safe_skip": "input_data_list_was_empty — no records to sort",
             },
         ),
+        # data resolves to a non-list (LLM passed whole step result instead of a key)
+        (
+            "data",
+            lambda v, args: not isinstance(v, list),
+            lambda tool, args: {
+                "sorted_data": [],
+                "total_in": 0,
+                "total_out": 0,
+                "sort_by": args.get("sort_by", ""),
+                "order": args.get("order", "DESC"),
+                "limit": args.get("limit", 0),
+                "_safe_skip": f"data arg resolved to {type(args.get('data')).__name__} not list — check $ref key",
+            },
+        ),
     ],
-    # get_average / sum_values / get_minimum / get_maximum:
-    # If the resolved field arg is None or empty string → tools return gracefully
-    # already, but guard against None so we don't pass literal None as field name.
+    # forecast_linear with insufficient data points
+    "forecast_linear": [
+        (
+            "data",
+            lambda v, args: not isinstance(v, list) or len(v) < 2,
+            lambda tool, args: {
+                "forecast": [],
+                "model_slope": None,
+                "model_intercept": None,
+                "r_squared": None,
+                "periods_ahead": args.get("periods_ahead", 3),
+                "data_points": 0,
+                "value_key": args.get("value_key", "count"),
+                "_safe_skip": "forecast_linear requires at least 2 data points — insufficient periods data",
+            },
+        ),
+    ],
+    # calculate_rate_of_change: if either value is None/zero-baseline
+    "calculate_rate_of_change": [
+        (
+            "b",
+            lambda v, args: _is_zero_or_none(v),
+            lambda tool, args: {
+                "a": args.get("a"),
+                "b": args.get("b"),
+                "pct_change": None,
+                "direction": "unknown",
+                "_safe_skip": "baseline value (b) is zero or null — rate of change undefined",
+            },
+        ),
+    ],
+    # flag_by_threshold: if threshold is None
+    "flag_by_threshold": [
+        (
+            "threshold",
+            lambda v, args: v is None or (isinstance(v, str) and v.strip().lower() in ("none", "null", "")),
+            lambda tool, args: {
+                "flagged_count": 0,
+                "total_records": 0,
+                "flag_ratio": 0.0,
+                "flagged_records": [],
+                "groups": [],
+                "_safe_skip": "threshold resolved to None — cannot flag records without a threshold",
+            },
+        ),
+    ],
+    # get_average: if the field resolves to empty
     "get_average": [
         (
             "field",
@@ -314,61 +388,60 @@ def _guard_resolved_args(tool_name: str, resolved_args: dict) -> None:
             )
 
 
+def _resolve_value(v, step_results: dict):
+    """
+    Recursively resolve a single value that may be:
+    - a plain scalar (return as-is)
+    - a $step_N.key reference string (resolve to actual value)
+    - a list (resolve each element recursively)
+    - a dict (resolve each value recursively — handles nested result_ref dicts)
+    """
+    if isinstance(v, str):
+        return _resolve_ref(v, step_results)
+    if isinstance(v, list):
+        resolved_list = [_resolve_value(item, step_results) for item in v]
+        # If every element is itself a list, flatten into one list
+        if resolved_list and all(isinstance(x, list) for x in resolved_list):
+            flat = []
+            for sub in resolved_list:
+                flat.extend(sub)
+            return flat
+        return resolved_list
+    if isinstance(v, dict):
+        return {ik: _resolve_value(iv, step_results) for ik, iv in v.items()}
+    return v  # plain scalar (int, float, bool, None, etc.)
+
+
 def _resolve_args(args: dict, step_results: dict) -> dict:
     """Resolve all $step_N.key references in an args dict.
-    Handles plain values, single string references, lists of references,
-    and nested dicts of references (e.g. result_ref in final_answer_tool).
+    Handles plain values, strings, lists, and nested dicts at any depth.
     """
-    resolved = {}
-    for k, v in args.items():
-        if isinstance(v, list):
-            # Resolve each item in the list individually
-            res_list = [_resolve_ref(item, step_results) for item in v]
-            # If the result is a list of lists, flatten it into a single list
-            # so the frontend table renderer gets a clean flat list of dicts.
-            if res_list and all(isinstance(x, list) for x in res_list):
-                flattened = []
-                for sublist in res_list:
-                    flattened.extend(sublist)
-                resolved[k] = flattened
-            else:
-                resolved[k] = res_list
-
-        elif isinstance(v, dict):
-            # Nested dict — resolve each value inside it individually.
-            # This covers final_answer_tool receiving:
-            #   result_ref = {"total": "$step_0.total_sum", "avg": "$step_1.average"}
-            # Without this the $step_N strings pass through as literal text and
-            # the Formatting Agent hallucinates real-looking numbers for them.
-            resolved[k] = {
-                inner_k: _resolve_ref(inner_v, step_results)
-                for inner_k, inner_v in v.items()
-            }
-
-        else:
-            resolved[k] = _resolve_ref(v, step_results)
-    return resolved
+    return {k: _resolve_value(v, step_results) for k, v in args.items()}
 
 
 def _coerce_numeric_args(tool_name: str, resolved_args: dict) -> dict:
     """
-    Silently coerce None numeric arguments to 0 for tools that do arithmetic.
-    This handles the case where an upstream step returns None (e.g. get_average
-    on zero records) and the LLM feeds that directly into do_math.
+    Silently coerce None/string numeric arguments to float for tools that do arithmetic.
 
-    Only applied to do_math — other tools handle None internally via pandas.
+    Applied to: do_math, calculate_rate_of_change
+    Other tools handle None internally via pandas.
     """
-    if tool_name != "do_math":
+    _NUMERIC_TOOLS = {
+        "do_math":                  ("a", "b"),
+        "calculate_rate_of_change": ("a", "b"),
+    }
+    arg_names = _NUMERIC_TOOLS.get(tool_name)
+    if not arg_names:
         return resolved_args
 
     patched = dict(resolved_args)
-    for arg in ("a", "b"):
+    for arg in arg_names:
         v = patched.get(arg)
         if v is None or (isinstance(v, str) and v.strip().lower() in ("none", "null", "")):
             logger.warning(
-                "[Queue Runner] do_math arg '%s' is None/null — coercing to 0 "
+                "[Queue Runner] %s arg '%s' is None/null — coercing to 0 "
                 "to prevent crash. Check upstream step output.",
-                arg,
+                tool_name, arg,
             )
             patched[arg] = 0
         else:
@@ -376,9 +449,9 @@ def _coerce_numeric_args(tool_name: str, resolved_args: dict) -> dict:
                 patched[arg] = float(str(v))
             except (ValueError, TypeError):
                 logger.warning(
-                    "[Queue Runner] do_math arg '%s' = %r cannot be parsed as float — "
+                    "[Queue Runner] %s arg '%s' = %r cannot be parsed as float — "
                     "coercing to 0.",
-                    arg, v,
+                    tool_name, arg, v,
                 )
                 patched[arg] = 0
     return patched
@@ -516,8 +589,10 @@ def run_queue(queue: list[dict], filtered_records: dict, progress_callback: call
         log_step(step_idx, tool_name, result)
 
     # ── Fix 2: Accurate status reporting ────────────────────────────────────
-    # Determine how many of the non-final steps errored vs succeeded
-    final_step_key = f"step_{len(queue) - 1}"
+    # Use the actual step index from the last queue item — NOT len(queue)-1.
+    # The LLM may number steps starting from 1 or use non-sequential indices.
+    last_step_idx  = queue[-1]["step"] if queue else 0
+    final_step_key = f"step_{last_step_idx}"
     final_result   = step_results.get(final_step_key, {})
 
     if _step_failed(final_result):
