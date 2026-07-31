@@ -156,28 +156,83 @@ class _DependencyError(Exception):
     """Raised when a $ref points to a step that already failed."""
 
 
-def _resolve_args(args: dict, step_results: dict) -> dict:
-    """Resolve all $step_N.key references in an args dict.
-    Handles plain values, single string references, and lists of references.
+def _resolve_value(value: Any, step_results: dict) -> Any:
     """
-    resolved = {}
-    for k, v in args.items():
-        if isinstance(v, list):
-            # Resolve each item in the list individually
-            res_list = [_resolve_ref(item, step_results) for item in v]
-            # If the result is a list of lists, flatten it into a single list
-            # so the frontend table renderer gets a clean flat list of dicts.
-            if res_list and all(isinstance(x, list) for x in res_list):
-                flattened = []
-                for sublist in res_list:
-                    flattened.extend(sublist)
-                resolved[k] = flattened
-            else:
-                resolved[k] = res_list
-        else:
-            resolved[k] = _resolve_ref(v, step_results)
-    return resolved
+    Recursively resolve $step_N.key references inside any JSON structure.
 
+    Supported:
+      - "$step_0.count"
+      - ["$step_0.count", "$step_1.result"]
+      - {"Count": "$step_0.count"}
+      - Nested dict/list combinations
+    """
+
+    # ------------------------------------------------------------------
+    # String -> resolve $step reference
+    # ------------------------------------------------------------------
+    if isinstance(value, str):
+        # Guard: LLM sometimes serialises dicts/lists as a Python-style string.
+        # e.g. "{'By Mail': '$step_0.count', 'By Call': '$step_1.count'}"
+        # Parse it so nested $step refs get resolved correctly.
+        if value.startswith(("{", "[")):
+            import ast
+            try:
+                parsed = ast.literal_eval(value)
+                if isinstance(parsed, (dict, list)):
+                    return _resolve_value(parsed, step_results)
+            except (ValueError, SyntaxError):
+                pass
+        return _resolve_ref(value, step_results)
+
+    # ------------------------------------------------------------------
+    # List -> resolve every item recursively
+    # ------------------------------------------------------------------
+    if isinstance(value, list):
+        resolved_list = [_resolve_value(item, step_results) for item in value]
+
+        # Preserve existing flatten behaviour
+        if (
+            resolved_list
+            and all(isinstance(item, list) for item in resolved_list)
+        ):
+            flattened = []
+            for sublist in resolved_list:
+                flattened.extend(sublist)
+            return flattened
+
+        return resolved_list
+
+    # ------------------------------------------------------------------
+    # Dictionary -> resolve every value recursively
+    # ------------------------------------------------------------------
+    if isinstance(value, dict):
+        return {
+            key: _resolve_value(val, step_results)
+            for key, val in value.items()
+        }
+
+    # ------------------------------------------------------------------
+    # Numbers / bool / None / everything else
+    # ------------------------------------------------------------------
+    return value
+
+
+def _resolve_args(args: dict, step_results: dict) -> dict:
+    """
+    Resolve all $step_N.key references in the args dictionary.
+
+    Supports:
+      ✔ strings
+      ✔ lists
+      ✔ dictionaries
+      ✔ nested dictionaries
+      ✔ nested lists
+      ✔ any combination of the above
+    """
+    return {
+        key: _resolve_value(value, step_results)
+        for key, value in args.items()
+    }
 
 # =============================================================================
 # PUBLIC API

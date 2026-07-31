@@ -54,11 +54,12 @@ class AnalysisOutput(BaseModel):
             "These are the columns that will be retrieved and passed to the execution agent."
         )
     )
-    filter_values: dict[str, dict[str, str]] = Field(
+    filter_values: dict[str, dict[str, str | list[str]]] = Field(
         default_factory=dict,
         description=(
             "Per-module pre-filter conditions. "
             "Maps module → { FieldName: value to filter on }. "
+            "Can be a single string or a list of strings if multiple values are compared. "
             "Only include values that are explicitly present in or directly implied by the query. "
             "These conditions narrow the retrieved records before analysis begins."
         )

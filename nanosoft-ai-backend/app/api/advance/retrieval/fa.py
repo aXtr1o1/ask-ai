@@ -33,7 +33,7 @@ def retrieve(
                         break
             if val is not None:
                 if isinstance(val, list):
-                    return str(val[0]).strip() if val else None
+                    return None
                 if isinstance(val, str) and val.strip().lower() in ("null", "none"):
                     return None
                 return str(val).strip()

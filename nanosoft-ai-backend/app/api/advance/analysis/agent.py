@@ -203,7 +203,7 @@ def analyze_query(
                         if isinstance(item, dict):
                             merged.update(item)
                     raw_dict["filter_values"][mod] = {
-                        k: str(v) for k, v in merged.items() if v is not None
+                        k: v if isinstance(v, list) else str(v) for k, v in merged.items() if v is not None
                     }
                     logger.warning(
                         "[Analysis Agent] filter_values[%s] was list-of-dicts — merged into dict", mod
@@ -211,7 +211,7 @@ def analyze_query(
                 elif isinstance(vals, dict):
                     # Shape A (correct): drop null values
                     raw_dict["filter_values"][mod] = {
-                        k: str(v) for k, v in vals.items() if v is not None
+                        k: v if isinstance(v, list) else str(v) for k, v in vals.items() if v is not None
                     }
     elif isinstance(raw_fv, list):
         # Shape D: flat list of dicts (missing module wrapper) -> [{"StatusName": "Offline"}]
@@ -223,7 +223,7 @@ def analyze_query(
             modules_hint = raw_dict.get("modules") or []
             mod_key = modules_hint[0] if modules_hint else "unknown"
             raw_dict["filter_values"] = {
-                mod_key: {k: str(v) for k, v in merged.items() if v is not None}
+                mod_key: {k: v if isinstance(v, list) else str(v) for k, v in merged.items() if v is not None}
             }
             logger.warning(
                 "[Analysis Agent] filter_values was flat list of dicts — wrapped under module '%s'", mod_key
@@ -263,7 +263,7 @@ def analyze_query(
             if actual_field:
                 valid_filter_fields[mod][actual_field] = desc
 
-    valid_filter_values: dict[str, dict[str, str]] = {}
+    valid_filter_values: dict[str, dict[str, str | list[str]]] = {}
     for mod in valid_modules:
         valid_filter_values[mod] = {}
         for field, val in response.filter_values.get(mod, {}).items():
