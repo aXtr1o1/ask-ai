@@ -26,32 +26,32 @@ Fix 2 — Accurate status reporting:
 """
 import inspect
 import logging
+import re
 from typing import Any
 
 from app.api.advance.execution.tools import (
+    # Basic Tools
     count_records,
     sum_values,
     get_average,
-    get_minimum,
-    get_maximum,
-    calculate_time_between,
     group_by_and_count,
-    get_unique_values,
-    join_records,
+    group_by_and_aggregate,
+    join_and_aggregate,
+    get_record_fields,
     do_math,
     sort_and_limit,
-    group_by_and_aggregate,
-    get_record_fields,
     final_answer_tool,
-    # Phase 3-5 Intelligence Tools
+    # Intelligence Tools
     calculate_age_from_now,
     group_by_time_period,
     calculate_mtbf,
-    calculate_weighted_score,
     flag_by_threshold,
     calculate_rate_of_change,
     calculate_percentile,
     forecast_linear,
+    compare_date_fields,
+    merge_and_score,
+    add_duration_to_date,
 )
 from app.api.advance.execution.agent_logger import log_step
 
@@ -62,30 +62,28 @@ logger = logging.getLogger("advance.execution.queue_runner")
 # TOOL REGISTRY — name → LangChain tool object
 # =============================================================================
 TOOL_REGISTRY: dict[str, Any] = {
-    # ── Core tools ──────────────────────────────────────────────────────────────
+    # ── Basic Tools ─────────────────────────────────────────────────────────────
     "count_records":           count_records,
     "sum_values":              sum_values,
     "get_average":             get_average,
-    "get_minimum":             get_minimum,
-    "get_maximum":             get_maximum,
-    "calculate_time_between":  calculate_time_between,
     "group_by_and_count":      group_by_and_count,
-    "get_unique_values":       get_unique_values,
-    "join_records":            join_records,
+    "group_by_and_aggregate":  group_by_and_aggregate,
+    "join_and_aggregate":      join_and_aggregate,
+    "get_record_fields":       get_record_fields,
     "do_math":                 do_math,
     "sort_and_limit":          sort_and_limit,
-    "group_by_and_aggregate":  group_by_and_aggregate,
-    "get_record_fields":       get_record_fields,
     "final_answer_tool":       final_answer_tool,
-    # ── Phase 3-5 Intelligence Tools ────────────────────────────────────────
-    "calculate_age_from_now":   calculate_age_from_now,
-    "group_by_time_period":     group_by_time_period,
-    "calculate_mtbf":           calculate_mtbf,
-    "calculate_weighted_score": calculate_weighted_score,
-    "flag_by_threshold":        flag_by_threshold,
+    # ── Intelligence Tools ───────────────────────────────────────────────────
+    "calculate_age_from_now":  calculate_age_from_now,
+    "group_by_time_period":    group_by_time_period,
+    "calculate_mtbf":          calculate_mtbf,
+    "flag_by_threshold":       flag_by_threshold,
     "calculate_rate_of_change": calculate_rate_of_change,
-    "calculate_percentile":     calculate_percentile,
-    "forecast_linear":          forecast_linear,
+    "calculate_percentile":    calculate_percentile,
+    "forecast_linear":         forecast_linear,
+    "compare_date_fields":     compare_date_fields,
+    "merge_and_score":         merge_and_score,
+    "add_duration_to_date":    add_duration_to_date,
 }
 
 
@@ -388,73 +386,45 @@ def _guard_resolved_args(tool_name: str, resolved_args: dict) -> None:
             )
 
 
-def _resolve_value(v, step_results: dict):
-    """
-    Recursively resolve a single value that may be:
-    - a plain scalar (return as-is)
-    - a $step_N.key reference string (resolve to actual value)
-    - a list (resolve each element recursively)
-    - a dict (resolve each value recursively — handles nested result_ref dicts)
-    """
-    if isinstance(v, str):
-        return _resolve_ref(v, step_results)
-    if isinstance(v, list):
-        resolved_list = [_resolve_value(item, step_results) for item in v]
-        # If every element is itself a list, flatten into one list
-        if resolved_list and all(isinstance(x, list) for x in resolved_list):
-            flat = []
-            for sub in resolved_list:
-                flat.extend(sub)
-            return flat
-        return resolved_list
-    if isinstance(v, dict):
-        return {ik: _resolve_value(iv, step_results) for ik, iv in v.items()}
-    return v  # plain scalar (int, float, bool, None, etc.)
-
-
-def _resolve_args(args: dict, step_results: dict) -> dict:
-    """Resolve all $step_N.key references in an args dict.
-    Handles plain values, strings, lists, and nested dicts at any depth.
-    """
-    return {k: _resolve_value(v, step_results) for k, v in args.items()}
+# First _resolve_value and _resolve_args definitions removed — dead code.
+# The active (more complete) definitions are below.
 
 
 def _coerce_numeric_args(tool_name: str, resolved_args: dict) -> dict:
     """
-    Silently coerce None/string numeric arguments to float for tools that do arithmetic.
+    Coerce None/string numeric arguments to float for arithmetic tools.
 
-    Applied to: do_math, calculate_rate_of_change
-    Other tools handle None internally via pandas.
+    For do_math: only coerce when operation is DIV or MOD.
+      DIV/MOD with None denominator is caught by _ARG_GUARDS → safe null result.
+      ADD/SUB/MUL with None is semantically invalid — leave as-is so the tool
+      can return a meaningful error instead of silently computing a wrong result.
+
+    For calculate_rate_of_change: the tool handles None internally and returns
+      a structured error — no coercion needed here.
     """
-    _NUMERIC_TOOLS = {
-        "do_math":                  ("a", "b"),
-        "calculate_rate_of_change": ("a", "b"),
-    }
-    arg_names = _NUMERIC_TOOLS.get(tool_name)
-    if not arg_names:
-        return resolved_args
-
-    patched = dict(resolved_args)
-    for arg in arg_names:
-        v = patched.get(arg)
-        if v is None or (isinstance(v, str) and v.strip().lower() in ("none", "null", "")):
-            logger.warning(
-                "[Queue Runner] %s arg '%s' is None/null — coercing to 0 "
-                "to prevent crash. Check upstream step output.",
-                tool_name, arg,
-            )
-            patched[arg] = 0
-        else:
-            try:
-                patched[arg] = float(str(v))
-            except (ValueError, TypeError):
+    if tool_name == "do_math":
+        op = str(resolved_args.get("operation", "")).upper()
+        if op not in ("DIV", "MOD"):
+            # Not a division-type op — don't coerce, let tool handle or error
+            return resolved_args
+        # DIV/MOD: coerce b so _ARG_GUARDS can catch zero-denominator cleanly
+        patched = dict(resolved_args)
+        for arg in ("a", "b"):
+            v = patched.get(arg)
+            if v is None or (isinstance(v, str) and v.strip().lower() in ("none", "null", "")):
                 logger.warning(
-                    "[Queue Runner] %s arg '%s' = %r cannot be parsed as float — "
-                    "coercing to 0.",
-                    tool_name, arg, v,
+                    "[Queue Runner] do_math %s arg '%s' is None — coercing to 0.",
+                    op, arg,
                 )
                 patched[arg] = 0
-    return patched
+            else:
+                try:
+                    patched[arg] = float(str(v))
+                except (ValueError, TypeError):
+                    patched[arg] = 0
+        return patched
+
+    return resolved_args
 def _resolve_value(value: Any, step_results: dict) -> Any:
     """
     Recursively resolve $step_N.key references inside any JSON structure.
@@ -470,17 +440,6 @@ def _resolve_value(value: Any, step_results: dict) -> Any:
     # String -> resolve $step reference
     # ------------------------------------------------------------------
     if isinstance(value, str):
-        # Guard: LLM sometimes serialises dicts/lists as a Python-style string.
-        # e.g. "{'By Mail': '$step_0.count', 'By Call': '$step_1.count'}"
-        # Parse it so nested $step refs get resolved correctly.
-        if value.startswith(("{", "[")):
-            import ast
-            try:
-                parsed = ast.literal_eval(value)
-                if isinstance(parsed, (dict, list)):
-                    return _resolve_value(parsed, step_results)
-            except (ValueError, SyntaxError):
-                pass
         return _resolve_ref(value, step_results)
 
     # ------------------------------------------------------------------
@@ -502,9 +461,28 @@ def _resolve_value(value: Any, step_results: dict) -> Any:
         return resolved_list
 
     # ------------------------------------------------------------------
-    # Dictionary -> resolve every value recursively
+    # Dictionary — check for LLM dict-style result reference FIRST
     # ------------------------------------------------------------------
     if isinstance(value, dict):
+        # LLM sometimes emits {"step": 1, "key": "count"} instead of
+        # the canonical "$step_1.count" string reference.  Detect and
+        # resolve this pattern before falling through to generic recursion.
+        step_val = value.get("step")
+        key_val  = value.get("key")
+        if (
+            step_val is not None
+            and key_val is not None
+            and isinstance(key_val, str)
+            and len(value) == 2           # only these two keys — nothing extra
+        ):
+            synthetic_ref = f"$step_{step_val}.{key_val}"
+            logger.debug(
+                "[Queue Runner] dict-ref %r → resolving as '%s'",
+                value, synthetic_ref,
+            )
+            return _resolve_ref(synthetic_ref, step_results)
+
+        # Generic dict → resolve every value recursively
         return {
             key: _resolve_value(val, step_results)
             for key, val in value.items()

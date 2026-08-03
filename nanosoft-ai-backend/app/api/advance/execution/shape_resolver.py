@@ -41,6 +41,7 @@ def _detect(final_value) -> tuple[str, dict]:
     """
     Returns (shape_type, descriptor).
     Inspects structure only — never reads the actual values inside lists/dicts.
+    Uses explicit '_result_type' if present; falls back to structure only for plain scalars/lists.
     """
 
     # ── None / failed execution ───────────────────────────────────────────────
@@ -70,9 +71,11 @@ def _detect(final_value) -> tuple[str, dict]:
     if not isinstance(final_value, dict):
         return "single_number", {"type": "single_number"}
 
-    # ── Phase 3-5: Time-series (group_by_time_period) ─────────────────────────
-    if "periods" in final_value:
-        periods = final_value["periods"]
+    # Read explicit shape type assigned by the tool
+    result_type = final_value.get("_result_type")
+    
+    if result_type == "time_series":
+        periods = final_value.get("periods", [])
         period_count = len(periods) if isinstance(periods, list) else 0
         return "time_series", {
             "type":         "time_series",
@@ -81,69 +84,59 @@ def _detect(final_value) -> tuple[str, dict]:
             "operation":    final_value.get("operation", "COUNT"),
         }
 
-    # ── Phase 3-5: Forecast (forecast_linear) ──────────────────────────────
-    if "forecast" in final_value:
-        forecast = final_value["forecast"]
+    if result_type == "forecast":
+        forecast = final_value.get("forecast", [])
         forecast_count = len(forecast) if isinstance(forecast, list) else 0
         return "forecast", {
             "type":           "forecast",
             "forecast_count": forecast_count,
-            "r_squared":      final_value.get("r_squared"),
         }
 
-    # ── Phase 3-5: Flagged records (flag_by_threshold) ──────────────────────
-    if "flagged_count" in final_value:
+    if result_type == "flagged_set":
         return "flagged_set", {
             "type":          "flagged_set",
             "flagged_count": final_value.get("flagged_count", 0),
             "total_records": final_value.get("total_records", 0),
-            "flag_ratio":    final_value.get("flag_ratio", 0.0),
         }
 
-    # ── Phase 3-5: Composite scores (calculate_weighted_score) ──────────────
-    if "avg_score" in final_value:
-        scores = final_value.get("scores", [])
+    if result_type == "scored_records":
+        ranked = final_value.get("ranked", [])   # merge_and_score returns "ranked" not "scores"
         return "scored_records", {
             "type":        "scored_records",
-            "score_count": len(scores) if isinstance(scores, list) else 0,
-            "avg_score":   final_value.get("avg_score"),
+            "score_count": len(ranked) if isinstance(ranked, list) else 0,
         }
 
-    # ── Phase 3-5: MTBF data (calculate_mtbf) ──────────────────────────────
-    if "mtbf_by_asset" in final_value:
-        assets = final_value["mtbf_by_asset"]
+    if result_type == "mtbf_data":
+        assets = final_value.get("mtbf_by_asset", [])
         asset_count = len(assets) if isinstance(assets, list) else 0
-        shape_type  = "mtbf_data"
-        return shape_type, {
+        return "mtbf_data", {
             "type":        "mtbf_data",
             "asset_count": asset_count,
-            "overall_avg": final_value.get("overall_avg_mtbf_days"),
         }
 
-    # ── Phase 3-5: Age distribution (calculate_age_from_now) ───────────────
-    if "avg_age_days" in final_value:
+    if result_type == "age_distribution":
         groups = final_value.get("groups", [])
         return "age_distribution", {
             "type":         "age_distribution",
-            "avg_age_days": final_value.get("avg_age_days"),
             "group_count":  len(groups) if isinstance(groups, list) else 0,
         }
 
-    # ── Phase 3-5: Percentile values (calculate_percentile) ────────────────
-    if "percentile_values" in final_value:
-        pct_keys = list(final_value["percentile_values"].keys()) if isinstance(final_value.get("percentile_values"), dict) else []
+    if result_type == "statistics":
+        pct_keys = []
+        if "percentile_values" in final_value:
+            pct_keys = list(final_value["percentile_values"].keys()) if isinstance(final_value.get("percentile_values"), dict) else []
+        elif "stats" in final_value:
+            pct_keys = list(final_value["stats"].keys()) if isinstance(final_value.get("stats"), dict) else []
         return "statistics", {
-            "type":      "percentile_stats",
+            "type":      "statistics",
             "stat_keys": pct_keys,
         }
 
-    # ── Rate of change (calculate_rate_of_change) ─────────────────────────
-    if "pct_change" in final_value:
+    if result_type == "rate_of_change":
         return "single_number", {"type": "rate_of_change"}
 
-    # ── Grouped data (group_by_and_count / group_by_and_aggregate) ──────────
-    if "groups" in final_value:
-        groups     = final_value["groups"]
+    if result_type == "grouped_data":
+        groups     = final_value.get("groups", [])
         group_count = len(groups) if isinstance(groups, list) else 0
         fields      = list(groups[0].keys()) if group_count > 0 and isinstance(groups[0], dict) else []
         shape_type  = "grouped_few" if group_count <= 6 else "grouped_many"
@@ -153,9 +146,17 @@ def _detect(final_value) -> tuple[str, dict]:
             "fields":        fields,
             "total_records": final_value.get("total_records", 0),
         }
+        
+    if result_type == "ranked_list":
+        total_out = final_value.get("total_out", 0)
+        shape_type = "grouped_few" if total_out <= 6 else "grouped_many"
+        return shape_type, {
+            "type":        "ranked_list",
+            "item_count":  total_out,
+            "total_in":    final_value.get("total_in", 0),
+        }
 
-    # ── Record set (get_record_fields) ───────────────────────────────────────
-    if "records" in final_value:
+    if result_type == "record_set":
         record_count    = final_value.get("total", 0)
         fields_returned = final_value.get("fields_returned", [])
         return "record_set", {
@@ -165,40 +166,23 @@ def _detect(final_value) -> tuple[str, dict]:
             "fields":       fields_returned,
         }
 
-    # ── Unique values list (get_unique_values) ───────────────────────────────
-    if "unique_values" in final_value:
+    if result_type == "value_list":
         item_count = final_value.get("count", 0)
         shape_type = "value_list_small" if item_count <= 10 else "value_list_large"
         return shape_type, {
             "type":       "value_list",
             "item_count": item_count,
         }
+        
+    if result_type == "single_number":
+        return "single_number", {"type": "single_number"}
 
-    # ── Statistics (calculate_time_between) ──────────────────────────────────
-    if "stats" in final_value:
-        stat_keys = list(final_value["stats"].keys()) if isinstance(final_value.get("stats"), dict) else []
-        return "statistics", {
-            "type":      "statistics",
-            "stat_keys": stat_keys,
-        }
-
-    # ── Sorted list (sort_and_limit) ─────────────────────────────────────────
-    if "sorted_data" in final_value:
-        total_out = final_value.get("total_out", 0)
-        shape_type = "grouped_few" if total_out <= 6 else "grouped_many"
-        return shape_type, {
-            "type":        "ranked_list",
-            "item_count":  total_out,
-            "total_in":    final_value.get("total_in", 0),
-        }
-
-    # ── Single computed number (count, result, total_sum, average, etc.) ─────
+    # Fallback to structural guessing ONLY for legacy cases where _result_type might be missing
     scalar_keys = {"count", "result", "total_sum", "average", "minimum",
-                   "maximum", "matched_count"}
+                   "maximum", "matched_count", "pct_change"}
     if scalar_keys & set(final_value.keys()):
         return "single_number", {"type": "single_number"}
 
-    # ── Fallback ─────────────────────────────────────────────────────────────
     return "single_number", {"type": "unknown"}
 
 

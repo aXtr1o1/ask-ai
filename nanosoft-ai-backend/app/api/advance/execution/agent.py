@@ -23,6 +23,7 @@ Public API:
 """
 import json
 import logging
+import re
 import time
 
 from google.genai import types
@@ -70,61 +71,80 @@ def _strip_markdown(raw: str) -> str:
 # Keep in sync with tools.py.
 # =============================================================================
 _TOOL_OUTPUT_KEYS: dict[str, set[str]] = {
-    # ── Core tools ────────────────────────────────────────────────────────────
+    # ── Basic Tools ─────────────────────────────────────────────────────────────
     "count_records":          {"count", "module", "condition_field", "condition_value",
                                "conditions"},
-    "sum_values":             {"total_sum", "records_used", "module", "field",
-                               "condition_field", "condition_value"},
-    "get_average":            {"average", "records_used", "module", "field",
-                               "condition_field", "condition_value"},
-    "get_minimum":            {"minimum", "records_used", "module", "field",
-                               "condition_field", "condition_value"},
-    "get_maximum":            {"maximum", "records_used", "module", "field",
-                               "condition_field", "condition_value"},
-    "calculate_time_between": {"stats", "calculated", "missing_dates", "total_records",
-                               "module", "start_field", "end_field"},
+    "sum_values":             {"total_sum", "records_used", "module", "field", "filters"},
+    "get_average":            {"average", "records_used", "module", "field", "filters"},
     "group_by_and_count":     {"groups", "total_records", "unique_groups",
-                               "module", "group_field", "filter_field", "filter_value"},
-    "get_unique_values":      {"unique_values", "count", "module", "field",
-                               "filter_field", "filter_value"},
-    "join_records":           {"matched_count", "unmatched_in_a", "unmatched_in_b",
-                               "records_in_a", "records_in_b",
-                               "module_a", "module_b", "join_field", "error"},
+                               "module", "group_fields", "filters"},
+    "group_by_and_aggregate": {"groups", "total_records", "unique_groups",
+                               "module", "group_fields", "agg_field", "operation", "filters"},
+    "get_record_fields":      {"module", "total", "fields_returned", "records", "filters"},
     "do_math":                {"result", "operation", "a", "b"},
     "sort_and_limit":         {"sorted_data", "total_in", "total_out",
                                "sort_by", "order", "limit"},
-    "group_by_and_aggregate": {"groups", "total_records", "unique_groups",
-                               "module", "group_field", "agg_field", "operation",
-                               "filter_field", "filter_value"},
-    "get_record_fields":      {"module", "total", "fields_returned", "records"},
     "final_answer_tool":      {"status", "final_value"},
-    # ── Phase 3-5 Intelligence Tools ──────────────────────────────────────────
-    "calculate_age_from_now":   {"avg_age_days", "max_age_days", "min_age_days",
-                                 "total_records", "calculated", "groups",
-                                 "module", "date_field", "group_field",
-                                 "filter_field", "filter_value"},
-    "group_by_time_period":     {"periods", "total_records", "period_count",
-                                 "value_key", "module", "date_field", "period",
-                                 "operation", "agg_field",
-                                 "filter_field", "filter_value"},
-    "calculate_mtbf":           {"mtbf_by_asset", "overall_avg_mtbf_days",
-                                 "assets_analyzed", "total_records",
-                                 "module", "asset_field", "failure_date_field",
-                                 "filter_field", "filter_value"},
-    "calculate_weighted_score": {"scores", "avg_score", "max_score", "min_score",
-                                 "total_records", "components_used",
-                                 "module", "group_field"},
-    "flag_by_threshold":        {"flagged_count", "total_records", "flag_ratio",
-                                 "flagged_records", "groups",
-                                 "module", "field", "threshold", "operator",
-                                 "group_field", "filter_field", "filter_value"},
+    # ── Intelligence Tools ─────────────────────────────────────────────────
+    "calculate_age_from_now":  {"avg_age_days", "max_age_days", "min_age_days",
+                                "total_records", "calculated", "groups",
+                                "module", "date_field", "group_fields", "filters"},
+    "group_by_time_period":    {"periods", "total_records", "period_count",
+                                "value_key", "module", "date_field", "period",
+                                "operation", "agg_field", "filters"},
+    "calculate_mtbf":          {"mtbf_by_asset", "overall_avg_mtbf_days",
+                                "assets_analyzed", "total_records",
+                                "module", "asset_field", "failure_date_field", "filters"},
+    "flag_by_threshold":       {"flagged_count", "total_records", "flag_ratio",
+                                "flagged_records", "groups",
+                                "module", "field", "threshold", "operator",
+                                "group_fields", "filters"},
     "calculate_rate_of_change": {"pct_change", "direction", "a", "b"},
-    "calculate_percentile":     {"percentile_values", "mean", "std_dev",
-                                 "records_used", "module", "field",
-                                 "condition_field", "condition_value"},
-    "forecast_linear":          {"forecast", "model_slope", "model_intercept",
-                                 "r_squared", "periods_ahead", "data_points",
-                                 "value_key"},
+    "calculate_percentile":    {"percentile_values", "mean", "std_dev", "minimum", "maximum",
+                                "records_used", "module", "field", "filters"},
+    "forecast_linear":         {"forecast", "model_slope", "model_intercept",
+                                "r_squared", "periods_ahead", "data_points",
+                                "value_key", "last_known_label"},
+    "compare_date_fields":     {"flagged_count", "total_records", "flag_ratio",
+                                "valid_pairs", "groups",
+                                "module", "field_a", "field_b", "operator",
+                                "group_fields", "filters"},
+    "merge_and_score":         {"ranked", "group_key", "datasets_used", "total_groups"},
+    "add_duration_to_date":    {"records", "total", "expired_count",
+                                "module", "date_field", "duration_field",
+                                "duration_unit", "filters"},
+    "join_and_aggregate":      {"groups", "matched_count", "unique_groups", "total_records",
+                                "module_a", "module_b", "join_field",
+                                "group_fields", "agg_field", "operation"},
+}
+
+# =============================================================================
+# REQUIRED ARGS — module-level constant (not rebuilt per loop iteration)
+# =============================================================================
+_REQUIRED_ARGS: dict[str, list[str]] = {
+    # ── Basic Tools ────────────────────────────────────────────────────────────
+    "count_records":             ["module"],
+    "sum_values":                ["module", "field"],
+    "get_average":               ["module", "field"],
+    "group_by_and_count":        ["module", "group_fields"],
+    "group_by_and_aggregate":    ["module", "group_fields", "agg_field", "operation"],
+    "get_record_fields":         ["module"],
+    "sort_and_limit":            ["data"],
+    "do_math":                   ["operation", "a"],
+    # ── Intelligence Tools ─────────────────────────────────────────────────────
+    "calculate_age_from_now":    ["module", "date_field"],
+    "group_by_time_period":      ["module", "date_field"],
+    "calculate_mtbf":            ["module", "asset_field", "failure_date_field"],
+    "flag_by_threshold":         ["module", "field", "threshold"],
+    "calculate_rate_of_change":  ["a", "b"],
+    "calculate_percentile":      ["module", "field"],
+    "forecast_linear":           ["data"],
+    "compare_date_fields":       ["module", "field_a", "field_b", "operator"],
+    "merge_and_score":           ["datasets", "group_key"],
+    "add_duration_to_date":      ["module", "date_field", "duration_field"],
+    "join_and_aggregate":        ["module_a", "module_b", "join_field",
+                                  "group_fields", "agg_field", "operation"],
+    "final_answer_tool":         ["result_ref"],
 }
 
 
@@ -143,6 +163,19 @@ def _validate_queue(queue: list) -> None:
     if not isinstance(queue, list) or len(queue) == 0:
         raise ValueError("Agent returned an empty or non-list queue.")
 
+    # Reject duplicate step numbers
+    seen_steps: set = set()
+    for i, step in enumerate(queue):
+        if isinstance(step, dict):
+            idx = step.get("step")
+            if idx in seen_steps:
+                raise ValueError(
+                    f"Duplicate step index {idx} found at position {i} in queue. "
+                    f"Step indices must be unique."
+                )
+            if idx is not None:
+                seen_steps.add(idx)
+
     # Build a map: step_index → tool_name for all steps seen so far
     step_tool_map: dict[int, str] = {}
 
@@ -157,45 +190,35 @@ def _validate_queue(queue: list) -> None:
         args         = step.get("args", {})
 
         # Check required arguments are present for known tools
-        _REQUIRED_ARGS: dict[str, list[str]] = {
-            # ── Core tools ────────────────────────────────────────────────
-            "get_unique_values":         ["module", "field"],
-            "count_records":             ["module"],
-            "sum_values":                ["module", "field"],
-            "get_average":               ["module", "field"],
-            "get_minimum":               ["module", "field"],
-            "get_maximum":               ["module", "field"],
-            "calculate_time_between":    ["module", "start_field", "end_field"],
-            "group_by_and_count":        ["module", "group_field"],
-            "group_by_and_aggregate":    ["module", "group_field", "agg_field", "operation"],
-            "get_record_fields":         ["module"],
-            "sort_and_limit":            ["data"],
-            "join_records":              ["module_a", "module_b", "join_field"],
-            "do_math":                   ["operation", "a"],
-            # ── Phase 3-5 Intelligence Tools ──────────────────────────────
-            "calculate_age_from_now":    ["module", "date_field"],
-            "group_by_time_period":      ["module", "date_field"],
-            "calculate_mtbf":            ["module", "asset_field", "failure_date_field"],
-            "calculate_weighted_score":  ["module", "score_components"],
-            "flag_by_threshold":         ["module", "field", "threshold"],
-            "calculate_rate_of_change":  ["a", "b"],
-            "calculate_percentile":      ["module", "field"],
-            "forecast_linear":           ["data"],
-        }
         required = _REQUIRED_ARGS.get(current_tool, [])
         for req in required:
             if req not in args:
                 raise ValueError(
-                    f"Queue step {i} ({current_tool}): missing required argument '{req}'. "
+                    f"Queue step index {current_idx} (position {i}, tool={current_tool}): "
+                    f"missing required argument '{req}'. "
                     f"Args provided: {list(args.keys())}"
                 )
 
         # Validate all arg values that are $step_N.key references
+        # Recursively walks nested lists and dicts (e.g. merge_and_score datasets)
+        def _extract_refs(val) -> list[str]:
+            """Recursively extract all $step_N.key strings from any structure."""
+            if isinstance(val, str):
+                return [val] if val.startswith("$step_") else []
+            if isinstance(val, list):
+                out = []
+                for item in val:
+                    out.extend(_extract_refs(item))
+                return out
+            if isinstance(val, dict):
+                out = []
+                for v in val.values():
+                    out.extend(_extract_refs(v))
+                return out
+            return []
+
         for arg_name, arg_val in args.items():
-            refs = arg_val if isinstance(arg_val, list) else [arg_val]
-            for ref in refs:
-                if not isinstance(ref, str) or not ref.startswith("$step_"):
-                    continue  # plain value — skip
+            for ref in _extract_refs(arg_val):
 
                 inner = ref[1:]                    # "step_2.count"
                 parts = inner.split(".", 1)
@@ -333,7 +356,7 @@ def run_execution(
     logger.info("[Execution Agent] latency : llm=%.2fs", llm_time)
 
     try:
-        parsed = json.loads(raw_json)
+        parsed = json.loads(_strip_markdown(raw_json))
     except json.JSONDecodeError as exc:
         logger.error("[Execution Agent] JSON parse failed: %s\nRaw: %.300s", exc, raw_json)
         raise ValueError(f"Execution Agent returned invalid JSON. Error: {exc}") from exc
@@ -367,7 +390,9 @@ def run_execution(
             args = step.get("args") or {}
             for k, v in args.items():
                 if v is None:
-                    args[k] = ""                      # None → empty string
+                    # List args default to [] not "" — preserves correct type
+                    args[k] = [] if k in ("filters", "group_fields", "conditions",
+                                          "percentiles", "fields", "datasets") else ""
                 elif isinstance(v, (dict, list)):
                     pass                              # keep structured values intact
                 elif not isinstance(v, str):
@@ -375,6 +400,23 @@ def run_execution(
             step["args"] = args
 
     queue = parsed
+
+    # ── Auto-repair: final_answer_tool flat-args (Bug #1) ────────────────────
+    # The LLM sometimes places multi-part answer labels directly as top-level
+    # args instead of nesting them under result_ref:
+    #   WRONG:   {"MTBF": "$step_0.overall_avg_mtbf_days", "MTTR": "$step_1.average"}
+    #   CORRECT: {"result_ref": {"MTBF": "...", "MTTR": "..."}}
+    # Detect and silently repair before validation so the request never crashes.
+    for step in queue:
+        if isinstance(step, dict) and step.get("tool") == "final_answer_tool":
+            args = step.get("args", {})
+            if "result_ref" not in args and args:
+                step["args"] = {"result_ref": dict(args)}
+                logger.info(
+                    "[Execution Agent] Auto-repaired final_answer_tool: "
+                    "wrapped flat args %s into result_ref dict.",
+                    list(dict(args).keys()),
+                )
 
     _validate_queue(queue)
     log_queue(queue)
@@ -394,7 +436,7 @@ def run_execution(
 
     # ── Log completion ──────────────────────────────────────────────────────
     step_results = result.get("step_results", {})
-    last_key     = f"step_{len(queue) - 1}"
+    last_key     = f"step_{queue[-1]['step']}"
     last_output  = step_results.get(last_key, {})
     final_value  = last_output.get("final_value", last_output)
 

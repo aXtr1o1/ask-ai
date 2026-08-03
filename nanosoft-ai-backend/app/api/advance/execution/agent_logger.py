@@ -87,19 +87,13 @@ def log_step(step_idx: int, tool_name: str, result: dict):
     elif "average" in result and "stats" not in result:
         summary = f"average={result['average']}  ({result.get('records_used')} records)"
 
-    elif "minimum" in result and "stats" not in result:
-        summary = f"minimum={result['minimum']}"
-
-    elif "maximum" in result and "stats" not in result:
-        summary = f"maximum={result['maximum']}"
-
-    elif "stats" in result:
-        s = result["stats"]
+    elif "percentile_values" in result:
+        pct = result.get("percentile_values", {})
+        p50 = pct.get("p50", "N/A")
         summary = (
-            f"avg={s.get('average')} min  "
-            f"min={s.get('minimum')}  "
-            f"max={s.get('maximum')}  "
-            f"({result.get('calculated')} records)"
+            f"p50={p50}  mean={result.get('mean')}  "
+            f"std={result.get('std_dev')}  "
+            f"records={result.get('records_used')}"
         )
 
     elif "groups" in result:

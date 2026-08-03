@@ -65,6 +65,7 @@ nanosoft-ai-backend/app/api/advance/Understanding_Agent/__pycache__/*
 nanosoft-ai-backend/app/api/advance/Formatting_agent/__pycache__/*
 nanosoft-ai-backend/app/api/advance/preprocessing/__pycache__/*
 nanosoft-ai-backend/app/api/advance/stream/__pycache__/*
+nanosoft-ai-backend/app/api/advance/evaluation/__pycache__/*
 
 
 
