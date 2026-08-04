@@ -167,42 +167,40 @@ MODULE_ENUMS: dict[str, dict[str, list[str]]] = {
     # =========================================================================
     # Assets — Physical Asset Register
     # =========================================================================
-        "assets": {
-            "StatusName": [
-                "Online",
-                "Offline",
-            ],
-            "ConditionName": [
-                "Bad",
-                "CDT",
-                "Good",
-                "Immobilized",
-                "Operational",
-                "ULD",
-            ],
-            "ServiceAreaName": [
-                "N/A",
-                "SAC012",
-                "SCA013",
-            ],
-            "TradeGroupName": [
-                "OWNED",
-                "Owned",
-                "RENTED",
-            ],
-            "PriorityName": [
-                "Critical",
-                "High",
-                "Low",
-                "Medium",
-                "P1 Critical",
-                "P2 High",
-                "P2-High",
-                "P3 Medium",
-                "P4 Low",
-            ],
-        
-
+    "assets": {
+        "StatusName": [
+            "Online",
+            "Offline",
+        ],
+        "ConditionName": [
+            "Bad",
+            "CDT",
+            "Good",
+            "Immobilized",
+            "Operational",
+            "ULD",
+        ],
+        "ServiceAreaName": [
+            "N/A",
+            "SAC012",
+            "SCA013",
+        ],
+        "TradeGroupName": [
+            "OWNED",
+            "Owned",
+            "RENTED",
+        ],
+        "PriorityName": [
+            "Critical",
+            "High",
+            "Low",
+            "Medium",
+            "P1 Critical",
+            "P2 High",
+            "P2-High",
+            "P3 Medium",
+            "P4 Low",
+        ],
         "AssetTypeName": [
             "Fixed",
             "Movable",

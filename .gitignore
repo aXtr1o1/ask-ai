@@ -69,3 +69,11 @@ nanosoft-ai-backend/tests/api/routes/__pycache__/
 nanosoft-ai-backend/tests/services/__pycache__/
 nanosoft-ai-backend/tests/tools/__pycache__/
 nanosoft-ai-backend/app/services/sync/__pycache__/*
+
+# advance pipeline __pycache__ entries
+nanosoft-ai-backend/app/api/advance/__pycache__/*
+nanosoft-ai-backend/app/api/advance/Understanding_Agent/__pycache__/*
+nanosoft-ai-backend/app/api/advance/analysis/__pycache__/*
+nanosoft-ai-backend/app/api/advance/analysis/metadata/__pycache__/*
+nanosoft-ai-backend/app/api/advance/routes/__pycache__/*
+nanosoft-ai-backend/app/api/advance/service/__pycache__/*

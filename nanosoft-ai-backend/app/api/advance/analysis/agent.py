@@ -7,6 +7,7 @@ for each module.
 
 Thought tokens are streamed in real-time via thought_callback.
 """
+import json as _json
 import logging
 import time
 
@@ -123,7 +124,6 @@ def analyze_query(
     # The model sometimes returns filter_fields as a list ['F1','F2'] instead
     # of a dict {'F1': 'desc', 'F2': 'desc'}, and filter_values can have null values.
     # Fix both before handing to Pydantic so we never get a ValidationError here.
-    import json as _json
     try:
         raw_dict = _json.loads(json_text)
     except _json.JSONDecodeError as exc:
@@ -259,9 +259,10 @@ def analyze_query(
     for mod in valid_modules:
         valid_filter_fields[mod] = {}
         for field, desc in response.filter_fields.get(mod, {}).items():
-            actual_field = schema_fields_lower[mod].get(field.lower())
+            actual_field = schema_fields_lower[mod].get(field.lower()) 
             if actual_field:
-                valid_filter_fields[mod][actual_field] = desc
+                meta_desc = MODULE_SCHEMAS[mod][actual_field]            # returns only this field's description
+                valid_filter_fields[mod][actual_field] = meta_desc
 
     valid_filter_values: dict[str, dict[str, str | list[str]]] = {}
     for mod in valid_modules:
