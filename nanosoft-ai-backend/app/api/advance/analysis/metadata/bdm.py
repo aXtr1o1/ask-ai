@@ -38,8 +38,8 @@ BDM_SCHEMA: dict[str, str] = {
         "Current lifecycle status of the work order. "
     ),
 
-    "WoTypeName": (
-        "Work order type. "
+   "WoTypeName": (
+    "Category describing the work order type."
     ),
 
     "PriorityName": (

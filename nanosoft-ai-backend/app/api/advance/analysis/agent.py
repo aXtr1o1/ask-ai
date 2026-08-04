@@ -16,6 +16,7 @@ from app.api.advance.analysis.schemas import AnalysisOutput
 from app.api.advance.analysis.prompt import get_system_prompt
 from app.api.advance.analysis.metadata import MODULE_SCHEMAS, get_metadata
 from app.api.advance.gemini_stream import stream_with_thoughts
+from app.api.advance.analysis.mandatory_fields import build_query_field_context
 
 logger = logging.getLogger("advance.analysis")
 
@@ -254,10 +255,20 @@ def analyze_query(
     valid_filter_fields: dict[str, dict[str, str]] = {}
     for mod in valid_modules:
         valid_filter_fields[mod] = {}
+        extracted_fields = []
         for field, desc in response.filter_fields.get(mod, {}).items():
             actual_field = schema_fields_lower[mod].get(field.lower())
             if actual_field:
                 valid_filter_fields[mod][actual_field] = desc
+                extracted_fields.append(actual_field)
+                
+        try:
+            context = build_query_field_context(mod, extracted_fields)
+            for m_field in context["mandatory_fields"]:
+                if m_field not in valid_filter_fields[mod]:
+                    valid_filter_fields[mod][m_field] = "Mandatory field"
+        except KeyError:
+            pass
 
     valid_filter_values: dict[str, dict[str, str | list[str]]] = {}
     for mod in valid_modules:

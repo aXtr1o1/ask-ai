@@ -57,13 +57,13 @@ MODULE_ENUMS: dict[str, dict[str, list[str]]] = {
             "Casual Maintenances",
             "FA",
         ],
-        # "ComplaintTypeName": [
-        #     "Corrective Maintenance",
-        #     "Incident",
-        #     "Proactive",
-        #     "Reactive Maintenance",
-        #     "Service Request",
-        # ],
+        "ComplaintTypeName": [
+            "Corrective Maintenance",
+            "Incident",
+            "Proactive",
+            "Reactive Maintenance",
+            "Service Request",
+        ],
     },
 
     # =========================================================================

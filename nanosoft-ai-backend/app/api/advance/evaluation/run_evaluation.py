@@ -320,60 +320,50 @@ def run_evaluation(
 
     # -- Main loop ------------------------------------------------------------
     #
-    #  Outer loop  : cycles
-    #  Inner loop  : questions  (all run in order within the cycle)
-    #
-    #  History OFF (default):
-    #    Each question gets its own brand-new session_id → no prior context.
-    #
-    #  History ON (--history flag):
-    #    All questions in a cycle share one session_id.  A new session_id
-    #    is generated at the start of every cycle so context resets between cycles.
+    #  Outer loop  : questions
+    #  Inner loop  : cycles (run the same question N times in a row)
     #
     # -------------------------------------------------------------------------
-    for cycle_num in range(1, cycles + 1):
+    for q_idx, q in enumerate(enabled_questions, start=1):
+        q_id     = q["id"]
+        question = q["question"]
+
         # When history is ON, generate ONE session id shared across all
-        # questions in this cycle.  When OFF, this is just a placeholder —
-        # each question will override it with its own uuid below.
-        cycle_session_id = str(uuid.uuid4())
+        # cycles for this specific question.
+        q_session_id = str(uuid.uuid4())
 
         logger.info("")
         logger.info("=" * 70)
-        logger.info("Cycle %d/%d  — history=%s",
-                    cycle_num, cycles, "ON" if history else "OFF")
+        logger.info("Question %d/%d  [Q#%d] — history=%s",
+                    q_idx, len(enabled_questions), q_id, "ON" if history else "OFF")
+        logger.info("  %s", question)
         if history:
-            logger.info("  Shared session: %s", cycle_session_id)
+            logger.info("  Shared session: %s", q_session_id)
         logger.info("=" * 70)
 
-        for q_idx, q in enumerate(enabled_questions, start=1):
-            q_id     = q["id"]
-            question = q["question"]
+        for cycle_num in range(1, cycles + 1):
             row_count += 1
 
-            # ── session_id selection ─────────────────────────────────────────
-            # History OFF → unique session per question (no context carried over)
-            # History ON  → shared session for the whole cycle
-            session_id = cycle_session_id if history else str(uuid.uuid4())
+            # History OFF → unique session per run (no context carried over)
+            # History ON  → shared session across all runs of this question
+            session_id = q_session_id if history else str(uuid.uuid4())
 
-            logger.info("")
-            logger.info("  --- Q %d/%d  [Q#%d]  (overall row %d/%d)  session=%s",
-                        q_idx, len(enabled_questions), q_id, row_count, total_rows,
-                        session_id)
-            logger.info("  %s", question)
+            logger.info("  --- Run %d/%d  (overall row %d/%d)  session=%s",
+                        cycle_num, cycles, row_count, total_rows, session_id)
 
             ua, aa, err = run_single(
                 question,
                 session_id,
-                store_history=history,   # only persist when history is ON
+                store_history=history,
             )
             _write_row(ws, excel_row, q_id, cycle_num, question, ua, aa, err)
             excel_row += 1
 
-        # pause between cycles (not after the last one)
-        if cycle_num < cycles:
+        # Pause between different questions
+        if q_idx < len(enabled_questions):
             logger.info("")
-            logger.info("  Cycle %d complete. Pausing %ds before cycle %d...",
-                        cycle_num, break_secs, cycle_num + 1)
+            logger.info("  Finished all runs for Q#%d. Pausing %ds before next question...",
+                        q_id, break_secs)
             time.sleep(break_secs)
 
     # -- Save workbook --------------------------------------------------------
