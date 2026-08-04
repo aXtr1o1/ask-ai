@@ -25,6 +25,7 @@ import SpaceBooking from "./components/Bookings/spacebooking";
 import SpaceBookingModal from "./components/Bookings/SpaceBookingModal";
 import ComplaintsModal from "./components/Bookings/ComplaintsModal";
 import AssetAnalyticsDashboard from "./components/AssetAnalytics/AssetAnalyticsDashboard";
+import AdvanceChatUI, { sendAdvanceQuery, AdvanceStreamMessage, renderCharToDom } from "./components/Advance/AdvanceChatUI";
 
 /* changes done by megnathan: Cleaned up icon imports to avoid conflicts with local definitions */
 import {
@@ -60,6 +61,14 @@ interface Message {
   multipleDatasets?: MultiDatasetView[];
   multiSummary?: string;  // ← context_summary from the backend
   isSpaceBooking?: boolean;   // ← Track if message belongs to Space Booking session
+  // ── Advance AI fields ──────────────────────────────────────────────────────
+  isAdvanceStream?: boolean;
+  advanceResult?: any;
+  agentStatus?: "thinking" | "done";
+  stage?: string;
+  stages?: any[];
+  streamContent?: string;
+  isRetrieving?: boolean;
 }
 
 interface ChatSession { id: string; title: string; createdAt: number; updatedAt?: number; isPinned?: boolean; isArchived?: boolean; group_name?: string; isSpaceBooking?: boolean; }
@@ -1295,6 +1304,7 @@ export default function Home() {
   const [isSpaceBooking, setIsSpaceBooking] = useState<boolean>(false);
   const [isComplaints, setIsComplaints] = useState<boolean>(false);
   const [isAssetAnalytics, setIsAssetAnalytics] = useState<boolean>(false);
+  const [isAdvanceAskAI, setIsAdvanceAskAI] = useState<boolean>(false);
   const [isComplaintsModalOpen, setIsComplaintsModalOpen] = useState<boolean>(false);
   const [activeBookingBubbleIndex, setActiveBookingBubbleIndex] = useState<number | null>(null);
   const [bookingStartDate, setBookingStartDate] = useState<string>("");
@@ -3543,12 +3553,154 @@ export default function Home() {
     }
   };
 
+  // ── Advance AI — sends query to /api/advance/ask-ai via HTTP POST ─────────
+  const handleAdvanceAskAI = (userText: string) => {
+    recordPromptForGhostHistory(ghostPromptHistoryStorageKey(loggedInUser), userText);
+
+    const now = Date.now();
+    setChatSessions(prev => {
+      const existing = prev.find(s => s.id === sessionId);
+      const rest = prev.filter(s => s.id !== sessionId);
+      if (existing) return [{ ...existing, updatedAt: now }, ...rest];
+      return [{ id: sessionId, title: "New Chat", createdAt: now, updatedAt: now }, ...rest];
+    });
+
+    setShowFeaturePlaceholder(false);
+    const placeholderMsg: Message = { role: "ai", text: "", streaming: true, isAdvanceStream: true, agentStatus: "thinking" };
+    setMessages(prev => {
+      const updated = [...prev, { role: "user" as const, text: userText }, placeholderMsg];
+      sessionMessagesRef.current.set(sessionId, updated);
+      return updated;
+    });
+
+    if (inputRef.current) inputRef.current.value = "";
+    rawInputRef.current = "";
+    setInput("");
+    syncGhostUserMirror();
+    setIsLoading(true);
+
+    let currentStage = "";
+    let charQueue: string[] = [];
+    let isFlushing = false;
+    
+    const flushQueue = () => {
+      if (charQueue.length === 0) {
+        isFlushing = false;
+        return;
+      }
+      isFlushing = true;
+      
+      // Adaptive typing speed: type faster if we are falling behind
+      const charsToType = charQueue.length > 100 ? 10 : charQueue.length > 40 ? 5 : charQueue.length > 15 ? 2 : 1;
+      for (let i = 0; i < charsToType && charQueue.length > 0; i++) {
+        renderCharToDom(charQueue.shift()!);
+      }
+      
+      requestAnimationFrame(flushQueue);
+    };
+
+    sendAdvanceQuery(
+      userText,
+      process.env.NEXT_PUBLIC_API_BASE_URL!,
+      (stage) => {
+        // Inject a visual boundary into the terminal if a new stage starts (except the very first one which will just be the first text)
+        if (currentStage && currentStage !== stage) {
+          renderCharToDom(`\n\n[=== ${stage} ===]\n`);
+        }
+        currentStage = stage;
+        
+        // Stage started → update msg.stages so AdvanceStreamMessage shows the terminal header
+        setMessages(prev => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last && last.role === "ai") {
+            last.stage       = stage;
+            last.agentStatus = "thinking";
+            last.isRetrieving = false;
+            if (!last.stages) last.stages = [];
+            if (!last.stages.find((s: any) => s.name === stage)) {
+              last.stages.push({ name: stage });
+            }
+          }
+          return [...updated];
+        });
+      },
+      (chars) => {
+        // Update streamContent flag on the first chunk so UI transitions to the terminal
+        setMessages(prev => {
+           const updated = [...prev];
+           const last = updated[updated.length - 1];
+           if (last && last.role === "ai" && !last.streamContent) {
+              last.streamContent = "started";
+              return updated;
+           }
+           return prev;
+        });
+
+        // Thought token → inject directly into the live terminal DOM (60fps, no re-render)
+        const str = typeof chars === "string" ? chars : String(chars);
+        for (const ch of str) {
+           charQueue.push(ch);
+        }
+        if (!isFlushing) {
+           requestAnimationFrame(flushQueue);
+        }
+      },
+      (stage) => {
+        // Stage ended — if Analysis Agent just finished, show the DB retrieval indicator
+        setMessages(prev => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last && last.role === "ai" && stage === "Analysis Agent") {
+            last.isRetrieving = true;
+          }
+          return [...updated];
+        });
+      },
+      (data) => {
+        setMessages(prev => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last && last.role === "ai") {
+            last.streaming = false;
+            last.agentStatus = "done";
+            if (data) last.advanceResult = data;
+          }
+          sessionMessagesRef.current.set(sessionId, updated);
+          return updated;
+        });
+        setIsLoading(false);
+      },
+      (error) => {
+        setMessages(prev => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last && last.role === "ai") {
+            last.text = `Error: ${error.message}`;
+            last.streaming = false;
+            last.agentStatus = "done";
+          }
+          return updated;
+        });
+        setIsLoading(false);
+      },
+      null,
+      sessionId
+    );
+  };
+
   // ── Send message over the persistent WebSocket ────────────────────────────
   const sendMessage = () => {
     const domVal = inputRef.current?.value ?? "";
     if (!domVal.trim() || isLoading) return;
     clearGhostCompletion();
     const userText = domVal.trim();
+
+    // Route to Advance AI if that mode is active
+    if (isAdvanceAskAI) {
+      handleAdvanceAskAI(userText);
+      return;
+    }
 
     const ws = wsRef.current;
 
@@ -3704,6 +3856,7 @@ export default function Home() {
               </div>
             )}
 
+
             <SpaceBooking
               isSpaceBooking={isSpaceBooking}
               setIsSpaceBooking={setIsSpaceBooking}
@@ -3711,6 +3864,8 @@ export default function Home() {
               setIsComplaints={setIsComplaints}
               isAssetAnalytics={isAssetAnalytics}
               setIsAssetAnalytics={setIsAssetAnalytics}
+              isAdvanceAskAI={isAdvanceAskAI}
+              setIsAdvanceAskAI={setIsAdvanceAskAI}
               isChatStarted={messages.length > 0}
               onSwitchMode={handleSwitchMode}
             >
@@ -4720,7 +4875,7 @@ export default function Home() {
                       )}
 
                       <div
-                        className={`message-bubble ${msg.role}${isGraphMsg ? ' graph-message' : ''}${(msg.tableData && msg.tableData.length > 0) || (msg.multipleDatasets && msg.multipleDatasets.length > 0) ? ' table-message' : ''}`}
+                        className={`message-bubble ${msg.role}${isGraphMsg ? ' graph-message' : ''}${(msg.tableData && msg.tableData.length > 0) || (msg.multipleDatasets && msg.multipleDatasets.length > 0) ? ' table-message' : ''}${msg.isAdvanceStream ? ' advance-message' : ''}`}
                         style={{ position: 'relative' }}
                       >
 
@@ -4792,11 +4947,15 @@ export default function Home() {
                           })()}</>
 
                         ) : isStreaming ? (
-                          /* ── Streaming: pre-wrap plain text + blinking cursor ── */
+                          /* ── Streaming: Advance AI thinking OR standard streaming cursor ── */
+                          msg.isAdvanceStream ? (
+                            <AdvanceStreamMessage msg={msg} isDark={true} />
+                          ) : (
                           <div className="ai-bubble streaming-text">
                             <span dangerouslySetInnerHTML={{ __html: injectCalendarIcon(msg.text, idx) }} />
                             <span className="stream-cursor" />
                           </div>
+                          )
 
                         ) : isGraphMsg && graphData ? (
                           /* ── Graph: Render chart with per-message type switcher ── */
@@ -4891,7 +5050,10 @@ export default function Home() {
                           />
 
                         ) : (
-                          /* ── Complete: already formatted at [DONE] time ── */
+                          /* ── Complete: Advance AI result OR standard formatted bubble ── */
+                          msg.isAdvanceStream ? (
+                            <AdvanceStreamMessage msg={msg} isDark={true} />
+                          ) : (
                           <div className="ai-bubble" style={{
                             fontSize: responsive.isMobile ? '13px' : responsive.isTablet ? '14px' : '15px',
                             lineHeight: 1.5,
@@ -4905,10 +5067,11 @@ export default function Home() {
                               textAlign: 'left',
                             }} />
                           </div>
+                          )
                         )}
 
-                        {/* Copy button for text bubbles only */}
-                        {!isAudio && !isGraphMsg && !(msg.tableData && msg.tableData.length > 0) && !(msg.multipleDatasets && msg.multipleDatasets.length > 0) && (
+                        {/* Copy button for text bubbles only — not for advance AI messages */}
+                        {!isAudio && !isGraphMsg && !msg.isAdvanceStream && !(msg.tableData && msg.tableData.length > 0) && !(msg.multipleDatasets && msg.multipleDatasets.length > 0) && (
                           <>
                             <button
                               className="copy-bubble-btn"

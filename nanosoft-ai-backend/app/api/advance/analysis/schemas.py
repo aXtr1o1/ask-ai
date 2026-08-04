@@ -27,7 +27,7 @@ from pydantic import BaseModel, Field
 class AnalysisOutput(BaseModel):
     """Structured output from the Analysis Agent."""
     reasoning: str = Field(
-        description="A brief explanation of why you selected the specific modules, fields, and filter values based on the query."
+        description="A concise explanation of why you chose these fields and filters based on the query."
     )
 
     limit: int | None = Field(
@@ -35,14 +35,6 @@ class AnalysisOutput(BaseModel):
         description=(
             "Maximum number of records to return if the user explicitly specifies a numeric limit "
             "in the query (e.g. 'top 5', 'first 10', 'give me 5 assets'). Set to null if no specific quantity/count is requested."
-        )
-    )
-
-    modules: list[str] = Field(
-        default_factory=list,
-        description=(
-            "FM database modules required to answer the query. "
-            "Only from: assets, bdm, ppm, fa, sb."
         )
     )
     filter_fields: dict[str, dict[str, str]] = Field(

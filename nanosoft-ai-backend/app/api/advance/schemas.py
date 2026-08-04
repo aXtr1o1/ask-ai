@@ -10,6 +10,8 @@ class AdvanceAskRequest(BaseModel):
 
 # ── API Response ──────────────────────────────────────────────────────────────
 class AdvanceAskResponse(BaseModel):
+    intent:             str | None = None
+    modules:            list[str] | None = None
     query_summary:      str | None = None   # always returned
     general_response:   str | None = None   # populated when intent = general
     web_search_summary: str | None = None   # populated when intent = web_search

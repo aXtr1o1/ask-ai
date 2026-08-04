@@ -187,7 +187,7 @@ def analyze_query(
         # Detect Shape B: all values are strings/None (flat, not nested)
         all_flat = all(not isinstance(v, dict) and not isinstance(v, list) for v in raw_fv.values())
         if all_flat and raw_fv:
-            modules_hint = raw_dict.get("modules") or []
+            modules_hint = modules
             mod_key = modules_hint[0] if modules_hint else "unknown"
             raw_dict["filter_values"] = {mod_key: raw_fv}
             logger.warning(
@@ -220,7 +220,7 @@ def analyze_query(
             if isinstance(item, dict):
                 merged.update(item)
         if merged:
-            modules_hint = raw_dict.get("modules") or []
+            modules_hint = modules
             mod_key = modules_hint[0] if modules_hint else "unknown"
             raw_dict["filter_values"] = {
                 mod_key: {k: v if isinstance(v, list) else str(v) for k, v in merged.items() if v is not None}
@@ -247,7 +247,8 @@ def analyze_query(
     logger.info("[Analysis Agent] latency : llm=%.2fs", llm_time)
 
     # ── Validate — strip hallucinated modules / fields ────────────────────────
-    valid_modules = [m for m in response.modules if m in MODULE_SCHEMAS]
+    # The Understanding Agent has already selected the modules. We just validate them.
+    valid_modules = [m for m in modules if m in MODULE_SCHEMAS]
 
     # Map lowercase field names to actual schema field names
     schema_fields_lower = {
@@ -258,11 +259,18 @@ def analyze_query(
     valid_filter_fields: dict[str, dict[str, str]] = {}
     for mod in valid_modules:
         valid_filter_fields[mod] = {}
-        for field, desc in response.filter_fields.get(mod, {}).items():
-            actual_field = schema_fields_lower[mod].get(field.lower()) 
-            if actual_field:
-                meta_desc = MODULE_SCHEMAS[mod][actual_field]            # returns only this field's description
+        llm_fields = response.filter_fields.get(mod, {})
+        
+        # Auto-fill: If the LLM returns {} (unsure), we inject ALL fields natively
+        if not llm_fields:
+            for actual_field, meta_desc in MODULE_SCHEMAS.get(mod, {}).items():
                 valid_filter_fields[mod][actual_field] = meta_desc
+        else:
+            for field, desc in llm_fields.items():
+                actual_field = schema_fields_lower[mod].get(field.lower()) 
+                if actual_field:
+                    meta_desc = MODULE_SCHEMAS[mod][actual_field]
+                    valid_filter_fields[mod][actual_field] = meta_desc
 
     valid_filter_values: dict[str, dict[str, str | list[str]]] = {}
     for mod in valid_modules:
