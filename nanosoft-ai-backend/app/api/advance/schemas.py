@@ -6,6 +6,8 @@ from typing import TypedDict, Optional
 class AdvanceAskRequest(BaseModel):
     query:      str = Field(..., description="The user's question or query")
     session_id: str = Field(..., description="Unique session identifier")
+    user_name:  str = Field(default="", description="The user's name from frontend")
+    user_id:    str = Field(default="", description="The user's ID from frontend")
 
 
 # ── API Response ──────────────────────────────────────────────────────────────
@@ -27,6 +29,8 @@ class AdvancePipelineState(TypedDict):
     # ── Input (set once by service.py) ────────────────────────────────────────
     query:      str
     session_id: str
+    user_name:  str
+    user_id:    str
 
     # ── Understanding Agent → routing + Analysis Agent ─────────────────────────
     intent:                str           # drives conditional edge in pipeline
@@ -43,3 +47,6 @@ class AdvancePipelineState(TypedDict):
     filter_fields: dict                  # returned when intent = db_query
     filter_values: dict                  # returned when intent = db_query
     limit:         Optional[int]         # reserved for future retrieval layer
+    
+    # ── Retrieval Layer → Router (response fields) ──────────────────────────────
+    retrieved_data: dict                 # data fetched from DB via SPs

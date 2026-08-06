@@ -28,7 +28,7 @@ async def advance_ask_ai(request: AdvanceAskRequest) -> StreamingResponse:
     logger.info("[advance/ask-ai] ▶ SSE REQUEST | session=%s | query=%s", session_id, query)
 
     return StreamingResponse(
-        stream_advance_pipeline(query, session_id),
+        stream_advance_pipeline(query, session_id, request.user_name, request.user_id),
         media_type = "text/event-stream",
         headers    = {
             "Cache-Control":   "no-cache",

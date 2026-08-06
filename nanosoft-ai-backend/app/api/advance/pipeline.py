@@ -5,6 +5,8 @@ from app.api.advance.schemas import AdvancePipelineState
 from app.api.advance.Understanding_Agent.agent import classify_query
 from app.api.advance.Understanding_Agent.conversation_memory import conversation_memory
 from app.api.advance.analysis.agent import analyze_query
+from app.api.advance.retrieval.layer import run_retrieval_layer
+from app.api.advance.preprocessing.layer import preprocess_records
 
 logger = logging.getLogger("advance.pipeline")
 
@@ -44,6 +46,33 @@ def analysis_node(state: AdvancePipelineState) -> dict:
     }
 
 
+def retrieval_node(state: AdvancePipelineState) -> dict:
+    result = run_retrieval_layer(
+        user_name=state.get("user_name", ""),
+        user_id=state.get("user_id", ""),
+        modules=state["modules"],
+        filter_values=state.get("filter_values", {}),
+        filter_fields=state.get("filter_fields", {}),
+        limit=state.get("limit")
+    )
+    logger.info("[Pipeline] ✔ retrieval_node | retrieved for modules=%s", list(result.keys()))
+    return {
+        "retrieved_data": result
+    }
+
+
+def preprocessing_node(state: AdvancePipelineState) -> dict:
+    retrieved_data = state.get("retrieved_data", {})
+    if retrieved_data:
+        preprocessed_data = preprocess_records(retrieved_data)
+        logger.info("[Pipeline] ✔ preprocessing_node | cleaned data")
+    else:
+        preprocessed_data = {}
+    return {
+        "retrieved_data": preprocessed_data
+    }
+
+
 def route_after_understanding(state: AdvancePipelineState) -> str:
     intent = state.get("intent", "general")
     logger.info("[Pipeline] ↳ EDGE: intent=%s", intent)
@@ -54,13 +83,17 @@ def _build_pipeline() -> StateGraph:
     builder = StateGraph(AdvancePipelineState)
     builder.add_node("understanding_node", understanding_node)
     builder.add_node("analysis_node",      analysis_node)
+    builder.add_node("retrieval_node",     retrieval_node)
+    builder.add_node("preprocessing_node", preprocessing_node)
     builder.add_edge(START, "understanding_node")
     builder.add_conditional_edges(
         "understanding_node",
         route_after_understanding,
         {"analysis_node": "analysis_node", END: END},
     )
-    builder.add_edge("analysis_node", END)
+    builder.add_edge("analysis_node", "retrieval_node")
+    builder.add_edge("retrieval_node", "preprocessing_node")
+    builder.add_edge("preprocessing_node", END)
     return builder.compile()
 
 

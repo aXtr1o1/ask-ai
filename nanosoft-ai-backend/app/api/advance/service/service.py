@@ -8,17 +8,21 @@ from app.api.advance.pipeline import advance_pipeline
 from app.api.advance.Understanding_Agent.agent import classify_query
 from app.api.advance.Understanding_Agent.conversation_memory import conversation_memory
 from app.api.advance.analysis.agent import analyze_query
+from app.api.advance.retrieval.layer import run_retrieval_layer
+from app.api.advance.preprocessing.layer import preprocess_records
 
 logger = logging.getLogger("advance.service")
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
-def _build_initial_state(query: str, session_id: str) -> dict:
+def _build_initial_state(query: str, session_id: str, user_name: str, user_id: str) -> dict:
     return {
         # Input
         "query":                 query,
         "session_id":            session_id,
+        "user_name":             user_name,
+        "user_id":               user_id,
         # Understanding Agent defaults
         "intent":                "",
         "query_summary":         None,
@@ -57,8 +61,8 @@ def _store_conversation_turn(
 
 # ── Non-streaming pipeline (LangGraph, kept for health-check / testing) ────────
 
-async def run_advance_pipeline(query: str, session_id: str) -> dict:
-    initial_state = _build_initial_state(query, session_id)
+async def run_advance_pipeline(query: str, session_id: str, user_name: str, user_id: str) -> dict:
+    initial_state = _build_initial_state(query, session_id, user_name, user_id)
     final_state = await asyncio.to_thread(advance_pipeline.invoke, initial_state)
     intent = final_state.get("intent", "general")
     _store_conversation_turn(session_id, query, final_state, intent)
@@ -67,7 +71,7 @@ async def run_advance_pipeline(query: str, session_id: str) -> dict:
 
 # ── Streaming pipeline ─────────────────────────────────────────────────────────
 
-def _run_streaming_pipeline(query: str, session_id: str, stream_queue: _queue.Queue) -> None:
+def _run_streaming_pipeline(query: str, session_id: str, user_name: str, user_id: str, stream_queue: _queue.Queue) -> None:
     """
     Runs both agents directly (no LangGraph) so thought_callback can push
     SSE events into the queue in real-time.
@@ -105,6 +109,28 @@ def _run_streaming_pipeline(query: str, session_id: str, stream_queue: _queue.Qu
 
             filter_fields = analysis.get("filter_fields", {})
             filter_values = analysis.get("filter_values", {})
+            limit         = analysis.get("limit")
+            
+            # ── Retrieval Layer ───────────────────────────────────────────────────────
+            stream_queue.put({"status": "running_start", "stage": "Retrieval Layer"})
+            
+            retrieved_data = run_retrieval_layer(
+                user_name=user_name,
+                user_id=user_id,
+                modules=modules,
+                filter_values=filter_values,
+                filter_fields=filter_fields,
+                limit=limit
+            )
+            
+            stream_queue.put({"status": "running_end", "stage": "Retrieval Layer"})
+            
+            # ── Preprocessing Layer ───────────────────────────────────────────────────
+            stream_queue.put({"status": "running_start", "stage": "Preprocessing Layer"})
+            preprocessed_data = preprocess_records(retrieved_data)
+            stream_queue.put({"status": "running_end", "stage": "Preprocessing Layer"})
+            
+            # TODO: Future execution layer will use preprocessed_data
 
         # ── Store turn in conversation memory ─────────────────────────────────
         _store_conversation_turn(
@@ -143,7 +169,7 @@ def _run_streaming_pipeline(query: str, session_id: str, stream_queue: _queue.Qu
         stream_queue.put(None)  # sentinel — always emitted so the generator always terminates
 
 
-async def stream_advance_pipeline(query: str, session_id: str):
+async def stream_advance_pipeline(query: str, session_id: str, user_name: str, user_id: str):
     """
     Async generator that yields SSE-formatted strings.
     The heavy pipeline work runs in a daemon thread so the event loop stays free.
@@ -153,7 +179,7 @@ async def stream_advance_pipeline(query: str, session_id: str):
 
     thread = threading.Thread(
         target = _run_streaming_pipeline,
-        args   = (query, session_id, stream_queue),
+        args   = (query, session_id, user_name, user_id, stream_queue),
         daemon = True,
     )
     thread.start()

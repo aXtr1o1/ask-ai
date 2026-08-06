@@ -64,7 +64,7 @@ def analyze_query(
     config = types.GenerateContentConfig(
         system_instruction = system_prompt,
         response_mime_type = "application/json",
-        temperature        = 1,
+        temperature        = 0.5,
         thinking_config    = types.ThinkingConfig(
             thinking_budget  = 512,
             include_thoughts = True,

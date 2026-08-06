@@ -16,10 +16,6 @@ router_sb = APIRouter()
 
 logger_sb = logging.getLogger("sb_route")
 logger_sb.setLevel(logging.INFO)
-ch2 = logging.StreamHandler()
-ch2.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
-if not logger_sb.handlers:
-    logger_sb.addHandler(ch2)
 
 
 def format_response_sb(data):
