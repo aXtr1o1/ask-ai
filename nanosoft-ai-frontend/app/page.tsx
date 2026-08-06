@@ -24,13 +24,14 @@ import { recordPromptForGhostHistory, ghostPromptHistoryStorageKey } from "./lib
 import SpaceBooking from "./components/Bookings/spacebooking";
 import SpaceBookingModal from "./components/Bookings/SpaceBookingModal";
 import ComplaintsModal from "./components/Bookings/ComplaintsModal";
+import AssetAnalyticsDashboard from "./components/AssetAnalytics/AssetAnalyticsDashboard";
 
 /* changes done by megnathan: Cleaned up icon imports to avoid conflicts with local definitions */
 import {
   IconUser, IconMicrophone, IconPlayerPlay, IconPlayerPause,
   IconTrash, IconArrowUp, IconChartBar, IconList,
   IconLayoutGrid, IconMenu2, IconX, IconCrown,
-  IconDotsVertical, IconCopy, IconCheck, IconBulb, IconFolder
+  IconDotsVertical, IconCopy, IconCheck, IconBulb, IconFolder, IconDeviceAnalytics
 } from "@tabler/icons-react";
 // ─── Types ───────────────────────────────────────────────────────────────────
 type MultiDatasetView = {
@@ -1293,6 +1294,7 @@ export default function Home() {
   // SpaceBooking active feature states
   const [isSpaceBooking, setIsSpaceBooking] = useState<boolean>(false);
   const [isComplaints, setIsComplaints] = useState<boolean>(false);
+  const [isAssetAnalytics, setIsAssetAnalytics] = useState<boolean>(false);
   const [isComplaintsModalOpen, setIsComplaintsModalOpen] = useState<boolean>(false);
   const [activeBookingBubbleIndex, setActiveBookingBubbleIndex] = useState<number | null>(null);
   const [bookingStartDate, setBookingStartDate] = useState<string>("");
@@ -1362,6 +1364,7 @@ export default function Home() {
     setSessionId(generateSessionId()); // New session for the group
     setIsSpaceBooking(false);
     setIsComplaints(false);
+    setIsAssetAnalytics(false);
     setIsComplaintsModalOpen(false);
     setActiveBookingBubbleIndex(null);
 
@@ -2563,7 +2566,7 @@ export default function Home() {
               setBookingStartTime(parsed.fromTime);
               setBookingEndTime(parsed.toTime);
               setActiveBookingBubbleIndex(idx);
-              console.log("📅 [Auto] Phase 3 detected — auto-opening inline booking picker on message index:", idx);
+              console.log("📅 [Auto] Phase 3 / validation detected — auto-opening inline booking picker on message index:", idx);
               return prev;
             });
           }
@@ -2814,7 +2817,7 @@ export default function Home() {
     }, 3000);
   };
 
-  const handleNewChat = async (initialMode?: 'space_booking' | 'complaints' | 'ask_ai') => {
+  const handleNewChat = async (initialMode?: 'space_booking' | 'complaints' | 'ask_ai' | 'asset_analytics') => {
     if (isLoading) {
       showWarningToast("Please wait, don't switch the chat!");
       console.log("⚠️ Chat creation blocked: Please wait, don't switch the chat!");
@@ -2830,6 +2833,7 @@ export default function Home() {
     setIsLoading(false);
     setIsSpaceBooking(initialMode === 'space_booking'); // Reset space booking state when starting a new chat
     setIsComplaints(initialMode === 'complaints');
+    setIsAssetAnalytics(initialMode === 'asset_analytics');
     setIsComplaintsModalOpen(false);
     setActiveBookingBubbleIndex(null);
 
@@ -2916,8 +2920,8 @@ export default function Home() {
     setTimeout(() => refetchSessions(), 400);
   };
 
-  const handleSwitchMode = (newMode: 'space_booking' | 'complaints' | 'ask_ai') => {
-    const currentMode = isSpaceBooking ? 'space_booking' : isComplaints ? 'complaints' : 'ask_ai';
+  const handleSwitchMode = (newMode: 'space_booking' | 'complaints' | 'ask_ai' | 'asset_analytics') => {
+    const currentMode = isSpaceBooking ? 'space_booking' : isComplaints ? 'complaints' : isAssetAnalytics ? 'asset_analytics' : 'ask_ai';
     if (newMode === currentMode) {
       return;
     }
@@ -2932,6 +2936,7 @@ export default function Home() {
       // If current chat is empty, just switch the mode of the current chat!
       setIsSpaceBooking(newMode === 'space_booking');
       setIsComplaints(newMode === 'complaints');
+      setIsAssetAnalytics(newMode === 'asset_analytics');
     }
   };
 
@@ -3151,6 +3156,7 @@ export default function Home() {
 
     setIsSpaceBooking(false); // Reset space booking state when switching session
     setIsComplaints(false);
+    setIsAssetAnalytics(false);
     setIsComplaintsModalOpen(false);
     setActiveBookingBubbleIndex(null);
 
@@ -3703,6 +3709,8 @@ export default function Home() {
               setIsSpaceBooking={setIsSpaceBooking}
               isComplaints={isComplaints}
               setIsComplaints={setIsComplaints}
+              isAssetAnalytics={isAssetAnalytics}
+              setIsAssetAnalytics={setIsAssetAnalytics}
               isChatStarted={messages.length > 0}
               onSwitchMode={handleSwitchMode}
             >
@@ -4055,6 +4063,7 @@ export default function Home() {
                   setMessages([]);
                   setIsSpaceBooking(false);
                   setIsComplaints(false);
+                  setIsAssetAnalytics(false);
                   setIsComplaintsModalOpen(false);
                   setActiveBookingBubbleIndex(null);
                 }}
@@ -4072,6 +4081,7 @@ export default function Home() {
                   setMessages([]); // Clear messages to show landing container
                   setIsSpaceBooking(false);
                   setIsComplaints(false);
+                  setIsAssetAnalytics(false);
                   setIsComplaintsModalOpen(false);
                   setActiveBookingBubbleIndex(null);
                 }}
@@ -4087,6 +4097,7 @@ export default function Home() {
                   handleFeatureClick('groups');
                   setIsSpaceBooking(false);
                   setIsComplaints(false);
+                  setIsAssetAnalytics(false);
                   setIsComplaintsModalOpen(false);
                   setActiveBookingBubbleIndex(null);
                 }}
@@ -4580,8 +4591,19 @@ export default function Home() {
             </div>
           )}
 
+          {/* Asset Analytics Full Screen */}
+          {!historyLoading && isAssetAnalytics && (
+            <div style={{ flex: 1, display: "flex", overflow: "hidden", width: "100%" }}>
+              <AssetAnalyticsDashboard 
+                loggedInUser={loggedInUser || "Unknown"} 
+                baseUrl={baseUrl || ""} 
+                onExit={() => setIsAssetAnalytics(false)}
+              />
+            </div>
+          )}
+
           {/* Landing — welcome shifted up; input vertically centered (only before first message) */}
-          {!historyLoading && isLanding && (activeFeature === 'chat' || activeFeature === 'groups' || activeFeature === 'archived') && (
+          {!historyLoading && isLanding && !isAssetAnalytics && (activeFeature === 'chat' || activeFeature === 'groups' || activeFeature === 'archived') && (
             <div className="landing-start-column">
               <div className="landing-start-spacer-top" aria-hidden />
               <div className="landing-container landing-container--start">
@@ -4621,7 +4643,7 @@ export default function Home() {
           )}
 
           {/* Chat area */}
-          {!historyLoading && !isLanding && (activeFeature === 'chat' || activeFeature === 'groups' || activeFeature === 'archived') && (
+          {!historyLoading && !isLanding && !isAssetAnalytics && (activeFeature === 'chat' || activeFeature === 'groups' || activeFeature === 'archived') && (
             <div className="chat-scroll-area">
               {selectedGroupName && (
                 <div style={{ padding: '12px 24px', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -5157,7 +5179,7 @@ export default function Home() {
           )}
 
           {/* Input footer — bottom bar after chat starts or while history loads (not duplicated on landing) */}
-          {(historyLoading || (!isLanding && (activeFeature === 'chat' || activeFeature === 'groups' || activeFeature === 'archived'))) && renderChatInputFooter("default")}
+          {(historyLoading || (!isLanding && !isAssetAnalytics && (activeFeature === 'chat' || activeFeature === 'groups' || activeFeature === 'archived'))) && renderChatInputFooter("default")}
 
           {/* Upgrade Plan Modal */}
           {showUpgradePlan && (

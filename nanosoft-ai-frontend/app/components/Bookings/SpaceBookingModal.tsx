@@ -400,6 +400,7 @@ export default function SpaceBookingModal({
   const [endDate, setEndDate] = useState<string>("");
   const [startTime, setStartTime] = useState<string>("");
   const [endTime, setEndTime] = useState<string>("");
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [viewDate, setViewDate] = useState<Date>(() => new Date());
   const [error, setError] = useState<string>("");
   const [mounted, setMounted] = useState<boolean>(false);
@@ -531,6 +532,24 @@ export default function SpaceBookingModal({
     const finalEndDate = endDate || startDate;
     const fromStr = `${startDate} ${startTime}`;
     const toStr = `${finalEndDate} ${endTime}`;
+
+    // Bug 4 Fix: Reject past dates on confirm
+    const todayStr = new Date().toISOString().split("T")[0];
+    if (startDate < todayStr) {
+      setErrorMsg("Bookings cannot be made for past dates. Please select today or a future date.");
+      return; // keep modal open
+    }
+
+    // Bug 6 & 7 Fix: Reject same or reversed start/end time
+    const startDT = new Date(`${startDate}T${startTime}`);
+    const endDT   = new Date(`${finalEndDate}T${endTime}`);
+    if (!isNaN(startDT.getTime()) && !isNaN(endDT.getTime())) {
+      if (startDT >= endDT) {
+        setErrorMsg("End time must be later than start time. Please select a valid time range.");
+        return; // keep modal open for correction
+      }
+    }
+
     console.log("📅 [SpaceBookingModal] Confirming date/time:", { fromStr, toStr });
 
     const now = new Date();
@@ -655,11 +674,12 @@ export default function SpaceBookingModal({
             fontSize: "13px",
             fontWeight: isHighlighted || isInRange ? 700 : 500,
             cursor: isDisabled ? "not-allowed" : "pointer",
-            opacity: isDisabled ? 0.5 : 1,
+            opacity: isPastDate ? 0.35 : isDisabled ? 0.5 : 1,
             transition: "all 0.15s ease",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
+            textDecoration: isPastDate ? "line-through" : "none",
           }}
           onMouseEnter={(e) => {
             if (!isHighlighted && !isInRange && !isDisabled) e.currentTarget.style.background = "rgba(255, 255, 255, 0.08)";
