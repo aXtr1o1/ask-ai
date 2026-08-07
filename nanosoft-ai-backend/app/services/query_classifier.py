@@ -55,7 +55,7 @@ _FACILITY_KEYWORDS = re.compile(
     r"""
     \b(
         # ── Modules ──
-        assets? | ppm | bdm | fa\b | sb\b |
+        assets? | ppm | bdm | fa\b | sb\b | contracts? | employees? |
         # ── Actions on data ──
         how\s+many | show\s+(me|all|the) | list\b | count\b | fetch\b | retrieve\b |
         give\s+me | display\b | total\b | number\s+of | aggregate\b |
@@ -68,10 +68,10 @@ _FACILITY_KEYWORDS = re.compile(
         # ── Maintenance / complaints ──
         complaint | maintenance | work.?order | breakdown | preventive |
         schedule.?based | facility.?audit | inspection | snagging |
-        # ── Location / classification ──
+        # ── Location / classification / hr / contract ──
         building | floor | locality | discipline | division | trade.?group |
         category | service.?type | priority | status | stage |
-        online\b | offline\b |
+        online\b | offline\b | staff | workforce | agreement | designation | department |
         # ── Time references for data ──
         today | yesterday | this\s+week | last\s+week |
         this\s+month | last\s+month | this\s+year | last\s+year |
@@ -96,14 +96,15 @@ _FOLLOWUP_PRONOUNS = re.compile(
 
 _PREV_DATA_CONTEXT = re.compile(
     r"\b(assets?|records?|results?|items?|ppm|bdm|fa\b|sb\b|complaints?|"
-    r"work\s*orders?|matching|found|retrieved|fetched)\b",
+    r"work\s*orders?|contracts?|agreements?|employees?|staff|matching|found|retrieved|fetched)\b",
+
     re.IGNORECASE,
 )
 
 
 def needs_facility_tools(query: str, previous_assistant_context: str = "") -> bool:
     """
-    Return True  → invoke model WITH facility tools (ASSETS, PPM, BDM, FA, SB).
+    Return True  → invoke model WITH facility tools (ASSETS, PPM, BDM, FA, SB, CONTRACT, EMPLOYEE).
     Return False → invoke model WITHOUT tools (plain conversational response).
 
     Logic:

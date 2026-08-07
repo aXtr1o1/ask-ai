@@ -219,3 +219,81 @@ class SBRequest(BaseModel):
     is_aggregate: Optional[bool] = Field(default=False)
     group_by_columns: Optional[List[str]] = Field(default=None)
     aggregate_function: Optional[str] = Field(default=None)
+
+
+class ContractRequest(BaseModel):
+    """Request schema for contract_master endpoint"""
+    contract_id: Optional[int] = None            # NEW — Exact ID match
+    user_id: Optional[str] = None
+    user_name: Optional[str] = None
+    contract_code: Optional[str] = None          # ContractCode
+    contract_name: Optional[str] = None          # ContractName
+    customer_name: Optional[str] = None          # CustomerName
+    contract_type: Optional[str] = None          # ContractTypeName
+    contract_categ: Optional[str] = None         # ContractCategName
+    contract_group: Optional[str] = None         # ContractGroupName
+    organisation: Optional[str] = None           # OrganisationName
+    status: Optional[str] = None                 # ContStStatus
+    status_type: Optional[str] = None            # ContStTypes
+    tax_name: Optional[str] = None               # TaxName
+    period: Optional[str] = None                 # Period
+    payment_terms: Optional[str] = None          # ConPaymentTermsName
+    is_active: Optional[bool] = None
+    is_draft: Optional[bool] = None
+    is_renewal: Optional[bool] = None
+    is_extended: Optional[bool] = None
+    is_terminate: Optional[bool] = None
+    is_non_contract: Optional[bool] = None
+    is_ppm: Optional[bool] = None
+    is_bdm: Optional[bool] = None
+    is_dsm: Optional[bool] = None
+    is_incident: Optional[bool] = None
+    is_case: Optional[bool] = None
+    keyword: Optional[str] = None
+    date_from: Optional[str] = None              
+    date_to: Optional[str] = None              
+    limit: Optional[int] = None
+    offset: int = Field(default=0, ge=0)
+    is_aggregate: Optional[bool] = Field(default=False)
+    group_by_columns: Optional[List[str]] = Field(default=None)
+    aggregate_function: Optional[str] = Field(default=None)
+
+
+class EmployeeRequest(BaseModel):
+    """Request schema for employee_master endpoint"""
+    employee_id: Optional[int] = None            # NEW — Exact ID match
+    user_id: Optional[str] = None
+    user_name: Optional[str] = None
+    employee_code: Optional[str] = None          # EmployeeCode
+    employee_name: Optional[str] = None          # EmployeeFullName
+    first_name: Optional[str] = None             # FirstName
+    last_name: Optional[str] = None              # LastName
+    organisation: Optional[str] = None           # OrganisationName
+    department: Optional[str] = None             # DepartmentName
+    designation: Optional[str] = None            # DesignationName
+    classification: Optional[str] = None         # ClassificationName
+    branch: Optional[str] = None                 # Branch
+    nature_of_work: Optional[str] = None         # NatureOfWorkName
+    employee_type: Optional[str] = None          # EmployeeTypeName
+    employment_type: Optional[str] = None        # EmploymentTypeName
+    shift_name: Optional[str] = None             # ShiftName
+    shift_code: Optional[str] = None             # ShiftCode
+    gender: Optional[str] = None                 # EmpGenderName
+    marital_status: Optional[str] = None         # MaritalStatus
+    nationality: Optional[str] = None            # NationalityName
+    country: Optional[str] = None                # CountryName
+    employee_group: Optional[str] = None         # EmployeeGroupName
+    emp_grade: Optional[str] = None              # EmpGradeName
+    emp_title: Optional[str] = None              # EmpTitleName
+    vehicle_no: Optional[str] = None             # VehicleNo
+    is_active: Optional[bool] = None
+    is_attendance_enable: Optional[bool] = None
+    is_single_punch: Optional[bool] = None
+    keyword: Optional[str] = None
+    date_from: Optional[str] = None              
+    date_to: Optional[str] = None            
+    limit: Optional[int] = None
+    offset: int = Field(default=0, ge=0)
+    is_aggregate: Optional[bool] = Field(default=False)
+    group_by_columns: Optional[List[str]] = Field(default=None)
+    aggregate_function: Optional[str] = Field(default=None)

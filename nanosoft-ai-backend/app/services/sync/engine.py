@@ -11,6 +11,8 @@ from .upsert_ppm import upsert_ppm
 from .upsert_bdm import upsert_bdm
 from .upsert_fa import upsert_fa
 from .upsert_sb import upsert_sb
+from .upsert_contract import upsert_contract
+from .upsert_employee import upsert_employee
 
 
 # ─────────────────────────────────────────────────────────────
@@ -132,6 +134,10 @@ def run_sync() -> dict:
                 all_records = _dedup(all_records, "RMComplaintNo")
             elif endpoint == "/getSB":
                 all_records = _dedup(all_records, "SBCreWorkOrder")
+            elif endpoint == "/getContract":
+                all_records = _dedup(all_records, "ContractIDPK")
+            elif endpoint == "/getEmployee":
+                all_records = _dedup(all_records, "EmployeeIDPK")
 
             dedup_count   = len(all_records)
             dupes_removed = raw_count - dedup_count
@@ -152,6 +158,10 @@ def run_sync() -> dict:
                     ins, upd, err = upsert_fa(cursor, all_records, user_id, user_name)
                 elif endpoint == "/getSB":
                     ins, upd, err = upsert_sb(cursor, all_records, user_id, user_name)
+                elif endpoint == "/getContract":
+                    ins, upd, err = upsert_contract(cursor, all_records, user_id, user_name)
+                elif endpoint == "/getEmployee":
+                    ins, upd, err = upsert_employee(cursor, all_records, user_id, user_name)
                 else:
                     log.warning(f"  Unknown endpoint {endpoint} — skipping.")
                     del all_records

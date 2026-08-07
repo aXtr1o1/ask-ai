@@ -287,10 +287,94 @@ class SBInput(BaseModel):
     group_by_columns: Optional[List[AllColumns]] = Field(default=None, description="Columns to group by when is_aggregate=True. CRITICAL: If the user asks to group by a specific field, pass exactly that column name even if it's not strictly listed here. Valid values: DivisionName, DisciplineName, BuildingName, FloorName, LocalityName, LocalityCode, PPMStageName, FrequencyName, ServiceTypeName, ContractName, SpotName.")
     aggregate_function: Optional[str] = Field(default=None, description="The mathematical function to apply when grouping data. Use COUNT, SUM, or AVG for grouped distributions. Do not use this field for a simple total count.")
 
+class ContractInput(BaseModel):
+    """
+    Schema for CONTRACT tool. Covers service contracts, maintenance agreements, and client contracts.
+    CRITICAL RULE FOR ALL FIELDS: NEVER auto-correct, modify, or truncate the user's text to match
+    'Example values'. Always extract the EXACT wording and spacing typed by the user.
+    """
+    user_id: Optional[str] = Field(None, description="Internal system-set ID; strictly mandatory for all queries. Never request this from the user.")
+    user_name: Optional[str] = Field(None, description="Internal system-set user name; strictly mandatory for all queries. Never request this from the user.")
+    contract_id: Optional[int] = Field(None, description="The exact integer ID of the contract (ContractIDPK). Map this ONLY if the user provides a specific integer ID.")
+    contract_code: Optional[str] = Field(None, description="The unique reference code for a specific contract record. Use this when the user gives a contract number or code to look up a particular contract. Example values: 50016, 50015, 50014.")
+    contract_name: Optional[str] = Field(None, description="The full title or name of the contract. Use this when the user names a specific contract they want to find or asks about a contract by its title. Example values: Maintenance Group L India, Split Unit Maintenance.")
+    customer_name: Optional[str] = Field(None, description="The client or company the contract is signed with. Use this when the user asks about contracts belonging to or issued to a specific company or client. Example values: Group L Services, Power Group.")
+    contract_type: Optional[str] = Field(None, description="The broad classification that defines what kind of contract it is. Use this when the user asks for a specific type of contract. Example values: Annual Maintenance Contract.")
+    contract_categ: Optional[str] = Field(None, description="A more specific category the contract falls under within its type. Use this when the user asks about contract categories. Example values: In-House.")
+    contract_group: Optional[str] = Field(None, description="The grouping that organises related contracts together. Use this when the user asks about a particular contract group. Example values: Contract.")
+    organisation: Optional[str] = Field(None, description="The organisation that manages or delivers the contract. Use this when the user asks about contracts under a specific organisation. Example values: Nanosoft POC.")
+    status: Optional[str] = Field(None, description="The current lifecycle state of the contract. Use this when the user asks for live, expired, pending, or terminated contracts. Example values: Live, Expired, Pending, Terminated. NEVER use this for count aggregations — use is_aggregate=True with group_by_columns=['ContStStatus'] instead.")
+    status_type: Optional[str] = Field(None, description="A sub-classification that further distinguishes the contract's status. Use this when the user specifically asks about the contract type being formal or informal. Example values: Contract, Non Contract.")
+    tax_name: Optional[str] = Field(None, description="The tax or VAT rate applied to the contract's financial value. Use this when the user asks about contracts with a specific tax or VAT rate. Example values: VAT 5%.")
+    period: Optional[str] = Field(None, description="The billing period or duration cycle agreed in the contract. Use this when the user asks about contracts with a specific billing frequency or period.")
+    payment_terms: Optional[str] = Field(None, description="The payment schedule or terms that govern how the contract is billed. Use this when the user asks about payment cycles, billing terms, or how a contract is paid.")
+    is_active: Optional[bool] = Field(None, description="Indicates whether the contract is currently active and in force. Set true when the user asks for currently active or live contracts; false for inactive ones. For a distribution count (active vs inactive), use is_aggregate=True with group_by_columns=['IsActive'] instead.")
+    is_draft: Optional[bool] = Field(None, description="Indicates the contract has been created but not yet finalised or approved. Set true when the user asks about draft contracts or contracts that are still pending sign-off.")
+    is_renewal: Optional[bool] = Field(None, description="Indicates this contract is a renewal of a previous agreement. Set true when the user asks about renewed or renewal contracts.")
+    is_extended: Optional[bool] = Field(None, description="Indicates this contract's duration has been extended beyond its original end date. Set true when the user asks about contracts that have been given an extension.")
+    is_terminate: Optional[bool] = Field(None, description="Indicates this contract was terminated before its natural end date. Set true when the user asks about terminated or cancelled contracts.")
+    is_non_contract: Optional[bool] = Field(None, description="Indicates this is an informal or non-contract record rather than a formal signed agreement. Set true when the user asks about non-contract or informal agreements; false for formal contracts.")
+    is_ppm: Optional[bool] = Field(None, description="Indicates the contract includes Planned Preventive Maintenance (PPM) as a covered service. Set true when the user asks which contracts cover or include PPM services. For a count breakdown, use is_aggregate=True with group_by_columns=['IsPPM'].")
+    is_bdm: Optional[bool] = Field(None, description="Indicates the contract includes Breakdown Maintenance (BDM) as a covered service. Set true when the user asks which contracts cover BDM or reactive maintenance. For a count breakdown, use is_aggregate=True with group_by_columns=['IsBDM'].")
+    is_dsm: Optional[bool] = Field(None, description="Indicates the contract includes Demand Side Management (DSM) services. Set true when the user asks about DSM-enabled contracts.")
+    is_incident: Optional[bool] = Field(None, description="Indicates the contract covers incident management services. Set true when the user asks about contracts that include incident tracking.")
+    is_case: Optional[bool] = Field(None, description="Indicates the contract covers case management services. Set true when the user asks about contracts that include case handling.")
+    keyword: Optional[str] = Field(None, description="A free-text search term for anything the user mentions that doesn't match a specific contract field above. Pass the user's exact words. CRITICAL: Never include generic words like 'contract', 'show', or 'list' here — only specific meaningful search terms.")
+    date_from: Optional[str] = Field(None, description="Filters contracts whose start date falls on or after this date. Use when the user asks about contracts starting from a certain date or time period. Use YYYY-MM-DD. Supports: 'today', 'this month', 'last month', 'this year', 'last year'.")
+    date_to: Optional[str] = Field(None, description="Filters contracts whose end date falls on or before this date. Use when the user asks about contracts expiring by a certain date. Use YYYY-MM-DD. Supports relative keywords.")
+    limit: Optional[int] = Field(default=None, description="The maximum number of contract records to return. Set this when the user asks for a specific number of results — e.g. 'show 5 contracts' means limit=5. For count-only queries, do NOT set this.")
+    offset: Optional[int] = Field(default=None, description="Pagination offset — skip this many records before returning results. Only set if the user explicitly asks for a page or offset.")
+    is_aggregate: Optional[bool] = Field(default=False, description="Set True when the user asks for a count breakdown grouped by a dimension — e.g. 'how many contracts per type', 'breakdown by status', 'how many ContractTypeName'. Leave False for simple total counts or when filtering for a specific value.")
+    group_by_columns: Optional[List[AllColumns]] = Field(default=None, description="The database columns to group the result by when is_aggregate=True. Use the exact column name. Valid values: ContractTypeName, ContractCategName, ContractGroupName, OrganisationName, CustomerName, ContStStatus, ContStTypes, IsActive, IsDraft, IsRenewal, IsExtended, IsTerminate, IsPPM, IsBDM, IsDSM, IsIncident, IsCase, IsNonContract, Period, TaxName, ConPaymentTermsName.")
+    aggregate_function: Optional[str] = Field(default=None, description="The aggregation function applied to each group. Use COUNT when the user asks how many, SUM for total values, AVG for averages. Do not set for a simple total count with no grouping.")
 
+
+class EmployeeInput(BaseModel):
+    """
+    Schema for EMPLOYEE tool. Covers HR employee master records, staff profiles, and workforce data.
+    CRITICAL RULE FOR ALL FIELDS: NEVER auto-correct, modify, or truncate the user's text to match
+    'Example values'. Always extract the EXACT wording and spacing typed by the user.
+    """
+    user_id: Optional[str] = Field(None, description="Internal system-set ID; strictly mandatory for all queries. Never request this from the user.")
+    user_name: Optional[str] = Field(None, description="Internal system-set user name; strictly mandatory for all queries. Never request this from the user.")
+    employee_id: Optional[int] = Field(None, description="The exact integer ID of the employee (EmployeeIDPK). Map this ONLY if the user provides a specific integer ID.")
+    employee_code: Optional[str] = Field(None, description="The unique HR code that identifies a specific employee. Use this when the user gives an employee ID or code to look up a particular person. Example values: E10001, E10002.")
+    employee_name: Optional[str] = Field(None, description="The full name of the employee as recorded in the system. Use this when the user asks about a specific person by their full name. Example values: Yalcin Akbulut Akbulut, Adem Bal.")
+    first_name: Optional[str] = Field(None, description="The employee's first or given name. Use this when the user provides only the first name of the person they are looking for. Example values: Adem, Yalcin Akbulut.")
+    last_name: Optional[str] = Field(None, description="The employee's last name or family name. Use this when the user provides only a surname to search for. Example values: Bal, Akbulut.")
+    organisation: Optional[str] = Field(None, description="The organisation the employee is part of. Use this when the user asks about employees belonging to a particular company or organisation. Example values: Nanosoft POC.")
+    department: Optional[str] = Field(None, description="The department the employee works in. Use this when the user asks about employees in a specific team or department. Example values: Facility Management Operations.")
+    designation: Optional[str] = Field(None, description="The job title or position the employee holds. Use this when the user asks about employees with a specific role, title, or position. Example values: Manager, Engineer.")
+    classification: Optional[str] = Field(None, description="The HR classification assigned to the employee, grouping them by a staffing category. Use this when the user filters by employee classification. Example values: Self.")
+    branch: Optional[str] = Field(None, description="The branch or office location the employee is assigned to. Use this when the user asks about employees based at a specific branch or office.")
+    nature_of_work: Optional[str] = Field(None, description="The type of work or operational domain the employee performs. Use this when the user asks about employees by their work nature or function. Example values: FM Operations.")
+    employee_type: Optional[str] = Field(None, description="The category type of the employee — whether primary, secondary, contract, etc. Use this when the user asks about a specific employee category. Example values: Primary.")
+    employment_type: Optional[str] = Field(None, description="The employment basis — whether full-time, part-time, or other. Use this when the user asks about employees by their employment arrangement.")
+    shift_name: Optional[str] = Field(None, description="The work shift the employee is assigned to. Use this when the user asks about employees on a specific shift or who work at certain times. Example values: Morning Shift, General Shift.")
+    shift_code: Optional[str] = Field(None, description="The short code for the employee's assigned shift. Use this when the user references a shift by its code. Example values: 101, 102.")
+    gender: Optional[str] = Field(None, description="The gender of the employee. Use this when the user asks specifically about male or female employees. Example values: Male, Female.")
+    marital_status: Optional[str] = Field(None, description="The marital status of the employee. Use this when the user asks about employees filtered by marital status. Example values: Single, Married.")
+    nationality: Optional[str] = Field(None, description="The nationality or country of citizenship of the employee. Use this when the user asks about employees of a specific nationality. Example values: Indian, Filipino, Pakistani.")
+    country: Optional[str] = Field(None, description="The country of residence or origin of the employee. Use this when the user asks about employees from or residing in a specific country.")
+    employee_group: Optional[str] = Field(None, description="The workforce group category the employee belongs to within the HR structure. Use this when the user asks about a specific employee grouping.")
+    emp_grade: Optional[str] = Field(None, description="The salary or payroll grade level of the employee. Use this when the user asks about employees at a specific grade or pay band.")
+    emp_title: Optional[str] = Field(None, description="The honorific title of the employee. Use this when the user asks about employees with a specific title prefix. Example values: Mr., Ms., Dr.")
+    vehicle_no: Optional[str] = Field(None, description="The vehicle registration number assigned to or used by the employee. Use this when the user asks about an employee's assigned vehicle.")
+    is_active: Optional[bool] = Field(None, description="Indicates whether the employee is currently working and active in the system. Set true when the user asks for currently active or working staff; false for resigned or inactive. For a distribution count (active vs inactive), use is_aggregate=True with group_by_columns=['IsActive'].")
+    is_attendance_enable: Optional[bool] = Field(None, description="Indicates whether attendance tracking is turned on for this employee. Set true when the user asks about employees whose attendance is being tracked. For a count breakdown, use is_aggregate=True with group_by_columns=['IsAttendanceEnable'].")
+    is_single_punch: Optional[bool] = Field(None, description="Indicates the employee uses single-punch (one-direction) attendance recording. Set true when the user asks about employees who use single punch mode.")
+    keyword: Optional[str] = Field(None, description="A free-text search term for anything the user mentions that doesn't match a specific employee field above. Pass the user's exact words. CRITICAL: Never include generic words like 'employee', 'staff', 'show', or 'list' here — only specific meaningful search terms.")
+    date_from: Optional[str] = Field(None, description="Filters employees who joined on or after this date. Use when the user asks about employees who joined from a certain date or period. Use YYYY-MM-DD. Supports: 'today', 'this month', 'last month', 'this year'.")
+    date_to: Optional[str] = Field(None, description="Filters employees who joined on or before this date. Use when the user asks about employees who joined up to a certain date. Use YYYY-MM-DD. Supports relative keywords.")
+    limit: Optional[int] = Field(default=None, description="The maximum number of employee records to return. Set this when the user asks for a specific number — e.g. 'show 5 employees' means limit=5. For count-only queries, do NOT set this.")
+    offset: Optional[int] = Field(default=None, description="Pagination offset — skip this many records before returning results. Only set if the user explicitly asks for a page or offset.")
+    is_aggregate: Optional[bool] = Field(default=False, description="Set True when the user asks for a count breakdown grouped by a dimension — e.g. 'how many employees per department', 'breakdown by nationality', 'how many DepartmentName'. Leave False for simple totals or when filtering for a specific value.")
+    group_by_columns: Optional[List[AllColumns]] = Field(default=None, description="The database columns to group the result by when is_aggregate=True. Use the exact column name. Valid values: OrganisationName, DepartmentName, DesignationName, ClassificationName, Branch, NatureOfWorkName, EmployeeTypeName, EmploymentTypeName, ShiftName, EmpGenderName, NationalityName, CountryName, IsActive, IsAttendanceEnable, EmployeeGroupName, EmpGradeName, EmpTitleName.")
+    aggregate_function: Optional[str] = Field(default=None, description="The aggregation function applied to each group. Use COUNT when the user asks how many, SUM for totals, AVG for averages. Do not set for a simple total count with no grouping.")
 
 
 class ChatRequest(BaseModel):
+
     """Request schema for chat endpoint"""
     query: Optional[str] = None
     userName: Optional[str] = None

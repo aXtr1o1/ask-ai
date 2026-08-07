@@ -12,7 +12,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage
 
 from app.config import settings
-from app.tools.facility_tools import ASSETS, PPM, BDM, FA, SB
+from app.tools.facility_tools import ASSETS, PPM, BDM, FA, SB, CONTRACT, EMPLOYEE
 from app.services.langchain_tool_paths import LangChainToolPathsMixin
 from app.services.langchain_response_builder import LangChainResponseBuilderMixin
 from app.services.quota_service import quota_fallback_service
@@ -65,16 +65,18 @@ class LangChainService(LangChainToolPathsMixin, LangChainResponseBuilderMixin):
                 temperature=0.0
             )
             # Model WITH tools — for facility data queries
-            self.model = _base_model.bind_tools([ASSETS, PPM, BDM, FA, SB])
+            self.model = _base_model.bind_tools([ASSETS, PPM, BDM, FA, SB, CONTRACT, EMPLOYEE])
             # Model WITHOUT tools — for conversational / general queries
             self.plain_model = _base_model
 
             self.tool_map = {
-                "ASSETS": ASSETS,
-                "PPM":    PPM,
-                "BDM":    BDM,
-                "FA":     FA,
-                "SB":     SB,
+                "ASSETS":    ASSETS,
+                "PPM":       PPM,
+                "BDM":       BDM,
+                "FA":        FA,
+                "SB":        SB,
+                "CONTRACT":  CONTRACT,
+                "EMPLOYEE":  EMPLOYEE,
             }
             self._last_search_context = None
             # Stores the last successful tool payload per tool (filter fields only).
@@ -84,7 +86,7 @@ class LangChainService(LangChainToolPathsMixin, LangChainResponseBuilderMixin):
             # Tracks the SINGLE most recently called tool — used to redirect
             # follow-up queries ("give me 8 among them") to the correct tool.
             self._last_used_tool: str | None = None
-            logger.info("🚀 LangChainService initialized with ASSETS, PPM, BDM, FA, SB tools")
+            logger.info("LangChainService initialized with ASSETS, PPM, BDM, FA, SB, CONTRACT, EMPLOYEE tools")
         except Exception as e:
             logger.error(f"❌ LangChainService init failed: {e}", exc_info=True)
             raise
