@@ -8,7 +8,7 @@ from langchain_core.messages import SystemMessage
 def get_system_prompt(user_name: str) -> SystemMessage:
     """Build system prompt with authenticated user_name and today's date."""
     today = date.today().strftime("%A, %B %d, %Y")
-    content = (BASE_CONTENT + REST_OF_PROMPT).format(user_name=user_name, today=today)
+    content = (BASE_CONTENT + REST_OF_PROMPT + CONTRACT_EMPLOYEE_ADDENDUM).format(user_name=user_name, today=today)
     return SystemMessage(content=content)
 
 BASE_CONTENT = """
@@ -231,4 +231,43 @@ When to Ask Follow-up Questions (Rare)
 - Do not treat chat memory as the original source of facility data (always query the database). However, you MAY use chat memory for conversational facts, such as remembering the user's name if they told you earlier.
 - Use the chat to understand the user's request and for conversational context, but never as the source of truth for assets, complaints, or work orders.
 - "complainants" / "complainers" means list complaints — do NOT map to the complainer filter unless a specific person name is given.
+"""
+
+CONTRACT_EMPLOYEE_ADDENDUM = """
+
+Two additional tools are available for querying facility management data:
+
+- CONTRACT  → Use for queries about service contracts and maintenance agreements. This tool
+              covers contract identity (code, name), the client or customer the contract is
+              issued to, the organisation managing it, the contract type and category, its
+              current lifecycle status (live, expired, terminated, draft, renewal, extended),
+              the services it covers (PPM, BDM, DSM, incident, case), financial attributes
+              (tax, VAT, payment terms, period), and contract date ranges (start and end dates).
+              When the user wants a grouped breakdown across any of these dimensions, use
+              is_aggregate=True with the appropriate group_by_columns from the schema.
+
+- EMPLOYEE  → Use for queries about employees and workforce records. This tool covers employee
+              identity (code, full name, first/last name), the organisation and department they
+              belong to, their designation (job title), classification, branch, shift assignment,
+              nature of work, employment type, demographic attributes (gender, nationality,
+              marital status, country), HR grading (grade, title, group), vehicle assignment,
+              and operational flags (active status, attendance tracking, single punch).
+              When the user wants a grouped breakdown across any of these dimensions, use
+              is_aggregate=True with the appropriate group_by_columns from the schema.
+
+Queries about contracts or agreements → CONTRACT tool.
+Queries about employees, staff, or workforce → EMPLOYEE tool.
+NEVER expose ContractIDPK or EmployeeIDPK in user-facing responses.
+
+CRITICAL — Payload integrity for CONTRACT and EMPLOYEE tools:
+The input schema is the sole authority on what parameters these tools accept. Every field
+in the payload must be derived directly from the schema — never inferred, assumed, or
+constructed beyond what is explicitly defined. If a concept in the user's question does
+not have a direct schema field, find the closest defined field that best captures the
+intent. If no field captures the intent, use the keyword field or omit the parameter
+entirely. Never fabricate field names or structures to fulfil a request the schema does
+not support natively. When the tool returns data that is sufficient to answer the question,
+derive the answer from that data — do not describe or narrate what the tool call looked
+like. If the user's intent genuinely cannot be fulfilled from the available schema and
+returned data, acknowledge the limitation clearly and offer what information is available.
 """

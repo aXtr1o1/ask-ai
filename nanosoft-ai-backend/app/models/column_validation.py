@@ -13,5 +13,11 @@ AllColumns = Literal[
     "FrequencyName", "PPMStatus", "PPMStageName", "ContractName",
     "WoStatus", "StageName", "ComplaintTypeName", "ComplaintHeaderName", "ComplaintModeName", 
     "ServiceTypeName", "RMStageName", "RMCategoryName", "RMCategorySubName", 
-    "IsRMWithdraw", "IsRMRework", "IsActive"
+    "IsRMWithdraw", "IsRMRework", "IsActive",
+    "OrganisationName", "DepartmentName", "DesignationName", "ClassificationName", "Branch",
+    "NatureOfWorkName", "EmployeeTypeName", "EmploymentTypeName", "ShiftName", "EmpGenderName",
+    "NationalityName", "CountryName", "IsAttendanceEnable", "EmployeeGroupName", "EmpGradeName", "EmpTitleName",
+    "ContractTypeName", "ContractCategName", "ContractGroupName", "CustomerName", "ContStStatus",
+    "ContStTypes", "IsDraft", "IsRenewal", "IsExtended", "IsTerminate", "IsIncident", "IsCase",
+    "IsNonContract", "Period", "TaxName", "ConPaymentTermsName"
 ]
