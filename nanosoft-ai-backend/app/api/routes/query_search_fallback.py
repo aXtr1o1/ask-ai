@@ -33,6 +33,20 @@ SB_TEXT_FILTER_FIELDS = (
     "work_order", "stage", "frequency", "service_type", "division", "discipline",
     "locality", "locality_code", "building", "floor", "spot_name", "contract", "tech",
 )
+CONTRACT_TEXT_FILTER_FIELDS = (
+    "contract_code", "contract_name", "customer_name",
+    "contract_type", "contract_categ", "contract_group",
+    "organisation", "status", "status_type",
+    "tax_name", "period", "payment_terms",
+)
+EMPLOYEE_TEXT_FILTER_FIELDS = (
+    "employee_code", "employee_name", "first_name", "last_name",
+    "organisation", "department", "designation", "classification", "branch",
+    "nature_of_work", "employee_type", "employment_type",
+    "shift_name", "shift_code", "gender", "marital_status",
+    "nationality", "country",
+    "employee_group", "emp_grade", "emp_title", "vehicle_no",
+)
 
 
 def is_empty_query_result(data: dict[str, Any]) -> bool:

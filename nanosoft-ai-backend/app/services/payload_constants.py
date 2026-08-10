@@ -63,6 +63,18 @@ TOOL_GROUP_BY_COLUMNS: dict[str, frozenset[str]] = {
         "DivisionName", "DisciplineName", "BuildingName", "FloorName", "LocalityName", "LocalityCode",
         "PPMStageName", "FrequencyName", "ServiceTypeName", "ContractName", "SpotName",
     }),
+    "EMPLOYEE": frozenset({
+        "OrganisationName", "DepartmentName", "DesignationName", "ClassificationName", "Branch",
+        "NatureOfWorkName", "EmployeeTypeName", "EmploymentTypeName", "ShiftName", "EmpGenderName",
+        "NationalityName", "CountryName", "IsActive", "IsAttendanceEnable", "EmployeeGroupName",
+        "EmpGradeName", "EmpTitleName",
+    }),
+    "CONTRACT": frozenset({
+        "ContractTypeName", "ContractCategName", "ContractGroupName", "OrganisationName", "CustomerName",
+        "ContStStatus", "ContStTypes", "IsActive", "IsDraft", "IsRenewal", "IsExtended", "IsTerminate",
+        "IsPPM", "IsBDM", "IsDSM", "IsIncident", "IsCase", "IsNonContract", "Period", "TaxName",
+        "ConPaymentTermsName",
+    }),
 }
 
 # English / alias → canonical DB column for group_by_columns
@@ -127,6 +139,30 @@ GROUP_BY_ALIASES: dict[str, str] = {
     "isenablebdm": "IsEnableBDM",
     "enablebdm": "IsEnableBDM",
     "bdmenabled": "IsEnableBDM",
+    # Employee & Contract aliases
+    "organisation": "OrganisationName",
+    "department": "DepartmentName",
+    "designation": "DesignationName",
+    "classification": "ClassificationName",
+    "natureofwork": "NatureOfWorkName",
+    "employeetype": "EmployeeTypeName",
+    "employmenttype": "EmploymentTypeName",
+    "employeegroup": "EmployeeGroupName",
+    "empgrade": "EmpGradeName",
+    "emptitle": "EmpTitleName",
+    "shift": "ShiftName",
+    "gender": "EmpGenderName",
+    "nationality": "NationalityName",
+    "country": "CountryName",
+    "customer": "CustomerName",
+    "contracttype": "ContractTypeName",
+    "contractcateg": "ContractCategName",
+    "contractcategory": "ContractCategName",
+    "contractgroup": "ContractGroupName",
+    "contststatus": "ContStStatus",
+    "contractstatus": "ContStStatus",
+    "contsttypes": "ContStTypes",
+    "paymentterms": "ConPaymentTermsName",
 }
 
 # Query phrase fragment → group_by column (when inferring from user text)
