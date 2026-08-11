@@ -221,7 +221,7 @@ class LangChainService(LangChainToolPathsMixin, LangChainResponseBuilderMixin):
 
                 _has_table_keyword = bool(_re.search(
                     r"\b(asset|assets|equipment|equipments|device|devices|ppm|sb|preventive|schedule[\s\-]based"
-                    r"|fa|facility\s+audit|audit|bdm|breakdown|breakdowns)\b",
+                    r"|fa|facility\s+audit|audit|bdm|breakdown|breakdowns|contract|contracts|employee|employees)\b",
                     _q,
                 ))
                 # Also clear if: last AI message was a clarification OR caller explicitly flagged

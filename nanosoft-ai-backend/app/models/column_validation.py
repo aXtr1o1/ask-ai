@@ -18,6 +18,6 @@ AllColumns = Literal[
     "NatureOfWorkName", "EmployeeTypeName", "EmploymentTypeName", "ShiftName", "EmpGenderName",
     "NationalityName", "CountryName", "IsAttendanceEnable", "EmployeeGroupName", "EmpGradeName", "EmpTitleName",
     "ContractTypeName", "ContractCategName", "ContractGroupName", "CustomerName", "ContStStatus",
-    "ContStTypes", "IsDraft", "IsRenewal", "IsExtended", "IsTerminate", "IsIncident", "IsCase",
-    "IsNonContract", "Period", "TaxName", "ConPaymentTermsName"
+    "ContStTypes", "IsDraft", "IsRenewal", "IsExtended", "IsTerminate", "IsPPM", "IsBDM", "IsDSM",
+    "IsIncident", "IsCase", "IsNonContract", "Period", "TaxName", "ConPaymentTermsName"
 ]
