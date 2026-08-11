@@ -9,7 +9,7 @@ Purpose:
 import logging
 import time
 from typing import Any
-
+from datetime import datetime, date as _date
 from app.api.advance.preprocessing.field_type_map import FIELD_TYPE_MAP as _FIELD_TYPE_MAP
 
 logger = logging.getLogger("advance.preprocessing")
@@ -49,11 +49,11 @@ def _clean_bool(v: Any) -> bool:
         return False
     if isinstance(v, bool):
         return v
-    if isinstance(v, int):
+    if isinstance(v, (int, float)):
         return bool(v)
     if isinstance(v, str):
         return v.strip().lower() in ("true", "1", "yes")
-    return False
+    return bool(v)
 
 
 def _clean_int(v: Any) -> "int | None":
@@ -112,7 +112,7 @@ def _clean_datetime(v: Any) -> "str | None":
         if idx != -1:
             s = s[:idx]
 
-    from datetime import datetime
+    
     for fmt in _DATE_FORMATS:
         try:
             return datetime.strptime(s, fmt).strftime("%Y-%m-%d %H:%M:%S")
@@ -167,6 +167,12 @@ def _preprocess_record(record: dict, module: str, counters: dict) -> dict:
         else:
             if raw_value is None or isinstance(raw_value, (int, float, bool)):
                 cleaned[field] = raw_value
+            elif isinstance(raw_value, datetime):
+                # psycopg2 returns timestamp columns as aware/naive datetime objects
+                cleaned[field] = raw_value.strftime("%Y-%m-%d %H:%M:%S")
+            elif isinstance(raw_value, _date):
+                # psycopg2 returns date columns as date objects
+                cleaned[field] = raw_value.strftime("%Y-%m-%d 00:00:00")
             else:
                 cleaned[field] = _clean_text(raw_value)
 
@@ -224,7 +230,7 @@ def preprocess_records(filtered_records: dict[str, dict]) -> dict[str, dict]:
 
         date_failures  = counters["date_failures"]
         total_warnings += date_failures
-        failure_note   = f"{date_failures} bad date(s)→None" if date_failures else ""
+        failure_note   = f"  | {date_failures} bad date(s)→None" if date_failures else ""
 
         logger.info(
             "  %-8s : %4d records | %s%s",

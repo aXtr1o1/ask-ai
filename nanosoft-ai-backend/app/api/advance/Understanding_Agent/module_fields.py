@@ -129,7 +129,41 @@ MODULE_FIELDS: dict[str, list[str]] = {
         "ServiceTypCode", "ServiceTypeName",
         "SBCreChargeLedgerKey", "SBCreCostLedgerKey",
         "Remarks", "FilePath",
-        "CreatedUserID", "CreatedTtm", "UpdatedTtm",
+        "CreatedUserID", "CreatedTtm",
         
+    ],
+
+    # Maintenance Contracts Register
+    # Tracks all maintenance contracts, service agreements, and sub-contracts.
+    "contracts": [
+        "ContractIDPK", "ContractCode", "ContractName",
+        "CustomerName", "OrganisationName",
+        "ContractTypeName", "ContractCategName", "ContractGroupName",
+        "ContStStatus", "ContStTypes",
+        "ContractDate", "StartDate", "EndDate", "AnnualReviewDate", "ExtendedDate",
+        "ContractValue", "ConValueBeforVat", "VatAmount", "ExtendedValue", "TotalContractValue",
+        "TaxName", "Period", "ConPaymentTermsName",
+        "NoOfBilling", "NoofInvoice",
+        "NoofEngineer", "NoofSupervisor", "NoofPrimary",
+        "ShiftNoofPrimary", "ShiftNoofSecondary",
+        "IsActive", "IsDraft", "IsRenewal", "IsExtended", "IsTerminate",
+        "IsNonContract", "IsPPM", "IsBDM", "IsDSM", "IsIncident", "IsCase",
+    ],
+
+    # Employee / Workforce Register
+    # Tracks every employee, technician, supervisor, and staff member in the system.
+    "employees": [
+        "EmployeeIDPK", "EmployeeCode", "EmployeeFullName", "FirstName", "LastName",
+        "EmpGenderName", "MaritalStatus", "NationalityName", "CountryName",
+        "EmpDateofBirth", "EmpDateOfJoin", "ProbationPeriod", "DateofConfirmation", "LeftJobOnDate",
+        "CreatedTtm",
+        "OrganisationName", "DepartmentName", "DesignationName", "ClassificationName",
+        "Branch", "NatureOfWorkName", "EmployeeTypeName", "EmploymentTypeName",
+        "ShiftName", "ShiftCode",
+        "EmployeeGroupName", "EmpGradeName", "EmpTitleName",
+        "Color", "VehicleNo",
+        "WorkHours", "WrkPerDay",
+        "IsActive", "IsAttendanceEnable", "IsSinglePunch",
+        "Remarks",
     ],
 }

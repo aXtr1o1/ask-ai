@@ -72,11 +72,13 @@ Available modules and their fields:
 {module_fields_block}
 
 Module domains for orientation:
-  assets  →  physical equipment register, asset status, condition, location
-  bdm     →  reactive/breakdown complaints, work orders raised on failures
-  ppm     →  planned preventive maintenance, scheduled tasks, technician assignments
-  fa      →  facility audits, inspections, remedial snags, quality checks
-  sb      →  schedule bookings, housekeeping visits, pre-planned service appointments
+  assets     →  physical equipment register, asset status, condition, location
+  bdm        →  reactive/breakdown complaints, work orders raised on failures
+  ppm        →  planned preventive maintenance, scheduled tasks, technician assignments
+  fa         →  facility audits, inspections, remedial snags, quality checks
+  sb         →  schedule bookings, housekeeping visits, pre-planned service appointments
+  contracts  →  maintenance contracts and service agreements, contract values, billing periods, contract status, renewal and extension tracking
+  employees  →  workforce register, staff details, designations, departments, shifts, attendance configuration
 
 ════════════════════════════════════════════════
 QUERY SUMMARY  (db_query / web_search ONLY)

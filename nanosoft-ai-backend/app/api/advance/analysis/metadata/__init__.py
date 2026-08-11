@@ -11,25 +11,31 @@ This keeps the Analysis Agent's system prompt lean — only the selected
 modules' metadata is injected, not the full schema for all modules.
 
 Individual module files:
-    assets.py  →  Physical Asset Register
-    bdm.py     →  Breakdown / Reactive Maintenance
-    ppm.py     →  Planned Preventive Maintenance
-    fa.py      →  Facility Audits & Remedial
-    sb.py      →  Schedule Bookings
+    assets.py     →  Physical Asset Register
+    bdm.py        →  Breakdown / Reactive Maintenance
+    ppm.py        →  Planned Preventive Maintenance
+    fa.py         →  Facility Audits & Remedial
+    sb.py         →  Schedule Bookings
+    contracts.py  →  Maintenance Contracts Register
+    employees.py  →  Employee / Workforce Register
 """
-from app.api.advance.analysis.metadata.assets import ASSETS_SCHEMA
-from app.api.advance.analysis.metadata.bdm    import BDM_SCHEMA
-from app.api.advance.analysis.metadata.ppm    import PPM_SCHEMA
-from app.api.advance.analysis.metadata.fa     import FA_SCHEMA
-from app.api.advance.analysis.metadata.sb     import SB_SCHEMA
+from app.api.advance.analysis.metadata.assets     import ASSETS_SCHEMA
+from app.api.advance.analysis.metadata.bdm        import BDM_SCHEMA
+from app.api.advance.analysis.metadata.ppm        import PPM_SCHEMA
+from app.api.advance.analysis.metadata.fa         import FA_SCHEMA
+from app.api.advance.analysis.metadata.sb         import SB_SCHEMA
+from app.api.advance.analysis.metadata.contracts  import CONTRACTS_SCHEMA
+from app.api.advance.analysis.metadata.employees  import EMPLOYEES_SCHEMA
 
 # Registry — maps module name → its schema dict
 _REGISTRY: dict[str, dict[str, str]] = {
-    "assets": ASSETS_SCHEMA,
-    "bdm":    BDM_SCHEMA,
-    "ppm":    PPM_SCHEMA,
-    "fa":     FA_SCHEMA,
-    "sb":     SB_SCHEMA,
+    "assets":    ASSETS_SCHEMA,
+    "bdm":       BDM_SCHEMA,
+    "ppm":       PPM_SCHEMA,
+    "fa":        FA_SCHEMA,
+    "sb":        SB_SCHEMA,
+    "contracts": CONTRACTS_SCHEMA,
+    "employees": EMPLOYEES_SCHEMA,
 }
 
 

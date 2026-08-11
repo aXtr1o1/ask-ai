@@ -12,8 +12,8 @@ Type tags:
     "numeric_str" — money/value stored as text (e.g. "25000.00") → float
     "datetime"    — date/datetime string → "YYYY-MM-DD HH:MM:SS" or None
 
-Coverage: all columns from DB schema provided 2026-07-29
-Tables:   Asset · bdm · ppm · FacilityAudit · ScheduleBased
+Coverage: all columns from DB schema provided 2026-08-10
+Tables:   Asset · bdm · ppm · FacilityAudit · ScheduleBased · contract_master · employee_master
 
 Adding a new module:
     1. Add a new key with the module name (must match retrieval module key)
@@ -183,7 +183,7 @@ FIELD_TYPE_MAP: dict[str, dict[str, str]] = {
         "PMTechName":           "text",
         "PMTechRemarks":        "text",
         "LastStandByRemarks":   "text",
-        "PPMPendingPeriod":     "text",
+        "PPMPendingPeriod":     "numeric_str",  # stored as text in DB but holds a numeric value; converted to float for math tools
 
         # ── Datetime fields ───────────────────────────────────────────────────
         "WoDateTime":           "datetime",
@@ -243,7 +243,7 @@ FIELD_TYPE_MAP: dict[str, dict[str, str]] = {
         "RMResponseTime":           "text",
         "RMResolutionTime":         "text",
         "RMFlowSeqNo":              "text",
-        "RMTotalAmount":            "text",
+        "RMTotalAmount":            "numeric_str", # monetary value stored as text → float
         "RMManPower":               "text",
         "RMManHours":               "text",
 
@@ -269,8 +269,7 @@ FIELD_TYPE_MAP: dict[str, dict[str, str]] = {
         "IsActive":                 "bool",
         "DeleStat":                 "bool",
 
-        # ── Numeric ───────────────────────────────────────────────────────────
-        "RMCCMComplaintIDPK":       "bigint",  # duplicated above for clarity
+        # ── Numeric ───────────────────────────────────────────────────────
         "RMDownloadStat":           "int",
         "CreatedUserID":            "int",
         "RMMaintenanceHrs":         "float",   # numeric in DB
@@ -334,7 +333,6 @@ FIELD_TYPE_MAP: dict[str, dict[str, str]] = {
         "Remarks":                  "text",
         "FilePath":                 "text",
         "CreatedTtm":               "text",
-        "UpdatedTtm":               "text",
 
         # ── Flags (boolean) ───────────────────────────────────────────────────
         "IsSBCreWithDraw":          "bool",
@@ -354,8 +352,7 @@ FIELD_TYPE_MAP: dict[str, dict[str, str]] = {
 
         # ── Numeric (float) ───────────────────────────────────────────────────
         "SBCreSLAHours":            "float",
-        "SBCreMaintenanceHours":    "float",
-
+        "SBCreMaintenanceHours":    "float",   # numeric in DB — was missing
         # ── Numeric (integer) ─────────────────────────────────────────────────
         "CreatedUserID":            "int",
 
@@ -367,5 +364,128 @@ FIELD_TYPE_MAP: dict[str, dict[str, str]] = {
         "PMSBLastSBDateTime":       "datetime",
         "SBTechStartDateTime":      "datetime",
         "SBTechEndDateTime":        "datetime",
+    },
+
+    # =========================================================================
+    # CONTRACTS  —  Maintenance Contracts Register
+    # Tracks all maintenance contracts and service agreements.
+    # DB table: contract_master
+    # =========================================================================
+    "contracts": {
+        # ── Identifiers ───────────────────────────────────────────────────
+        "ContractIDPK":         "int",
+        "ContractCode":         "text",
+        "ContractName":         "text",
+
+        # ── Customer / Organisation ─────────────────────────────────────────
+        "CustomerName":         "text",
+        "OrganisationName":     "text",
+
+        # ── Classification ────────────────────────────────────────────────
+        "ContractTypeName":     "text",
+        "ContractCategName":    "text",
+        "ContractGroupName":    "text",
+        "ContStStatus":         "text",
+        "ContStTypes":          "text",
+        "TaxName":              "text",
+        "Period":               "text",
+        "ConPaymentTermsName":  "text",
+
+        # ── Financial Values (numeric in DB) ─────────────────────────────────
+        "ContractValue":        "float",
+        "ExtendedValue":        "float",
+        "TotalContractValue":   "float",
+        "ConValueBeforVat":     "float",
+        "VatAmount":            "float",
+
+        # ── Staffing Counts (integer in DB) ─────────────────────────────────
+        "NoOfBilling":          "int",
+        "NoofInvoice":          "int",
+        "NoofEngineer":         "int",
+        "NoofSupervisor":       "int",
+        "NoofPrimary":          "int",
+        "ShiftNoofPrimary":     "int",
+        "ShiftNoofSecondary":   "int",
+
+        # ── Flags (boolean) ───────────────────────────────────────────────────
+        "IsNonContract":        "bool",
+        "IsActive":             "bool",
+        "IsDraft":              "bool",
+        "IsRenewal":            "bool",
+        "IsExtended":           "bool",
+        "IsTerminate":          "bool",
+        "IsPPM":                "bool",
+        "IsBDM":                "bool",
+        "IsDSM":                "bool",
+        "IsIncident":           "bool",
+        "IsCase":               "bool",
+
+        # ── Dates ──────────────────────────────────────────────────────────────
+        "ContractDate":         "datetime",
+        "StartDate":            "datetime",
+        "EndDate":              "datetime",
+        "AnnualReviewDate":     "datetime",
+        "ExtendedDate":         "datetime",
+        "updated_at":           "datetime",
+    },
+
+    # =========================================================================
+    # EMPLOYEES  —  Employee / Workforce Register
+    # Tracks every employee, technician, supervisor, and staff member.
+    # DB table: employee_master
+    # =========================================================================
+    "employees": {
+        # ── Identifiers ───────────────────────────────────────────────────
+        "EmployeeIDPK":         "int",
+        "EmployeeCode":         "text",
+        "EmployeeFullName":     "text",
+        "FirstName":            "text",
+        "LastName":             "text",
+
+        # ── Personal Details ────────────────────────────────────────────────
+        "EmpGenderName":        "text",
+        "MaritalStatus":        "text",
+        "NationalityName":      "text",
+        "CountryName":          "text",
+        "EmpTitleName":         "text",
+        "Color":                "text",
+        "VehicleNo":            "text",
+
+        # ── Organisation / Role ──────────────────────────────────────────────
+        "OrganisationName":     "text",
+        "DepartmentName":       "text",
+        "DesignationName":      "text",
+        "ClassificationName":   "text",
+        "Branch":               "text",
+        "NatureOfWorkName":     "text",
+        "EmployeeTypeName":     "text",
+        "EmploymentTypeName":   "text",
+        "EmployeeGroupName":    "text",
+        "EmpGradeName":         "text",
+
+        # ── Shift ──────────────────────────────────────────────────────────────
+        "ShiftName":            "text",
+        "ShiftCode":            "text",
+
+        # ── Work Parameters (numeric in DB) ─────────────────────────────────
+        "WorkHours":            "float",
+        "WrkPerDay":            "float",
+
+        # ── Remarks ──────────────────────────────────────────────────────────────
+        "Remarks":              "text",
+        "ProbationPeriod":      "text",
+
+        # ── Flags (boolean) ───────────────────────────────────────────────────
+        "IsActive":             "bool",
+        "IsAttendanceEnable":   "bool",
+        "IsSinglePunch":        "bool",
+
+        # ── Dates ──────────────────────────────────────────────────────────────
+        "EmpDateofBirth":       "datetime",
+        "EmpDateOfJoin":        "datetime",
+        "DateofConfirmation":   "datetime",
+        "LeftJobOnDate":        "datetime",
+        "CreatedTtm":           "datetime",
+        "updated_at":           "datetime",
     },
 }

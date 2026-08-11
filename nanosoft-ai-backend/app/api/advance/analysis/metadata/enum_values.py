@@ -206,6 +206,64 @@ MODULE_ENUMS: dict[str, dict[str, list[str]]] = {
             "Movable",
         ],
     },
+
+    # =========================================================================
+    # Contracts — Maintenance Contracts Register
+    # =========================================================================
+    "contracts": {
+        "ContStStatus": [
+            "Expired",
+            "Live",
+        ],
+        "ContStTypes": [
+            "Contract",
+            "Projects",
+            "Sub Contract",
+        ],
+        "ContractTypeName": [
+            "Annual Maintenance Contract",
+            "CAPEX",
+            "One Time Job",
+            "Warranty Maintenance Contract",
+        ],
+        "ContractCategName": [
+            "In-House",
+            "Outsourced",
+        ],
+        "ContractGroupName": [
+            "Contract",
+            "Project",
+            "Sub Contract",
+        ],
+        "ConPaymentTermsName": [
+            "ANNUAL",
+            "MONTHLY",
+            "QUARTERLY",
+        ],
+        "TaxName": [
+            "VAT 5%",
+        ],
+    },
+
+    # =========================================================================
+    # Employees — Employee / Workforce Register
+    # =========================================================================
+    "employees": {
+        "EmpGenderName": [
+            "Female",
+            "Male",
+        ],
+        "EmployeeTypeName": [
+            "Primary",
+            "Secondary",
+            "Supervisor",
+        ],
+        "ShiftName": [
+            "General Shift",
+            "Morning Shift",
+            "Night Shift",
+        ],
+    },
 }
 
 

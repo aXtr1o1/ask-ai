@@ -1,23 +1,27 @@
 import logging
 import itertools
 
-from app.api.models.schemas import AssetRequest, BDMRequest, PPMRequest, FARequest, SBRequest
-from app.api.routes.assets import get_assets
-from app.api.routes.bdm import get_bdm
-from app.api.routes.ppm import get_ppm
-from app.api.routes.fa import get_fa
-from app.api.routes.sb import get_sb
+from app.api.models.schemas import AssetRequest, BDMRequest, PPMRequest, FARequest, SBRequest, ContractRequest, EmployeeRequest
+from app.api.routes.assets    import get_assets
+from app.api.routes.bdm       import get_bdm
+from app.api.routes.ppm       import get_ppm
+from app.api.routes.fa        import get_fa
+from app.api.routes.sb        import get_sb
+from app.api.routes.contract  import get_contracts
+from app.api.routes.employee  import get_employees
 from app.api.advance.retrieval.mappings import ALL_MAPPINGS
 
 logger = logging.getLogger("advance.retrieval.layer")
 
 
 MODULE_ROUTER_MAP = {
-    "assets": (AssetRequest, get_assets),
-    "bdm": (BDMRequest, get_bdm),
-    "ppm": (PPMRequest, get_ppm),
-    "fa": (FARequest, get_fa),
-    "sb": (SBRequest, get_sb),
+    "assets":    (AssetRequest,    get_assets),
+    "bdm":       (BDMRequest,      get_bdm),
+    "ppm":       (PPMRequest,      get_ppm),
+    "fa":        (FARequest,       get_fa),
+    "sb":        (SBRequest,       get_sb),
+    "contracts": (ContractRequest, get_contracts),
+    "employees": (EmployeeRequest, get_employees),
 }
 
 
@@ -98,11 +102,14 @@ def run_retrieval_layer(
         
         # 4. Fetch data for each permutation
         for perm in perms:
-            # Base payload with defaults
+            # Base payload with defaults.
+            _user_id   = user_id   if (user_id   and str(user_id).strip())   else None
+            _user_name = user_name if (user_name and str(user_name).strip()) else None
+
             payload = {
-                "user_name": user_name,
-                "user_id": user_id,
-                "offset": 0,
+                "user_name": _user_name,
+                "user_id":   _user_id,
+                "offset":    0,
                 "is_aggregate": False
             }
             if limit is not None:

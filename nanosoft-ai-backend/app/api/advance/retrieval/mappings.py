@@ -21,8 +21,8 @@ ASSETS_MAPPINGS: dict[str, str] = {
     "MakeName":         "make",
     "ModelName":        "model",
     "Owner":            "owner",
-    "ServiceArea":      "service_area",
-    "TradeGroup":       "trade_group",
+    "ServiceAreaName":   "service_area",
+    "TradeGroupName":    "trade_group",
     "DrawingNo":        "drawing_no",
     "Remarks":          "remarks",
     "Keyword":          "keyword",
@@ -31,13 +31,13 @@ ASSETS_MAPPINGS: dict[str, str] = {
 }
 
 ASSETS_BOOL_MAPPINGS: dict[str, str] = {
-    "OnHold":       "on_hold",
-    "IsSnagged":    "is_snagged",
-    "IsScraped":    "is_scraped",
-    "EnablePPM":    "enable_ppm",
-    "EnableBDM":    "enable_bdm",
-    "EnableBMS":    "enable_bms",
-    "EnableDSM":    "enable_dsm",
+    "OnHold":           "on_hold",
+    "IsSnagged":        "is_snagged",
+    "IsScraped":        "is_scraped",
+    "IsEnablePPM":      "enable_ppm",
+    "IsEnableBDM":      "enable_bdm",
+    "IsEnableBMS":      "enable_bms",
+    "IsEnableDSM":      "enable_dsm",
 }
 
 ASSETS_NUMERIC_MAPPINGS: dict[str, str] = {}
@@ -84,15 +84,15 @@ BDM_MAPPINGS: dict[str, str] = {
     "PriorityName":         "priority",
     "StageName":            "stage",
     "ComplaintTypeName":    "complaint_type",
-    "ComplaintHeader":      "complaint_header",
+    "ComplaintHeaderName":  "complaint_header",
     "ComplaintModeName":    "complaint_mode",
     "ComplaintNatureName":  "complaint_nature",
-    "WoType":               "wo_type",
+    "WoTypeName":           "wo_type",
     "ServiceTypeName":      "service_type",
     "ContractName":         "contract",
     "AnalysisTechName":     "analysis_tech",
     "ExecutionTechName":    "execution_tech",
-    "Complainer":           "complainer",
+    "ComplainerName":       "complainer",
     "RegisterBy":           "register_by",
     "LocalityName":         "locality",
     "LocalityCode":         "locality_code",
@@ -149,14 +149,14 @@ FA_NUMERIC_MAPPINGS: dict[str, str] = {}
 
 
 SB_MAPPINGS: dict[str, str] = {
-    "SBRequestNo":       "work_order",
-    "SBStageName":       "stage",
+    "SBCreMRNo":          "work_order",
+    "PPMStageName":       "stage",
     "ServiceTypeName":   "service_type",
     "FrequencyName":     "frequency",
     "DivisionName":      "division",
     "DisciplineName":    "discipline",
     "ContractName":      "contract",
-    "TechName":          "tech",
+    "SBTechName":         "tech",
     "LocalityName":      "locality",
     "LocalityCode":      "locality_code",
     "BuildingName":      "building",
@@ -183,10 +183,86 @@ SB_NUMERIC_MAPPINGS: dict[str, str] = {
 }
 
 
+CONTRACT_MAPPINGS: dict[str, str] = {
+    "ContractIDPK":         "contract_id",
+    "ContractCode":         "contract_code",
+    "ContractName":         "contract_name",
+    "CustomerName":         "customer_name",
+    "ContractTypeName":     "contract_type",
+    "ContractCategName":    "contract_categ",
+    "ContractGroupName":    "contract_group",
+    "OrganisationName":     "organisation",
+    "ContStStatus":         "status",
+    "ContStTypes":          "status_type",
+    "TaxName":              "tax_name",
+    "Period":               "period",
+    "ConPaymentTermsName":  "payment_terms",
+    "Keyword":              "keyword",
+    "date_from":            "date_from",
+    "date_to":              "date_to",
+}
+
+CONTRACT_BOOL_MAPPINGS: dict[str, str] = {
+    "IsActive":       "is_active",
+    "IsDraft":        "is_draft",
+    "IsRenewal":      "is_renewal",
+    "IsExtended":     "is_extended",
+    "IsTerminate":    "is_terminate",
+    "IsNonContract":  "is_non_contract",
+    "IsPPM":          "is_ppm",
+    "IsBDM":          "is_bdm",
+    "IsDSM":          "is_dsm",
+    "IsIncident":     "is_incident",
+    "IsCase":         "is_case",
+}
+
+CONTRACT_NUMERIC_MAPPINGS: dict[str, str] = {}
+
+
+EMPLOYEE_MAPPINGS: dict[str, str] = {
+    "EmployeeIDPK":       "employee_id",
+    "EmployeeCode":       "employee_code",
+    "EmployeeFullName":   "employee_name",
+    "FirstName":          "first_name",
+    "LastName":           "last_name",
+    "OrganisationName":   "organisation",
+    "DepartmentName":     "department",
+    "DesignationName":    "designation",
+    "ClassificationName": "classification",
+    "Branch":             "branch",
+    "NatureOfWorkName":   "nature_of_work",
+    "EmployeeTypeName":   "employee_type",
+    "EmploymentTypeName": "employment_type",
+    "ShiftName":          "shift_name",
+    "ShiftCode":          "shift_code",
+    "EmpGenderName":      "gender",
+    "MaritalStatus":      "marital_status",
+    "NationalityName":    "nationality",
+    "CountryName":        "country",
+    "EmployeeGroupName":  "employee_group",
+    "EmpGradeName":       "emp_grade",
+    "EmpTitleName":       "emp_title",
+    "VehicleNo":          "vehicle_no",
+    "Keyword":            "keyword",
+    "date_from":          "date_from",
+    "date_to":            "date_to",
+}
+
+EMPLOYEE_BOOL_MAPPINGS: dict[str, str] = {
+    "IsActive":             "is_active",
+    "IsAttendanceEnable":   "is_attendance_enable",
+    "IsSinglePunch":        "is_single_punch",
+}
+
+EMPLOYEE_NUMERIC_MAPPINGS: dict[str, str] = {}
+
+
 ALL_MAPPINGS: dict[str, tuple[dict, dict, dict]] = {
-    "assets": (ASSETS_MAPPINGS, ASSETS_BOOL_MAPPINGS, ASSETS_NUMERIC_MAPPINGS),
-    "bdm":    (BDM_MAPPINGS,    BDM_BOOL_MAPPINGS,    BDM_NUMERIC_MAPPINGS),
-    "ppm":    (PPM_MAPPINGS,    PPM_BOOL_MAPPINGS,    PPM_NUMERIC_MAPPINGS),
-    "fa":     (FA_MAPPINGS,     FA_BOOL_MAPPINGS,     FA_NUMERIC_MAPPINGS),
-    "sb":     (SB_MAPPINGS,     SB_BOOL_MAPPINGS,     SB_NUMERIC_MAPPINGS),
+    "assets":    (ASSETS_MAPPINGS,    ASSETS_BOOL_MAPPINGS,    ASSETS_NUMERIC_MAPPINGS),
+    "bdm":       (BDM_MAPPINGS,       BDM_BOOL_MAPPINGS,       BDM_NUMERIC_MAPPINGS),
+    "ppm":       (PPM_MAPPINGS,       PPM_BOOL_MAPPINGS,       PPM_NUMERIC_MAPPINGS),
+    "fa":        (FA_MAPPINGS,        FA_BOOL_MAPPINGS,        FA_NUMERIC_MAPPINGS),
+    "sb":        (SB_MAPPINGS,        SB_BOOL_MAPPINGS,        SB_NUMERIC_MAPPINGS),
+    "contracts": (CONTRACT_MAPPINGS,  CONTRACT_BOOL_MAPPINGS,  CONTRACT_NUMERIC_MAPPINGS),
+    "employees": (EMPLOYEE_MAPPINGS,  EMPLOYEE_BOOL_MAPPINGS,  EMPLOYEE_NUMERIC_MAPPINGS),
 }
