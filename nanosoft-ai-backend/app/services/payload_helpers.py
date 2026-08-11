@@ -35,7 +35,11 @@ def _normalize_group_by_value(raw: str, tool_name: str) -> str | None:
         if col.lower() == key:
             return col
     
-    raise ValueError(f"The grouping field '{raw}' is not applicable for {tool_name}. Please stop and inform the user that this field is not supported for {tool_name}.")
+    logger.warning(
+        "[group_by] Field '%s' is not a valid grouping column for %s — dropping it.",
+        raw, tool_name,
+    )
+    return None
 
 
 def _infer_group_by_from_query(query: str, tool_name: str) -> list[str]:

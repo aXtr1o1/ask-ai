@@ -319,11 +319,6 @@ class LangChainToolPathsMixin:
             _is_followup = bool(_FUP_RE.search(user_query))
 
             # ── FOLLOW-UP TOOL CORRECTION ──────────────────────────────────────────
-            # Problem: "give me 8 among them" after PPM MONTHLY query picks BDM
-            # because BDM still has an old Catering Services payload.
-            #
-            # Fix: for follow-up queries, ALWAYS use _last_used_tool (the single
-            # most recently called tool). If the model picks a DIFFERENT tool,
             # redirect to _last_used_tool.
             if _is_followup and self._last_used_tool and self._last_used_tool != tool_name:
                 _redirect_tool = self._last_used_tool
