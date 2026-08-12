@@ -73,14 +73,18 @@ def _strip_markdown(raw: str) -> str:
 _TOOL_OUTPUT_KEYS: dict[str, set[str]] = {
     # ── Basic Tools ─────────────────────────────────────────────────────────────
     "count_records":          {"count", "module", "condition_field", "condition_value",
-                               "conditions"},
+                               "conditions", "total_records", "total"},
     "sum_values":             {"total_sum", "records_used", "module", "field", "filters"},
     "get_average":            {"average", "records_used", "module", "field", "filters"},
     "group_by_and_count":     {"groups", "total_records", "unique_groups",
-                               "module", "group_fields", "filters"},
+                               "module", "group_fields", "filters",
+                               "count", "total", "value"},
     "group_by_and_aggregate": {"groups", "total_records", "unique_groups",
-                               "module", "group_fields", "agg_field", "operation", "filters"},
+                               "module", "group_fields", "agg_field", "operation", "filters",
+                               "count", "total", "value"},
     "get_record_fields":      {"module", "total", "fields_returned", "records", "filters"},
+    "filter_by_prior_results": {"module", "match_field", "total", "matched", "fields_returned", "records"},
+    "intersect_record_sets":   {"match_field", "matched_values", "count"},
     "do_math":                {"result", "operation", "a", "b"},
     "sort_and_limit":         {"sorted_data", "total_in", "total_out",
                                "sort_by", "order", "limit"},
@@ -106,7 +110,7 @@ _TOOL_OUTPUT_KEYS: dict[str, set[str]] = {
                                 "r_squared", "periods_ahead", "data_points",
                                 "value_key", "last_known_label"},
     "compare_date_fields":     {"flagged_count", "total_records", "flag_ratio",
-                                "valid_pairs", "groups",
+                                "valid_pairs", "flagged_records", "groups",
                                 "module", "field_a", "field_b", "operator",
                                 "group_fields", "filters"},
     "merge_and_score":         {"ranked", "group_key", "datasets_used", "total_groups"},
@@ -116,6 +120,11 @@ _TOOL_OUTPUT_KEYS: dict[str, set[str]] = {
     "join_and_aggregate":      {"groups", "matched_count", "unique_groups", "total_records",
                                 "module_a", "module_b", "join_field",
                                 "group_fields", "agg_field", "operation"},
+    "join_and_filter_by_date_diff": {"matched_records", "matched_count", "total_joined",
+                                     "module_a", "module_b", "join_field",
+                                     "date_field_a", "date_field_b",
+                                     "operator", "threshold_days",
+                                     "filters_a", "filters_b"},
 }
 
 # =============================================================================
@@ -129,6 +138,8 @@ _REQUIRED_ARGS: dict[str, list[str]] = {
     "group_by_and_count":        ["module", "group_fields"],
     "group_by_and_aggregate":    ["module", "group_fields", "agg_field", "operation"],
     "get_record_fields":         ["module"],
+    "filter_by_prior_results":    ["module", "match_field", "match_values"],
+    "intersect_record_sets":     ["datasets", "match_field"],
     "sort_and_limit":            ["data"],
     "do_math":                   ["operation", "a"],
     # ── Intelligence Tools ─────────────────────────────────────────────────────
@@ -144,6 +155,9 @@ _REQUIRED_ARGS: dict[str, list[str]] = {
     "add_duration_to_date":      ["module", "date_field", "duration_field"],
     "join_and_aggregate":        ["module_a", "module_b", "join_field",
                                   "group_fields", "agg_field", "operation"],
+    "join_and_filter_by_date_diff": ["module_a", "module_b", "join_field",
+                                     "date_field_a", "date_field_b",
+                                     "operator", "threshold_days"],
     "final_answer_tool":         ["result_ref"],
 }
 
@@ -249,10 +263,18 @@ def _validate_queue(queue: list) -> None:
                     ref_tool     = step_tool_map[ref_idx]
                     allowed_keys = _TOOL_OUTPUT_KEYS.get(ref_tool, set())
                     if allowed_keys and root_key not in allowed_keys:
-                        raise ValueError(
-                            f"Queue step {i} ({current_tool}) arg '{arg_name}': "
-                            f"'{ref}' uses key '{root_key}' but tool '{ref_tool}' "
-                            f"only outputs: {sorted(allowed_keys)}"
+                        # Warn instead of crash — the LLM may use conditional
+                        # filter refs (groups[?X=='Y'].count) where the root key
+                        # 'groups' IS valid, or alias keys like 'count' for
+                        # 'total_records'. Strict enforcement causes intermittent
+                        # crashes without improving safety.
+                        logger.warning(
+                            "Queue step %d (%s) arg '%s': "
+                            "'%s' uses key '%s' but tool '%s' "
+                            "only outputs: %s — allowing with warning.",
+                            i, current_tool, arg_name,
+                            ref, root_key, ref_tool,
+                            sorted(allowed_keys),
                         )
 
         step_tool_map[current_idx] = current_tool

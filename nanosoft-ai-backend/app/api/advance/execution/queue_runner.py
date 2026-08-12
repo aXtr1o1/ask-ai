@@ -38,6 +38,8 @@ from app.api.advance.execution.tools import (
     group_by_and_aggregate,
     join_and_aggregate,
     get_record_fields,
+    filter_by_prior_results,
+    intersect_record_sets,
     do_math,
     sort_and_limit,
     final_answer_tool,
@@ -52,6 +54,7 @@ from app.api.advance.execution.tools import (
     compare_date_fields,
     merge_and_score,
     add_duration_to_date,
+    join_and_filter_by_date_diff,
 )
 from app.api.advance.execution.agent_logger import log_step
 
@@ -70,6 +73,8 @@ TOOL_REGISTRY: dict[str, Any] = {
     "group_by_and_aggregate":  group_by_and_aggregate,
     "join_and_aggregate":      join_and_aggregate,
     "get_record_fields":       get_record_fields,
+    "filter_by_prior_results": filter_by_prior_results,
+    "intersect_record_sets":   intersect_record_sets,
     "do_math":                 do_math,
     "sort_and_limit":          sort_and_limit,
     "final_answer_tool":       final_answer_tool,
@@ -84,6 +89,7 @@ TOOL_REGISTRY: dict[str, Any] = {
     "compare_date_fields":     compare_date_fields,
     "merge_and_score":         merge_and_score,
     "add_duration_to_date":    add_duration_to_date,
+    "join_and_filter_by_date_diff": join_and_filter_by_date_diff,
 }
 
 
@@ -159,13 +165,13 @@ def _resolve_ref(val: Any, step_results: dict) -> Any:
 
     field = parts[1]        # e.g. "count"  or  "groups[0].value"  or  "stats.average"
 
-    # ── List-index notation: "groups[0].value" ─────────────────────────────
-    # The LLM references the top item from a list field: $step_1.groups[0].value
+    # ── List-index notation: "groups[0].value" or "groups[*].AssetTagNo" ─────
+    # The LLM references an item or wildcard list: $step_1.groups[0].value or $step_1.groups[*].AssetTagNo
     import re
-    list_idx_match = re.match(r'^(\w+)\[(\d+)\]\.?(.*)?$', field)
+    list_idx_match = re.match(r'^(\w+)\[(\*|\d+)\]\.?(.*)?$', field)
     if list_idx_match:
         list_key   = list_idx_match.group(1)   # "groups"
-        idx        = int(list_idx_match.group(2))  # 0
+        raw_idx    = list_idx_match.group(2)   # "*" or "0"
         sub_key    = list_idx_match.group(3)   # "value"  (may be empty)
 
         if not isinstance(step_result, dict) or list_key not in step_result:
@@ -180,7 +186,18 @@ def _resolve_ref(val: Any, step_results: dict) -> Any:
                 f"Reference '{val}': field '{list_key}' in step '{step_key}' "
                 f"is not a list (got {type(the_list).__name__})."
             )
+
+        # Wildcard extraction: $step_1.groups[*].AssetTagNo -> list of values
+        if raw_idx == "*":
+            if sub_key:
+                return [item[sub_key] for item in the_list if isinstance(item, dict) and sub_key in item]
+            return the_list
+
+        idx = int(raw_idx)
         if idx >= len(the_list):
+            if idx == 0 and len(the_list) == 0:
+                # Safe fallback: index 0 of an empty list returns 0 for count/value metrics, None otherwise
+                return 0 if sub_key in ("count", "value", "total", "matched_count", "total_records") else None
             raise IndexError(
                 f"Reference '{val}': index [{idx}] out of range — "
                 f"list '{list_key}' has only {len(the_list)} item(s)."
@@ -196,6 +213,84 @@ def _resolve_ref(val: Any, step_results: dict) -> Any:
             return item[sub_key]
         return item
     # ── End list-index notation ─────────────────────────────────────────────
+
+    # ── Conditional list filter notation: "groups[?WoStatus=='Closed'].count" ──
+    # Wrapped in try/except so that malformed patterns or missing data return
+    # safe fallback values instead of crashing the entire chain.
+    cond_filter_match = re.match(r'^(\w+)\[\?\s*(\w+)\s*==\s*[\'"]?([^\'"\]]+)[\'"]?\s*\]\.?(.*)?$', field)
+    if cond_filter_match:
+        list_key     = cond_filter_match.group(1)       # "groups"
+        target_field = cond_filter_match.group(2)       # "WoStatus"
+        target_val   = cond_filter_match.group(3).strip() # "Closed"
+        sub_key      = cond_filter_match.group(4)       # "count"
+
+        try:
+            if not isinstance(step_result, dict) or list_key not in step_result:
+                # List field missing — return safe fallback instead of crashing
+                logger.warning(
+                    "[Queue Runner] Conditional ref '%s': list field '%s' not in step '%s'. "
+                    "Returning safe fallback.",
+                    val, list_key, step_key,
+                )
+                return 0 if sub_key in ("count", "value", "total", "matched_count", "total_records") else None
+
+            the_list = step_result[list_key]
+            if not isinstance(the_list, list):
+                logger.warning(
+                    "[Queue Runner] Conditional ref '%s': '%s' is not a list. "
+                    "Returning safe fallback.",
+                    val, list_key,
+                )
+                return 0 if sub_key in ("count", "value", "total", "matched_count", "total_records") else None
+
+            matching_item = None
+            for item in the_list:
+                if isinstance(item, dict):
+                    item_val = str(item.get(target_field, "")).strip().lower()
+                    if item_val == target_val.lower():
+                        matching_item = item
+                        break
+            if matching_item is not None:
+                if sub_key:
+                    if sub_key in matching_item:
+                        return matching_item[sub_key]
+                    # Sub-key not found in matching item — return safe fallback
+                    logger.warning(
+                        "[Queue Runner] Conditional ref '%s': sub-key '%s' not in matched item. "
+                        "Returning safe fallback.",
+                        val, sub_key,
+                    )
+                    return 0 if sub_key in ("count", "value", "total", "matched_count", "total_records") else None
+                return matching_item
+            else:
+                # No matching item found — safe fallback (e.g., no 'Cancelled' records exist)
+                return 0 if sub_key in ("count", "value", "total", "matched_count", "total_records") else None
+        except Exception as exc:
+            # Catch-all for any malformed conditional ref — return safe fallback
+            logger.warning(
+                "[Queue Runner] Conditional ref '%s' failed: %s. Returning safe fallback.",
+                val, exc,
+            )
+            return 0 if sub_key in ("count", "value", "total", "matched_count", "total_records") else None
+    # ── End conditional list filter ──────────────────────────────────────────
+
+    # ── Alias resolution: some keys are aliases of each other ────────────────
+    # The LLM sometimes references $step_N.count expecting total_records,
+    # or $step_N.total expecting total_records.  Check aliases before failing.
+    _KEY_ALIASES = {
+        "count": ["total_records", "total", "matched_count"],
+        "total": ["total_records", "count", "matched_count"],
+        "total_records": ["count", "total"],
+    }
+    if isinstance(step_result, dict) and field not in step_result:
+        aliases = _KEY_ALIASES.get(field, [])
+        for alias in aliases:
+            if alias in step_result:
+                logger.debug(
+                    "[Queue Runner] Alias resolution: '%s' → '%s' in step '%s'",
+                    field, alias, step_key,
+                )
+                return step_result[alias]
 
     if not isinstance(step_result, dict) or field not in step_result:
         # Try dot-notation nested key: "stats.average" → step_result["stats"]["average"]
@@ -253,11 +348,25 @@ _ARG_GUARDS: dict[str, list[tuple]] = {
             lambda v, args: args.get("operation", "").upper() in ("DIV", "MOD")
                             and _is_zero_or_none(v),
             lambda tool, args: {
+                "_result_type": "single_number",
                 "operation": args.get("operation", "DIV").upper(),
                 "a": args.get("a"),
                 "b": args.get("b"),
                 "result": None,
                 "_safe_skip": "denominator_was_zero_or_null — result set to None",
+            },
+        ),
+        # a is None for ANY operation → result is undefined
+        (
+            "a",
+            lambda v, args: v is None or (isinstance(v, str) and v.strip().lower() in ("none", "null", "")),
+            lambda tool, args: {
+                "_result_type": "single_number",
+                "operation": args.get("operation", "").upper(),
+                "a": None,
+                "b": args.get("b"),
+                "result": None,
+                "_safe_skip": "operand_a_was_none — result set to None",
             },
         ),
     ],
@@ -337,6 +446,23 @@ _ARG_GUARDS: dict[str, list[tuple]] = {
             },
         ),
     ],
+    # filter_by_prior_results: if match_values is empty or None
+    "filter_by_prior_results": [
+        (
+            "match_values",
+            lambda v, args: v is None or (isinstance(v, list) and len(v) == 0),
+            lambda tool, args: {
+                "_result_type": "record_set",
+                "module": args.get("module", ""),
+                "match_field": args.get("match_field", ""),
+                "total": 0,
+                "matched": 0,
+                "fields_returned": args.get("fields", []) or [],
+                "records": [],
+                "_safe_skip": "match_values was empty or None — returning empty record set",
+            },
+        ),
+    ],
     # get_average: if the field resolves to empty
     "get_average": [
         (
@@ -394,34 +520,29 @@ def _coerce_numeric_args(tool_name: str, resolved_args: dict) -> dict:
     """
     Coerce None/string numeric arguments to float for arithmetic tools.
 
-    For do_math: only coerce when operation is DIV or MOD.
-      DIV/MOD with None denominator is caught by _ARG_GUARDS → safe null result.
-      ADD/SUB/MUL with None is semantically invalid — leave as-is so the tool
-      can return a meaningful error instead of silently computing a wrong result.
+    For do_math: coerce for ALL operations so _ARG_GUARDS can catch
+    None operands cleanly. This prevents the tool from receiving string
+    "None" or actual None and crashing mid-calculation.
 
     For calculate_rate_of_change: the tool handles None internally and returns
       a structured error — no coercion needed here.
     """
     if tool_name == "do_math":
         op = str(resolved_args.get("operation", "")).upper()
-        if op not in ("DIV", "MOD"):
-            # Not a division-type op — don't coerce, let tool handle or error
-            return resolved_args
-        # DIV/MOD: coerce b so _ARG_GUARDS can catch zero-denominator cleanly
         patched = dict(resolved_args)
         for arg in ("a", "b"):
             v = patched.get(arg)
             if v is None or (isinstance(v, str) and v.strip().lower() in ("none", "null", "")):
-                logger.warning(
-                    "[Queue Runner] do_math %s arg '%s' is None — coercing to 0.",
-                    op, arg,
-                )
-                patched[arg] = 0
+                # Leave as None so _ARG_GUARDS can detect and safe-skip
+                patched[arg] = None
+            elif isinstance(v, (int, float)) and not isinstance(v, bool):
+                patched[arg] = float(v)
             else:
                 try:
                     patched[arg] = float(str(v))
                 except (ValueError, TypeError):
-                    patched[arg] = 0
+                    # Cannot parse — leave as None for _ARG_GUARDS
+                    patched[arg] = None
         return patched
 
     return resolved_args
@@ -573,12 +694,12 @@ def run_queue(queue: list[dict], filtered_records: dict, progress_callback: call
             log_step(step_idx, tool_name, step_results[step_key])
             continue
 
-        except (ValueError, KeyError) as exc:
+        except (ValueError, KeyError, IndexError) as exc:
             logger.error(
                 "[Queue Runner] Step %d (%s) — arg resolution failed: %s",
                 step_idx, tool_name, exc,
             )
-            step_results[step_key] = {"error": str(exc)}
+            step_results[step_key] = {"_result_type": "error", "error": str(exc)}
             tools_called += 1
             error_count  += 1
             log_step(step_idx, tool_name, step_results[step_key])
@@ -608,7 +729,7 @@ def run_queue(queue: list[dict], filtered_records: dict, progress_callback: call
         tool_obj = TOOL_REGISTRY.get(tool_name)
         if tool_obj is None:
             logger.error("[Queue Runner] Step %d — unknown tool: '%s'", step_idx, tool_name)
-            step_results[step_key] = {"error": f"Unknown tool: {tool_name}"}
+            step_results[step_key] = {"_result_type": "error", "error": f"Unknown tool: {tool_name}"}
             tools_called += 1
             error_count  += 1
             log_step(step_idx, tool_name, step_results[step_key])
@@ -632,7 +753,7 @@ def run_queue(queue: list[dict], filtered_records: dict, progress_callback: call
                 step_idx, tool_name, exc,
                 exc_info=True,
             )
-            step_results[step_key] = {"error": str(exc)}
+            step_results[step_key] = {"_result_type": "error", "error": str(exc)}
             tools_called += 1
             error_count  += 1
             log_step(step_idx, tool_name, step_results[step_key])

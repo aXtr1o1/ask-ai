@@ -49,6 +49,10 @@ def load_records_as_dataframe(state: dict, module: str) -> pd.DataFrame:
 
     Called by: all tools
     """
+    # Defensive: if LLM passed a resolved list as `module`, build DF from it directly.
+    if isinstance(module, list):
+        return pd.DataFrame(module) if module else pd.DataFrame()
+
     records = state.get("filtered_records", {}).get(module, [])
     if not records:
         return pd.DataFrame()
@@ -96,27 +100,33 @@ def resolve_column(df: pd.DataFrame, field: str) -> str | None:
     """
     Resolve a field name to an actual DataFrame column name using case-insensitive matching.
 
-    The LLM uses PascalCase names from module_fields (e.g. 'BuildingName', 'ResolutionTAT'),
-    but stored procedure columns may have different casing. This resolver finds the best
-    match so tools never fail on casing mismatches.
-
-    Returns the actual column name if found, or None if no match exists.
-
-    Called by: all field-dependent tools
+    Handles:
+      1. Direct / case-insensitive matching.
+      2. Module prefix stripping (e.g. 'assets.AssetTagNo' -> 'AssetTagNo').
+      3. Join suffix fallbacks (e.g. 'BuildingName' -> 'BuildingName_a' if renamed during join).
     """
-    # Guard: a non-string can never be a valid column name.
     if not isinstance(field, str) or not field.strip():
         return None
 
-    if field in df.columns:
-        return field  # exact match — fast path
+    # Strip module prefix if present (e.g. 'assets.AssetTagNo' -> 'AssetTagNo')
+    clean_field = field.strip()
+    if "." in clean_field:
+        clean_field = clean_field.split(".")[-1]
 
-    field_lower = field.lower()
+    if clean_field in df.columns:
+        return clean_field
+
+    clean_lower = clean_field.lower()
     for col in df.columns:
-        if col.lower() == field_lower:
-            return col  # case-insensitive match
+        if col.lower() == clean_lower:
+            return col
 
-    return None  # no match found
+    # Join suffix fallback (_a / _b)
+    for col in df.columns:
+        if col.lower() in (f"{clean_lower}_a", f"{clean_lower}_b"):
+            return col
+
+    return None
 
 def _is_unresolved_ref(val) -> bool:
     """
@@ -151,14 +161,33 @@ def _apply_conditions(
 
     Called by: all tools that accept filters: list[dict]
     """
+    if df.empty:
+        return df
+
+    # Group conditions by field name to support multiple values for the same field (OR/IN filtering)
+    field_conditions: dict[str, list] = {}
     for cond in conditions:
         field = cond.get("field", "")
         value = cond.get("value", "")
         if not field:
             continue
-        if _is_unresolved_ref(value) or _is_unresolved_ref(field):
+
+        # Handle unresolved references — lists can contain $step_ refs too
+        if isinstance(value, str) and _is_unresolved_ref(value):
             raise ValueError(f"Unresolved reference in filter: field='{field}', value='{value}'")
-            
+        if isinstance(value, list) and any(_is_unresolved_ref(v) for v in value if isinstance(v, str)):
+            raise ValueError(f"Unresolved reference in filter: field='{field}', value contains unresolved $step refs")
+        if _is_unresolved_ref(field):
+            raise ValueError(f"Unresolved reference in filter: field='{field}', value='{value}'")
+
+        if field not in field_conditions:
+            field_conditions[field] = []
+        if isinstance(value, list):
+            field_conditions[field].extend(value)
+        else:
+            field_conditions[field].append(value)
+
+    for field, values in field_conditions.items():
         actual = resolve_column(df, field)
         if actual is None:
             if invalid_fields is not None:
@@ -166,10 +195,36 @@ def _apply_conditions(
             raise ValueError(f"Filter field '{field}' not found. Available columns: {sorted(df.columns.tolist())}")
 
         col = df[actual].fillna("").astype(str).str.strip()
-        if value == "":
-            df = df[col == ""]
-        else:
-            df = df[col.str.lower() == str(value).lower()]
+
+        if len(values) > 1:
+            # Multiple values for the same field -> OR / IN filter
+            lower_vals = {str(v).strip().lower() for v in values if v is not None}
+            df = df[col.str.lower().isin(lower_vals)]
+        elif len(values) == 1:
+            value = values[0]
+            if isinstance(value, list):
+                lower_vals = {str(v).strip().lower() for v in value if v is not None}
+                df = df[col.str.lower().isin(lower_vals)]
+            elif value == "":
+                df = df[col == ""]
+            else:
+                val_str = str(value).strip().lower()
+                if val_str in ("current_year", "this_year", "current year", "this year"):
+                    import datetime
+                    curr_yr = str(datetime.datetime.now().year)
+                    if col.str.lower().str.contains(curr_yr, regex=False).any():
+                        val_str = curr_yr
+                    else:
+                        extracted_years = col.str.extract(r'(\b20\d{2}\b)')[0].dropna()
+                        if not extracted_years.empty:
+                            val_str = str(extracted_years.max())
+                        else:
+                            val_str = curr_yr
+                is_date_col = any(term in actual.lower() for term in ("date", "time", "dt", "period"))
+                if is_date_col and len(val_str) <= 7:
+                    df = df[col.str.lower().str.contains(val_str, regex=False)]
+                else:
+                    df = df[col.str.lower() == val_str]
     return df
 
 

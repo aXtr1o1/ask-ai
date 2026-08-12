@@ -75,8 +75,7 @@ def calculate_age_from_now(
 
     actual_date = resolve_column(df, date_field)
     if actual_date is None:
-        return {"module": module, "date_field": date_field,
-                "error": f"Column '{date_field}' not found. Available: {list(df.columns)}"}
+        return _err(f"Column '{date_field}' not found. Available: {list(df.columns)}")
 
     df = df.copy()
     today = pd.Timestamp.now(tz=None).normalize()
@@ -138,6 +137,7 @@ def group_by_time_period(
     agg_field: str = "",
     operation: str = "COUNT",
     filters: list | None = None,
+    group_fields: list | None = None,
 ) -> dict:
     """
     Group records by a time period (month / week / quarter / year) from a date column.
@@ -168,8 +168,7 @@ def group_by_time_period(
 
     actual_date = resolve_column(df, date_field)
     if actual_date is None:
-        return {"module": module, "date_field": date_field,
-                "error": f"Column '{date_field}' not found. Available: {list(df.columns)}"}
+        return _err(f"Column '{date_field}' not found. Available: {list(df.columns)}")
 
     df = df.copy()
     df["_dt"] = pd.to_datetime(df[actual_date], dayfirst=True, errors="coerce")
@@ -179,7 +178,7 @@ def group_by_time_period(
     label_fmt = {"month": "%Y-%m", "week": "%Y-W%W", "quarter": None, "year": "%Y"}
 
     if period_lower not in label_fmt:
-        return {"error": f"Invalid period '{period}'. Valid: month | week | quarter | year"}
+        return _err(f"Invalid period '{period}'. Valid: month | week | quarter | year")
 
     if period_lower == "quarter":
         df["_period"] = df["_dt"].dt.to_period("Q").astype(str)
@@ -189,7 +188,7 @@ def group_by_time_period(
     op = operation.upper()
     agg_fn_map = {"COUNT": "size", "SUM": "sum", "AVG": "mean", "MIN": "min", "MAX": "max"}
     if op not in agg_fn_map:
-        return {"error": f"Invalid operation '{op}'. Valid: COUNT | SUM | AVG | MIN | MAX"}
+        return _err(f"Invalid operation '{op}'. Valid: COUNT | SUM | AVG | MIN | MAX")
 
     if op == "COUNT" or not agg_field:
         grouped = (
@@ -202,7 +201,7 @@ def group_by_time_period(
     else:
         actual_agg = resolve_column(df, agg_field)
         if actual_agg is None:
-            return {"error": f"agg_field '{agg_field}' not found. Available: {list(df.columns)}"}
+            return _err(f"agg_field '{agg_field}' not found. Available: {list(df.columns)}")
         df[actual_agg] = pd.to_numeric(df[actual_agg], errors="coerce")
         grouped = (
             df.groupby("_period", sort=True)[actual_agg]
@@ -277,10 +276,10 @@ def calculate_mtbf(
     actual_date  = resolve_column(df, failure_date_field)
 
     if actual_asset is None:
-        return {"error": f"asset_field '{asset_field}' not found. Available: {list(df.columns)}"}
+        return _err(f"asset_field '{asset_field}' not found. Available: {list(df.columns)}")
     if actual_date is None:
-        return {"error": f"failure_date_field '{failure_date_field}' not found. "
-                         f"Available: {list(df.columns)}"}
+        return _err(f"failure_date_field '{failure_date_field}' not found. "
+                     f"Available: {list(df.columns)}")
 
     df = df.copy()
     df["_dt"] = pd.to_datetime(df[actual_date], dayfirst=True, errors="coerce")
@@ -332,14 +331,19 @@ def calculate_mtbf(
 # =============================================================================
 @tool
 def flag_by_threshold(
-    module: str,
-    field: str,
-    threshold,
-    state: Annotated[dict, InjectedState()],
+    module: str = "",
+    field: str = "",
+    threshold = 0,
+    state: Annotated[dict, InjectedState()] = None,
     operator: str = "gt",
     group_fields: list | None = None,
     label_field: str = "",
     filters: list | None = None,
+    data: list | None = None,
+    flagged_records: list | None = None,
+    records: list | None = None,
+    input_data: list | None = None,
+    dataset: list | None = None,
 ) -> dict:
     """
     Flag records where a numeric field satisfies a threshold condition.
@@ -359,8 +363,26 @@ def flag_by_threshold(
         group_fields: Optional list of columns to count flagged records per group
         label_field:  Optional column to include in flagged records list (e.g. WO number)
         filters:      Optional list of {"field": str, "value": str} dicts for AND pre-filtering
+        data:         Optional list of record dicts from a prior step (e.g. $step_N.groups)
     """
-    df = load_records_as_dataframe(state, module)
+    if data is None:
+        data = flagged_records or records or input_data or dataset
+
+    # ── Handle LLM passing a resolved list as `module` instead of `data` ───
+    if isinstance(module, list):
+        data = module
+        module = ""
+
+    if data is not None and isinstance(data, list):
+        if not data:
+            return {"_result_type": "flagged_set",
+                    "module": module, "field": field, "threshold": threshold,
+                    "operator": operator, "flagged_count": 0, "total_records": 0,
+                    "flag_ratio": 0.0, "flagged_records": [], "groups": []}
+        df = pd.DataFrame(data)
+    else:
+        df = load_records_as_dataframe(state, module)
+
     if df.empty:
         return {"_result_type": "flagged_set",
                 "module": module, "field": field, "threshold": threshold,
@@ -375,7 +397,16 @@ def flag_by_threshold(
 
     actual_field = resolve_column(df, field)
     if actual_field is None:
-        return {"error": f"Column '{field}' not found. Available: {list(df.columns)}"}
+        # Fallback: if user/LLM asks to flag by 'count' on a raw module with group_fields,
+        # group the module first to produce group record counts, then evaluate threshold.
+        if field.lower() in ("count", "value", "total", "records", "") and group_fields:
+            resolved_groups = [resolve_column(df, g) for g in group_fields]
+            actual_groups = [g for g in resolved_groups if g is not None]
+            if actual_groups:
+                df = df.groupby(actual_groups, dropna=False).size().reset_index(name="count")
+                actual_field = "count"
+        if actual_field is None:
+            return _err(f"Column '{field}' not found. Available: {list(df.columns)}")
 
     df = df.copy()
 
@@ -389,8 +420,8 @@ def flag_by_threshold(
 
     if use_string_compare:
         if op != "eq":
-            return {"error": f"operator '{op}' requires a numeric threshold. "
-                             f"String threshold '{threshold}' only works with operator 'eq'."}
+            return _err(f"operator '{op}' requires a numeric threshold. "
+                        f"String threshold '{threshold}' only works with operator 'eq'.")
         str_col = df[actual_field].fillna("").astype(str).str.strip().str.lower()
         mask    = str_col == str(threshold).strip().lower()
         numeric_col = pd.Series([float("nan")] * len(df), index=df.index)
@@ -407,7 +438,7 @@ def flag_by_threshold(
         "eq":  lambda s, t: s == t,
     }
     if op not in op_map:
-        return {"error": f"Unknown operator '{op}'. Valid: gt | lt | gte | lte | eq"}
+        return _err(f"Unknown operator '{op}'. Valid: gt | lt | gte | lte | eq")
 
     if use_string_compare:
         thr = threshold
@@ -510,6 +541,7 @@ def calculate_rate_of_change(
 
     if fa is None or fb is None:
         return {
+            "_result_type": "error",
             "a": a, "b": b,
             "pct_change": None,
             "direction":  "unknown",
@@ -518,6 +550,7 @@ def calculate_rate_of_change(
 
     if fb == 0:
         return {
+            "_result_type": "error",
             "a": fa, "b": fb,
             "pct_change": None,
             "direction":  "unknown",
@@ -528,6 +561,7 @@ def calculate_rate_of_change(
     direction = "up" if pct > 0 else ("down" if pct < 0 else "flat")
 
     return {
+        "_result_type": "rate_of_change",
         "a":          fa,
         "b":          fb,
         "pct_change": pct,
@@ -568,10 +602,11 @@ def calculate_percentile(
     try:
         percentiles = [int(p) for p in percentiles]
     except (TypeError, ValueError):
-        return {"error": "percentiles must be a list of integers."}
+        return _err("percentiles must be a list of integers.")
 
     if df.empty:
-        return {"module": module, "field": field, "records_used": 0,
+        return {"_result_type": "percentile_data",
+                "module": module, "field": field, "records_used": 0,
                 "percentile_values": {}, "mean": None, "std_dev": None}
 
     if filters:
@@ -582,11 +617,12 @@ def calculate_percentile(
 
     actual_field = resolve_column(df, field)
     if actual_field is None:
-        return {"error": f"Column '{field}' not found. Available: {list(df.columns)}"}
+        return _err(f"Column '{field}' not found. Available: {list(df.columns)}")
 
     series = pd.to_numeric(df[actual_field], errors="coerce").dropna()
     if series.empty:
-        return {"module": module, "field": field, "records_used": 0,
+        return {"_result_type": "percentile_data",
+                "module": module, "field": field, "records_used": 0,
                 "percentile_values": {}, "mean": None, "std_dev": None}
 
     pct_values = {}
@@ -595,6 +631,7 @@ def calculate_percentile(
         pct_values[f"p{p}"] = round(float(np.percentile(series, p)), 4)
 
     return {
+        "_result_type":      "percentile_data",
         "module":            module,
         "field":             field,
         "filters":           filters or [],
@@ -688,7 +725,7 @@ def forecast_linear(
         label_key:     Name of the period label key in each period dict
     """
     if not isinstance(data, list) or len(data) < 2:
-        return {"error": "forecast_linear requires at least 2 data points from group_by_time_period."}
+        return _err("forecast_linear requires at least 2 data points from group_by_time_period.")
 
     try:
         periods_ahead = int(periods_ahead)
@@ -706,7 +743,7 @@ def forecast_linear(
 
     valid_pairs = [(i, v) for i, v in enumerate(values) if v is not None]
     if len(valid_pairs) < 2:
-        return {"error": "Not enough valid numeric values to fit a forecast model."}
+        return _err("Not enough valid numeric values to fit a forecast model.")
 
     x = np.array([p[0] for p in valid_pairs], dtype=float)
     y = np.array([p[1] for p in valid_pairs], dtype=float)
@@ -738,6 +775,7 @@ def forecast_linear(
         })
 
     return {
+        "_result_type":     "forecast",
         "model_slope":     round(float(slope),     6),
         "model_intercept": round(float(intercept), 6),
         "r_squared":       round(float(r2),        6),
@@ -798,9 +836,9 @@ def compare_date_fields(
     actual_b = resolve_column(df, field_b)
 
     if actual_a is None:
-        return {"error": f"Column '{field_a}' not found. Available: {list(df.columns)}"}
+        return _err(f"Column '{field_a}' not found. Available: {list(df.columns)}")
     if actual_b is None:
-        return {"error": f"Column '{field_b}' not found. Available: {list(df.columns)}"}
+        return _err(f"Column '{field_b}' not found. Available: {list(df.columns)}")
 
     df = df.copy()
     df["_dt_a"] = pd.to_datetime(df[actual_a], dayfirst=True, errors="coerce")
@@ -816,12 +854,20 @@ def compare_date_fields(
         "lte": lambda a, b: a <= b,
     }
     if op not in op_map:
-        return {"error": f"Unknown operator '{op}'. Valid: gt | lt | gte | lte"}
+        return _err(f"Unknown operator '{op}'. Valid: gt | lt | gte | lte")
 
     mask   = op_map[op](valid["_dt_a"], valid["_dt_b"])
-    flagged = valid[mask]
+    flagged = valid[mask].copy()
     total   = len(valid)
     n_flag  = len(flagged)
+
+    # ── Flagged records list (capped at _MAX_DETAIL_RECORDS) ────────────────
+    flagged["day_diff"] = (flagged["_dt_a"] - flagged["_dt_b"]).dt.days
+    drop_cols = {"_dt_a", "_dt_b"}
+    keep_cols = [c for c in flagged.columns if c not in drop_cols]
+    flagged_records = _clean_records(
+        flagged[keep_cols].head(_MAX_DETAIL_RECORDS).to_dict(orient="records")
+    )
 
     groups = []
     if group_fields:
@@ -846,18 +892,19 @@ def compare_date_fields(
             groups = group_stats
 
     return {
-        "_result_type":  "flagged_set",
-        "module":        module,
-        "field_a":       field_a,
-        "field_b":       field_b,
-        "operator":      op,
-        "filters":       filters or [],
-        "total_records": len(df),
-        "valid_pairs":   total,
-        "flagged_count": n_flag,
-        "flag_ratio":    round(n_flag / total, 4) if total else 0.0,
-        "group_fields":  group_fields or [],
-        "groups":        groups,
+        "_result_type":    "flagged_set",
+        "module":          module,
+        "field_a":         field_a,
+        "field_b":         field_b,
+        "operator":        op,
+        "filters":         filters or [],
+        "total_records":   len(df),
+        "valid_pairs":     total,
+        "flagged_count":   n_flag,
+        "flag_ratio":      round(n_flag / total, 4) if total else 0.0,
+        "flagged_records": flagged_records,
+        "group_fields":    group_fields or [],
+        "groups":          groups,
     }
 
 
@@ -892,9 +939,21 @@ def merge_and_score(
         group_key: Common grouping field name across all datasets
     """
     if not datasets:
-        return {"error": "datasets must be a non-empty list."}
+        return _err("datasets must be a non-empty list.")
     if not group_key:
-        return {"error": "group_key must be specified."}
+        return _err("group_key must be specified.")
+
+    def _extract_dict_val(row, target_key):
+        if not isinstance(row, dict):
+            return None
+        if target_key in row:
+            return row[target_key]
+        clean_target = target_key.split(".")[-1].strip().lower()
+        for k, v in row.items():
+            clean_k = k.split(".")[-1].strip().lower()
+            if clean_k == clean_target:
+                return v
+        return None
 
     # Collect all group_key values across datasets
     all_keys: set = set()
@@ -902,15 +961,23 @@ def merge_and_score(
         data = ds.get("data", [])
         if isinstance(data, list):
             for row in data:
-                if isinstance(row, dict) and group_key in row:
-                    all_keys.add(str(row[group_key]))
+                if isinstance(row, dict):
+                    kv = _extract_dict_val(row, group_key)
+                    if kv is not None:
+                        all_keys.add(str(kv))
 
     if not all_keys:
-        return {"error": f"No records found with group_key '{group_key}' in any dataset."}
+        return {
+            "_result_type":  "scored_records",
+            "group_key":     group_key,
+            "datasets_used": [ds.get("label") for ds in datasets],
+            "total_groups":  0,
+            "ranked":        [],
+        }
 
     total_weight = sum(float(ds.get("weight", 1)) for ds in datasets)
     if total_weight == 0:
-        return {"error": "Total weight of all datasets cannot be zero."}
+        return _err("Total weight of all datasets cannot be zero.")
 
     # Build lookup: label → {group_key_value: numeric_value}
     # Invalid/non-numeric values are SKIPPED (not coerced to 0)
@@ -923,8 +990,10 @@ def merge_and_score(
         if isinstance(data, list):
             for row in data:
                 if isinstance(row, dict):
-                    key_val = row.get(group_key)
-                    num_val = row.get(value_key)
+                    key_val = _extract_dict_val(row, group_key)
+                    num_val = _extract_dict_val(row, value_key)
+                    if num_val is None:
+                        num_val = row.get("count") or row.get("value")
                     if key_val is not None:
                         if num_val is None:
                             # Explicit None — group exists but metric is unknown
@@ -1043,10 +1112,10 @@ def add_duration_to_date(
     actual_dur  = resolve_column(df, duration_field)
 
     if actual_date is None:
-        return {"error": f"date_field '{date_field}' not found. Available: {list(df.columns)}"}
+        return _err(f"date_field '{date_field}' not found. Available: {list(df.columns)}")
     if actual_dur is None:
-        return {"error": f"duration_field '{duration_field}' not found. "
-                         f"Available: {list(df.columns)}"}
+        return _err(f"duration_field '{duration_field}' not found. "
+                     f"Available: {list(df.columns)}")
 
     df        = df.copy()
     today     = pd.Timestamp.now(tz=None).normalize()
@@ -1102,4 +1171,236 @@ def add_duration_to_date(
         "total":          len(output_records),
         "expired_count":  expired_count,
         "records":        output_records[:200],
+    }
+
+
+# =============================================================================
+# TOOL 20: join_and_filter_by_date_diff
+# =============================================================================
+@tool
+def join_and_filter_by_date_diff(
+    module_a:      str,
+    module_b:      str,
+    join_field:    str,
+    date_field_a:  str,
+    date_field_b:  str,
+    operator:      str,
+    threshold_days: int,
+    state: Annotated[dict, InjectedState()],
+    fields:        list | None = None,
+    filters_a:     list | None = None,
+    filters_b:     list | None = None,
+) -> dict:
+    """
+    Inner-join two modules on a shared key field, compute the day difference between
+    a date column from each module, then return records where that difference satisfies
+    a threshold condition.
+
+    Use when you need to find events in one module that occurred within / after / before
+    N days of a reference event in another module, joined per asset or entity.
+
+    Example: find breakdowns (bdm) that occurred within 7 days after a PPM completion (ppm),
+    matched by AssetTagNo.
+
+    operator options:
+      within_days  — 0 <= (date_field_a - date_field_b).days <= threshold_days
+      after_days   — (date_field_a - date_field_b).days > threshold_days
+      before_days  — (date_field_a - date_field_b).days < 0  (date_a is before date_b)
+      gt           — day_diff > threshold_days
+      lt           — day_diff < threshold_days
+      gte          — day_diff >= 0
+      lte          — day_diff <= threshold_days
+
+    date_field_a is typically the event to test (e.g. breakdown date from bdm).
+    date_field_b is typically the reference event (e.g. PPM completion date from ppm).
+    day_diff is computed as (date_a - date_b).days — positive = date_a is later.
+
+    Each returned record includes a computed 'day_diff' field showing the exact gap.
+
+    Args:
+        module_a:       First module (the event module, e.g. "bdm")
+        module_b:       Second module (the reference module, e.g. "ppm")
+        join_field:     Column shared by both modules to join on (e.g. "AssetTagNo")
+        date_field_a:   Date column from module_a (the event date, e.g. "ComplainedDateTime")
+        date_field_b:   Date column from module_b (the reference date, e.g. "WoCompletedDate")
+        operator:       within_days | after_days | before_days | gt | lt | gte | lte
+        threshold_days: Day threshold for the comparison (e.g. 7)
+        fields:         Optional list of columns to include in output records (empty = all)
+        filters_a:      Optional pre-filters for module_a as [{\"field\": str, \"value\": str}]
+        filters_b:      Optional pre-filters for module_b as [{\"field\": str, \"value\": str}]
+    """
+    df_a = load_records_as_dataframe(state, module_a)
+    df_b = load_records_as_dataframe(state, module_b)
+
+    if df_a.empty:
+        return _err(f"No data found for module '{module_a}'.")
+    if df_b.empty:
+        return _err(f"No data found for module '{module_b}'.")
+
+    # ── Apply pre-filters ────────────────────────────────────────────────────
+    if filters_a:
+        try:
+            df_a = _apply_conditions(df_a, filters_a)
+        except ValueError as e:
+            return _err(f"filters_a error: {e}")
+    if filters_b:
+        try:
+            df_b = _apply_conditions(df_b, filters_b)
+        except ValueError as e:
+            return _err(f"filters_b error: {e}")
+
+    # ── Post-filter empty check ──────────────────────────────────────────────
+    if df_a.empty or df_b.empty:
+        return {
+            "_result_type":   "date_filtered_join",
+            "module_a":       module_a,
+            "module_b":       module_b,
+            "join_field":     join_field,
+            "date_field_a":   date_field_a,
+            "date_field_b":   date_field_b,
+            "operator":       operator,
+            "threshold_days": threshold_days,
+            "total_joined":   0,
+            "matched_count":  0,
+            "matched_records": [],
+        }
+
+    # ── Resolve join field in both modules ───────────────────────────────────
+    actual_join_a = resolve_column(df_a, join_field)
+    actual_join_b = resolve_column(df_b, join_field)
+
+    if actual_join_a is None:
+        return _err(
+            f"join_field '{join_field}' not found in '{module_a}'. "
+            f"Available: {sorted(df_a.columns.tolist())}"
+        )
+    if actual_join_b is None:
+        return _err(
+            f"join_field '{join_field}' not found in '{module_b}'. "
+            f"Available: {sorted(df_b.columns.tolist())}"
+        )
+
+    # ── Resolve date fields before renaming ─────────────────────────────────
+    actual_date_a = resolve_column(df_a, date_field_a)
+    actual_date_b = resolve_column(df_b, date_field_b)
+
+    if actual_date_a is None:
+        return _err(
+            f"date_field_a '{date_field_a}' not found in '{module_a}'. "
+            f"Available: {sorted(df_a.columns.tolist())}"
+        )
+    if actual_date_b is None:
+        return _err(
+            f"date_field_b '{date_field_b}' not found in '{module_b}'. "
+            f"Available: {sorted(df_b.columns.tolist())}"
+        )
+
+    # ── Normalise join key types for clean merge ─────────────────────────────
+    df_a = df_a.copy()
+    df_b = df_b.copy()
+    df_a[actual_join_a] = df_a[actual_join_a].fillna("").astype(str).str.strip()
+    df_b[actual_join_b] = df_b[actual_join_b].fillna("").astype(str).str.strip()
+
+    # ── Rename overlapping columns (suffix _a / _b) except the join key ──────
+    overlap = (set(df_a.columns) & set(df_b.columns)) - {actual_join_a}
+    if overlap:
+        df_a = df_a.rename(columns={c: f"{c}_a" for c in overlap})
+        df_b = df_b.rename(columns={c: f"{c}_b" for c in overlap})
+        # Update resolved names after renaming
+        if actual_date_a in overlap:
+            actual_date_a = f"{actual_date_a}_a"
+        if actual_date_b in overlap:
+            actual_date_b = f"{actual_date_b}_b"
+        actual_join_b_r = actual_join_b if actual_join_b not in overlap else f"{actual_join_b}_b"
+    else:
+        actual_join_b_r = actual_join_b
+
+    # ── Inner join ───────────────────────────────────────────────────────────
+    merged = pd.merge(
+        df_a, df_b,
+        left_on=actual_join_a, right_on=actual_join_b_r,
+        how="inner",
+    )
+
+    if merged.empty:
+        return {
+            "_result_type":   "date_filtered_join",
+            "module_a":       module_a,
+            "module_b":       module_b,
+            "join_field":     join_field,
+            "date_field_a":   date_field_a,
+            "date_field_b":   date_field_b,
+            "operator":       operator,
+            "threshold_days": threshold_days,
+            "total_joined":   0,
+            "matched_count":  0,
+            "matched_records": [],
+        }
+
+    # ── Parse date columns ───────────────────────────────────────────────────
+    merged["_dt_a"] = pd.to_datetime(merged[actual_date_a], dayfirst=True, errors="coerce")
+    merged["_dt_b"] = pd.to_datetime(merged[actual_date_b], dayfirst=True, errors="coerce")
+
+    valid = merged.dropna(subset=["_dt_a", "_dt_b"]).copy()
+    valid["day_diff"] = (valid["_dt_a"] - valid["_dt_b"]).dt.days
+
+    # ── Apply operator filter ────────────────────────────────────────────────
+    op = operator.lower()
+    try:
+        thr = int(threshold_days)
+    except (TypeError, ValueError):
+        return _err(f"threshold_days must be an integer, got: {threshold_days!r}")
+
+    op_map = {
+        "within_days":  lambda d: (d >= 0) & (d <= thr),
+        "after_days":   lambda d: d > thr,
+        "before_days":  lambda d: d < 0,
+        "gt":           lambda d: d > thr,
+        "lt":           lambda d: d < thr,
+        "gte":          lambda d: d >= 0,
+        "lte":          lambda d: d <= thr,
+    }
+    if op not in op_map:
+        return _err(
+            f"Unknown operator '{op}'. "
+            f"Valid: within_days | after_days | before_days | gt | lt | gte | lte"
+        )
+
+    mask    = op_map[op](valid["day_diff"])
+    matched = valid[mask]
+
+    # ── Build output records ─────────────────────────────────────────────────
+    drop_cols = {"_dt_a", "_dt_b"}
+    keep_cols = [c for c in matched.columns if c not in drop_cols]
+
+    if fields:
+        # Resolve each requested field name to actual column in merged result
+        resolved_fields = []
+        for f in fields:
+            col = resolve_column(matched, f)
+            if col:
+                resolved_fields.append(col)
+        if resolved_fields:
+            # Always include join_field and day_diff
+            must_have = {actual_join_a, "day_diff"}
+            keep_cols = list(must_have | set(resolved_fields))
+
+    out_df = matched[keep_cols].head(_MAX_DETAIL_RECORDS)
+
+    records = _clean_records(out_df.to_dict(orient="records"))
+
+    return {
+        "_result_type":   "date_filtered_join",
+        "module_a":       module_a,
+        "module_b":       module_b,
+        "join_field":     join_field,
+        "date_field_a":   date_field_a,
+        "date_field_b":   date_field_b,
+        "operator":       op,
+        "threshold_days": thr,
+        "filters_a":      filters_a or [],
+        "filters_b":      filters_b or [],
+        "total_joined":   len(valid),
+        "matched_count":  len(matched),
+        "matched_records": records,
     }

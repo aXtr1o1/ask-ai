@@ -30,12 +30,14 @@ from app.api.advance.execution.tools_basic import (        # noqa: F401
     group_by_and_aggregate,
     join_and_aggregate,
     get_record_fields,
+    filter_by_prior_results,
+    intersect_record_sets,
     do_math,
     sort_and_limit,
     final_answer_tool,
 )
 
-# ── Intelligence Tools (10–19) ────────────────────────────────────────────────
+# ── Intelligence Tools (10–20) ────────────────────────────────────────────────
 from app.api.advance.execution.tools_advanced import (     # noqa: F401
     calculate_age_from_now,
     group_by_time_period,
@@ -47,6 +49,7 @@ from app.api.advance.execution.tools_advanced import (     # noqa: F401
     compare_date_fields,
     merge_and_score,
     add_duration_to_date,
+    join_and_filter_by_date_diff,
 )
 
 # =============================================================================
@@ -61,6 +64,8 @@ ALL_TOOLS = [
     group_by_and_aggregate,
     join_and_aggregate,
     get_record_fields,
+    filter_by_prior_results,
+    intersect_record_sets,
     do_math,
     sort_and_limit,
     final_answer_tool,
@@ -75,4 +80,5 @@ ALL_TOOLS = [
     compare_date_fields,
     merge_and_score,
     add_duration_to_date,
+    join_and_filter_by_date_diff,
 ]

@@ -49,9 +49,9 @@ group_by_and_count(module, group_fields, filters=[])
   Item access: $step_N.groups[i].count  or  $step_N.groups[i].BuildingName
 
 group_by_and_aggregate(module, group_fields, agg_field, operation, filters=[])
-  Group by one or more fields; compute SUM | AVG | MIN | MAX of a numeric field per group.
+  Group by one or more fields; compute SUM | AVG | MIN | MAX | COUNT | COUNT_DISTINCT per group.
   group_fields: list of column names.
-  operation: SUM | AVG | MIN | MAX
+  operation: SUM | AVG | MIN | MAX | COUNT | COUNT_DISTINCT
   RETURNS: groups (list of dicts — each has all group_fields keys + "value" key),
            total_records, unique_groups, module, group_fields, agg_field, operation, filters
   Item access: $step_N.groups[i].value
@@ -62,22 +62,37 @@ join_and_aggregate(module_a, module_b, join_field, group_fields, agg_field, oper
   Use when the grouping dimension is in one module and the metric is in another.
   For COUNT leave agg_field as "" and operation as "COUNT".
   group_fields: columns present in the joined result to group by.
-  operation: SUM | AVG | MIN | MAX | COUNT
+  operation: SUM | AVG | MIN | MAX | COUNT | COUNT_DISTINCT
   RETURNS: groups (list of dicts with all group_fields keys + "value" key),
            matched_count, unique_groups, total_records,
            module_a, module_b, join_field, group_fields, agg_field, operation
   Item access: $step_N.groups[i].value
 
-get_record_fields(module, fields=[], filters=[], limit=200)
-  Return actual record data. Use when the answer requires field-level details.
-  fields: list of column names to include; empty = all columns.
-  limit: maximum rows to return (default 200).
+get_record_fields(module, fields=[], filters=[], limit=0)
+  Return record details matching filters. Use for extracting specific values (like emails, phone numbers, IDs) 
+  when a prior step gives exact filtering criteria.
+  limit: maximum rows to return (default 0 for no limit).
   RETURNS: records (list of dicts), total, fields_returned, module, filters
 
+filter_by_prior_results(module, match_field, match_values, fields=[], limit=0)
+  Filter records where match_field's value appears in match_values (a reference to a prior step's output list).
+  Use this for CROSS-MODULE JOINING (e.g. finding asset details for AssetTagNos returned by a BDM query).
+  ALWAYS use this instead of `get_record_fields` + `intersect_record_sets` for cross-module filtering, because it bypasses database limits by fetching specifically what is needed.
+  limit: maximum rows to return (default 0 for no limit).
+  RETURNS: records (list of dicts), total, matched, fields_returned, module, match_field
+
+intersect_record_sets(datasets, match_field)
+  Intersect multiple prior step lists to find common values.
+  DO NOT use this for standard cross-module joining (use filter_by_prior_results instead).
+  Only use this when you need to find the intersection of two ALREADY FILTERED lists (e.g. assets flagged in FA AND flagged in BDM).
+  datasets: list of $step_N references. E.g. ["$step_1.flagged_records", "$step_2.flagged_records"].
+  match_field: string column name to intersect on (e.g. "AssetTagNo").
+  RETURNS: matched_values (list of string values), count (int)
+
 do_math(operation, a, b=0)
-  Arithmetic on two scalar values.
-  operation: ADD | SUB | MUL | DIV | MOD | POWER | SQRT | ABS
-  DIV by zero returns null. SQRT and ABS use only a.
+  Perform arithmetic operation (ADD, SUB, MUL, DIV, MOD, POWER, SQRT, ABS) on two numbers.
+  ALWAYS use do_math steps for calculations (ratios, percentages, products).
+  Do NOT write raw math strings (like "($step_1... / $step_0...) * 100") inside final_answer_tool.
   RETURNS: result, operation, a, b
 
 sort_and_limit(data, sort_by="", order="DESC", limit=0)
@@ -88,6 +103,8 @@ sort_and_limit(data, sort_by="", order="DESC", limit=0)
 
 final_answer_tool(result_ref)
   Always the last step. 'result_ref' is the ONLY valid argument name — never use any other.
+  Values must be $step_N references or objects mapping labels to $step_N references.
+  Do NOT write raw inline math expressions (e.g. "($step_1 / $step_0) * 100") inside result_ref; execute all math using do_math steps first!
 
   Single-value answer:
     "args": {"result_ref": "$step_0.count"}
@@ -190,6 +207,32 @@ add_duration_to_date(module, date_field, duration_field,
            total, expired_count, module, date_field, duration_field,
            duration_unit, filters
 
+join_and_filter_by_date_diff(module_a, module_b, join_field,
+                             date_field_a, date_field_b,
+                             operator, threshold_days,
+                             fields=[], filters_a=[], filters_b=[])
+  Inner-join two modules on a shared key field, compute the day difference between
+  a date column from each module, then return records where that difference satisfies
+  a threshold condition.
+  Use for cross-module temporal analysis: e.g. find breakdowns (bdm) that occurred
+  within 7 days after a PPM completion (ppm), matched per asset.
+  date_field_a = the event date (from module_a). date_field_b = the reference date (from module_b).
+  day_diff = (date_a − date_b).days  — positive means date_a is later than date_b.
+  operator: within_days | after_days | before_days | gt | lt | gte | lte
+    within_days  — 0 <= day_diff <= threshold_days  (e.g. breakdown within 7 days after PPM)
+    after_days   — day_diff > threshold_days
+    before_days  — day_diff < 0  (date_a occurred before date_b)
+    gt / lt / gte / lte — numeric comparisons on day_diff vs threshold_days
+  threshold_days: integer day count for the comparison.
+  fields: optional list of columns to return in matched_records (empty = all columns).
+  filters_a / filters_b: optional [{\"field\": str, \"value\": str}] pre-filters per module.
+  Each returned record includes a 'day_diff' field with the exact computed gap.
+  RETURNS: matched_records (list of joined records satisfying the condition),
+           matched_count, total_joined,
+           module_a, module_b, join_field, date_field_a, date_field_b,
+           operator, threshold_days, filters_a, filters_b
+  Item access: $step_N.matched_records[i].<field>  or  $step_N.matched_count
+
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 REFERENCE SYNTAX
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -200,6 +243,13 @@ $step_N.key[i].subkey    — element i of a list, then its sub-key
 
 Only reference keys listed in that tool's RETURNS above.
 Steps are numbered from 0. A step can only reference steps that come before it.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DATE & YEAR FILTERING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+When a question asks for "this year", "current year", or "current year to date", pass `filters=[{"field": "<date_column>", "value": "current_year"}]` directly in tool filters (e.g. `filters: [{"field": "ComplainedDateTime", "value": "current_year"}]`).
+Do NOT reference `$step_N.periods[0].period_label` from `group_by_time_period` because index `[0]` refers to the oldest historical year, not the current year.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 DATA CONTRACT
