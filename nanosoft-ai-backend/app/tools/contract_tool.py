@@ -133,7 +133,7 @@ def CONTRACT(
         return json.dumps(result)
     except HTTPException as e:
         logger.error("[CONTRACT] API error: %s", e.detail)
-        return f"API Error: {e.detail}"
+        return json.dumps({"p_list": [], "p_count": 0, "error": "Unable to retrieve contract data. Please try a different query."})
     except Exception as e:
         logger.error("[CONTRACT] Tool error: %s", str(e), exc_info=True)
-        return f"Error calling CONTRACT: {str(e)}"
+        return json.dumps({"p_list": [], "p_count": 0, "error": "Unable to retrieve contract data. Please try a different query."})
