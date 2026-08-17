@@ -18,3 +18,4 @@ psycopg2-binary
 numpy>=1.26
 scikit-learn>=1.4
 langgraph>=0.2
+pandas>=2.0
