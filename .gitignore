@@ -80,4 +80,9 @@ nanosoft-ai-backend/app/api/advance/service/__pycache__/*
 nanosoft-ai-backend/app/api/advance/retrieval/__pycache__/*
 nanosoft-ai-backend/app/api/advance/preprocessing/__pycache__/*
 nanosoft-ai-backend/app/api/advance/execution_agent/__pycache__/*
+nanosoft-ai-backend/app/api/advance/execution_agent/agent/__pycache__/*
+nanosoft-ai-backend/app/api/advance/execution_agent/prompt/__pycache__/*
+nanosoft-ai-backend/app/api/advance/execution_agent/tools/__pycache__/*
+nanosoft-ai-backend/app/api/advance/execution_agent/queue/__pycache__/*
+nanosoft-ai-backend/app/api/advance/execution_agent/output/__pycache__/*
 nanosoft-ai-backend/app/api/advance/Formatting_agent/__pycache__/*

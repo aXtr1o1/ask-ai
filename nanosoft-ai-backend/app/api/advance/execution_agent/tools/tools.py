@@ -12,7 +12,7 @@ Tool implementations live in:
 """
 
 # ── Basic Tools ────────────────────────────────────────────────────────────────
-from app.api.advance.execution_agent.tools_basic import (        # noqa: F401
+from app.api.advance.execution_agent.tools.tools_basic import (        # noqa: F401
     count_records,
     sum_values,
     get_average,
@@ -28,7 +28,7 @@ from app.api.advance.execution_agent.tools_basic import (        # noqa: F401
 )
 
 # ── Intelligence Tools ─────────────────────────────────────────────────────────
-from app.api.advance.execution_agent.tools_advanced import (     # noqa: F401
+from app.api.advance.execution_agent.tools.tools_advanced import (     # noqa: F401
     calculate_age_from_now,
     group_by_time_period,
     calculate_mtbf,

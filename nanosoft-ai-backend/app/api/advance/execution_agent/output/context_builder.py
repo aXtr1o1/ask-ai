@@ -12,7 +12,7 @@ Format determines what the Formatting Agent receives:
   BULLET_LIST /     LLM reasons over the result to produce the full response.
   NUMBERED_LIST
 """
-from app.api.advance.execution_agent.shape_resolver import resolve as resolve_shape
+from app.api.advance.execution_agent.output.shape_resolver import resolve as resolve_shape
 
 
 _DATA_HEAVY_FORMATS = {"TABLE", "GRAPH"}

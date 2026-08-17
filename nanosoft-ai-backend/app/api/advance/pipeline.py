@@ -7,8 +7,8 @@ from app.api.advance.Understanding_Agent.conversation_memory import conversation
 from app.api.advance.analysis.agent import analyze_query
 from app.api.advance.retrieval.layer import run_retrieval_layer
 from app.api.advance.preprocessing.layer import preprocess_records
-from app.api.advance.execution_agent.agent import run_execution
-from app.api.advance.execution_agent.context_builder import build_formatting_context
+from app.api.advance.execution_agent.agent.agent          import run_execution
+from app.api.advance.execution_agent.output.context_builder import build_formatting_context
 from app.api.advance.Formatting_agent.agent import format_response
 
 logger = logging.getLogger("advance.pipeline")

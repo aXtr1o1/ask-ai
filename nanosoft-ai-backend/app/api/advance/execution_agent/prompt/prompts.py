@@ -15,8 +15,8 @@ Tool API signatures (required args, optional args, returns) are generated
 dynamically from tool_meta.py so this file never needs to change when a
 tool's signature changes — only tool_meta.py does.
 """
-from app.api.advance.execution_agent.context   import MODULE_RELATIONSHIP_CONTEXT
-from app.api.advance.execution_agent.tool_meta import build_tool_api_block, EXECUTION_REASONING_CONTEXT
+from app.api.advance.execution_agent.prompt.context   import MODULE_RELATIONSHIP_CONTEXT
+from app.api.advance.execution_agent.prompt.tool_meta import build_tool_api_block, EXECUTION_REASONING_CONTEXT
 
 # =============================================================================
 # PART A — Role + module context + tool purpose descriptions
