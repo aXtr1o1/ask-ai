@@ -19,7 +19,7 @@ FA_SCHEMA: dict[str, str] = {
 
     # --- Classification ---
     "RMStageName": (
-        "Current workflow stage of the audit or remedial task. "
+    "Current lifecycle stage of the audit workflow, not its category."
     ),
 
     "PriorityName": (
@@ -30,9 +30,10 @@ FA_SCHEMA: dict[str, str] = {
         "How often this audit recurs. "
     ),
 
-    "RMCategoryName": (
-        "High-level category of the audit. "
-    ),
+ "RMCategoryName": (
+    "Checklist or template used for the audit — select only when a specific "
+    "checklist type is named in the query."
+),
 
     "RMCategorySubName": (
         "Specific audit checklist item within the category. "
@@ -76,10 +77,10 @@ FA_SCHEMA: dict[str, str] = {
     ),
 
     "RMTechnicalFindings": (
-        "Technical findings documented during the audit or inspection. "
-        "Example: 'Water leakage observed','Loose electrical connection'"
+    "Free-text technician notes from the audit. Null if not yet recorded. "
+    "Not exact-match filterable — treat as text-search only. "
+    "Example: 'Water leakage observed'."
     ),
-
     "ReworkRemarks": (
         "Remarks entered if the task was marked for rework. "
         "Example: 'Cleaning not satisfactory','Reinspection required'"
@@ -123,8 +124,8 @@ FA_SCHEMA: dict[str, str] = {
     ),
 
     "RMBDMWOCompletedDate": (
-        "Date the audit work order was officially closed. Null if still open. "
-        "Example: '15-07-2026 12:00:00','18-07-2026 17:00:00'"
+    "Date the linked BDM work order was closed, format DD-MM-YYYY HH:MM:SS. "
+    "Null if still open. Example: '15-07-2026 12:00:00'."
     ),
 
     "RMXComplaintDate": (

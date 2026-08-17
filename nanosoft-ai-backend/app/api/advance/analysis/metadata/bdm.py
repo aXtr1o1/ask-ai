@@ -38,8 +38,8 @@ BDM_SCHEMA: dict[str, str] = {
         "Current lifecycle status of the work order. "
     ),
 
-    "WoTypeName": (
-        "Work order type. "
+   "WoTypeName": (
+    "Category describing the work order type."
     ),
 
     "PriorityName": (
@@ -51,7 +51,7 @@ BDM_SCHEMA: dict[str, str] = {
     ),
 
     "ComplaintTypeName": (
-        "Category of the complaint. "
+    "General category describing the nature of the maintenance work."
     ),
 
     "ComplaintModeName": (
@@ -59,8 +59,10 @@ BDM_SCHEMA: dict[str, str] = {
     ),
 
     "ComplaintNatureName": (
-        "Short description of the problem reported. Free-form text. "
-        "Example: 'AC not cooling','Printer paper jam'"
+        "Free-text description of the problem reported. "
+        "CRITICAL: Do NOT hardcode search strings for this field into filter_values. "
+        "Must be placed in filter_fields for dynamic text searching. "
+        "Example: 'AC not cooling'."
     ),
 
     "ComplaintHeaderName": (
@@ -140,13 +142,13 @@ BDM_SCHEMA: dict[str, str] = {
 
     # --- Timestamps ---
     "ComplainedDateTime": (
-        "Date and time the complaint was raised. Format: 'DD-MM-YYYY HH:MM:SS'. "
-        "Example: '15-07-2026 09:30:15','18-07-2026 14:45:00'"
+    "Date and time the complaint was raised. Format: DD-MM-YYYY HH:MM:SS, always populated. "
+    "Example: '15-07-2026 09:30:15'."
     ),
 
     "AnalysisStartTime": (
-        "Date and time the technician started analysing. Null if not yet started. "
-        "Example: '15-07-2026 09:45:00','18-07-2026 15:00:00'"
+    "Timestamp technician began analysis, format DD-MM-YYYY HH:MM:SS. "
+    "Null if analysis has not started. Example: '15-07-2026 09:45:00'."
     ),
 
     "AnalysisEndTime": (
@@ -191,7 +193,7 @@ BDM_SCHEMA: dict[str, str] = {
 
     # --- SLA / TAT ---
     "ResponseTAT": (
-        "Response Turnaround Time status. "
+        "Whether the response met the required turnaround time threshold. "
         "Example: 'NROT','Within SLA'"
     ),
 

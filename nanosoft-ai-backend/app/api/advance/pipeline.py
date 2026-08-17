@@ -7,6 +7,9 @@ from app.api.advance.Understanding_Agent.conversation_memory import conversation
 from app.api.advance.analysis.agent import analyze_query
 from app.api.advance.retrieval.layer import run_retrieval_layer
 from app.api.advance.preprocessing.layer import preprocess_records
+from app.api.advance.execution_agent.agent import run_execution
+from app.api.advance.execution_agent.context_builder import build_formatting_context
+from app.api.advance.Formatting_agent.agent import format_response
 
 logger = logging.getLogger("advance.pipeline")
 
@@ -73,6 +76,61 @@ def preprocessing_node(state: AdvancePipelineState) -> dict:
     }
 
 
+def execution_node(state: AdvancePipelineState) -> dict:
+    """Run the Execution Agent: plan the tool queue (LLM once), then execute (no LLM)."""
+    preprocessed_data  = state.get("retrieved_data", {})
+    modules            = state.get("modules", [])
+    question           = state.get("query_summary") or state.get("query", "")
+    filter_fields      = state.get("filter_fields", {})
+    response_format    = state.get("response_format", "PLAIN_TEXT")
+    user_specified     = state.get("user_specified_format", False)
+
+    logger.info("[Pipeline] → execution_node | question=%s | modules=%s",
+                question[:100], modules)
+
+    execution_result = run_execution(
+        question          = question,
+        filter_fields     = filter_fields,
+        modules           = modules,
+        filtered_records  = preprocessed_data,
+        response_format   = response_format,
+        user_specified    = user_specified,
+    )
+
+    # Build the formatting context — resolves format, shape, final answer
+    formatting_context = build_formatting_context(
+        execution_result = execution_result,
+        suggested_format = response_format,
+        user_specified   = user_specified,
+    )
+
+    logger.info("[Pipeline] ✔ execution_node | status=%s | format=%s",
+                execution_result.get("status"), formatting_context.get("response_format"))
+
+    return {
+        "execution_result":    execution_result,
+        "formatting_context":  formatting_context,
+    }
+
+
+
+def formatting_node(state: AdvancePipelineState) -> dict:
+    """Run the Formatting Agent: write the explanation for the response."""
+    formatting_context = state.get("formatting_context") or {}
+    query_summary      = state.get("query_summary") or state.get("query", "")
+
+    logger.info("[Pipeline] → formatting_node | format=%s",
+                formatting_context.get("response_format", "?"))
+
+    formatted_result = format_response(
+        formatting_context = formatting_context,
+        query_summary      = query_summary,
+    )
+
+    logger.info("[Pipeline] ✔ formatting_node | layout=%s", formatted_result.get("layout"))
+    return {"formatted_result": formatted_result}
+
+
 def route_after_understanding(state: AdvancePipelineState) -> str:
     intent = state.get("intent", "general")
     logger.info("[Pipeline] ↳ EDGE: intent=%s", intent)
@@ -85,15 +143,19 @@ def _build_pipeline() -> StateGraph:
     builder.add_node("analysis_node",      analysis_node)
     builder.add_node("retrieval_node",     retrieval_node)
     builder.add_node("preprocessing_node", preprocessing_node)
+    builder.add_node("execution_node",     execution_node)
+    builder.add_node("formatting_node",    formatting_node)
     builder.add_edge(START, "understanding_node")
     builder.add_conditional_edges(
         "understanding_node",
         route_after_understanding,
         {"analysis_node": "analysis_node", END: END},
     )
-    builder.add_edge("analysis_node", "retrieval_node")
-    builder.add_edge("retrieval_node", "preprocessing_node")
-    builder.add_edge("preprocessing_node", END)
+    builder.add_edge("analysis_node",      "retrieval_node")
+    builder.add_edge("retrieval_node",     "preprocessing_node")
+    builder.add_edge("preprocessing_node", "execution_node")
+    builder.add_edge("execution_node",     "formatting_node")
+    builder.add_edge("formatting_node",    END)
     return builder.compile()
 
 

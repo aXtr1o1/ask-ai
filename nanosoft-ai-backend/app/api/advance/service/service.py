@@ -10,6 +10,9 @@ from app.api.advance.Understanding_Agent.conversation_memory import conversation
 from app.api.advance.analysis.agent import analyze_query
 from app.api.advance.retrieval.layer import run_retrieval_layer
 from app.api.advance.preprocessing.layer import preprocess_records
+from app.api.advance.execution_agent.agent import run_execution
+from app.api.advance.execution_agent.context_builder import build_formatting_context
+from app.api.advance.Formatting_agent.agent import format_response
 
 logger = logging.getLogger("advance.service")
 
@@ -111,28 +114,73 @@ def _run_streaming_pipeline(query: str, session_id: str, user_name: str, user_id
             filter_values = analysis.get("filter_values", {})
             limit         = analysis.get("limit")
             
-            # ── Retrieval Layer ───────────────────────────────────────────────────────
+            # ── Retrieval Layer ──────────────────────────────────────────────
             stream_queue.put({"status": "running_start", "stage": "Retrieval Layer"})
-            
+            for mod in modules:
+                stream_queue.put({"status": "running_chunk", "word": f"Fetching {mod} data..."})
+
             retrieved_data = run_retrieval_layer(
-                user_name=user_name,
-                user_id=user_id,
-                modules=modules,
-                filter_values=filter_values,
-                filter_fields=filter_fields,
-                limit=limit
+                user_name    = user_name,
+                user_id      = user_id,
+                modules      = modules,
+                filter_values = filter_values,
+                filter_fields = filter_fields,
+                limit        = limit,
             )
-            
             stream_queue.put({"status": "running_end", "stage": "Retrieval Layer"})
             
             # ── Preprocessing Layer ───────────────────────────────────────────────────
             stream_queue.put({"status": "running_start", "stage": "Preprocessing Layer"})
             preprocessed_data = preprocess_records(retrieved_data)
             stream_queue.put({"status": "running_end", "stage": "Preprocessing Layer"})
-            
-            # TODO: Future execution layer will use preprocessed_data
 
-        # ── Store turn in conversation memory ─────────────────────────────────
+            # ── Execution Agent ───────────────────────────────────────────────
+            stream_queue.put({"status": "running_start", "stage": "Execution Agent"})
+
+            response_format    = understanding.get("response_format", "PLAIN_TEXT")
+            user_specified     = understanding.get("user_specified_format", False)
+
+            execution_result = run_execution(
+                question          = query_summary or query,
+                filter_fields     = filter_fields,
+                modules           = modules,
+                filtered_records  = preprocessed_data,
+                thought_callback  = lambda chunk: stream_queue.put({"status": "running_chunk", "word": chunk}),
+                response_format   = response_format,
+                user_specified    = user_specified,
+            )
+
+            formatting_context = build_formatting_context(
+                execution_result = execution_result,
+                suggested_format = response_format,
+                user_specified   = user_specified,
+            )
+
+            stream_queue.put({"status": "running_end", "stage": "Execution Agent"})
+
+            # Extract computed final_answer for frontend rendering (required for TABLE/GRAPH layout)
+            queue_steps = execution_result.get("queue", [])
+            step_res    = execution_result.get("step_results", {})
+            last_key    = f"step_{queue_steps[-1]['step']}" if queue_steps else None
+            final_out   = step_res.get(last_key, {}) if last_key else {}
+            final_val   = final_out.get("final_value", final_out)
+
+            formatted_result = format_response(
+                formatting_context = formatting_context,
+                query_summary      = query_summary or query,
+                thought_callback   = lambda chunk: stream_queue.put({"status": "running_chunk", "word": chunk}),
+            )
+
+            if isinstance(formatted_result, dict) and formatted_result.get("final_answer") is None:
+                formatted_result["final_answer"] = final_val
+
+            stream_queue.put({"status": "running_end", "stage": "Formatting Agent"})
+
+        else:
+            execution_result   = {}
+            formatting_context = {}
+            formatted_result   = {}
+
         _store_conversation_turn(
             session_id  = session_id,
             query       = query,
@@ -147,19 +195,15 @@ def _run_streaming_pipeline(query: str, session_id: str, user_name: str, user_id
             intent = intent,
         )
 
-        # ── Complete ──────────────────────────────────────────────────────────
-        stream_queue.put({
-            "status": "complete",
-            "result": {
-                "intent":             intent,
-                "modules":            modules,
-                "query_summary":      query_summary,
-                "general_response":   understanding.get("general_response"),
-                "web_search_summary": understanding.get("web_search_summary"),
-                "filter_fields":      filter_fields,
-                "filter_values":      filter_values,
-            },
-        })
+        # ── Complete — send only what the frontend renders ────────────────────
+        if intent == "db_query":
+            result_payload = {"formatted_result": formatted_result}
+        elif intent == "web_search":
+            result_payload = {"web_search_summary": understanding.get("web_search_summary")}
+        else:  # general
+            result_payload = {"general_response": understanding.get("general_response")}
+
+        stream_queue.put({"status": "complete", "result": result_payload})
 
     except Exception as exc:
         logger.error("[service] Streaming pipeline error: %s", exc, exc_info=True)
@@ -185,10 +229,18 @@ async def stream_advance_pipeline(query: str, session_id: str, user_name: str, u
     thread.start()
 
     while True:
-        # Block in a thread-pool worker (non-blocking for the event loop)
-        item = await loop.run_in_executor(None, lambda: stream_queue.get(timeout=60))
+        # Block in a thread-pool worker (non-blocking for the event loop).
+        # timeout=120s covers worst-case LLM latency for Execution + Formatting agents.
+        # On Empty (timeout) we close the stream cleanly instead of crashing.
+        try:
+            item = await loop.run_in_executor(None, lambda: stream_queue.get(timeout=120))
+        except _queue.Empty:
+            logger.warning("[service] Stream queue timed out — pipeline thread did not finish in time.")
+            yield f"data: {_json.dumps({'status': 'error', 'message': 'Pipeline timeout — please try again.'})}\n\n"
+            yield "data: [DONE]\n\n"
+            break
 
-        if item is None:              # sentinel — pipeline finished
+        if item is None:              # sentinel — pipeline finished normally
             yield "data: [DONE]\n\n"
             break
 

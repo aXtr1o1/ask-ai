@@ -690,16 +690,24 @@ export async function sendAdvanceQuery(
   onComplete: (result: any) => void,
   onError: (error: any) => void,
   ws?: WebSocket | null,
-  sessionId?: string
+  sessionId?: string,
+  userName?: string,
+  userId?: string | number
 ) {
   try {
+    // Only include user fields if they are non-empty — passing empty string
+    // causes the backend to receive None and fetch ALL users' records (slow).
+    const body: Record<string, any> = {
+      query:      text,
+      session_id: sessionId || "default",
+    };
+    if (userName && String(userName).trim()) body.user_name = String(userName).trim();
+    if (userId   && String(userId).trim())   body.user_id   = String(userId).trim();
+
     const response = await fetch(`${baseUrl}/api/advance/ask-ai`, {
       method:  "POST",
       headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify({
-        query:      text,
-        session_id: sessionId || "default",
-      }),
+      body:    JSON.stringify(body),
     });
 
     if (!response.ok) {
@@ -739,7 +747,7 @@ export async function sendAdvanceQuery(
             onStart(evt.stage);
 
           } else if (evt.status === "running_chunk") {
-            if (evt.word) onChunk(evt.word);             // whole word / chunk
+            if (evt.word) onChunk(evt.word);
 
           } else if (evt.status === "running_end") {
             onEnd(evt.stage);
@@ -750,8 +758,8 @@ export async function sendAdvanceQuery(
           } else if (evt.status === "error") {
             throw new Error(evt.message || "Unknown pipeline error");
           }
-        } catch {
-          // ignore malformed lines
+        } catch (e) {
+          console.error("Error processing SSE line:", e, "Payload:", payload);
         }
       }
     }
@@ -877,29 +885,6 @@ export function AdvanceStreamMessage({ msg, isDark = true }: { msg: any; isDark?
                   ></span>
                 </div>
               </div>
-
-              {/* Retrieval gap indicator */}
-              {msg.isRetrieving && (
-                <div 
-                  className="retrieval-indicator"
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                    fontSize: "12px",
-                    color: "#D4AF37",
-                    fontStyle: "italic",
-                    padding: "4px 0"
-                  }}
-                >
-                  <svg viewBox="0 0 24 24" style={{ width: "16px", height: "16px", stroke: "#D4AF37", fill: "none", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", animation: "spin 2s linear infinite" }}>
-                    <ellipse cx="12" cy="5" rx="9" ry="3"/>
-                    <path d="M3 5v14c0 1.657 4.03 3 9 3s9-1.343 9-3V5"/>
-                    <path d="M3 12c0 1.657 4.03 3 9 3s9-1.343 9-3"/>
-                  </svg>
-                  <span>Retrieving data from database...</span>
-                </div>
-              )}
             </>
           )}
         </div>
@@ -907,101 +892,78 @@ export function AdvanceStreamMessage({ msg, isDark = true }: { msg: any; isDark?
 
       {/* Final Envelope Result — uses the premium renderChatResponseHtml layout */}
       {!msg.streaming && msg.advanceResult && (
-        <div className="message-bubble ai" style={{ position: "relative" }}>
-          <div 
-            className="ai-bubble"
-            style={{ width: "100%", display: "flex", flexDirection: "column", gap: "12px", padding: "12px" }}
-            dangerouslySetInnerHTML={{ 
-              __html: renderChatResponseHtml((() => {
-                const res = msg.advanceResult;
-                let layout = "PLAIN_TEXT";
-                let response_type = "general";
-                let explanation = "";
-                let answer: any = "";
-                let header = "Advance AI Response";
-              if (res.intent === "db_query" || (res.filter_fields && Object.keys(res.filter_fields).length > 0)) {
-                 layout = "HTML";
-                 response_type = "Data Filters Identified";
-                 header = "Data Filter Extraction";
-                 
-                 let fieldsSet = new Set<string>();
-                 let valuesList: string[] = [];
-                 
-                  // Extract deduplicated fields and format them with descriptions
-                  if (res.filter_fields) {
-                     for (const [mod, fields] of Object.entries(res.filter_fields)) {
-                        if (fields && typeof fields === "object" && !Array.isArray(fields)) {
-                           for (const [field, desc] of Object.entries(fields)) {
-                              fieldsSet.add(`<span style="color:#D4AF37;">${escapeHtml(field)}:</span> <span style="color:#f8fafc;">${escapeHtml(String(desc))}</span>`);
-                           }
-                        }
-                     }
-                  }
-                 
-                 // Extract only populated filtering values directly from filter_values
-                 if (res.filter_values) {
-                    for (const [mod, filterObj] of Object.entries(res.filter_values)) {
-                       if (filterObj && typeof filterObj === "object") {
-                          for (const [field, val] of Object.entries(filterObj)) {
-                             if (val !== undefined && val !== null && val !== "" && (!Array.isArray(val) || val.length > 0)) {
-                                valuesList.push(`<span style="color:#D4AF37;">${escapeHtml(field)}:</span> <span style="color:#f8fafc; font-weight:600;">${escapeHtml(Array.isArray(val) ? val.join(", ") : String(val))}</span>`);
-                             }
-                          }
-                       }
-                    }
-                 }
-                 
-                 let fieldsList = Array.from(fieldsSet);
-                 
-                 let modulesStr = "—";
-                 if (res.modules && Array.isArray(res.modules) && res.modules.length > 0) {
-                     modulesStr = res.modules.join(", ");
-                 }
-                 
-                 answer = `
-                   <div style="margin-bottom: 16px;">
-                     <div style="font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: #D4AF37; margin-bottom: 4px;">Understanding Agent Summary</div>
-                     <div style="background: rgba(0,0,0,0.15); border: 1px solid rgba(255,255,255,0.05); padding: 10px; border-radius: 6px;">${escapeHtml(res.query_summary || "—")}</div>
-                   </div>
-                   <div style="margin-bottom: 16px;">
-                     <div style="font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: #D4AF37; margin-bottom: 4px;">Selected Modules</div>
-                     <div style="background: rgba(0,0,0,0.15); border: 1px solid rgba(255,255,255,0.05); padding: 10px; border-radius: 6px;">${escapeHtml(modulesStr)}</div>
-                   </div>
-                   <div style="margin-bottom: 16px;">
-                     <div style="font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: #D4AF37; margin-bottom: 4px;">Analysis Agent Selected Fields</div>
-                     <div style="background: rgba(0,0,0,0.15); border: 1px solid rgba(255,255,255,0.05); padding: 10px; border-radius: 6px;">${fieldsList.length > 0 ? fieldsList.join("<br/><br/>") : "—"}</div>
-                   </div>
-                   <div>
-                     <div style="font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: #D4AF37; margin-bottom: 4px;">Analysis Selected Filtering Values</div>
-                     <div style="background: rgba(0,0,0,0.15); border: 1px solid rgba(255,255,255,0.05); padding: 10px; border-radius: 6px;">${valuesList.length > 0 ? valuesList.join("<br/>") : "—"}</div>
-                   </div>
-                 `;
-              } else if (res.web_search_summary) {
-                 layout = "MARKDOWN";
-                 response_type = "Web Search Result";
-                 header = "Web Search";
-                 answer = res.web_search_summary;
-              } else {
-                 layout = "MARKDOWN";
-                 response_type = "General Response";
-                 header = "AI Answer";
-                 answer = res.general_response;
+        <div 
+          className="ai-bubble"
+          style={{ width: "100%", display: "flex", flexDirection: "column", gap: "12px", padding: "12px" }}
+          dangerouslySetInnerHTML={{ 
+            __html: renderChatResponseHtml((() => {
+              // Backend sends: { formatted_result: { layout, explanation, final_answer, response_type } }
+              //           or:  { web_search_summary: "..." }
+              //           or:  { general_response: "..." }
+              const res = msg.advanceResult;
+              const fr  = res?.formatted_result;   // unwrap one level
+
+              if (fr) {
+                // db_query path — TABLE or PLAIN_TEXT result
+                const layout       = (fr.layout || "PLAIN_TEXT").toUpperCase();
+                const explanation  = fr.explanation || "";
+                const finalAnswer  = fr.final_answer;
+
+                if (layout === "TABLE" && Array.isArray(finalAnswer) && finalAnswer.length > 0) {
+                  // Render explanation + HTML table
+                  const cols   = Object.keys(finalAnswer[0]);
+                  const thHtml = cols.map(c => `<th style="padding:6px 10px;text-align:left;color:#D4AF37;border-bottom:1px solid rgba(212,175,55,0.3);white-space:nowrap;">${escapeHtml(c)}</th>`).join("");
+                  const rowsHtml = finalAnswer.map(row =>
+                    `<tr>${cols.map(c => `<td style="padding:5px 10px;border-bottom:1px solid rgba(255,255,255,0.05);color:#f1f5f9;">${escapeHtml(String(row[c] ?? ""))}</td>`).join("")}</tr>`
+                  ).join("");
+                  const tableHtml = `
+                    <div style="overflow-x:auto;margin-top:10px;">
+                      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                        <thead><tr>${thHtml}</tr></thead>
+                        <tbody>${rowsHtml}</tbody>
+                      </table>
+                    </div>`;
+                  return {
+                    response_type:    "table-response",
+                    layout:           "HTML",
+                    explanation:      explanation,
+                    formatted_answer: tableHtml,
+                    header:           "Query Result"
+                  };
+                }
+
+                // PLAIN_TEXT or no rows
+                return {
+                  response_type:    "plain-response",
+                  layout:           "MARKDOWN",
+                  explanation:      "",
+                  formatted_answer: explanation || (typeof finalAnswer === "string" ? finalAnswer : JSON.stringify(finalAnswer, null, 2)),
+                  header:           "AI Response"
+                };
               }
 
+              if (res?.web_search_summary) {
+                return {
+                  response_type:    "web-response",
+                  layout:           "MARKDOWN",
+                  explanation:      "",
+                  formatted_answer: res.web_search_summary,
+                  header:           "Web Search"
+                };
+              }
+
+              // general intent
               return {
-                 response_type,
-                 layout,
-                 explanation,
-                 formatted_answer: answer,
-                 header
+                response_type:    "general",
+                layout:           "MARKDOWN",
+                explanation:      "",
+                formatted_answer: res?.general_response || "",
+                header:           "AI Response"
               };
             })())
           }} 
-          />
-        </div>
+        />
       )}
     </>
   );
 }
-
-  

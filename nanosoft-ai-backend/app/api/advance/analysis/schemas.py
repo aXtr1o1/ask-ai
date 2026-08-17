@@ -26,9 +26,6 @@ from pydantic import BaseModel, Field
 # =============================================================================
 class AnalysisOutput(BaseModel):
     """Structured output from the Analysis Agent."""
-    reasoning: str = Field(
-        description="A concise explanation of why you chose these fields and filters based on the query."
-    )
 
     limit: int | None = Field(
         default=None,
@@ -59,4 +56,11 @@ class AnalysisOutput(BaseModel):
     thought: str = Field(
         default="",
         description="Your internal reasoning and step-by-step thinking process before generating the final output. Always provide your complete thought process here."
+    )
+    # NOTE: reasoning is intentionally last — the LLM writes fields in order.
+    # Keeping critical fields (filter_fields, filter_values) first ensures they
+    # are always fully written even if the output is truncated mid-reasoning.
+    reasoning: str = Field(
+        default="",
+        description="A concise explanation of why you chose these fields and filters based on the query."
     )

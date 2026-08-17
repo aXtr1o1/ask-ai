@@ -57,13 +57,13 @@ MODULE_ENUMS: dict[str, dict[str, list[str]]] = {
             "Casual Maintenances",
             "FA",
         ],
-        # "ComplaintTypeName": [
-        #     "Corrective Maintenance",
-        #     "Incident",
-        #     "Proactive",
-        #     "Reactive Maintenance",
-        #     "Service Request",
-        # ],
+        "ComplaintTypeName": [
+            "Corrective Maintenance",
+            "Incident",
+            "Proactive",
+            "Reactive Maintenance",
+            "Service Request",
+        ],
     },
 
     # =========================================================================
@@ -285,4 +285,51 @@ def get_enum_block(modules: list[str]) -> str:
             vals = ", ".join(f'"{v}"' for v in values)
             lines.append(f"  {field}: {vals}")
         lines.append("")
+    return "\n".join(lines).strip()
+
+
+def get_enum_block_for_fields(
+    modules: list[str],
+    filter_fields: dict[str, dict[str, str]],
+) -> str:
+    """
+    Return enum values ONLY for fields that were selected by the Analysis Agent.
+
+    This prevents the Execution Agent from hallucinating filters on enum fields
+    that exist in the enum registry but were NOT included in the retrieved data.
+
+    Args:
+        modules:       The active module names e.g. ['bdm', 'ppm']
+        filter_fields: The Analysis Agent's output — { module: { field: desc } }
+                       Only fields present here will have their enum values included.
+
+    Returns:
+        A formatted string of enum values for prompt injection — limited to
+        selected fields only. Returns a placeholder string if none apply.
+    """
+    lines = []
+
+    for mod in modules:
+        mod_enums        = MODULE_ENUMS.get(mod, {})
+        selected_fields  = filter_fields.get(mod, {})  # fields chosen by Analysis Agent
+
+        # Only keep enums whose field name was actually selected
+        relevant_enums = {
+            field: values
+            for field, values in mod_enums.items()
+            if field in selected_fields
+        }
+
+        if not relevant_enums:
+            continue
+
+        lines.append(f"[{mod.upper()}]")
+        for field, values in relevant_enums.items():
+            vals = ", ".join(f'"{v}"' for v in values)
+            lines.append(f"  {field}: {vals}")
+        lines.append("")
+
+    if not lines:
+        return "(no enum constraints apply to the selected fields)"
+
     return "\n".join(lines).strip()

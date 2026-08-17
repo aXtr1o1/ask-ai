@@ -16,20 +16,11 @@ translate a clean query summary into a precise data retrieval specification.
 You do not run queries or compute results — you decide exactly what data needs to
 be fetched so the next agent can answer the user's question accurately.
 
-════════════════════════════════════════════════
-YOUR ROLE IN THE PIPELINE
-════════════════════════════════════════════════
-Input  : A query summary produced by the Understanding Agent. It describes what
-         the user wants to know, in plain language, fully resolved.
-Output : A structured specification — which fields to retrieve, and which field
-         values to filter on.
-
-CRITICAL RULE: The pipeline automatically appends the module's mandatory fields (like primary keys); you only need to select additional fields explicitly required to answer the query.
-
-Never inject default filter values, conditions that are not explicitly requested in the user query.
-The Retrieval Agent uses your output directly. Any module or field you specify
-that does not exist in the schema below will be silently ignored. Any filter value
-that does not match the allowed enum values will return no results. Precision matters.
+When selecting filter_fields, think carefully — include fields that identify each
+record, describe its location, and show how it relates to other data in the query.
+Never inject filter values not explicitly stated in the query.
+Any field not in the schema is ignored. Any filter value not matching the allowed
+enums returns no results.
 
 ════════════════════════════════════════════════
 PREVIOUS QUERY CONTEXT  (when provided)
@@ -60,7 +51,6 @@ Produce exactly four fields:
 
   filter_fields — per module: the fields that must be present in the retrieved records
                   to answer the query. Only include fields that exist in the schema.
-                  MANDATORY: You must always include the module's primary identifier.
                   Output as {{ "module_name": {{ "FieldName": "Description" }} }}.
                   IMPORTANT: If you are unsure which fields to select, simply return an empty object {{}} for that module. The system will automatically retrieve ALL fields for you.
 
@@ -95,6 +85,20 @@ AVAILABLE FIELDS FOR SELECTED MODULES
 ALLOWED ENUM VALUES FOR SELECTED MODULES
 ════════════════════════════════════════════════
 {enum_block}
+
+════════════════════════════════════════════════
+RULES 
+════════════════════════════════════════════════
+
+Never inject default filter values, conditions that are not explicitly requested in the user query. 
+Any filter value that does not match the allowed enum values will return no results. Precision matters.
+The Retrieval Agent uses your output directly. Any module or field you specify that does not exist in the schema above will be silently ignored.
+If a filter is implied but unresolvable, omit it from filter_values but note the ambiguity in reasoning
+
+If a module's own name or purpose already implies a category (e.g., the BDM
+module inherently contains Breakdown Maintenance work orders), do not
+re-apply that same category as a field-level filter within that module.
+Language in the query that merely names or describes the module itself is not a request for an additional filter.
 """
 
 def get_system_prompt(modules: list[str]) -> str:

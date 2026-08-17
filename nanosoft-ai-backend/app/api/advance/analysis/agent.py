@@ -16,6 +16,7 @@ from google.genai import types
 from app.api.advance.analysis.schemas import AnalysisOutput
 from app.api.advance.analysis.prompt import get_system_prompt
 from app.api.advance.analysis.metadata import MODULE_SCHEMAS, get_metadata
+from app.api.advance.analysis.metadata.mandatory_fields import MANDATORY_FIELDS
 from app.api.advance.gemini_stream import stream_with_thoughts
 
 logger = logging.getLogger("advance.analysis")
@@ -280,6 +281,87 @@ def analyze_query(
             if actual_field:
                 valid_filter_values[mod][actual_field] = val
 
+    # ── Filter value field injection pass ─────────────────────────────────────
+    # If a field is used in filter_values but missing from filter_fields,
+    # we must inject it so that the column is fetched from the database
+    # and made available to the downstream planner agent.
+    logger.info("[Analysis Agent] ── Filter value field injection pass ──")
+    for mod in valid_modules:
+        fv_fields = valid_filter_values.get(mod, {})
+        mod_schema = MODULE_SCHEMAS.get(mod, {})
+        injected_fv = []
+        for fv_field in fv_fields:
+            if fv_field not in valid_filter_fields[mod]:
+                if fv_field in mod_schema:
+                    valid_filter_fields[mod][fv_field] = mod_schema[fv_field]
+                    injected_fv.append(fv_field)
+                    logger.info(
+                        "[Analysis Agent] [%s] filter value field '%s' — INJECTED (was missing from filter_fields)",
+                        mod, fv_field
+                    )
+        if injected_fv:
+            logger.info("[Analysis Agent] [%s] injected filter fields  : %s", mod, injected_fv)
+
+    # ── Mandatory field injection ─────────────────────────────────────────────
+    # After the LLM's filter_fields are validated, we ensure that every
+    # cross-module relationship field defined in MANDATORY_FIELDS is present.
+    # - If the LLM already selected it  → skip (keep LLM's version, no override)
+    # - If the LLM missed it            → inject with description from MODULE_SCHEMAS
+    # This runs ONLY when the LLM returned specific fields (not the auto-fill-all path).
+    logger.info("[Analysis Agent] ── Mandatory field injection pass ──")
+    for mod in valid_modules:
+        mandatory_list = MANDATORY_FIELDS.get(mod, [])
+        if not mandatory_list:
+            logger.info("[Analysis Agent] [%s] no mandatory fields defined — skip", mod)
+            continue
+
+        mod_schema      = MODULE_SCHEMAS.get(mod, {})
+        already_present = []
+        injected        = []
+        missing_schema  = []   # field listed in MANDATORY_FIELDS but not in schema (safety net)
+
+        for mand_field in mandatory_list:
+            if mand_field in valid_filter_fields[mod]:
+                # LLM already selected this field — nothing to do
+                already_present.append(mand_field)
+                logger.debug(
+                    "[Analysis Agent] [%s] mandatory '%s' — already selected by LLM",
+                    mod, mand_field
+                )
+            elif mand_field in mod_schema:
+                # LLM missed it — inject with description from metadata
+                valid_filter_fields[mod][mand_field] = mod_schema[mand_field]
+                injected.append(mand_field)
+                logger.info(
+                    "[Analysis Agent] [%s] mandatory '%s' — INJECTED (was missing from LLM output)",
+                    mod, mand_field
+                )
+            else:
+                # Field listed in MANDATORY_FIELDS but not in module's schema — config error
+                missing_schema.append(mand_field)
+                logger.warning(
+                    "[Analysis Agent] [%s] mandatory '%s' — SKIPPED (not found in MODULE_SCHEMAS — check mandatory_fields.py)",
+                    mod, mand_field
+                )
+
+        logger.info(
+            "[Analysis Agent] [%s] mandatory injection summary: "
+            "total_mandatory=%d | already_present=%d | injected=%d | schema_mismatch=%d",
+            mod,
+            len(mandatory_list),
+            len(already_present),
+            len(injected),
+            len(missing_schema),
+        )
+        if injected:
+            logger.info("[Analysis Agent] [%s] injected fields  : %s", mod, injected)
+        if already_present:
+            logger.info("[Analysis Agent] [%s] already present  : %s", mod, already_present)
+        if missing_schema:
+            logger.warning("[Analysis Agent] [%s] schema mismatches: %s", mod, missing_schema)
+
+    logger.info("[Analysis Agent] ── Mandatory injection pass complete ──")
+
     total_time = time.perf_counter() - start_total
     logger.info("[Analysis Agent] latency : total=%.2fs", total_time)
     logger.info("[Analysis Agent] modules selected : %s", valid_modules)
@@ -287,8 +369,8 @@ def analyze_query(
     for mod in valid_modules:
         ff = list(valid_filter_fields.get(mod, {}).keys())
         fv = valid_filter_values.get(mod, {})
-        logger.info("[Analysis Agent] [%s] filter_fields : %s", mod, ff)
-        logger.info("[Analysis Agent] [%s] filter_values : %s", mod, fv)
+        logger.info("[Analysis Agent] [%s] final filter_fields (%d) : %s", mod, len(ff), ff)
+        logger.info("[Analysis Agent] [%s] filter_values       : %s", mod, fv)
 
     return {
         "reasoning":     response.reasoning,
