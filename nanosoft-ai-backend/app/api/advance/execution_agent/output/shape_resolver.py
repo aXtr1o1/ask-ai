@@ -71,7 +71,12 @@ def _qualifies_for_graph(items: list) -> bool:
 
 
 def _find_embedded_list(d: dict) -> list | None:
-    """Return the first non-empty list value found inside a dict, or None."""
+    """Return the first non-empty list of dicts found inside a dict,
+    falling back to the first non-empty list of any type.
+    """
+    for v in d.values():
+        if isinstance(v, list) and _all_dicts(v):
+            return v
     for v in d.values():
         if isinstance(v, list) and v:
             return v
@@ -205,8 +210,6 @@ def resolve(
         {
             "resolved_format":  str,   # PLAIN_TEXT | TABLE | GRAPH
             "shape_descriptor": dict,  # {"shape": ..., "reason": ...}
-            "alternatives":     list,  # other compatible formats
-            "overridden":       bool,  # True if resolved_format != suggested_format
         }
     """
     shape, reason, best_format = _analyze(final_value)
@@ -219,8 +222,6 @@ def resolve(
     else:
         resolved_format = best_format
 
-    alternatives = [f for f in compatible if f != resolved_format]
-
     logger.info(
         "[Shape Resolver] format=%s | shape=%s | reason=%s",
         resolved_format, shape, reason,
@@ -229,6 +230,4 @@ def resolve(
     return {
         "resolved_format":  resolved_format,
         "shape_descriptor": {"shape": shape, "reason": reason},
-        "alternatives":     alternatives,
-        "overridden":       resolved_format != suggested_upper,
     }

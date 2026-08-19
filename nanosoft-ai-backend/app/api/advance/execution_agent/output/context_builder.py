@@ -11,9 +11,19 @@ Format determines what the Formatting Agent receives:
   PLAIN_TEXT /    — steps + shape_descriptor + alternatives + final_answer.
   BULLET_LIST /     LLM reasons over the result to produce the full response.
   NUMBERED_LIST
-"""
-from app.api.advance.execution_agent.output.shape_resolver import resolve as resolve_shape
 
+Dashboard composition:
+  Regardless of format, the DashboardComposer is called to produce a typed
+  component list (kpi / bar_chart / time_series_chart / table / text) from
+  the final_answer.  This list is included in the context as `dashboard` and
+  flows through to the frontend without touching the LLM.
+"""
+import logging
+
+from app.api.advance.execution_agent.output.shape_resolver    import resolve as resolve_shape
+from app.api.advance.execution_agent.output.dashboard_composer import compose as compose_dashboard
+
+logger = logging.getLogger("advance.context_builder")
 
 _DATA_HEAVY_FORMATS = {"TABLE", "GRAPH"}
 
@@ -36,7 +46,8 @@ def build_formatting_context(
 
     Returns a dict with:
         planned_steps, response_format, shape_descriptor, alternatives,
-        and final_answer (only for non-data-heavy formats).
+        final_answer (always included — service layer needs it for all formats),
+        and dashboard (typed component list produced by DashboardComposer).
     """
     queue        = execution_result.get("queue", [])
     step_results = execution_result.get("step_results", {})
@@ -68,18 +79,29 @@ def build_formatting_context(
         for step in queue
     ]
 
+    # Compose the dynamic dashboard from the final_answer.
+    # Pure Python, no LLM, no hardcoded field names.
+    # The dashboard is always built — the frontend decides whether to use it.
+    try:
+        dashboard = compose_dashboard(
+            final_answer     = final_answer,
+            shape_descriptor = shape_result["shape_descriptor"],
+            resolved_format  = resolved_format,
+        )
+    except Exception as exc:
+        logger.warning("[ContextBuilder] DashboardComposer failed: %s", exc)
+        dashboard = []
+
     context = {
         "planned_steps":     planned_steps,
         "response_format":   resolved_format,
         "shape_descriptor":  shape_result["shape_descriptor"],
-        "alternatives":      shape_result["alternatives"],
-        "format_overridden": shape_result["overridden"],
+        # Always include final_answer so service.py can patch it back.
+        # The Formatting Agent LLM only receives it for non-data-heavy formats
+        # (see Formatting_agent/agent.py) — but we store it here regardless.
+        "final_answer":      final_answer,
+        # Typed presentation component list — independent of layout/format.
+        "dashboard":         dashboard,
     }
-
-    # Send final_answer only for non-data-heavy formats.
-    # TABLE and GRAPH results are rendered by the frontend directly —
-    # no need to send the raw data to the Formatting Agent LLM.
-    if resolved_format.upper() not in _DATA_HEAVY_FORMATS:
-        context["final_answer"] = final_answer
 
     return context

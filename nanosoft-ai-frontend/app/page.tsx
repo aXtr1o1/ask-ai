@@ -25,7 +25,7 @@ import SpaceBooking from "./components/Bookings/spacebooking";
 import SpaceBookingModal from "./components/Bookings/SpaceBookingModal";
 import ComplaintsModal from "./components/Bookings/ComplaintsModal";
 import AssetAnalyticsDashboard from "./components/AssetAnalytics/AssetAnalyticsDashboard";
-import AdvanceChatUI, { sendAdvanceQuery, AdvanceStreamMessage, renderCharToDom } from "./components/Advance/AdvanceChatUI";
+import AdvanceChatUI, { sendAdvanceQuery, sendAdvanceAudioQuery, AdvanceStreamMessage, renderCharToDom } from "./components/Advance/AdvanceChatUI";
 
 /* changes done by megnathan: Cleaned up icon imports to avoid conflicts with local definitions */
 import {
@@ -3725,6 +3725,187 @@ export default function Home() {
     );
   };
 
+  const handleAdvanceAudioSend = async () => {
+    const blob = voiceRecorder.recordedAudioBlob;
+    if (!blob) return;
+
+    const audioUrl = URL.createObjectURL(blob);
+    let actualDuration = voiceRecorder.audioDuration > 0 ? voiceRecorder.audioDuration : voiceRecorder.recordingTime;
+
+    if (actualDuration === 0) {
+      actualDuration = await new Promise<number>((resolve) => {
+        const tmp = new Audio(audioUrl);
+        const onMeta = () => {
+          tmp.removeEventListener("loadedmetadata", onMeta);
+          resolve(isFinite(tmp.duration) ? tmp.duration : voiceRecorder.recordingTime);
+        };
+        tmp.addEventListener("loadedmetadata", onMeta);
+        setTimeout(() => { tmp.removeEventListener("loadedmetadata", onMeta); resolve(voiceRecorder.recordingTime); }, 600);
+      });
+    }
+
+    voiceRecorder.deleteRecording();
+
+    const now = Date.now();
+    setChatSessions(prev => {
+      const existing = prev.find(s => s.id === sessionId);
+      const rest = prev.filter(s => s.id !== sessionId);
+      if (existing) return [{ ...existing, updatedAt: now }, ...rest];
+      return [{ id: sessionId, title: "New Chat", createdAt: now, updatedAt: now }, ...rest];
+    });
+
+    setShowFeaturePlaceholder(false);
+    const placeholderMsg: Message = { role: "ai", text: "", streaming: true, isAdvanceStream: true, agentStatus: "thinking" };
+    setMessages(prev => {
+      const updated = [...prev, {
+        role: "user" as const,
+        text: "Voice message",
+        isAudio: true,
+        audioDuration: actualDuration,
+        audioUrl: audioUrl
+      }, placeholderMsg];
+      sessionMessagesRef.current.set(sessionId, updated);
+      return updated;
+    });
+
+    setIsLoading(true);
+
+    let currentStage = "";
+    let charQueue: string[] = [];
+    let isFlushing = false;
+
+    const flushQueue = () => {
+      if (charQueue.length === 0) {
+        isFlushing = false;
+        return;
+      }
+      isFlushing = true;
+
+      const charsToType = Math.min(2, charQueue.length);
+      for (let i = 0; i < charsToType && charQueue.length > 0; i++) {
+        renderCharToDom(charQueue.shift()!);
+      }
+
+      requestAnimationFrame(flushQueue);
+    };
+
+    sendAdvanceAudioQuery(
+      blob,
+      process.env.NEXT_PUBLIC_API_BASE_URL!,
+      (stage) => {
+        charQueue.length = 0;
+        isFlushing = false;
+        const sc = document.getElementById("active-stream-container");
+        if (sc) {
+          sc.innerHTML = "";
+
+          let defaultAction = "";
+          if (stage === "Understanding Agent") defaultAction = "Analyzing query intent and routing request...";
+          else if (stage === "Analysis Agent") defaultAction = "Extracting database fields and parsing filters...";
+          else if (stage === "Retrieval Layer") defaultAction = "Connecting to database and fetching records...";
+          else if (stage === "Preprocessing Layer") defaultAction = "Cleaning and preprocessing retrieved data...";
+          else if (stage === "Execution Agent") defaultAction = "Running query execution plan and solving steps...";
+          else if (stage === "Formatting Agent") defaultAction = "Generating summary explanation and rendering layout...";
+
+          if (defaultAction) {
+            const line = document.createElement("span");
+            line.className = "active-stream-line default-action-text";
+            line.style.cssText = "font-family:var(--font-mono, 'Fira Code', monospace);font-size:12px;color:#D4AF37;line-height:1.6;font-style:italic;display:block;opacity:0.75;";
+            line.textContent = defaultAction;
+            sc.appendChild(line);
+          }
+        }
+
+        currentStage = stage;
+
+        setMessages(prev => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last && last.role === "ai") {
+            last.stage = stage;
+            last.agentStatus = "thinking";
+            last.isRetrieving = false;
+            if (!last.stages) last.stages = [];
+            if (!last.stages.find((s: any) => s.name === stage)) {
+              last.stages.push({ name: stage });
+            }
+          }
+          return [...updated];
+        });
+      },
+      (chars) => {
+        const sc = document.getElementById("active-stream-container");
+        if (sc) {
+          const defaultText = sc.querySelector(".default-action-text");
+          if (defaultText) {
+            sc.innerHTML = "";
+          }
+        }
+
+        setMessages(prev => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last && last.role === "ai" && !last.streamContent) {
+            last.streamContent = "started";
+            return updated;
+          }
+          return prev;
+        });
+
+        const str = typeof chars === "string" ? chars : String(chars);
+        for (const ch of str) {
+          charQueue.push(ch);
+        }
+        if (!isFlushing) {
+          isFlushing = true;
+          requestAnimationFrame(flushQueue);
+        }
+      },
+      (stage) => {
+        charQueue.length = 0;
+        isFlushing = false;
+        const sc = document.getElementById("active-stream-container");
+        if (sc) sc.innerHTML = "";
+      },
+      (data) => {
+        charQueue.length = 0;
+        isFlushing = false;
+        const sc = document.getElementById("active-stream-container");
+        if (sc) sc.innerHTML = "";
+
+        setMessages(prev => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last && last.role === "ai") {
+            last.streaming = false;
+            last.agentStatus = "done";
+            if (data) last.advanceResult = data;
+          }
+          sessionMessagesRef.current.set(sessionId, updated);
+          return updated;
+        });
+        setIsLoading(false);
+      },
+      (error) => {
+        setMessages(prev => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last && last.role === "ai") {
+            last.text = `Error: ${error.message}`;
+            last.streaming = false;
+            last.agentStatus = "done";
+          }
+          return updated;
+        });
+        setIsLoading(false);
+      },
+      sessionId,
+      loggedInUser ?? "",
+      userIdInt != null ? String(userIdInt) : undefined,
+      actualDuration
+    );
+  };
+
   // ── Send message over the persistent WebSocket ────────────────────────────
   const sendMessage = () => {
     const domVal = inputRef.current?.value ?? "";
@@ -3859,7 +4040,7 @@ export default function Home() {
             displayTimeText={voiceRecorder.displayTimeText}
             onTogglePlayback={voiceRecorder.togglePlayback}
             onDelete={voiceRecorder.deleteRecording}
-            onSend={voiceRecorder.sendVoiceMessage}
+            onSend={isAdvanceAskAI ? handleAdvanceAudioSend : voiceRecorder.sendVoiceMessage}
             isLoading={isLoading}
             wsConnectionState={wsConnectionState}
           />

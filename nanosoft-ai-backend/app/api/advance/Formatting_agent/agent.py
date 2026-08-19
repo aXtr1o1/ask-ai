@@ -73,7 +73,9 @@ def format_response(
     response_format   = formatting_context.get("response_format",   "PLAIN_TEXT").upper()
     final_answer      = formatting_context.get("final_answer",      None)
     shape_descriptor  = formatting_context.get("shape_descriptor",  {})
-    format_overridden = formatting_context.get("format_overridden", False)
+    # Dashboard component list produced by DashboardComposer (deterministic, no LLM).
+    # May be an empty list if composition was skipped or failed gracefully.
+    dashboard         = formatting_context.get("dashboard",          [])
 
     is_data_heavy = response_format in _DATA_HEAVY_FORMATS
 
@@ -97,7 +99,6 @@ def format_response(
     system_prompt = build_formatting_prompt(
         response_format,
         shape_descriptor  = shape_descriptor,
-        format_overridden = format_overridden,
     )
 
     # ── Stream LLM ────────────────────────────────────────────────────────────
@@ -144,4 +145,8 @@ def format_response(
         "layout":        response_format,
         "explanation":   explanation,
         "final_answer":  final_answer,   # None for TABLE/GRAPH — frontend uses execution result
+        # Typed presentation component list from DashboardComposer.
+        # Always present (may be empty list).  Frontend uses this for the
+        # dynamic dashboard renderer when the list is non-empty.
+        "dashboard":     dashboard,
     }

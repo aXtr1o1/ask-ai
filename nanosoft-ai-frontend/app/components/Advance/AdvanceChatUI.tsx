@@ -5,6 +5,7 @@ import {
   IconMessageChatbot,
   IconPlus,
 } from "@tabler/icons-react";
+import DynamicDashboard from "./DynamicDashboard";
 
 
 interface AdvanceChatProps {
@@ -711,7 +712,14 @@ export async function sendAdvanceQuery(
     });
 
     if (!response.ok) {
-      throw new Error(`Advance AI error (${response.status}): ${await response.text()}`);
+      const errText = await response.text();
+      let cleanMsg = `Advance AI error (${response.status}): ${errText}`;
+      try {
+        const parsed = JSON.parse(errText);
+        if (parsed.detail) cleanMsg = parsed.detail;
+        else if (parsed.message) cleanMsg = parsed.message;
+      } catch (e) {}
+      throw new Error(cleanMsg);
     }
 
     const reader  = response.body!.getReader();
@@ -755,6 +763,94 @@ export async function sendAdvanceQuery(
           } else if (evt.status === "complete") {
             onComplete(evt.result);
 
+          } else if (evt.status === "error") {
+            throw new Error(evt.message || "Unknown pipeline error");
+          }
+        } catch (e) {
+          console.error("Error processing SSE line:", e, "Payload:", payload);
+        }
+      }
+    }
+  } catch (err) {
+    onError(err);
+  }
+}
+
+
+export async function sendAdvanceAudioQuery(
+  audioBlob: Blob,
+  baseUrl: string,
+  onStart: (stage: string) => void,
+  onChunk: (chars: string) => void,
+  onEnd: (stage: string) => void,
+  onComplete: (result: any) => void,
+  onError: (error: any) => void,
+  sessionId?: string,
+  userName?: string,
+  userId?: string | number,
+  audioDuration?: number
+) {
+  try {
+    const formData = new FormData();
+    const mimeType = audioBlob.type || "audio/ogg";
+    const extension = mimeType.includes("ogg") ? "ogg" : mimeType.includes("webm") ? "webm" : "ogg";
+
+    formData.append("file", audioBlob, `audio.${extension}`);
+    formData.append("session_id", sessionId || "default");
+    if (userName && String(userName).trim()) formData.append("user_name", String(userName).trim());
+    if (userId   && String(userId).trim())   formData.append("user_id", String(userId).trim());
+    if (audioDuration !== undefined) formData.append("audio_seconds", String(Math.ceil(audioDuration)));
+
+    const response = await fetch(`${baseUrl}/api/advance/ask-ai/audio`, {
+      method:  "POST",
+      body:    formData,
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      let cleanMsg = `Advance AI audio error (${response.status}): ${errText}`;
+      try {
+        const parsed = JSON.parse(errText);
+        if (parsed.detail) cleanMsg = parsed.detail;
+        else if (parsed.message) cleanMsg = parsed.message;
+      } catch (e) {}
+      throw new Error(cleanMsg);
+    }
+
+    const reader  = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let   buffer  = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+
+        const payload = trimmed.startsWith("data: ")
+          ? trimmed.slice(6).trim()
+          : trimmed;
+
+        if (payload === "[DONE]") break;
+
+        try {
+          const evt = JSON.parse(payload);
+
+          if (evt.status === "running_start") {
+            onStart(evt.stage);
+          } else if (evt.status === "running_chunk") {
+            if (evt.word) onChunk(evt.word);
+          } else if (evt.status === "running_end") {
+            onEnd(evt.stage);
+          } else if (evt.status === "complete") {
+            onComplete(evt.result);
           } else if (evt.status === "error") {
             throw new Error(evt.message || "Unknown pipeline error");
           }
@@ -890,79 +986,111 @@ export function AdvanceStreamMessage({ msg, isDark = true }: { msg: any; isDark?
         </div>
       )}
 
-      {/* Final Envelope Result — uses the premium renderChatResponseHtml layout */}
-      {!msg.streaming && msg.advanceResult && (
-        <div 
-          className="ai-bubble"
-          style={{ width: "100%", display: "flex", flexDirection: "column", gap: "12px", padding: "12px" }}
-          dangerouslySetInnerHTML={{ 
-            __html: renderChatResponseHtml((() => {
-              // Backend sends: { formatted_result: { layout, explanation, final_answer, response_type } }
-              //           or:  { web_search_summary: "..." }
-              //           or:  { general_response: "..." }
-              const res = msg.advanceResult;
-              const fr  = res?.formatted_result;   // unwrap one level
+      {/* Final Envelope Result */}
+      {!msg.streaming && msg.advanceResult && (() => {
+        const res = msg.advanceResult;
+        const fr  = res?.formatted_result;
 
-              if (fr) {
-                // db_query path — TABLE or PLAIN_TEXT result
-                const layout       = (fr.layout || "PLAIN_TEXT").toUpperCase();
-                const explanation  = fr.explanation || "";
-                const finalAnswer  = fr.final_answer;
+        // ── Dynamic Dashboard path ──────────────────────────────────────────
+        // If the backend produced a dashboard component list, render it with
+        // the new DynamicDashboard component.  No dangerouslySetInnerHTML.
+        if (fr?.dashboard && Array.isArray(fr.dashboard) && fr.dashboard.length > 0) {
+          return (
+            <div
+              className="ai-bubble"
+              style={{ width: "100%", display: "flex", flexDirection: "column", gap: "12px", padding: "12px" }}
+            >
+              <DynamicDashboard
+                components={fr.dashboard}
+                explanation={fr.explanation || undefined}
+              />
+            </div>
+          );
+        }
 
-                if (layout === "TABLE" && Array.isArray(finalAnswer) && finalAnswer.length > 0) {
-                  // Render explanation + HTML table
-                  const cols   = Object.keys(finalAnswer[0]);
-                  const thHtml = cols.map(c => `<th style="padding:6px 10px;text-align:left;color:#D4AF37;border-bottom:1px solid rgba(212,175,55,0.3);white-space:nowrap;">${escapeHtml(c)}</th>`).join("");
-                  const rowsHtml = finalAnswer.map(row =>
-                    `<tr>${cols.map(c => `<td style="padding:5px 10px;border-bottom:1px solid rgba(255,255,255,0.05);color:#f1f5f9;">${escapeHtml(String(row[c] ?? ""))}</td>`).join("")}</tr>`
-                  ).join("");
-                  const tableHtml = `
-                    <div style="overflow-x:auto;margin-top:10px;">
-                      <table style="width:100%;border-collapse:collapse;font-size:13px;">
-                        <thead><tr>${thHtml}</tr></thead>
-                        <tbody>${rowsHtml}</tbody>
-                      </table>
-                    </div>`;
+        // ── Legacy / fallback path (unchanged) ──────────────────────────────
+        // Handles: general intent, web_search intent, and any db_query result
+        // where the dashboard list is empty (e.g. old backend, error state).
+        return (
+          <div
+            className="ai-bubble"
+            style={{ width: "100%", display: "flex", flexDirection: "column", gap: "12px", padding: "12px" }}
+            dangerouslySetInnerHTML={{
+              __html: renderChatResponseHtml((() => {
+                if (fr) {
+                  const layout      = (fr.layout || "PLAIN_TEXT").toUpperCase();
+                  const explanation = fr.explanation || "";
+                  const finalAnswer = fr.final_answer;
+
+                  if (layout === "TABLE" && Array.isArray(finalAnswer) && finalAnswer.length > 0) {
+                    const cols     = Object.keys(finalAnswer[0]);
+                    const thHtml   = cols.map(c => `<th style="padding:6px 10px;text-align:left;color:#D4AF37;border-bottom:1px solid rgba(212,175,55,0.3);white-space:nowrap;">${escapeHtml(c)}</th>`).join("");
+                    const rowsHtml = finalAnswer.map((row: any) =>
+                      `<tr>${cols.map(c => `<td style="padding:5px 10px;border-bottom:1px solid rgba(255,255,255,0.05);color:#f1f5f9;">${escapeHtml(String(row[c] ?? ""))}</td>`).join("")}</tr>`
+                    ).join("");
+                    const tableHtml = `
+                      <div style="overflow-x:auto;margin-top:10px;">
+                        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                          <thead><tr>${thHtml}</tr></thead>
+                          <tbody>${rowsHtml}</tbody>
+                        </table>
+                      </div>`;
+                    return {
+                      response_type:    "table-response",
+                      layout:           "HTML",
+                      explanation:      explanation,
+                      formatted_answer: tableHtml,
+                      header:           "Query Result",
+                    };
+                  }
+
                   return {
-                    response_type:    "table-response",
-                    layout:           "HTML",
-                    explanation:      explanation,
-                    formatted_answer: tableHtml,
-                    header:           "Query Result"
+                    response_type:    "plain-response",
+                    layout:           "MARKDOWN",
+                    explanation:      "",
+                    formatted_answer: explanation || (typeof finalAnswer === "string" ? finalAnswer : JSON.stringify(finalAnswer, null, 2)),
+                    header:           "AI Response",
                   };
                 }
 
-                // PLAIN_TEXT or no rows
+                if (res?.web_search_summary) {
+                  return {
+                    response_type:    "web-response",
+                    layout:           "MARKDOWN",
+                    explanation:      "",
+                    formatted_answer: res.web_search_summary,
+                    header:           "Web Search",
+                  };
+                }
+
                 return {
-                  response_type:    "plain-response",
+                  response_type:    "general",
                   layout:           "MARKDOWN",
                   explanation:      "",
-                  formatted_answer: explanation || (typeof finalAnswer === "string" ? finalAnswer : JSON.stringify(finalAnswer, null, 2)),
-                  header:           "AI Response"
+                  formatted_answer: res?.general_response || "",
+                  header:           "AI Response",
                 };
-              }
+              })())
+            }}
+          />
+        );
+      })()}
 
-              if (res?.web_search_summary) {
-                return {
-                  response_type:    "web-response",
-                  layout:           "MARKDOWN",
-                  explanation:      "",
-                  formatted_answer: res.web_search_summary,
-                  header:           "Web Search"
-                };
-              }
-
-              // general intent
-              return {
-                response_type:    "general",
-                layout:           "MARKDOWN",
-                explanation:      "",
-                formatted_answer: res?.general_response || "",
-                header:           "AI Response"
-              };
-            })())
-          }} 
-        />
+      {/* Error / Text fallback */}
+      {!msg.streaming && !msg.advanceResult && msg.text && (
+        <div style={{
+          fontSize: "14px",
+          color: msg.text.startsWith("Error:") ? "#EF4444" : "var(--color-text, #FFFFFF)",
+          fontFamily: msg.text.startsWith("Error:") ? "var(--font-mono, 'Fira Code', monospace)" : "inherit",
+          padding: "10px 12px",
+          background: msg.text.startsWith("Error:") ? "rgba(239, 68, 68, 0.05)" : "transparent",
+          border: msg.text.startsWith("Error:") ? "1px solid rgba(239, 68, 68, 0.2)" : "none",
+          borderRadius: "8px",
+          width: "100%",
+          whiteSpace: "pre-wrap"
+        }}>
+          {msg.text}
+        </div>
       )}
     </>
   );

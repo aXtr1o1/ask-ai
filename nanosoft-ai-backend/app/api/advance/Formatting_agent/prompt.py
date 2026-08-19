@@ -15,7 +15,6 @@ _DATA_HEAVY_FORMATS = {"TABLE", "GRAPH"}
 def build_formatting_prompt(
     response_format:  str,
     shape_descriptor: dict | None = None,
-    format_overridden: bool = False,
 ) -> str:
     """
     Returns the system prompt for the Formatting Agent.
@@ -43,14 +42,6 @@ def build_formatting_prompt(
     else:
         shape_block = "  (shape not available)"
 
-    # Override notice
-    override_note = (
-        "\nNote: The display format was auto-corrected because the data shape "
-        "did not match the originally suggested format. "
-        "The format shown above is the best fit for the result.\n"
-        if format_overridden else ""
-    )
-
     # Writing instruction — depends on data-heavy vs lightweight
     if is_data_heavy:
         writing_instruction = (
@@ -72,7 +63,6 @@ def build_formatting_prompt(
     return (
         "You are the Insight Writer in a Facility Management analytics platform.\n\n"
         + writing_instruction
-        + f"\n{override_note}"
         + "\n════════════════════════════════════════════\n"
         + "DATA SHAPE  (structure — no raw values)\n"
         + "════════════════════════════════════════════\n"
