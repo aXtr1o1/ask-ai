@@ -257,11 +257,40 @@ def run_execution(
                 usage.get("input_tokens", 0), usage.get("output_tokens", 0), usage.get("total_tokens", 0))
     logger.info("[Execution Agent] latency : llm=%.2fs", llm_time)
 
-    try:
-        parsed = json.loads(_strip_markdown(raw_json))
-    except json.JSONDecodeError as exc:
-        logger.error("[Execution Agent] JSON parse failed: %s\nRaw: %.300s", exc, raw_json)
-        raise ValueError(f"Execution Agent returned invalid JSON. Error: {exc}") from exc
+    # ── Parse JSON — single retry on decode failure ────────────────────────────
+    # Gemini occasionally produces malformed JSON when streaming is combined with
+    # thinking mode and application/json mime type. A second call with the same
+    # prompt almost always succeeds. Two attempts max — no infinite loop.
+    _contents   = [{"role": "user", "parts": [{"text": human_message}]}]
+    _parse_error: json.JSONDecodeError | None = None
+    for _attempt in range(1, 3):
+        try:
+            parsed = json.loads(_strip_markdown(raw_json))
+            if _attempt > 1:
+                logger.info("[Execution Agent] JSON parse succeeded on retry (attempt %d).", _attempt)
+            break
+        except json.JSONDecodeError as exc:
+            _parse_error = exc
+            logger.warning(
+                "[Execution Agent] JSON decode failed (attempt %d/2): %s  Raw snippet: %.200s",
+                _attempt, exc, raw_json,
+            )
+            if _attempt < 2:
+                logger.info("[Execution Agent] Retrying LLM call with same prompt...")
+                _, raw_json, usage = stream_with_thoughts(
+                    contents   = _contents,
+                    config     = config,
+                    thought_cb = None,   # silent retry — no thought forwarding
+                )
+    else:
+        logger.error(
+            "[Execution Agent] JSON decode failed after 2 attempts. "
+            "Last raw response: %.400s", raw_json,
+        )
+        raise ValueError(
+            f"Execution Agent returned invalid JSON after 2 attempts. "
+            f"Last error: {_parse_error}"
+        ) from _parse_error
 
     # ── Coerce: model sometimes wraps the array in a dict ────────────────────
     # e.g. {"queue": [...]} or {"steps": [...]} instead of [...]

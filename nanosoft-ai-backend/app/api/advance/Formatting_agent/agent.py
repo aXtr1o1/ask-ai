@@ -77,6 +77,14 @@ def format_response(
     # May be an empty list if composition was skipped or failed gracefully.
     dashboard         = formatting_context.get("dashboard",          [])
 
+    # Extract component titles + types for the prompt — structure only, no values.
+    # The LLM uses this to reference the exact visuals the user is seeing.
+    dashboard_summary = [
+        {"type": item.get("type", ""), "title": item.get("title", "")}
+        for item in dashboard
+        if isinstance(item, dict) and item.get("type") and item.get("title")
+    ]
+
     is_data_heavy = response_format in _DATA_HEAVY_FORMATS
 
     _log_input(response_format, query_summary or "", planned_steps, final_answer)
@@ -99,12 +107,13 @@ def format_response(
     system_prompt = build_formatting_prompt(
         response_format,
         shape_descriptor  = shape_descriptor,
+        dashboard_summary = dashboard_summary,
     )
 
     # ── Stream LLM ────────────────────────────────────────────────────────────
     config = types.GenerateContentConfig(
         system_instruction = system_prompt,
-        temperature        = 0.3,
+        temperature        = 1.0,
         thinking_config    = types.ThinkingConfig(
             thinking_budget  = 256,
             include_thoughts = True,

@@ -92,6 +92,8 @@ def _is_currency(vals: list[float]) -> bool:
         return False
     if not any(v > 0 for v in vals):
         return False
+    if all(float(v) == int(v) for v in vals):
+        return False
     return True
 
 
@@ -108,18 +110,20 @@ def _is_ratio_column(vals: list[float]) -> bool:
 
 def _is_percent_column(vals: list[float]) -> bool:
     """
-    All values between 0 and 100 inclusive AND max value > 1.0
-    (to distinguish from 0-1 ratios).
+    All values between 0 and 100 inclusive AND at least one value > 1.0
+    (to distinguish from 0-1 ratios — handles max==1.0 edge case cleanly).
     This is a 0-to-100 percentage — display as-is with % suffix.
     Must have at least 2 values.
     """
     if len(vals) < 2:
         return False
-    return (
-        all(0.0 <= v <= 100.0 for v in vals)
-        and max(vals) > 1.0
-        and not _is_ratio_column(vals)
-    )
+    if not all(0.0 <= v <= 100.0 for v in vals):
+        return False
+    if all(0.0 <= v <= 1.0 for v in vals):
+        return False
+    if not any(v > 1.0 for v in vals):
+        return False
+    return True
 
 
 def _is_scalar(v: Any) -> bool:
@@ -179,7 +183,7 @@ def _find_date_key(records: list[dict]) -> str | None:
     """Return the first key whose string value looks like a date/period, or None."""
     if not records:
         return None
-    sample_rows = records[:10]
+    sample_rows = records[:min(30, len(records))]
     for k in (k for k in records[0] if not _is_private(k)):
         if any(isinstance(r.get(k), str) and _looks_like_date(r.get(k, "")) 
                for r in sample_rows):
@@ -215,6 +219,8 @@ def _normalise_list(lst: list) -> list[dict]:
                     row[k] = v
             if row:
                 clean.append(row)
+            else:
+                logger.debug("_normalise_list: skipped empty row")
     return clean
 
 
@@ -472,6 +478,8 @@ def _scan_column_types(
 
     for k in numeric_keys:
         col_vals = [float(r[k]) for r in records if _is_numeric(r.get(k))]
+        if not col_vals:
+            continue
         if _is_currency(col_vals):
             currency_keys.add(k)
         elif _is_ratio_column(col_vals):
@@ -504,11 +512,20 @@ def _find_low_cardinality_key(records: list[dict]) -> tuple[str | None, list[str
     """
     Scan all string columns for one whose unique values form a low-cardinality set
     (2–12 unique values AND repeated across many records — typical for status/type fields).
+    Also detects boolean columns (True/False) as low-cardinality.
     Returns (best_key, sorted_unique_values) or (None, []).
     """
     if len(records) < 3:
         return None, []
     sample = records[0]
+    # BUG 4.1 FIX — detect boolean columns before string scan
+    bool_keys = [
+        k for k in sample
+        if not _is_private(k)
+        and all(isinstance(r.get(k), bool) for r in records[:10] if r.get(k) is not None)
+    ]
+    if bool_keys:
+        return bool_keys[0], ["True", "False"]
     str_keys = _find_string_keys(sample)
     best_key: str | None = None
     best_score = float("inf")
@@ -518,8 +535,8 @@ def _find_low_cardinality_key(records: list[dict]) -> tuple[str | None, list[str
         all_vals = [str(r.get(k, "")).strip() for r in records if r.get(k)]
         unique_vals = set(v for v in all_vals if v)
         n_unique = len(unique_vals)
-        # Low cardinality: 2–12 unique values, covering at least 80% of records
-        if 2 <= n_unique <= 12 and len(all_vals) >= len(records) * 0.8:
+        # Low cardinality: 2–12 unique values, covering at least 60% of records
+        if 2 <= n_unique <= 12 and len(all_vals) >= len(records) * 0.6:
             # Prefer smaller cardinality (more chart-friendly)
             if n_unique < best_score:
                 best_score = n_unique
@@ -546,6 +563,15 @@ def _compose_list_of_dicts(
     sample       = records[0]
     numeric_keys = _find_numeric_keys(sample)
 
+    # fallback: scan more rows to catch numeric keys
+    # that are null in the first row
+    if not numeric_keys:
+        for row in records[1:min(10, len(records))]:
+            found = _find_numeric_keys(row)
+            if found:
+                numeric_keys = found
+                break
+
     # ── Scan column types across all records (pure value-type, no field names) ─
     currency_keys, ratio_keys, percent_keys = _scan_column_types(records, numeric_keys)
 
@@ -566,7 +592,7 @@ def _compose_list_of_dicts(
     is_scatter = False
     if resolved_format in ("scatter", "scatter_chart"):
         is_scatter = True
-    elif date_key is None and len(numeric_keys) == 2 and len(str_keys) <= 1 and len(records) > 20:
+    elif date_key is None and len(numeric_keys) == 2 and len(str_keys) <= 1 and len(records) > 30:
         is_scatter = True
 
     if is_scatter and len(numeric_keys) >= 2:
@@ -601,8 +627,10 @@ def _compose_list_of_dicts(
                 is_rat = metric in ratio_keys
                 is_pct = metric in percent_keys
                 components.append(_kpi(f"Total {h}", sum(vals), sparkline=spark_vals, delta=delta, is_currency=is_cur, is_ratio=is_rat, is_percent=is_pct))
-                components.append(_kpi(f"Avg {h}", round(sum(vals) / len(vals), 2), sparkline=spark_vals, delta=delta, is_currency=is_cur, is_ratio=is_rat, is_percent=is_pct))
-                components.append(_kpi(f"Peak {h}", max(vals), sparkline=spark_vals, delta=delta, is_currency=is_cur, is_ratio=is_rat, is_percent=is_pct))
+                non_null_vals = [v for v in vals if v is not None]
+                avg_val = round(sum(non_null_vals) / len(non_null_vals), 2) if non_null_vals else 0
+                components.append(_kpi(f"Avg {h}", avg_val, sparkline=spark_vals, delta=None, is_currency=is_cur, is_ratio=is_rat, is_percent=is_pct))
+                components.append(_kpi(f"Peak {h}", max(vals), sparkline=spark_vals, delta=None, is_currency=is_cur, is_ratio=is_rat, is_percent=is_pct))
         if len(numeric_keys) >= 2:
             components.append(_area_chart(chart_title, date_key, numeric_keys, records))
         else:
@@ -632,7 +660,7 @@ def _compose_list_of_dicts(
                 if vals:
                     spark_vals = [float(v) for v in vals if v is not None]
                     components.append(_kpi(f"Total {_humanise_key(metric)}", sum(vals), sparkline=spark_vals, is_currency=(metric in currency_keys), is_ratio=(metric in ratio_keys), is_percent=(metric in percent_keys)))
-            top20 = sorted(records, key=lambda r: r.get(numeric_keys[0], 0) or 0, reverse=True)[:20]
+            top20 = sorted(records, key=lambda r: sum(r.get(k, 0) or 0 for k in numeric_keys), reverse=True)[:20]
             components.append(_grouped_bar_chart(chart_title, cat_key, numeric_keys, top20))
             if n <= 12:
                 components.append(_donut_chart(f"Distribution — {_humanise_key(numeric_keys[0])}", cat_key, numeric_keys[0], records))
@@ -718,7 +746,7 @@ def _compose_list_of_dicts(
         _table(
             title_hint or "Details",
             _normalise_list(records),
-            note=f"Showing all {len(records)} records",
+            note=f"{len(records)} total records",
             currency_keys=currency_keys,
             ratio_keys=ratio_keys,
             percent_keys=percent_keys,
@@ -769,7 +797,10 @@ def _compose_dict(d: dict, resolved_format: str | None = None) -> list[dict]:
     # KPI cards for every scalar key — pure value-type classification
     for k, v in scalar_items.items():
         if _is_numeric(v) and isinstance(v, float) and 0.0 <= float(v) <= 1.0:
-            components.append(_gauge_chart(_humanise_key(k), round(float(v) * 100, 1)))
+            # BUG 1.2 FIX — guard against value already being a percentage (>1)
+            raw = float(v)
+            gauge_val = round(raw * 100, 1) if raw <= 1.0 else round(raw, 1)
+            components.append(_gauge_chart(_humanise_key(k), gauge_val))
         else:
             components.append(_kpi(_humanise_key(k), v))
 

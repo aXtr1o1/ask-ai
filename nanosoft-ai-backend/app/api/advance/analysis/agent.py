@@ -121,15 +121,40 @@ def analyze_query(
     )
     llm_time = time.perf_counter() - start_llm
 
-    # ── Pre-coerce JSON before Pydantic validates ─────────────────────────────
-    # The model sometimes returns filter_fields as a list ['F1','F2'] instead
-    # of a dict {'F1': 'desc', 'F2': 'desc'}, and filter_values can have null values.
-    # Fix both before handing to Pydantic so we never get a ValidationError here.
-    try:
-        raw_dict = _json.loads(json_text)
-    except _json.JSONDecodeError as exc:
-        logger.error("[Analysis Agent] JSON decode failed: %s\nRaw: %.300s", exc, json_text)
-        raise ValueError(f"Analysis Agent returned invalid JSON: {exc}") from exc
+    # ── Parse JSON — single retry on decode failure ────────────────────────────
+    # Gemini occasionally produces malformed JSON when streaming is combined with
+    # thinking mode and application/json mime type. A second call with the same
+    # prompt almost always succeeds. Two attempts max — no infinite loop.
+    _parse_error: _json.JSONDecodeError | None = None
+    for _attempt in range(1, 3):
+        try:
+            raw_dict = _json.loads(json_text)
+            if _attempt > 1:
+                logger.info("[Analysis Agent] JSON parse succeeded on retry (attempt %d).", _attempt)
+            break
+        except _json.JSONDecodeError as exc:
+            _parse_error = exc
+            logger.warning(
+                "[Analysis Agent] JSON decode failed (attempt %d/2): %s  Raw snippet: %.200s",
+                _attempt, exc, json_text,
+            )
+            if _attempt < 2:
+                logger.info("[Analysis Agent] Retrying LLM call with same prompt...")
+                _, json_text, usage = stream_with_thoughts(
+                    contents   = contents,
+                    config     = config,
+                    thought_cb = None,   # silent retry — no thought forwarding
+                )
+    else:
+        # Both attempts failed — raise with the full error context
+        logger.error(
+            "[Analysis Agent] JSON decode failed after 2 attempts. "
+            "Last raw response: %.400s", json_text,
+        )
+        raise ValueError(
+            f"Analysis Agent returned invalid JSON after 2 attempts. "
+            f"Last error: {_parse_error}"
+        ) from _parse_error
 
     # ── Coerce parallel arrays ────────────────────────────────────────────────
     # Sometimes the LLM returns filter_fields: ["StatusName"] and filter_values: ["Offline"]

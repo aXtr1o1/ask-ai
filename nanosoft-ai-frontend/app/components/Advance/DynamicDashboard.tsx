@@ -100,6 +100,7 @@ function injectAnimations() {
     .ddTr:hover td{background:rgba(212,175,55,.04)!important;transition:background .15s}
     .ddBtn{transition:all .15s ease;outline:none}
     .ddBtn:hover:not(:disabled){background:rgba(212,175,55,.18)!important;box-shadow:0 0 12px rgba(212,175,55,.22)}
+    @media (max-width:640px){.ddGrid{grid-template-columns:1fr!important;}}
   `;
   document.head.appendChild(s);
 }
@@ -258,7 +259,7 @@ function KpiGrid({items, activeFilter, allComponents}:{items:KpiC[]; activeFilte
   const cols=n===1?1:n===2?2:n<=4?2:n<=6?3:4;
   const iconColors=[G.gold,G.silver,"#34d399","#818cf8","#f472b6","#fb923c","#60a5fa"];
   return (
-    <div style={{display:"grid",gridTemplateColumns:`repeat(${cols},1fr)`,gap:12,width:"100%"}}>
+    <div style={{display:"grid",gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,gap:12,width:"100%"}}>
       {items.map((kpi,i)=>{
         const isSilver=i%2===1;
         const panel=isSilver?silverPanel:goldPanel;
@@ -270,11 +271,13 @@ function KpiGrid({items, activeFilter, allComponents}:{items:KpiC[]; activeFilte
         const ic=iconColors[i%iconColors.length];
         const glowFilter=isSilver?`drop-shadow(0 0 6px ${G.silverGlow})`:`drop-shadow(0 0 6px ${G.goldGlow})`;
 
-        // Render sparkline only if real trend data is present
-        const hasSpark = kpi.sparkline && kpi.sparkline.length > 1;
-        const sparkData = hasSpark
-          ? kpi.sparkline!.map((v: number, idx: number) => ({ id: idx, value: v }))
+        // BUG 1.4 FIX — suppress flat sparklines where all values are identical
+        const sparkData = kpi.sparkline
+          ? kpi.sparkline.map((v: number, idx: number) => ({ id: idx, value: v }))
           : [];
+        const hasVariance = sparkData.length > 1 &&
+          sparkData.some(d => d.value !== sparkData[0].value);
+        const hasSpark = hasVariance;
 
         const { value: displayValue, labelSuffix } = getFilteredKpiValue(kpi, activeFilter, allComponents);
 
@@ -289,7 +292,7 @@ function KpiGrid({items, activeFilter, allComponents}:{items:KpiC[]; activeFilte
             </div>
             {/* Value + Sparkline layout */}
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",marginTop:"auto",gap:8}}>
-              <span className="ddKpiVal" style={{fontSize:21,fontWeight:900,lineHeight:1,background:valGrad,WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text",animationDelay:`${i*.07+.1}s`,filter:glowFilter,marginBottom:2}}>{displayValue}</span>
+              <span className="ddKpiVal" style={{fontSize:21,fontWeight:900,lineHeight:1,whiteSpace:"nowrap",background:valGrad,WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text",animationDelay:`${i*.07+.1}s`,filter:glowFilter,marginBottom:2}}>{displayValue}</span>
               
               {/* Sparkline chart */}
               {hasSpark && (
@@ -316,7 +319,14 @@ function KpiGrid({items, activeFilter, allComponents}:{items:KpiC[]; activeFilte
                   color: kpi.delta > 0 ? "#10b981" : kpi.delta < 0 ? "#ef4444" : G.textMuted,
                   background: kpi.delta > 0 ? "rgba(16,185,129,0.12)" : kpi.delta < 0 ? "rgba(239,68,68,0.12)" : "rgba(255,255,255,0.05)"
                 }}>
-                  {kpi.delta > 0 ? `▲ +${kpi.delta}%` : kpi.delta < 0 ? `▼ ${kpi.delta}%` : `● No change`}
+                  {/* BUG 1.5 FIX — cap delta display to 999% to avoid partial-week inflation */}
+                  {(() => {
+                    const safeDelta = Math.min(Math.abs(kpi.delta!), 999);
+                    const sign = kpi.delta! > 0 ? "+" : kpi.delta! < 0 ? "-" : "";
+                    if (kpi.delta! > 0) return `▲ +${safeDelta}%`;
+                    if (kpi.delta! < 0) return `▼ -${safeDelta}%`;
+                    return `● No change`;
+                  })()}
                   {kpi.delta_label && <span style={{color: G.textFaint, fontWeight: 400, marginLeft: 2}}>{kpi.delta_label}</span>}
                 </span>
               ) : kpi.subtitle ? (
@@ -339,6 +349,8 @@ const SPAGE=20;
 function SummaryPanel({comp, activeFilter, toggleFilter}:{comp:SumC; activeFilter: {key: string; value: string} | null; toggleFilter: (key: string, value: string) => void}) {
   const [page,setPage]=useState(0);
   useEffect(()=>{injectAnimations();},[]);
+  // BUG 7.3 FIX — reset page when filter changes
+  useEffect(()=>{ setPage(0); },[activeFilter]);
   if (!comp.data?.length) return null;
 
   const isOriginator = activeFilter && activeFilter.key === comp.category_key;
@@ -463,7 +475,7 @@ function SummaryPanel({comp, activeFilter, toggleFilter}:{comp:SumC; activeFilte
     <div className="ddCard" style={{...goldPanel,padding:"20px",display:"flex",flexDirection:"column",gap:16}}>
       {Header}
       {/* Large dataset: chart on left + stats sidebar on right */}
-      <div style={{display:"flex",flexDirection:"row",gap:16,alignItems:"flex-start"}}>
+      <div style={{display:"flex",flexDirection:"row",gap:16,alignItems:"flex-start",flexWrap:"wrap"}}>
         {/* Main bar chart */}
         <div style={{flex:"1 1 0",minWidth:0,height:barH}}>
           <ResponsiveContainer width="100%" height="100%">
@@ -494,7 +506,7 @@ function SummaryPanel({comp, activeFilter, toggleFilter}:{comp:SumC; activeFilte
           </ResponsiveContainer>
         </div>
         {/* Stats sidebar — fills the right horizontal space, pagination anchored bottom */}
-        <div style={{flex:"0 0 190px",display:"flex",flexDirection:"column",gap:10,minHeight:barH}}>
+        <div style={{flex:"1 1 180px",minWidth:180,display:"flex",flexDirection:"column",gap:10,minHeight:barH}}>
           {/* Total — most important stat, shown at top */}
           <div style={{background:G.goldBg,border:`1px solid ${G.goldBorder}`,borderRadius:10,padding:"12px 14px",display:"flex",flexDirection:"column",gap:3}}>
             <span style={{fontSize:9,fontWeight:700,color:G.textMuted,textTransform:"uppercase",letterSpacing:".06em"}}>Total</span>
@@ -639,14 +651,14 @@ function RecordCards({comp, activeFilter}:{comp:RecC; activeFilter: {key: string
             {keys.filter(k=>k!==tk&&k!==bk).map(key=>(
               <div key={key} style={{display:"flex",flexDirection:"column",gap:3}}>
                 <span style={{fontSize:9,color:G.textMuted,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em"}}>{humanKey(key)}</span>
-                <span style={{fontSize:12,color:G.textPrimary,fontWeight:500,wordBreak:"break-word"}}>{String(first[key]??"")||<span style={{color:G.textFaint}}>—</span>}</span>
+                <span style={{fontSize:12,color:G.textPrimary,fontWeight:500,wordBreak:"break-word"}}>{(first[key]===null||first[key]===undefined||first[key]===""||String(first[key])==="null")?<span style={{color:G.textFaint}}>—</span>:String(first[key])}</span>
               </div>
             ))}
           </div>
         </div>
       )}
       {mode==="card"&&!isSingle&&(
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:12}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:12,padding:"0 4px",boxSizing:"border-box"}}>
           {vis.map((item,idx)=>{
             const ct=String(item[tk]||"Record");
             const cb=bk?String(item[bk]):"";
@@ -664,7 +676,7 @@ function RecordCards({comp, activeFilter}:{comp:RecC; activeFilter: {key: string
                   {dk.map(key=>(
                     <div key={key} style={{display:"flex",flexDirection:"column",gap:2}}>
                       <span style={{fontSize:9,color:G.textMuted,fontWeight:700,textTransform:"uppercase",letterSpacing:".04em"}}>{humanKey(key)}</span>
-                      <span style={{fontSize:11,color:G.textPrimary,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={String(item[key]??"")}>{String(item[key]??"")||<span style={{color:G.textFaint}}>—</span>}</span>
+                      <span style={{fontSize:11,color:G.textPrimary,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={(item[key]===null||item[key]===undefined||String(item[key])==="null")?"":String(item[key])}>{(item[key]===null||item[key]===undefined||item[key]===""||String(item[key])==="null")?<span style={{color:G.textFaint}}>—</span>:String(item[key])}</span>
                     </div>
                   ))}
                 </div>
@@ -674,10 +686,10 @@ function RecordCards({comp, activeFilter}:{comp:RecC; activeFilter: {key: string
         </div>
       )}
       {mode==="table"&&(
-        <div style={{overflowX:"auto",borderRadius:10,border:`1px solid ${G.goldBorder}`,boxShadow:`0 0 24px rgba(0,0,0,.3)`}}>
+        <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch",borderRadius:10,border:`1px solid ${G.goldBorder}`,boxShadow:`0 0 24px rgba(0,0,0,.3)`}}>
           <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,textAlign:"left"}}>
             <thead><tr style={{background:`linear-gradient(90deg,rgba(212,175,55,.12),rgba(212,175,55,.04))`,borderBottom:`1.5px solid ${G.goldBorder}`}}>{keys.map(col=><th key={col} style={{padding:"10px 14px",fontWeight:800,color:G.gold,fontSize:10,textTransform:"uppercase",letterSpacing:".06em",whiteSpace:"nowrap"}}>{humanKey(col)}</th>)}</tr></thead>
-            <tbody>{vis.map((row,ri)=><tr key={ri} className="ddTr" style={{borderBottom:`1px solid ${G.glassBorder}`,background:ri%2===1?"rgba(255,255,255,.012)":"transparent"}}>{keys.map(k=><td key={k} style={{padding:"8px 14px",color:G.textPrimary}}>{String(row[k]??"")||<span style={{color:G.textFaint}}>—</span>}</td>)}</tr>)}</tbody>
+            <tbody>{vis.map((row,ri)=><tr key={ri} className="ddTr" style={{borderBottom:`1px solid ${G.glassBorder}`,background:ri%2===1?"rgba(255,255,255,.012)":"transparent"}}>{keys.map(k=><td key={k} style={{padding:"8px 14px",color:G.textPrimary}}>{(row[k] === null || row[k] === undefined || row[k] === "" || String(row[k]) === "null") ? <span style={{color:G.textFaint}}>—</span> : String(row[k])}</td>)}</tr>)}</tbody>
           </table>
         </div>
       )}
@@ -701,11 +713,11 @@ function DynBar({comp, activeFilter, toggleFilter}:{comp:BarC; activeFilter: {ke
 
   const d=displayData.map(r=>({...r,[comp.y_key]:typeof r[comp.y_key]==="number"?r[comp.y_key]:Number(r[comp.y_key])||0}));
   const ml=Math.max(...d.map((r:any)=>String(r[comp.x_key]||"").length), 1);
-  const yW=Math.min(Math.max(ml*7.2,100),320);
+  const yW=Math.min(Math.max(ml*7.2, 80), 180);
   return (
     <div style={{display:"flex",flexDirection:"column"}}>
       <SecLabel label={comp.title}/>
-      <div style={{width:"100%",height:Math.min(d.length*28+60,380)}}>
+      <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch",width:"100%",height:Math.min(d.length*28+60,380)}}>
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={d} layout="vertical" margin={{top:4,right:20,bottom:4,left:8}}>
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.04)" horizontal={false}/>
@@ -755,11 +767,12 @@ function DynTs({comp, activeFilter}:{comp:TsC; activeFilter: {key: string; value
   return (
     <div style={{display:"flex",flexDirection:"column"}}>
       <SecLabel label={comp.title}/>
-      <div style={{width:"100%",height:240}}>
+      <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch",width:"100%",height:240}}>
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={displayData} margin={{top:4,right:24,bottom:4,left:0}}>
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.04)"/>
-            <XAxis dataKey={comp.x_key} tick={{fill:G.textMuted,fontSize:10}} axisLine={false} tickLine={false} interval="preserveStartEnd"/>
+            {/* BUG 2.3 FIX — angled labels prevent overlap on mobile */}
+            <XAxis dataKey={comp.x_key} tick={{fill:G.textMuted,fontSize:10}} axisLine={false} tickLine={false} interval="preserveStartEnd" angle={-35} textAnchor="end" height={45}/>
             <YAxis tick={{fill:G.textMuted,fontSize:10}} axisLine={false} tickLine={false} tickFormatter={(v:number)=>v>=1000?`${(v/1000).toFixed(1)}k`:v.toLocaleString()}/>
             <Tooltip content={<Tip/>}/>
             {comp.y_keys.length>1&&<Legend wrapperStyle={{fontSize:11,color:G.textMuted}}/>}
@@ -778,8 +791,10 @@ function DynTs({comp, activeFilter}:{comp:TsC; activeFilter: {key: string; value
 // but falls through to CHART_COLORS[idx % length] for everything else.
 // If sem(cell, 0) === sem(cell, 1) → a status keyword was matched.
 function isStatusValue(cell: string): boolean {
+  // BUG 6.4 FIX — normalize case before checking
   if (!cell || cell.length > 24) return false;
-  return sem(cell, 0) === sem(cell, 1);
+  const n = cell.toLowerCase().trim();
+  return sem(n, 0) === sem(n, 1);
 }
 
 function getStatusStyle(cell: string): { color: string; bg: string } | null {
@@ -835,7 +850,8 @@ function DynTable({comp, activeFilter, toggleFilter}:{comp:TabC; activeFilter: {
         {comp.note&&<span style={{fontSize:10,color:G.textFaint,fontStyle:"italic"}}>{comp.note}</span>}
       </div>
       <div style={{overflowX:"auto",borderRadius:10,border:`1px solid ${G.goldBorder}`,boxShadow:`0 0 24px rgba(0,0,0,.3)`}}>
-        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,textAlign:"left"}}>
+        {/* BUG 6.3 FIX — tableLayout:fixed prevents single long cell from stretching table */}
+        <table style={{width:"100%",tableLayout:"fixed",borderCollapse:"collapse",fontSize:12,textAlign:"left"}}>
           <thead>
             <tr style={{background:`linear-gradient(90deg,rgba(212,175,55,.12),rgba(212,175,55,.04))`,borderBottom:`1.5px solid ${G.goldBorder}`}}>
               {comp.columns.map((c, ci)=>(
@@ -975,9 +991,8 @@ function DynDonut({comp, activeFilter, toggleFilter}:{comp:DonutC; activeFilter:
     return {name, value:v, color:sem(name,i)};
   });
 
-  const total = (activeFilter && !isOriginator && hasFilterKey)
-    ? rows.reduce((s, d) => s + d.value, 0)
-    : (comp.total_value || rows.reduce((s,d)=>s+d.value,0));
+  // BUG 4.2 FIX — total must always reflect only the currently visible filtered rows
+  const total = rows.reduce((s, d) => s + d.value, 0);
 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:4}}>
@@ -1017,7 +1032,7 @@ function DynDonut({comp, activeFilter, toggleFilter}:{comp:DonutC; activeFilter:
             <span style={{fontSize:9,color:G.textMuted,textTransform:"uppercase",letterSpacing:".05em"}}>Total</span>
           </div>
         </div>
-        <div style={{flex:1,minWidth:120,display:"flex",flexDirection:"column",gap:6}}>
+        <div style={{flex:1,minWidth:120,display:"flex",flexDirection:"column",gap:6,maxHeight:200,overflowY:"auto",flexWrap:"nowrap"}}>
           {rows.map((item,idx)=>{
             const isSelected = activeFilter && isOriginator && item.name === activeFilter.value;
             const opacity = activeFilter && isOriginator ? (isSelected ? 1.0 : 0.25) : 1.0;
@@ -1051,6 +1066,8 @@ function DynDonut({comp, activeFilter, toggleFilter}:{comp:DonutC; activeFilter:
 function DynGroupedBar({comp, activeFilter, toggleFilter}:{comp:GrpBarC; activeFilter: {key: string; value: string} | null; toggleFilter: (key: string, value: string) => void}) {
   const [page, setPage] = useState(0);
   useEffect(()=>{injectAnimations();},[]);
+  // BUG 3.3 FIX — reset to page 0 whenever the active filter changes
+  useEffect(()=>{ setPage(0); },[activeFilter]);
   if (!comp.data?.length) return null;
 
   const isOriginator = activeFilter && activeFilter.key === comp.category_key;
@@ -1072,13 +1089,13 @@ function DynGroupedBar({comp, activeFilter, toggleFilter}:{comp:GrpBarC; activeF
   const barH = Math.min(paged.length * (comp.metric_keys.length * 9 + 20) + 60, 580);
   
   const ml = Math.max(...d.map((r:any)=>String(r[comp.category_key]).length), 1);
-  const yW = Math.min(Math.max(ml*7.2,100),320);
+  const yW = Math.min(Math.max(ml*7.2, 80), 180);
   const GRP_COLORS = [G.gold,G.silver,"#818cf8","#34d399","#f472b6","#fb923c","#60a5fa","#a78bfa"];
   
   return (
     <div style={{display:"flex",flexDirection:"column",gap:4}}>
       <SecLabel label={comp.title}/>
-      <div style={{width:"100%",height:barH}}>
+      <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch",width:"100%",height:barH}}>
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={paged} layout="vertical" margin={{top:4,right:20,bottom:4,left:8}}>
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.04)" horizontal={false}/>
@@ -1143,26 +1160,28 @@ function DynArea({comp, activeFilter}:{comp:AreaC; activeFilter: {key: string; v
   return (
     <div style={{display:"flex",flexDirection:"column",gap:4}}>
       <SecLabel label={comp.title}/>
-      <div style={{width:"100%",height:230}}>
+      <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch",width:"100%",height:230}}>
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={displayData} margin={{top:4,right:20,bottom:4,left:0}}>
             <defs>
               {comp.y_keys.map((k,i)=>(
-                <linearGradient key={k} id={`aGrad${i}`} x1="0" y1="0" x2="0" y2="1">
+                // BUG 2.4 FIX — unique gradient IDs prevent ID clashes across multiple area chart instances
+                <linearGradient key={k} id={`aGrad_${comp.title.replace(/\s/g,'_')}_${i}`} x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor={AREA_COLORS[i%AREA_COLORS.length]} stopOpacity={0.28}/>
                   <stop offset="95%" stopColor={AREA_COLORS[i%AREA_COLORS.length]} stopOpacity={0}/>
                 </linearGradient>
               ))}
             </defs>
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.04)"/>
-            <XAxis dataKey={comp.x_key} tick={{fill:G.textMuted,fontSize:10}} axisLine={false} tickLine={false} interval="preserveStartEnd"/>
+            {/* BUG 2.3 FIX — angled labels prevent overlap on mobile */}
+            <XAxis dataKey={comp.x_key} tick={{fill:G.textMuted,fontSize:10}} axisLine={false} tickLine={false} interval="preserveStartEnd" angle={-35} textAnchor="end" height={45}/>
             <YAxis tick={{fill:G.textMuted,fontSize:10}} axisLine={false} tickLine={false}
               tickFormatter={(v:number)=>v>=1000?`${(v/1000).toFixed(1)}k`:v.toLocaleString()}/>
             <Tooltip content={<Tip/>}/>
             {comp.y_keys.length>1&&<Legend wrapperStyle={{fontSize:10,color:G.textMuted}} formatter={(v:string)=>humanKey(v)}/>}
             {comp.y_keys.map((k,i)=>(
               <Area key={k} type="monotone" dataKey={k} stroke={AREA_COLORS[i%AREA_COLORS.length]}
-                fill={`url(#aGrad${i})`} strokeWidth={2} dot={false} activeDot={{r:4}} name={humanKey(k)}/>
+                fill={`url(#aGrad_${comp.title.replace(/\s/g,'_')}_${i})`} strokeWidth={2} dot={false} activeDot={{r:4}} name={humanKey(k)}/>
             ))}
           </AreaChart>
         </ResponsiveContainer>
@@ -1240,7 +1259,9 @@ function DynScatter({comp, activeFilter, toggleFilter}:{comp:ScatterC; activeFil
   return (
     <div style={{display:"flex",flexDirection:"column",gap:4}}>
       <SecLabel label={comp.title}/>
-      <div style={{width:"100%",height:240}}>
+      {/* BUG 8.2 FIX — axis title text rendered above/below instead of as axis label props */}
+      <div style={{fontSize:9,color:G.textMuted,textAlign:"center",marginBottom:2}}>{humanKey(comp.y_key)} vs {humanKey(comp.x_key)}</div>
+      <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch",width:"100%",height:240}}>
         <ResponsiveContainer width="100%" height="100%">
           <ScatterChart margin={{top:12,right:20,bottom:4,left:0}}>
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.04)"/>
@@ -1251,7 +1272,6 @@ function DynScatter({comp, activeFilter, toggleFilter}:{comp:ScatterC; activeFil
               tick={{fill:G.textMuted,fontSize:10}} 
               axisLine={false} 
               tickLine={false}
-              label={{ value: humanKey(comp.x_key), position: 'insideBottom', offset: -2, fill: G.textMuted, fontSize: 10 }}
             />
             <YAxis 
               type="number" 
@@ -1260,7 +1280,6 @@ function DynScatter({comp, activeFilter, toggleFilter}:{comp:ScatterC; activeFil
               tick={{fill:G.textMuted,fontSize:10}} 
               axisLine={false} 
               tickLine={false}
-              label={{ value: humanKey(comp.y_key), angle: -90, position: 'insideLeft', offset: 10, fill: G.textMuted, fontSize: 10 }}
             />
             <Tooltip 
               cursor={{ strokeDasharray: '3 3' }}
@@ -1306,6 +1325,8 @@ function DynScatter({comp, activeFilter, toggleFilter}:{comp:ScatterC; activeFil
           </ScatterChart>
         </ResponsiveContainer>
       </div>
+      {/* BUG 8.2 FIX — x-axis title below chart */}
+      <div style={{fontSize:9,color:G.textMuted,textAlign:"center",marginTop:4}}>{humanKey(comp.x_key)}</div>
     </div>
   );
 }
@@ -1446,7 +1467,10 @@ export default function DynamicDashboard({components,explanation}:DDProps) {
           borderRadius: 10,
           alignSelf: "flex-start",
           animation: "ddFadeUp .3s ease",
-          boxShadow: `0 4px 12px rgba(0,0,0,0.2)`
+          boxShadow: `0 4px 12px rgba(0,0,0,0.2)`,
+          flexWrap: "wrap",
+          maxWidth: "100%",
+          wordBreak: "break-word"
         }}>
           <span style={{ fontSize: 12, color: G.textPrimary }}>
             Active Filter: <strong style={{ color: G.goldBright }}>{humanKey(activeFilter.key)} = {activeFilter.value}</strong>
@@ -1471,6 +1495,34 @@ export default function DynamicDashboard({components,explanation}:DDProps) {
         </div>
       )}
 
+      {/* BUG 9.1 FIX — show message when filter returns no results */}
+      {activeFilter && (
+        (() => {
+          const anyData = components.some(c => {
+            if ("data" in c && Array.isArray((c as any).data)) {
+              return ((c as any).data as Record<string,unknown>[]).some(
+                r => String(r[(activeFilter as {key:string;value:string}).key]) === activeFilter.value
+              );
+            }
+            return false;
+          });
+          if (anyData) return null;
+          return (
+            <div style={{
+              padding: "14px 20px",
+              borderRadius: 10,
+              background: "rgba(244,63,94,0.08)",
+              border: "1px solid rgba(244,63,94,0.25)",
+              color: "#f43f5e",
+              fontSize: 13,
+              fontWeight: 600
+            }}>
+              No records match this filter. Click Clear Filter to reset.
+            </div>
+          );
+        })()
+      )}
+
       {kpis.length>0&&<KpiGrid items={kpis} activeFilter={activeFilter} allComponents={components}/>}
       
       {groups.map((group,gi)=>(
@@ -1478,7 +1530,7 @@ export default function DynamicDashboard({components,explanation}:DDProps) {
           // Single component — full width
           ? <React.Fragment key={gi}>{renderComp(group.comps[0],gi,activeFilter,toggleFilter)}</React.Fragment>
           // Paired components — side by side, using full horizontal space
-          : <div key={gi} style={{display:"grid",gridTemplateColumns:group.cols,gap:12,alignItems:"stretch"}}>
+          : <div key={gi} className="ddGrid" style={{display:"grid",gridTemplateColumns:group.cols,gap:12,alignItems:"stretch"}}>
               {group.comps.map((comp,ci)=>(
                 <React.Fragment key={ci}>{renderComp(comp,gi*10+ci,activeFilter,toggleFilter)}</React.Fragment>
               ))}
