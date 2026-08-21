@@ -9,7 +9,7 @@ Execution Agent — Internal Helpers
   get_numeric_column        — get a column as a clean numeric Series
   _apply_conditions         — apply a list of {field, value} filters to a DataFrame
   _safe_apply               — apply filters, catching ValueError and returning _err dict
-  _clean_records            — strip NaN/None values from a list of record dicts
+  _clean_records            — convert NaN/NaT/inf values to None in a list of record dicts (keys kept)
   _nan_to_none              — convert NaN/NaT scalar to None for JSON serialization
 """
 import math
@@ -142,7 +142,10 @@ def _apply_conditions(df: pd.DataFrame, conditions: list) -> pd.DataFrame:
     Each condition is a dict:
         {"field": "WoStatus", "value": "Open"}
 
-    Matching is case-insensitive and strips leading/trailing whitespace.
+    Matching is case-insensitive and normalises internal whitespace (collapses
+    runs of spaces to one), so "Mail  Building" (double space, as DB may store it)
+    matches a filter value of "Mail Building" (single space) — consistent with how
+    the stored procedure's word-boundary regex finds records.
 
     Args:
         df:         DataFrame to filter
@@ -165,11 +168,15 @@ def _apply_conditions(df: pd.DataFrame, conditions: list) -> pd.DataFrame:
                 f"Available columns: {sorted(df.columns.tolist())}"
             )
 
-        col = df[actual].fillna("").astype(str).str.strip()
-        if value == "":
+        # Collapse internal whitespace on both sides so "Mail  Building" (DB) matches
+        # a filter value of "Mail Building" — the SP's word-boundary regex is looser
+        # than an exact string match, so the tool filter must not be stricter than it.
+        col = df[actual].fillna("").astype(str).str.strip().str.replace(r"\s+", " ", regex=True)
+        norm_value = " ".join(value.split())
+        if norm_value == "":
             df = df[col == ""]
         else:
-            df = df[col.str.lower() == value.lower()]
+            df = df[col.str.lower() == norm_value.lower()]
 
     return df
 
@@ -190,13 +197,17 @@ def _safe_apply(df: pd.DataFrame, filters: list) -> tuple:
             return err
 
     Returns:
-        (filtered_df, None)       — on success
-        (original_df, error_dict) — on failure
+        (filtered_df, None)          — on success
+        (empty_df_like_df, error_dict) — on failure
+
+    On failure an EMPTY DataFrame (same columns as df) is returned instead of the
+    original unfiltered df, so a caller that forgets to check `err` before reusing
+    `df` can never silently compute over unfiltered data.
     """
     try:
         return _apply_conditions(df, filters), None
     except ValueError as exc:
-        return df, _err(str(exc))
+        return df.iloc[0:0], _err(str(exc))
 
 
 # =============================================================================
@@ -214,22 +225,24 @@ def _err(msg: str) -> dict:
 
 def _clean_records(records: list[dict]) -> list[dict]:
     """
-    Strip NaN/None values from a list of record dicts.
+    Convert NaN/NaT/inf scalars to None in a list of record dicts, for safe
+    JSON serialization.
 
-    Converts NaN/NaT scalars to None and removes keys whose value is None,
-    producing clean dicts that are safe for JSON serialization.
+    Keys are always kept, even when their value is None. Dropping a None key
+    (as this used to do) makes that record's dict shorter than its siblings;
+    when such dicts are later reloaded into a DataFrame (e.g. by a downstream
+    tool), pandas fills the "missing" column with NaN for every row that had
+    it dropped, so the column silently becomes all-NaN and numeric tools then
+    fail with "no usable numeric values" even though the data was legitimately
+    None, not absent.
 
     Args:
         records: list of dicts (typically rows from df.to_dict("records"))
 
     Returns:
-        list of dicts with NaN/None keys removed
+        list of dicts with NaN/NaT/inf values converted to None, same keys as input
     """
-    cleaned = []
-    for row in records:
-        clean_row = {k: _nan_to_none(v) for k, v in row.items()}
-        cleaned.append({k: v for k, v in clean_row.items() if v is not None})
-    return cleaned
+    return [{k: _nan_to_none(v) for k, v in row.items()} for row in records]
 
 
 # =============================================================================

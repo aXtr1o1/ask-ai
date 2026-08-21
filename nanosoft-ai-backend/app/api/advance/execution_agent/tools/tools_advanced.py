@@ -12,7 +12,7 @@ Intelligence FM Analytics Tools (Tools 10–19)
   18. merge_and_score           → combine multiple prior-step group results into a ranked score
   19. add_duration_to_date      → add a duration field to a date field (asset remaining life)
 """
-from typing import Annotated
+from typing import Annotated, Any
 
 import numpy as np
 import pandas as pd
@@ -25,7 +25,6 @@ from app.api.advance.execution_agent.tools.tool_helpers import (
     _apply_conditions,
     _clean_records,
     _nan_to_none,
-    _is_unresolved_ref,
     _safe_apply,
     _err,
 )
@@ -61,7 +60,8 @@ def calculate_age_from_now(
     df = load_records_as_dataframe(state, module)
     if df.empty:
         return {"_result_type": "age_distribution",
-                "module": module, "date_field": date_field, "total_records": 0,
+                "module": module, "date_field": date_field, "filters": filters or [],
+                "group_fields": group_fields or [], "total_records": 0,
                 "avg_age_days": None, "max_age_days": None, "min_age_days": None,
                 "calculated": 0, "groups": []}
 
@@ -95,6 +95,7 @@ def calculate_age_from_now(
         "min_age_days":  int(ages.min())              if not ages.empty else None,
     }
 
+    result["group_fields"] = group_fields or []
     if group_fields:
         resolved_groups = [resolve_column(valid, f) for f in group_fields]
         actual_groups   = [r for r in resolved_groups if r is not None]
@@ -113,8 +114,7 @@ def calculate_age_from_now(
                           if actual != req}
             if rename_map:
                 grouped = grouped.rename(columns=rename_map)
-            result["groups"]       = _clean_records(grouped.to_dict(orient="records"))
-            result["group_fields"] = group_fields
+            result["groups"] = _clean_records(grouped.to_dict(orient="records"))
         else:
             result["groups"] = []
     else:
@@ -156,7 +156,10 @@ def group_by_time_period(
     if df.empty:
         return {"_result_type": "time_series",
                 "module": module, "date_field": date_field, "period": period,
-                "total_records": 0, "operation": operation.upper(), "periods": []}
+                "agg_field": agg_field, "filters": filters or [],
+                "total_records": 0, "period_count": 0,
+                "value_key": "count" if not agg_field else "value",
+                "operation": operation.upper(), "periods": []}
 
     if filters:
         try:
@@ -255,8 +258,9 @@ def calculate_mtbf(
     if df.empty:
         return {"_result_type": "mtbf_data",
                 "module": module, "asset_field": asset_field,
-                "failure_date_field": failure_date_field,
-                "total_records": 0, "overall_avg_mtbf_days": None, "mtbf_by_asset": []}
+                "failure_date_field": failure_date_field, "filters": filters or [],
+                "total_records": 0, "assets_analyzed": 0,
+                "overall_avg_mtbf_days": None, "mtbf_by_asset": []}
 
     if filters:
         try:
@@ -267,8 +271,9 @@ def calculate_mtbf(
     if df.empty:
         return {"_result_type": "mtbf_data",
                 "module": module, "asset_field": asset_field,
-                "failure_date_field": failure_date_field,
-                "total_records": 0, "overall_avg_mtbf_days": None, "mtbf_by_asset": []}
+                "failure_date_field": failure_date_field, "filters": filters or [],
+                "total_records": 0, "assets_analyzed": 0,
+                "overall_avg_mtbf_days": None, "mtbf_by_asset": []}
 
     actual_asset = resolve_column(df, asset_field)
     actual_date  = resolve_column(df, failure_date_field)
@@ -304,8 +309,9 @@ def calculate_mtbf(
     if not mtbf_rows:
         return {"_result_type": "mtbf_data",
                 "module": module, "asset_field": asset_field,
-                "failure_date_field": failure_date_field,
-                "total_records": len(df), "overall_avg_mtbf_days": None, "mtbf_by_asset": []}
+                "failure_date_field": failure_date_field, "filters": filters or [],
+                "total_records": len(df), "assets_analyzed": 0,
+                "overall_avg_mtbf_days": None, "mtbf_by_asset": []}
 
     mtbf_df    = pd.DataFrame(mtbf_rows).sort_values("mtbf_days", ascending=True)
     valid_mtbf = [r["mtbf_days"] for r in mtbf_rows if r["mtbf_days"] is not None]
@@ -375,8 +381,10 @@ def flag_by_threshold(
         if not data:
             return {"_result_type": "flagged_set",
                     "module": module, "field": field, "threshold": threshold,
-                    "operator": operator, "flagged_count": 0, "total_records": 0,
-                    "flag_ratio": 0.0, "flagged_records": [], "groups": []}
+                    "operator": operator, "filters": filters or [], "group_fields": group_fields or [],
+                    "flagged_count": 0, "total_records": 0,
+                    # 0/0 is undefined, not "0% flagged" — see matching note below.
+                    "flag_ratio": None, "flagged_records": [], "groups": []}
         df = pd.DataFrame(data)
     else:
         df = load_records_as_dataframe(state, module)
@@ -384,8 +392,11 @@ def flag_by_threshold(
     if df.empty:
         return {"_result_type": "flagged_set",
                 "module": module, "field": field, "threshold": threshold,
-                "operator": operator, "flagged_count": 0, "total_records": 0,
-                "flag_ratio": 0.0, "flagged_records": [], "groups": []}
+                "operator": operator, "filters": filters or [], "group_fields": group_fields or [],
+                "flagged_count": 0, "total_records": 0,
+                # 0/0 is undefined, not "0% flagged" — a real ratio only exists once
+                # there are records to evaluate the threshold against.
+                "flag_ratio": None, "flagged_records": [], "groups": []}
 
     if filters:
         try:
@@ -604,8 +615,9 @@ def calculate_percentile(
 
     if df.empty:
         return {"_result_type": "percentile_data",
-                "module": module, "field": field, "records_used": 0,
-                "percentile_values": {}, "mean": None, "std_dev": None}
+                "module": module, "field": field, "filters": filters or [], "records_used": 0,
+                "percentile_values": {}, "mean": None, "std_dev": None,
+                "minimum": None, "maximum": None}
 
     if filters:
         try:
@@ -620,13 +632,19 @@ def calculate_percentile(
     series = pd.to_numeric(df[actual_field], errors="coerce").dropna()
     if series.empty:
         return {"_result_type": "percentile_data",
-                "module": module, "field": field, "records_used": 0,
-                "percentile_values": {}, "mean": None, "std_dev": None}
+                "module": module, "field": field, "filters": filters or [], "records_used": 0,
+                "percentile_values": {}, "mean": None, "std_dev": None,
+                "minimum": None, "maximum": None}
 
     pct_values = {}
     for p in percentiles:
         p = max(1, min(99, p))
         pct_values[f"p{p}"] = round(float(np.percentile(series, p)), 4)
+
+    # Sample std dev (ddof=1, pandas default) is mathematically undefined for a
+    # single data point — series.std() silently returns NaN rather than raising,
+    # which would otherwise leak a raw NaN into the output instead of a clear None.
+    std_dev = round(float(series.std()), 4) if len(series) >= 2 else None
 
     return {
         "_result_type":      "percentile_data",
@@ -636,7 +654,7 @@ def calculate_percentile(
         "records_used":      int(len(series)),
         "percentile_values": pct_values,
         "mean":              round(float(series.mean()), 4),
-        "std_dev":           round(float(series.std()), 4),
+        "std_dev":           std_dev,
         "minimum":           round(float(series.min()), 4),
         "maximum":           round(float(series.max()), 4),
     }
@@ -821,8 +839,11 @@ def compare_date_fields(
     if df.empty:
         return {"_result_type": "flagged_set",
                 "module": module, "field_a": field_a, "field_b": field_b,
-                "flagged_count": 0, "total_records": 0, "flag_ratio": 0.0,
-                "valid_pairs": 0, "groups": []}
+                "operator": operator, "filters": filters or [], "group_fields": group_fields or [],
+                # 0/0 is undefined, not "0% flagged" — a real ratio only exists once
+                # there are records to evaluate the comparison against.
+                "flagged_count": 0, "total_records": 0, "flag_ratio": None,
+                "valid_pairs": 0, "flagged_records": [], "groups": []}
 
     if filters:
         try:
@@ -1120,7 +1141,10 @@ def add_duration_to_date(
     df = load_records_as_dataframe(state, module)
     if df.empty:
         return {"_result_type": "record_set",
-                "module": module, "total": 0, "expired_count": 0, "records": []}
+                "module": module, "date_field": date_field, "duration_field": duration_field,
+                "duration_unit": duration_unit.lower() if isinstance(duration_unit, str) else duration_unit,
+                "filters": filters or [],
+                "total": 0, "expired_count": 0, "records": []}
 
     if filters:
         try:
@@ -1280,6 +1304,8 @@ def join_and_filter_by_date_diff(
             "date_field_b":   date_field_b,
             "operator":       operator,
             "threshold_days": threshold_days,
+            "filters_a":      filters_a or [],
+            "filters_b":      filters_b or [],
             "total_joined":   0,
             "matched_count":  0,
             "matched_records": [],
@@ -1352,6 +1378,8 @@ def join_and_filter_by_date_diff(
             "date_field_b":   date_field_b,
             "operator":       operator,
             "threshold_days": threshold_days,
+            "filters_a":      filters_a or [],
+            "filters_b":      filters_b or [],
             "total_joined":   0,
             "matched_count":  0,
             "matched_records": [],
@@ -1454,6 +1482,7 @@ def calculate_date_difference_stats(
     if df.empty:
         return {"_result_type": "date_difference_stats",
                 "module": module, "start_date_field": start_date_field, "end_date_field": end_date_field,
+                "filters": filters or [],
                 "total_records": 0, "avg_diff_days": None, "max_diff_days": None, "min_diff_days": None,
                 "calculated": 0, "groups": []}
 

@@ -153,7 +153,8 @@ def format_response(
         "response_type": _FORMAT_TO_RESPONSE_TYPE.get(response_format, "plain-response"),
         "layout":        response_format,
         "explanation":   explanation,
-        "final_answer":  final_answer,   # None for TABLE/GRAPH — frontend uses execution result
+        "final_answer":  final_answer,   # Always the real computed value; is_data_heavy above only
+        # controls whether it's sent to the LLM prompt, not this return
         # Typed presentation component list from DashboardComposer.
         # Always present (may be empty list).  Frontend uses this for the
         # dynamic dashboard renderer when the list is non-empty.

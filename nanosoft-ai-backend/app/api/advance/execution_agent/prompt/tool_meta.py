@@ -35,12 +35,12 @@ Keep all three in sync with the actual tool implementations in tools.py.
 TOOL_OUTPUT_KEYS: dict[str, set[str]] = {
     # ── Basic Tools ─────────────────────────────────────────────────────────────
     "count_records":          {"count", "module", "condition_field", "condition_value",
-                               "conditions", "total_records", "total"},
+                               "conditions"},
     "sum_values":             {"total_sum", "records_used", "module", "field", "filters"},
     "get_average":            {"average", "records_used", "module", "field", "filters"},
     "group_by_and_count":     {"groups", "total_records", "unique_groups",
                                "module", "group_fields", "filters",
-                               "count", "total", "value"},
+                               "count", "total"},
     "group_by_and_aggregate": {"groups", "total_records", "unique_groups",
                                "module", "group_fields", "agg_field", "operation", "filters",
                                "count", "total", "value"},
@@ -144,7 +144,7 @@ OPTIONAL_ARGS: dict[str, list[str]] = {
     "group_by_and_aggregate":    ["filters"],
     "join_and_aggregate":        ["filters_a", "filters_b"],
     "get_record_fields":         ["fields", "filters", "limit"],
-    "filter_by_prior_results":   ["fields", "limit"],
+    "filter_by_prior_results":   ["fields", "limit", "filters"],
     "intersect_record_sets":     [],
     "do_math":                   ["b"],
     "sort_and_limit":            ["sort_by", "order", "limit"],
@@ -153,7 +153,7 @@ OPTIONAL_ARGS: dict[str, list[str]] = {
     "calculate_age_from_now":    ["group_fields", "filters"],
     "group_by_time_period":      ["period", "agg_field", "operation", "filters"],
     "calculate_mtbf":            ["filters"],
-    "flag_by_threshold":         ["operator", "group_fields", "label_field", "filters"],
+    "flag_by_threshold":         ["operator", "group_fields", "label_field", "filters", "data"],
     "calculate_rate_of_change":  [],
     "calculate_percentile":      ["percentiles", "filters"],
     "forecast_linear":           ["periods_ahead", "value_key", "label_key"],
@@ -264,10 +264,10 @@ BASIC TOOLS — output state
 
 • group_by_and_count:
   Returns "groups" — a list of dicts. Each dict contains only the specified
-  group_fields columns plus a "value" key representing the count. Only the
-  group_fields columns and "value" are available downstream. All other original
+  group_fields columns plus a "count" key representing the count. Only the
+  group_fields columns and "count" are available downstream. All other original
   module columns are dropped.
-  Reference as $step_N.groups.
+  Reference as $step_N.groups or $step_N.groups[i].count — never $step_N.groups[i].value.
 
 • group_by_and_aggregate:
   Returns "groups" — a list of dicts. Each dict contains only the specified

@@ -158,26 +158,14 @@ def _run_streaming_pipeline(query: str, session_id: str, user_name: str, user_id
 
             stream_queue.put({"status": "running_end", "stage": "Execution Agent"})
 
-            # final_answer and dashboard are now stored in formatting_context by
-            # context_builder — no need to re-extract from step_results here.
-            fc_final_answer = formatting_context.get("final_answer")
-            fc_dashboard    = formatting_context.get("dashboard", [])
-
+            # final_answer and dashboard are always present in formatting_context
+            # (see context_builder.build_formatting_context) and format_response()
+            # returns them unchanged — no patch-back needed here.
             formatted_result = format_response(
                 formatting_context = formatting_context,
                 query_summary      = query_summary or query,
                 thought_callback   = lambda chunk: stream_queue.put({"status": "running_chunk", "word": chunk}),
             )
-
-            if isinstance(formatted_result, dict):
-                # Ensure final_answer is always present (Formatting Agent sets it to None
-                # for data-heavy layouts — patch it from the context so the frontend can render)
-                if formatted_result.get("final_answer") is None and fc_final_answer is not None:
-                    formatted_result["final_answer"] = fc_final_answer
-
-                # Always include the dashboard component list (may be empty list)
-                if "dashboard" not in formatted_result or not formatted_result["dashboard"]:
-                    formatted_result["dashboard"] = fc_dashboard
 
             stream_queue.put({"status": "running_end", "stage": "Formatting Agent"})
 

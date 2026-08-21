@@ -1044,11 +1044,28 @@ export function AdvanceStreamMessage({ msg, isDark = true }: { msg: any; isDark?
                     };
                   }
 
+                  // If the Formatting Agent's explanation is missing (e.g. its LLM call
+                  // failed), never fall back to raw-dumping finalAnswer — for a failed
+                  // computation that value is the internal error/_dep_failed object
+                  // (step references, tool names, raw exception text), never meant for
+                  // direct display. Only fall back to the real value when it's actually
+                  // a normal, successful result.
+                  const looksLikeInternalError =
+                    finalAnswer === null ||
+                    finalAnswer === undefined ||
+                    (typeof finalAnswer === "object" &&
+                      !Array.isArray(finalAnswer) &&
+                      ("error" in finalAnswer || "_dep_failed" in finalAnswer));
+
+                  const safeFallback = looksLikeInternalError
+                    ? "This result could not be computed because the required data was unavailable."
+                    : (typeof finalAnswer === "string" ? finalAnswer : JSON.stringify(finalAnswer, null, 2));
+
                   return {
                     response_type:    "plain-response",
                     layout:           "MARKDOWN",
                     explanation:      "",
-                    formatted_answer: explanation || (typeof finalAnswer === "string" ? finalAnswer : JSON.stringify(finalAnswer, null, 2)),
+                    formatted_answer: explanation || safeFallback,
                     header:           "AI Response",
                   };
                 }

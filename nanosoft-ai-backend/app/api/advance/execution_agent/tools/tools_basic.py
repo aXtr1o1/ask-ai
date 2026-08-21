@@ -122,10 +122,14 @@ def sum_values(
     """
     df = load_records_as_dataframe(state, module)
     if df.empty:
+        # No matching records at all — a sum has nothing to add up, so this is
+        # "not computed" (None), not "computed as zero" (0). A real 0 total only
+        # exists once actual records with real values are found and summed.
         return {
             "_result_type": "single_number",
             "module": module, "field": field, "filters": filters or [],
-            "total_sum": 0, "records_used": 0,
+            "total_sum": None, "records_used": 0,
+            "_note": f"No records found in '{module}' matching the given filters — cannot compute a sum.",
         }
 
     if filters:
@@ -233,8 +237,8 @@ def group_by_and_count(
     if df.empty:
         return {
             "_result_type": "grouped_data",
-            "module": module, "group_fields": group_fields,
-            "total_records": 0, "unique_groups": 0, "groups": [],
+            "module": module, "group_fields": group_fields, "filters": filters or [],
+            "total_records": 0, "count": 0, "unique_groups": 0, "groups": [],
         }
 
     if not group_fields:
@@ -307,8 +311,8 @@ def group_by_and_aggregate(
         return {
             "_result_type": "grouped_data",
             "module": module, "group_fields": group_fields, "agg_field": agg_field,
-            "operation": operation.upper(), "total_records": 0,
-            "unique_groups": 0, "groups": [],
+            "operation": operation.upper(), "filters": filters or [], "total_records": 0,
+            "count": 0, "unique_groups": 0, "groups": [],
         }
 
     if not group_fields:
@@ -462,6 +466,9 @@ def join_and_aggregate(
             "module_a":      module_a,
             "module_b":      module_b,
             "join_field":    join_field,
+            "group_fields":  group_fields,
+            "agg_field":     agg_field,
+            "operation":     operation.upper() if isinstance(operation, str) else operation,
             "matched_count": 0,
             "unique_groups": 0,
             "total_records": 0,
@@ -517,6 +524,9 @@ def join_and_aggregate(
             "module_a":      module_a,
             "module_b":      module_b,
             "join_field":    join_field,
+            "group_fields":  group_fields,
+            "agg_field":     agg_field,
+            "operation":     operation.upper() if isinstance(operation, str) else operation,
             "matched_count": 0,
             "unique_groups": 0,
             "total_records": 0,
@@ -630,7 +640,8 @@ def get_record_fields(
     if df.empty:
         return {
             "_result_type": "record_set",
-            "module": module, "total": 0, "records": [], "fields_returned": [],
+            "module": module, "filters": filters or [],
+            "total": 0, "records": [], "fields_returned": [],
         }
 
     if filters:
@@ -1019,14 +1030,38 @@ def do_math(
         }
 
     op = operation.upper()
+
+    # Validate BEFORE computing: for every operation that has real inputs but no
+    # valid real-number result, say so explicitly instead of quietly returning a
+    # bare `result: None` (or, for POWER, a `complex` object that would otherwise
+    # crash later at JSON serialization — far from where the real problem is).
+    _undefined_reason = None
+    if op in ("DIV", "MOD") and b_val == 0:
+        _undefined_reason = f"{op} by zero is undefined — cannot compute."
+    elif op == "SQRT" and a_val < 0:
+        _undefined_reason = "SQRT of a negative number has no real-number result — cannot compute."
+    elif op == "POWER" and a_val < 0 and not float(b_val).is_integer():
+        _undefined_reason = ("POWER of a negative base with a fractional exponent has no "
+                              "real-number result — cannot compute.")
+
+    if _undefined_reason:
+        return {
+            "_result_type": "single_number",
+            "operation":    op,
+            "a":            a_val,
+            "b":            b_val,
+            "result":       None,
+            "_note":        _undefined_reason,
+        }
+
     try:
         if   op == "ADD":   result = a_val + b_val
         elif op == "SUB":   result = a_val - b_val
         elif op == "MUL":   result = a_val * b_val
-        elif op == "DIV":   result = (a_val / b_val) if b_val != 0 else None
-        elif op == "MOD":   result = (a_val % b_val) if b_val != 0 else None
+        elif op == "DIV":   result = a_val / b_val
+        elif op == "MOD":   result = a_val % b_val
         elif op == "POWER": result = a_val ** b_val
-        elif op == "SQRT":  result = math.sqrt(a_val) if a_val >= 0 else None
+        elif op == "SQRT":  result = math.sqrt(a_val)
         elif op == "ABS":   result = abs(a_val)
         else:
             return _err(f"Unknown operation '{op}'. Valid: ADD SUB MUL DIV MOD POWER SQRT ABS")

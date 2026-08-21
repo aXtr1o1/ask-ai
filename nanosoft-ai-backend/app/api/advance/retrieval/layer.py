@@ -137,11 +137,28 @@ def run_retrieval_layer(
         # 5. Trim fields (only keep what is specified in filter_fields for this module)
         if mod_filter_fields:
             logger.info("[Retrieval Layer] Module '%s': Trimming data to %d fields: %s", module, len(mod_filter_fields), list(mod_filter_fields.keys()))
+            # Case-insensitive match: DB column casing can differ from filter_fields casing
+            # (e.g. DB returns "wostatus" but filter_fields has "WoStatus"). Matching by exact
+            # case would silently drop the column with no error, breaking every downstream
+            # step that needs it. Build a lowercase lookup once per module.
+            lower_to_expected = {k.lower(): k for k in mod_filter_fields}
             trimmed_list = []
+            unmatched_seen: set = set()
             for row in combined_p_list:
-                # Case-insensitive check just in case, but usually exact match
-                trimmed_row = {k: v for k, v in row.items() if k in mod_filter_fields}
+                trimmed_row = {}
+                for k, v in row.items():
+                    expected_key = lower_to_expected.get(k.lower())
+                    if expected_key is not None:
+                        trimmed_row[expected_key] = v
+                    elif k not in unmatched_seen:
+                        unmatched_seen.add(k)
                 trimmed_list.append(trimmed_row)
+            if unmatched_seen:
+                logger.warning(
+                    "[Retrieval Layer] Module '%s': %d DB column(s) had no match in "
+                    "filter_fields and were dropped: %s",
+                    module, len(unmatched_seen), sorted(unmatched_seen),
+                )
             combined_p_list = trimmed_list
         else:
             logger.info("[Retrieval Layer] Module '%s': No filter_fields provided, keeping all retrieved fields.", module)

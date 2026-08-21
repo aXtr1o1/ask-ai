@@ -94,11 +94,21 @@ def _analyze(final_value) -> tuple[str, str, str]:
     """
 
     # ── None or error dict ────────────────────────────────────────────────────
+    # The actual reason (not a generic placeholder) is carried in `reason` here
+    # because shape_descriptor is the ONE channel included in the Formatting
+    # Agent's prompt for every format — including TABLE/GRAPH, which never see
+    # final_answer itself. Without the real message here, a failed data-heavy
+    # query would give the LLM nothing to explain the failure with.
     if final_value is None:
         return "error", "Result is None — execution may have failed.", "PLAIN_TEXT"
 
     if isinstance(final_value, dict) and ("error" in final_value or "_dep_failed" in final_value):
-        return "error", "Execution step failed.", "PLAIN_TEXT"
+        reason = (
+            final_value.get("error")
+            or final_value.get("_dep_failed")
+            or "Execution step failed."
+        )
+        return "error", str(reason), "PLAIN_TEXT"
 
     # ── Scalar (int, float, str, bool) → PLAIN_TEXT ───────────────────────────
     if not isinstance(final_value, (dict, list)):

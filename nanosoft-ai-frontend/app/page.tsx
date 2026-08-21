@@ -3630,6 +3630,11 @@ export default function Home() {
 
         currentStage = stage;
 
+        // Displayed stage label only — drops the trailing " Agent" so the terminal
+        // header reads "Understanding" / "Analysis" / etc. Routing above still
+        // matches on the raw `stage` string; only the stored/rendered name changes.
+        const displayStage = stage.replace(/ Agent$/, "");
+
         // Stage started → update msg.stages so AdvanceStreamMessage shows the terminal header
         setMessages(prev => {
           const updated = [...prev];
@@ -3639,8 +3644,8 @@ export default function Home() {
             last.agentStatus = "thinking";
             last.isRetrieving = false;
             if (!last.stages) last.stages = [];
-            if (!last.stages.find((s: any) => s.name === stage)) {
-              last.stages.push({ name: stage });
+            if (!last.stages.find((s: any) => s.name === displayStage)) {
+              last.stages.push({ name: displayStage });
             }
           }
           return [...updated];
@@ -3818,6 +3823,11 @@ export default function Home() {
 
         currentStage = stage;
 
+        // Displayed stage label only — drops the trailing " Agent" so the terminal
+        // header reads "Understanding" / "Analysis" / etc. Routing above still
+        // matches on the raw `stage` string; only the stored/rendered name changes.
+        const displayStage = stage.replace(/ Agent$/, "");
+
         setMessages(prev => {
           const updated = [...prev];
           const last = updated[updated.length - 1];
@@ -3826,8 +3836,8 @@ export default function Home() {
             last.agentStatus = "thinking";
             last.isRetrieving = false;
             if (!last.stages) last.stages = [];
-            if (!last.stages.find((s: any) => s.name === stage)) {
-              last.stages.push({ name: stage });
+            if (!last.stages.find((s: any) => s.name === displayStage)) {
+              last.stages.push({ name: displayStage });
             }
           }
           return [...updated];

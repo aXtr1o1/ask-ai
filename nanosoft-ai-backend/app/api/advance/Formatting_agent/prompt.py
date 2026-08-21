@@ -89,12 +89,44 @@ def build_formatting_prompt(
             "No markdown. No headers. No bullet points. Plain prose only."
         )
 
+    # ── Internal-detail guardrail ───────────────────────────────────────────────
+    # The Reason line inside DATA SHAPE below may contain the raw tool/queue-runner
+    # message when Shape is "error" (see shape_resolver.py) — that's deliberate:
+    # it's the ONLY channel carrying the real cause into this prompt, since
+    # final_answer itself is never sent for TABLE/GRAPH formats. But it is internal
+    # context for YOU to reason from, never text to output. It can contain phrasing
+    # like "Step 'step_2' previously failed", "$step_1.groups", raw tool names, or
+    # Python exception text — none of that is meaningful to a business user.
+    internal_detail_guardrail = (
+        "════════════════════════════════════════════\n"
+        "HANDLING INTERNAL DETAILS — READ CAREFULLY\n"
+        "════════════════════════════════════════════\n"
+        "The Reason line below may contain internal execution details: step numbers, "
+        "'$step_N' references, tool names, or raw error/exception text. These are for "
+        "YOUR understanding only. Never repeat them verbatim — no step numbers, no "
+        "'$step' syntax, no tool names, no stack traces, no raw error objects. "
+        "If Shape is 'error', translate the underlying cause into one plain, confident "
+        "sentence a Facility Management user would understand (e.g. no matching records, "
+        "a required field had no usable values) — never say \"the operation/step/tool failed\" "
+        "or reference how the system is built internally.\n\n"
+        "Distinguish these three situations precisely — they are not interchangeable:\n"
+        "  1. A genuinely computed result of zero or an empty set (e.g. \"0 complaints are "
+        "currently open\", \"no assets matched this filter\") — state it as a real, confident "
+        "finding. This is a valid answer, not a failure.\n"
+        "  2. A result that could not be computed because required data was unavailable "
+        "(Shape is 'error', or the computed value is null/None) — clearly say the answer "
+        "could not be determined because the necessary data wasn't available, without "
+        "implying the value is zero and without any internal jargon.\n"
+        "  3. A normal, successfully computed non-zero result — state it directly."
+    )
+
     # ── Assemble ──────────────────────────────────────────────────────────────
     prompt = (
         "You are the Insight Writer for a Facility Management analytics platform. "
         "Your role is to produce the explanation that accompanies a computed data result — "
         "clear, confident, and precisely grounded in what was actually asked and computed.\n\n"
         + writing_instruction
+        + "\n\n" + internal_detail_guardrail
         + "\n\n════════════════════════════════════════════\n"
         "DATA SHAPE  (structure — no raw values)\n"
         "════════════════════════════════════════════\n"
@@ -108,7 +140,8 @@ def build_formatting_prompt(
         "\n\n════════════════════════════════════════════\n"
         f"Presentation format: {fmt}\n"
         "════════════════════════════════════════════\n"
-        "Write only the explanation. No format labels. No section headers. No tags."
+        "Write only the explanation. No format labels. No section headers. No tags. "
+        "No step numbers, $step references, tool names, or raw error text."
     )
 
     return prompt

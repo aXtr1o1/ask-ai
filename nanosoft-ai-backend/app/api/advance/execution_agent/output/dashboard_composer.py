@@ -872,9 +872,13 @@ def compose(
 
     if isinstance(final_answer, dict):
         if "error" in final_answer or "_dep_failed" in final_answer:
-            msg = final_answer.get("error") or final_answer.get("_dep_failed") or "Execution failed."
-            logger.info("[DashboardComposer] → text (error dict)")
-            return [_text(str(msg))]
+            # Deliberately generic and free of internal jargon (step numbers, $step_N
+            # refs, tool names) — this text is rendered directly to the user with no
+            # LLM rewriting step in between, unlike shape_descriptor.reason (built in
+            # shape_resolver.py), which DOES carry the raw message but only as internal
+            # context for the Formatting Agent's prompt, never shown to the user as-is.
+            logger.info("[DashboardComposer] → text (error dict, sanitized for direct display)")
+            return [_text("This result could not be computed because the required data was unavailable.")]
 
     # ── Scalar ───────────────────────────────────────────────────────────────
     if not isinstance(final_answer, (dict, list)):

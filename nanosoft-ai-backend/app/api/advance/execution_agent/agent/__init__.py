@@ -1,1 +1,1 @@
-# agent sub-package — run_execution, schemas, agent_logger
+# agent sub-package — run_execution, agent_logger

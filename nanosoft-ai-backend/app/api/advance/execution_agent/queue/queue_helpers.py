@@ -180,6 +180,7 @@ _ARG_GUARDS: dict[str, list[tuple]] = {
                 "periods_ahead": args.get("periods_ahead", 3),
                 "data_points": 0,
                 "value_key": args.get("value_key", "count"),
+                "last_known_label": None,
                 "_safe_skip": "forecast_linear requires at least 2 data points — insufficient periods data",
             },
         ),
@@ -204,6 +205,12 @@ _ARG_GUARDS: dict[str, list[tuple]] = {
             "threshold",
             lambda v, args: v is None or (isinstance(v, str) and v.strip().lower() in ("none", "null", "")),
             lambda tool, args: {
+                "module": args.get("module", ""),
+                "field": args.get("field", ""),
+                "threshold": args.get("threshold"),
+                "operator": args.get("operator", "gt"),
+                "filters": args.get("filters") or [],
+                "group_fields": args.get("group_fields") or [],
                 "flagged_count": 0,
                 "total_records": 0,
                 "flag_ratio": 0.0,
@@ -238,6 +245,7 @@ _ARG_GUARDS: dict[str, list[tuple]] = {
             lambda tool, args: {
                 "module": args.get("module"),
                 "field": args.get("field"),
+                "filters": args.get("filters") or [],
                 "average": None,
                 "records_used": 0,
                 "_safe_skip": "field_name_resolved_to_empty",

@@ -101,10 +101,13 @@ def _validate_queue(queue: list) -> None:
         current_tool = step["tool"]
         args         = step.get("args", {})
 
-        # Check required arguments are present for known tools
+        # Check required arguments are present (and not None) for known tools.
+        # A required arg present-but-None (e.g. the LLM emitted "group_fields": null)
+        # must fail here, not just an absent key — otherwise it silently reaches the
+        # tool as None/[] and fails deep inside execution instead of at validation time.
         required = REQUIRED_ARGS.get(current_tool, [])
         for req in required:
-            if req not in args:
+            if req not in args or args[req] is None:
                 raise ValueError(
                     f"Queue step index {current_idx} (position {i}, tool={current_tool}): "
                     f"missing required argument '{req}'. "
@@ -316,14 +319,26 @@ def run_execution(
     #   dict   → keep as-is     (result_ref in final_answer_tool may be a dict)
     #   list   → keep as-is     (multi-step references)
     #   int/float → str(v)      (field names or enum values passed as numbers)
+    #
+    # group_fields is deliberately EXCLUDED from the None→[] coercion below.
+    # group_fields is a REQUIRED arg for group_by_and_count / group_by_and_aggregate /
+    # join_and_aggregate — those tools reject an empty list just as they'd reject None.
+    # Coercing null → [] makes a genuinely missing value look "provided" to
+    # _validate_queue (the key is now present with a value), so the queue passes
+    # validation and only fails later, inside the tool, burying the real cause
+    # further down the step chain. Leaving it None lets _validate_queue's required-arg
+    # check (below) catch it immediately with a clear pre-execution error instead.
     for step in parsed:
         if isinstance(step, dict):
             args = step.get("args") or {}
             for k, v in args.items():
                 if v is None:
-                    # List args default to [] not "" — preserves correct type
-                    args[k] = [] if k in ("filters", "group_fields", "conditions",
-                                          "percentiles", "fields", "datasets") else ""
+                    if k == "group_fields":
+                        pass                          # leave as None — validator catches it
+                    elif k in ("filters", "conditions", "percentiles", "fields", "datasets"):
+                        args[k] = []                  # List args default to [] not ""
+                    else:
+                        args[k] = ""
                 elif isinstance(v, (dict, list)):
                     pass                              # keep structured values intact
                 elif not isinstance(v, str):

@@ -2,15 +2,13 @@
 Context Builder — formats the Execution Agent's raw output into a clean context
 for the Formatting Agent.
 
-Format determines what the Formatting Agent receives:
-
-  TABLE / GRAPH   — steps + shape_descriptor + alternatives only.
-                    No final_answer. Frontend renders the data.
-                    LLM writes the analytical context above the rendered data.
-
-  PLAIN_TEXT /    — steps + shape_descriptor + alternatives + final_answer.
-  BULLET_LIST /     LLM reasons over the result to produce the full response.
-  NUMBERED_LIST
+The context always carries planned_steps, shape_descriptor, final_answer, and
+dashboard, regardless of format. Format determines what the Formatting Agent's
+LLM prompt actually includes (see Formatting_agent/agent.py's is_data_heavy
+check) — TABLE/GRAPH prompts omit final_answer's raw values from the LLM
+message; PLAIN_TEXT/BULLET_LIST/NUMBERED_LIST include them. final_answer and
+dashboard themselves are always present in this context so the frontend can
+render either way.
 
 Dashboard composition:
   Regardless of format, the DashboardComposer is called to produce a typed
@@ -24,8 +22,6 @@ from app.api.advance.execution_agent.output.shape_resolver    import resolve as 
 from app.api.advance.execution_agent.output.dashboard_composer import compose as compose_dashboard
 
 logger = logging.getLogger("advance.context_builder")
-
-_DATA_HEAVY_FORMATS = {"TABLE", "GRAPH"}
 
 
 def build_formatting_context(
