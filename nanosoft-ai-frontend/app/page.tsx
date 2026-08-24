@@ -25,6 +25,7 @@ import SpaceBooking from "./components/Bookings/spacebooking";
 import SpaceBookingModal from "./components/Bookings/SpaceBookingModal";
 import ComplaintsModal from "./components/Bookings/ComplaintsModal";
 import AssetAnalyticsDashboard from "./components/AssetAnalytics/AssetAnalyticsDashboard";
+import AdvanceChatUI, { sendAdvanceQuery, sendAdvanceAudioQuery, AdvanceStreamMessage, renderCharToDom } from "./components/Advance/AdvanceChatUI";
 
 /* changes done by megnathan: Cleaned up icon imports to avoid conflicts with local definitions */
 import {
@@ -60,6 +61,14 @@ interface Message {
   multipleDatasets?: MultiDatasetView[];
   multiSummary?: string;  // ← context_summary from the backend
   isSpaceBooking?: boolean;   // ← Track if message belongs to Space Booking session
+  // ── Advance AI fields ──────────────────────────────────────────────────────
+  isAdvanceStream?: boolean;
+  advanceResult?: any;
+  agentStatus?: "thinking" | "done";
+  stage?: string;
+  stages?: any[];
+  streamContent?: string;
+  isRetrieving?: boolean;
 }
 
 interface ChatSession { id: string; title: string; createdAt: number; updatedAt?: number; isPinned?: boolean; isArchived?: boolean; group_name?: string; isSpaceBooking?: boolean; }
@@ -152,19 +161,19 @@ function formatContextSummary(text: string): string {
     .map(line => {
       const trimmed = line.trim();
       if (!trimmed) return '<div style="height:6px"></div>';
-      
+
       // Check for bullet list
       const bulletMatch = line.match(/^[\s]*([-*•])\s+(.*)/);
       if (bulletMatch) {
         return `<div style="display:flex;align-items:baseline;gap:8px;margin-left:12px;margin-top:2px;margin-bottom:2px"><span style="color:#D2AC47;font-size:10px;flex-shrink:0">•</span><span style="color:#F3F4F6">${md(bulletMatch[2])}</span></div>`;
       }
-      
+
       // Check for numbered list
       const numberMatch = line.match(/^[\s]*(\d+[.)])\s+(.*)/);
       if (numberMatch) {
         return `<div style="display:flex;align-items:baseline;gap:8px;margin-left:12px;margin-top:2px;margin-bottom:2px"><span style="color:#D2AC47;font-size:12px;font-weight:600;flex-shrink:0">${numberMatch[1]}</span><span style="color:#F3F4F6">${md(numberMatch[2])}</span></div>`;
       }
-      
+
       return `<div style="line-height:1.6;margin:2px 0;color:#F3F4F6">${md(line)}</div>`;
     })
     .join("");
@@ -844,11 +853,11 @@ function parseDateTimeFromMessage(text: string): { date: string; fromTime: strin
 
   const now = new Date();
   let date = getLocalYYYYMMDD(now);
-  
+
   // Future defaults: next hour
   let fromHour = now.getHours() + 1;
   let toHour = fromHour + 1;
-  
+
   if (fromHour >= 24) {
     fromHour = fromHour % 24;
     toHour = fromHour + 1;
@@ -858,7 +867,7 @@ function parseDateTimeFromMessage(text: string): { date: string; fromTime: strin
   } else if (toHour >= 24) {
     toHour = toHour % 24;
   }
-  
+
   let fromTime = `${String(fromHour).padStart(2, "0")}:00`;
   let toTime = `${String(toHour).padStart(2, "0")}:00`;
 
@@ -1295,6 +1304,7 @@ export default function Home() {
   const [isSpaceBooking, setIsSpaceBooking] = useState<boolean>(false);
   const [isComplaints, setIsComplaints] = useState<boolean>(false);
   const [isAssetAnalytics, setIsAssetAnalytics] = useState<boolean>(false);
+  const [isAdvanceAskAI, setIsAdvanceAskAI] = useState<boolean>(false);
   const [isComplaintsModalOpen, setIsComplaintsModalOpen] = useState<boolean>(false);
   const [activeBookingBubbleIndex, setActiveBookingBubbleIndex] = useState<number | null>(null);
   const [bookingStartDate, setBookingStartDate] = useState<string>("");
@@ -3543,12 +3553,381 @@ export default function Home() {
     }
   };
 
+  // ── Advance AI — sends query to /api/advance/ask-ai via HTTP POST ─────────
+  const handleAdvanceAskAI = (userText: string) => {
+    recordPromptForGhostHistory(ghostPromptHistoryStorageKey(loggedInUser), userText);
+
+    const now = Date.now();
+    setChatSessions(prev => {
+      const existing = prev.find(s => s.id === sessionId);
+      const rest = prev.filter(s => s.id !== sessionId);
+      if (existing) return [{ ...existing, updatedAt: now }, ...rest];
+      return [{ id: sessionId, title: "New Chat", createdAt: now, updatedAt: now }, ...rest];
+    });
+
+    setShowFeaturePlaceholder(false);
+    const placeholderMsg: Message = { role: "ai", text: "", streaming: true, isAdvanceStream: true, agentStatus: "thinking" };
+    setMessages(prev => {
+      const updated = [...prev, { role: "user" as const, text: userText }, placeholderMsg];
+      sessionMessagesRef.current.set(sessionId, updated);
+      return updated;
+    });
+
+    if (inputRef.current) inputRef.current.value = "";
+    rawInputRef.current = "";
+    setInput("");
+    syncGhostUserMirror();
+    setIsLoading(true);
+
+    let currentStage = "";
+    let charQueue: string[] = [];
+    let isFlushing = false;
+
+    const flushQueue = () => {
+      if (charQueue.length === 0) {
+        isFlushing = false;
+        return;
+      }
+      isFlushing = true;
+
+      // Steady, natural typing speed (max 2 characters per frame) for word-by-word/char-by-char aesthetic
+      const charsToType = Math.min(2, charQueue.length);
+      for (let i = 0; i < charsToType && charQueue.length > 0; i++) {
+        renderCharToDom(charQueue.shift()!);
+      }
+
+      requestAnimationFrame(flushQueue);
+    };
+
+    sendAdvanceQuery(
+      userText,
+      process.env.NEXT_PUBLIC_API_BASE_URL!,
+      (stage) => {
+        // Stage started — stop previous stream immediately, clear queue and clear DOM
+        charQueue.length = 0;
+        isFlushing = false;
+        const sc = document.getElementById("active-stream-container");
+        if (sc) {
+          sc.innerHTML = "";
+
+          // Inject a premium default action text so the terminal is never blank
+          let defaultAction = "";
+          if (stage === "Understanding Agent") defaultAction = "Analyzing query intent and routing request...";
+          else if (stage === "Analysis Agent") defaultAction = "Extracting database fields and parsing filters...";
+          else if (stage === "Retrieval Layer") defaultAction = "Connecting to database and fetching records...";
+          else if (stage === "Preprocessing Layer") defaultAction = "Cleaning and preprocessing retrieved data...";
+          else if (stage === "Execution Agent") defaultAction = "Running query execution plan and solving steps...";
+          else if (stage === "Formatting Agent") defaultAction = "Generating summary explanation and rendering layout...";
+
+          if (defaultAction) {
+            const line = document.createElement("span");
+            line.className = "active-stream-line default-action-text";
+            line.style.cssText = "font-family:var(--font-mono, 'Fira Code', monospace);font-size:12px;color:#D4AF37;line-height:1.6;font-style:italic;display:block;opacity:0.75;";
+            line.textContent = defaultAction;
+            sc.appendChild(line);
+          }
+        }
+
+        currentStage = stage;
+
+        // Displayed stage label only — drops the trailing " Agent" so the terminal
+        // header reads "Understanding" / "Analysis" / etc. Routing above still
+        // matches on the raw `stage` string; only the stored/rendered name changes.
+        const displayStage = stage.replace(/ Agent$/, "");
+
+        // Stage started → update msg.stages so AdvanceStreamMessage shows the terminal header
+        setMessages(prev => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last && last.role === "ai") {
+            last.stage = stage;
+            last.agentStatus = "thinking";
+            last.isRetrieving = false;
+            if (!last.stages) last.stages = [];
+            if (!last.stages.find((s: any) => s.name === displayStage)) {
+              last.stages.push({ name: displayStage });
+            }
+          }
+          return [...updated];
+        });
+      },
+      (chars) => {
+        // Clear default action text on the first actual chunk
+        const sc = document.getElementById("active-stream-container");
+        if (sc) {
+          const defaultText = sc.querySelector(".default-action-text");
+          if (defaultText) {
+            sc.innerHTML = ""; // clear default text to make way for actual stream
+          }
+        }
+
+        // Update streamContent flag on the first chunk so UI transitions to the terminal
+        setMessages(prev => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last && last.role === "ai" && !last.streamContent) {
+            last.streamContent = "started";
+            return updated;
+          }
+          return prev;
+        });
+
+        // Thought token → inject directly into the live terminal DOM (60fps, no re-render)
+        const str = typeof chars === "string" ? chars : String(chars);
+        for (const ch of str) {
+          charQueue.push(ch);
+        }
+        if (!isFlushing) {
+          isFlushing = true;
+          requestAnimationFrame(flushQueue);
+        }
+      },
+      (stage) => {
+        // Stage ended — clear charQueue and terminal so the next agent starts fresh.
+        charQueue.length = 0;           // drain any pending chars from this stage
+        isFlushing = false;
+        // Clear the live DOM terminal container
+        const sc = document.getElementById("active-stream-container");
+        if (sc) sc.innerHTML = "";
+      },
+      (data) => {
+        // Complete — drain queue and clear terminal immediately, then show final result.
+        charQueue.length = 0;
+        isFlushing = false;
+        const sc = document.getElementById("active-stream-container");
+        if (sc) sc.innerHTML = "";
+
+        setMessages(prev => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last && last.role === "ai") {
+            last.streaming = false;
+            last.agentStatus = "done";
+            if (data) last.advanceResult = data;
+          }
+          sessionMessagesRef.current.set(sessionId, updated);
+          return updated;
+        });
+        setIsLoading(false);
+      },
+      (error) => {
+        setMessages(prev => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last && last.role === "ai") {
+            last.text = `Error: ${error.message}`;
+            last.streaming = false;
+            last.agentStatus = "done";
+          }
+          return updated;
+        });
+        setIsLoading(false);
+      },
+      null,
+      sessionId,
+      loggedInUser ?? "",                                        // user_name → same as WS sends as "userName"
+      userIdInt != null ? String(userIdInt) : undefined          // user_id   → same as WS sends as "userId"
+    );
+  };
+
+  const handleAdvanceAudioSend = async () => {
+    const blob = voiceRecorder.recordedAudioBlob;
+    if (!blob) return;
+
+    const audioUrl = URL.createObjectURL(blob);
+    let actualDuration = voiceRecorder.audioDuration > 0 ? voiceRecorder.audioDuration : voiceRecorder.recordingTime;
+
+    if (actualDuration === 0) {
+      actualDuration = await new Promise<number>((resolve) => {
+        const tmp = new Audio(audioUrl);
+        const onMeta = () => {
+          tmp.removeEventListener("loadedmetadata", onMeta);
+          resolve(isFinite(tmp.duration) ? tmp.duration : voiceRecorder.recordingTime);
+        };
+        tmp.addEventListener("loadedmetadata", onMeta);
+        setTimeout(() => { tmp.removeEventListener("loadedmetadata", onMeta); resolve(voiceRecorder.recordingTime); }, 600);
+      });
+    }
+
+    voiceRecorder.deleteRecording();
+
+    const now = Date.now();
+    setChatSessions(prev => {
+      const existing = prev.find(s => s.id === sessionId);
+      const rest = prev.filter(s => s.id !== sessionId);
+      if (existing) return [{ ...existing, updatedAt: now }, ...rest];
+      return [{ id: sessionId, title: "New Chat", createdAt: now, updatedAt: now }, ...rest];
+    });
+
+    setShowFeaturePlaceholder(false);
+    const placeholderMsg: Message = { role: "ai", text: "", streaming: true, isAdvanceStream: true, agentStatus: "thinking" };
+    setMessages(prev => {
+      const updated = [...prev, {
+        role: "user" as const,
+        text: "Voice message",
+        isAudio: true,
+        audioDuration: actualDuration,
+        audioUrl: audioUrl
+      }, placeholderMsg];
+      sessionMessagesRef.current.set(sessionId, updated);
+      return updated;
+    });
+
+    setIsLoading(true);
+
+    let currentStage = "";
+    let charQueue: string[] = [];
+    let isFlushing = false;
+
+    const flushQueue = () => {
+      if (charQueue.length === 0) {
+        isFlushing = false;
+        return;
+      }
+      isFlushing = true;
+
+      const charsToType = Math.min(2, charQueue.length);
+      for (let i = 0; i < charsToType && charQueue.length > 0; i++) {
+        renderCharToDom(charQueue.shift()!);
+      }
+
+      requestAnimationFrame(flushQueue);
+    };
+
+    sendAdvanceAudioQuery(
+      blob,
+      process.env.NEXT_PUBLIC_API_BASE_URL!,
+      (stage) => {
+        charQueue.length = 0;
+        isFlushing = false;
+        const sc = document.getElementById("active-stream-container");
+        if (sc) {
+          sc.innerHTML = "";
+
+          let defaultAction = "";
+          if (stage === "Understanding Agent") defaultAction = "Analyzing query intent and routing request...";
+          else if (stage === "Analysis Agent") defaultAction = "Extracting database fields and parsing filters...";
+          else if (stage === "Retrieval Layer") defaultAction = "Connecting to database and fetching records...";
+          else if (stage === "Preprocessing Layer") defaultAction = "Cleaning and preprocessing retrieved data...";
+          else if (stage === "Execution Agent") defaultAction = "Running query execution plan and solving steps...";
+          else if (stage === "Formatting Agent") defaultAction = "Generating summary explanation and rendering layout...";
+
+          if (defaultAction) {
+            const line = document.createElement("span");
+            line.className = "active-stream-line default-action-text";
+            line.style.cssText = "font-family:var(--font-mono, 'Fira Code', monospace);font-size:12px;color:#D4AF37;line-height:1.6;font-style:italic;display:block;opacity:0.75;";
+            line.textContent = defaultAction;
+            sc.appendChild(line);
+          }
+        }
+
+        currentStage = stage;
+
+        // Displayed stage label only — drops the trailing " Agent" so the terminal
+        // header reads "Understanding" / "Analysis" / etc. Routing above still
+        // matches on the raw `stage` string; only the stored/rendered name changes.
+        const displayStage = stage.replace(/ Agent$/, "");
+
+        setMessages(prev => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last && last.role === "ai") {
+            last.stage = stage;
+            last.agentStatus = "thinking";
+            last.isRetrieving = false;
+            if (!last.stages) last.stages = [];
+            if (!last.stages.find((s: any) => s.name === displayStage)) {
+              last.stages.push({ name: displayStage });
+            }
+          }
+          return [...updated];
+        });
+      },
+      (chars) => {
+        const sc = document.getElementById("active-stream-container");
+        if (sc) {
+          const defaultText = sc.querySelector(".default-action-text");
+          if (defaultText) {
+            sc.innerHTML = "";
+          }
+        }
+
+        setMessages(prev => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last && last.role === "ai" && !last.streamContent) {
+            last.streamContent = "started";
+            return updated;
+          }
+          return prev;
+        });
+
+        const str = typeof chars === "string" ? chars : String(chars);
+        for (const ch of str) {
+          charQueue.push(ch);
+        }
+        if (!isFlushing) {
+          isFlushing = true;
+          requestAnimationFrame(flushQueue);
+        }
+      },
+      (stage) => {
+        charQueue.length = 0;
+        isFlushing = false;
+        const sc = document.getElementById("active-stream-container");
+        if (sc) sc.innerHTML = "";
+      },
+      (data) => {
+        charQueue.length = 0;
+        isFlushing = false;
+        const sc = document.getElementById("active-stream-container");
+        if (sc) sc.innerHTML = "";
+
+        setMessages(prev => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last && last.role === "ai") {
+            last.streaming = false;
+            last.agentStatus = "done";
+            if (data) last.advanceResult = data;
+          }
+          sessionMessagesRef.current.set(sessionId, updated);
+          return updated;
+        });
+        setIsLoading(false);
+      },
+      (error) => {
+        setMessages(prev => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last && last.role === "ai") {
+            last.text = `Error: ${error.message}`;
+            last.streaming = false;
+            last.agentStatus = "done";
+          }
+          return updated;
+        });
+        setIsLoading(false);
+      },
+      sessionId,
+      loggedInUser ?? "",
+      userIdInt != null ? String(userIdInt) : undefined,
+      actualDuration
+    );
+  };
+
   // ── Send message over the persistent WebSocket ────────────────────────────
   const sendMessage = () => {
     const domVal = inputRef.current?.value ?? "";
     if (!domVal.trim() || isLoading) return;
     clearGhostCompletion();
     const userText = domVal.trim();
+
+    // Route to Advance AI if that mode is active
+    if (isAdvanceAskAI) {
+      handleAdvanceAskAI(userText);
+      return;
+    }
 
     const ws = wsRef.current;
 
@@ -3671,7 +4050,7 @@ export default function Home() {
             displayTimeText={voiceRecorder.displayTimeText}
             onTogglePlayback={voiceRecorder.togglePlayback}
             onDelete={voiceRecorder.deleteRecording}
-            onSend={voiceRecorder.sendVoiceMessage}
+            onSend={isAdvanceAskAI ? handleAdvanceAudioSend : voiceRecorder.sendVoiceMessage}
             isLoading={isLoading}
             wsConnectionState={wsConnectionState}
           />
@@ -3704,6 +4083,7 @@ export default function Home() {
               </div>
             )}
 
+
             <SpaceBooking
               isSpaceBooking={isSpaceBooking}
               setIsSpaceBooking={setIsSpaceBooking}
@@ -3711,6 +4091,8 @@ export default function Home() {
               setIsComplaints={setIsComplaints}
               isAssetAnalytics={isAssetAnalytics}
               setIsAssetAnalytics={setIsAssetAnalytics}
+              isAdvanceAskAI={isAdvanceAskAI}
+              setIsAdvanceAskAI={setIsAdvanceAskAI}
               isChatStarted={messages.length > 0}
               onSwitchMode={handleSwitchMode}
             >
@@ -4594,9 +4976,9 @@ export default function Home() {
           {/* Asset Analytics Full Screen */}
           {!historyLoading && isAssetAnalytics && (
             <div style={{ flex: 1, display: "flex", overflow: "hidden", width: "100%" }}>
-              <AssetAnalyticsDashboard 
-                loggedInUser={loggedInUser || "Unknown"} 
-                baseUrl={baseUrl || ""} 
+              <AssetAnalyticsDashboard
+                loggedInUser={loggedInUser || "Unknown"}
+                baseUrl={baseUrl || ""}
                 onExit={() => setIsAssetAnalytics(false)}
               />
             </div>
@@ -4684,273 +5066,281 @@ export default function Home() {
                       return null;
                     }
                     const isUser = msg.role === "user";
-                  const isError = msg.role === "error";
-                  const isStreaming = msg.streaming === true;
-                  const isAudio = msg.isAudio === true;
-                  const isGraphMsg = msg.isGraphResponse === true;  // ← Use explicit flag
+                    const isError = msg.role === "error";
+                    const isStreaming = msg.streaming === true;
+                    const isAudio = msg.isAudio === true;
+                    const isGraphMsg = msg.isGraphResponse === true;  // ← Use explicit flag
 
-                  // ✅ Parse graph data ONLY if message is marked as graph response
-                  const graphData = isGraphMsg
-                    ? parseGraphData(msg.text)
-                    : null;
+                    // ✅ Parse graph data ONLY if message is marked as graph response
+                    const graphData = isGraphMsg
+                      ? parseGraphData(msg.text)
+                      : null;
 
-                  // DEBUG: Log rendering decision
-                  if (isGraphMsg) {
-                    console.log("✅ [RENDER] Marked as graph message → will render BarChartRenderer", {
-                      parsed: graphData !== null,
-                      type: graphData?.type,
-                    });
-                  } else if (!isUser && !isError && !isStreaming) {
-                    console.log("📨 [RENDER] Regular message → will render as HTML", {
-                      textLength: msg.text?.length || 0,
-                    });
-                  }
+                    // DEBUG: Log rendering decision
+                    if (isGraphMsg) {
+                      console.log("✅ [RENDER] Marked as graph message → will render BarChartRenderer", {
+                        parsed: graphData !== null,
+                        type: graphData?.type,
+                      });
+                    } else if (!isUser && !isError && !isStreaming) {
+                      console.log("📨 [RENDER] Regular message → will render as HTML", {
+                        textLength: msg.text?.length || 0,
+                      });
+                    }
 
-                  // Format duration as MM:SS
-                  const formatDuration = (seconds: number): string => {
-                    const mins = Math.floor(seconds / 60);
-                    const secs = seconds % 60;
-                    return `${mins}:${secs.toString().padStart(2, "0")}`;
-                  };
+                    // Format duration as MM:SS
+                    const formatDuration = (seconds: number): string => {
+                      const mins = Math.floor(seconds / 60);
+                      const secs = seconds % 60;
+                      return `${mins}:${secs.toString().padStart(2, "0")}`;
+                    };
 
-                  return (
-                    <div key={idx} className={`message-row ${msg.role}`}>
-                      {!isUser && !isError && (
-                        <div className="avatar-box"><IconAI /></div>
-                      )}
-
-                      <div
-                        className={`message-bubble ${msg.role}${isGraphMsg ? ' graph-message' : ''}${(msg.tableData && msg.tableData.length > 0) || (msg.multipleDatasets && msg.multipleDatasets.length > 0) ? ' table-message' : ''}`}
-                        style={{ position: 'relative' }}
-                      >
-
-                        {isAudio ? (
-                          /* ── Audio Message: Show player UI ── */
-                          (() => {
-                            // BUG 1 FIX: prefer real loaded duration, fall back to stored, then 0
-                            const realDur = audioDurationMap[idx] ?? msg.audioDuration ?? 0;
-                            const progress = audioProgressMap[idx] ?? 0;
-                            // currentTime = progress% of realDur
-                            const currentSec = realDur > 0 ? (progress / 100) * realDur : 0;
-
-                            const fmtSec = (s: number) => {
-                              const m = Math.floor(s / 60);
-                              const sec = Math.floor(s % 60);
-                              return `${m}:${sec.toString().padStart(2, "0")}`;
-                            };
-
-                            return (
-                              <div className="voice-message-container" style={{
-                                fontSize: responsive.isMobile ? '12px' : responsive.isTablet ? '13px' : '14px',
-                                display: 'flex',
-                                gap: responsive.isMobile ? '8px' : '12px',
-                                alignItems: 'center',
-                                width: '100%',
-                              }}>
-                                <button
-                                  className="voice-message-play-btn"
-                                  onClick={() => handleAudioPlayback(idx, msg.audioUrl, msg.audioDuration || 0)}
-                                  disabled={!isUser}
-                                >
-                                  {audioPlayingIndex === idx ? <IconPlayerPause size={20} /> : <IconPlayerPlay size={20} />}
-                                </button>
-                                <div style={{ display: "flex", flexDirection: "column", flex: 1, gap: "6px" }}>
-                                  <div className="voice-message-progress-wrapper">
-                                    <div
-                                      className="voice-message-progress-bar"
-                                      style={{
-                                        width: `${progress}%`,
-                                        transition: "width 0.1s linear",   // smooth CSS transition
-                                      }}
-                                    />
-                                  </div>
-                                  {/* BUG 1 FIX: show real duration; if playing show currentTime / total */}
-                                  <div className="voice-message-duration" style={{
-                                    fontSize: responsive.isMobile ? '11px' : responsive.isTablet ? '12px' : '13px',
-                                  }}>
-                                    {audioPlayingIndex === idx
-                                      ? `${fmtSec(currentSec)} / ${fmtSec(realDur)}`
-                                      : fmtSec(realDur)
-                                    }
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          })()
-                        ) : isUser || isError ? (
-                          /* ── User / Error: plain text ── */
-                          <>{(() => {
-                            if (isUser && msg.text.includes("[CALENDAR_PAYLOAD]")) {
-                              const match = msg.text.match(/start_time:\s*"([^"]+)",\s*end_time:\s*"([^"]+)"/);
-                              const prefix = msg.text.split("[CALENDAR_PAYLOAD]")[0].replace(/\|\s*$/, "").trim();
-                              if (match) {
-                                return prefix ? `${prefix} | Book from ${match[1]} to ${match[2]}` : `Book from ${match[1]} to ${match[2]}`;
-                              }
-                              return prefix;
-                            }
-                            return msg.text;
-                          })()}</>
-
-                        ) : isStreaming ? (
-                          /* ── Streaming: pre-wrap plain text + blinking cursor ── */
-                          <div className="ai-bubble streaming-text">
-                            <span dangerouslySetInnerHTML={{ __html: injectCalendarIcon(msg.text, idx) }} />
-                            <span className="stream-cursor" />
-                          </div>
-
-                        ) : isGraphMsg && graphData ? (
-                          /* ── Graph: Render chart with per-message type switcher ── */
-                          (() => {
-                            const chartSize = getResponsivePieChartSize(responsive.screen);
-                            return (
-                              <div style={{
-                                display: 'flex',
-                                justifyContent: 'center',
-                                alignItems: 'center',
-                                width: '100%',
-                                maxWidth: chartSize.containerMaxWidth,
-                                marginTop: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
-                                marginBottom: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
-                                marginLeft: 'auto',
-                                marginRight: 'auto',
-                                overflow: responsive.isMobile ? 'visible' : 'visible',
-                                paddingLeft: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
-                                paddingRight: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
-                                paddingTop: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
-                                paddingBottom: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
-                              }}>
-                                {(() => {
-                                  const msgChartType = msg.chartType || 'vertical-bar';
-
-                                  const handleChartTypeChange = (newType: ChartType) => {
-                                    setChartType(newType);
-                                    setMessages(prev => {
-                                      const updated = [...prev];
-                                      updated[idx] = { ...updated[idx], chartType: newType };
-                                      return updated;
-                                    });
-                                  };
-
-                                  if (msgChartType === 'horizontal-bar') {
-                                    return <HorizontalBarChartRenderer key={`hbar-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
-                                  } else if (msgChartType === 'pie') {
-                                    return <PieChartRenderer key={`pie-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
-                                  } else if (msgChartType === 'line') {
-                                    return <LineChartRenderer key={`line-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
-                                  } else {
-                                    return <BarChartRenderer key={`bar-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
-                                  }
-                                })()}
-                              </div>
-                            );
-                          })()
-
-                        ) : msg.multipleDatasets && msg.multipleDatasets.length > 0 ? (
-                          /* ── Multiple Tables: render summary + one TableWithTile per dataset ── */
-                          <div style={{ width: '100%' }}>
-                            {msg.multiSummary && (
-                              <div style={{
-                                marginBottom: '16px',
-                                fontSize: responsive.isMobile ? '13px' : '14px',
-                                lineHeight: 1.6,
-                                color: 'var(--color-text)',
-                                padding: '10px 14px',
-                                background: 'var(--color-surface-2, rgba(255,255,255,0.05))',
-                                borderRadius: '8px',
-                                borderLeft: '3px solid var(--color-accent, #D4AF37)',
-                              }}>
-                                <span dangerouslySetInnerHTML={{ __html: injectCalendarIcon(msg.multiSummary, idx) }} />
-                              </div>
-                            )}
-                            {msg.multipleDatasets.map((ds, dsIdx) => (
-                              <div key={dsIdx} style={{ marginBottom: dsIdx < msg.multipleDatasets!.length - 1 ? '24px' : 0 }}>
-                                <TableWithTile
-                                  rows={ds.rows}
-                                  title={ds.name}
-                                  htmlTableContent={ds.html}
-                                  totalCount={ds.totalCount}
-                                  showOnlyTiles={msg.isSpaceBooking}
-                                  isSpaceBooking={msg.isSpaceBooking}
-                                  forceDisable={msg.isSpaceBooking ? idx !== latestTableIdx : false}
-                                  onTileClick={handleTileClickForSpaceBooking}
-                                />
-                              </div>
-                            ))}
-                          </div>
-
-                        ) : msg.tableData && msg.tableData.length > 0 ? (
-                          /* ── Table: Render with TableWithTile component with toggle buttons for table/tile views ── */
-                          <TableWithTile
-                            rows={msg.tableData}
-                            title={msg.tableTitle || "Data"}
-                            htmlTableContent={msg.text}
-                            showOnlyTiles={msg.isSpaceBooking}
-                            isSpaceBooking={msg.isSpaceBooking}
-                            forceDisable={msg.isSpaceBooking ? idx !== latestTableIdx : false}
-                            onTileClick={handleTileClickForSpaceBooking}
-                          />
-
-                        ) : (
-                          /* ── Complete: already formatted at [DONE] time ── */
-                          <div className="ai-bubble" style={{
-                            fontSize: responsive.isMobile ? '13px' : responsive.isTablet ? '14px' : '15px',
-                            lineHeight: 1.5,
-                            maxWidth: responsive.isMobile ? '90%' : responsive.isTablet ? '85%' : '75%',
-                            display: 'flex',
-                            justifyContent: 'center',
-                            alignItems: 'flex-start',
-                          }}>
-                            <div dangerouslySetInnerHTML={{ __html: injectCalendarIcon(msg.text, idx) }} style={{
-                              width: '100%',
-                              textAlign: 'left',
-                            }} />
-                          </div>
+                    return (
+                      <div key={idx} className={`message-row ${msg.role}`}>
+                        {!isUser && !isError && (
+                          <div className="avatar-box"><IconAI /></div>
                         )}
 
-                        {/* Copy button for text bubbles only */}
-                        {!isAudio && !isGraphMsg && !(msg.tableData && msg.tableData.length > 0) && !(msg.multipleDatasets && msg.multipleDatasets.length > 0) && (
-                          <>
-                            <button
-                              className="copy-bubble-btn"
-                              onClick={(e) => {
-                                // Extract plain text if it's HTML
-                                const textToCopy = injectCalendarIcon(msg.text, idx).replace(new RegExp('<[^>]*>?', 'gm'), '');
-                                navigator.clipboard.writeText(textToCopy);
+                        <div
+                          className={`message-bubble ${msg.role}${isGraphMsg ? ' graph-message' : ''}${(msg.tableData && msg.tableData.length > 0) || (msg.multipleDatasets && msg.multipleDatasets.length > 0) ? ' table-message' : ''}${msg.isAdvanceStream ? ' advance-message' : ''}`}
+                          style={{ position: 'relative' }}
+                        >
 
-                                // Change icon to tick
-                                const btn = e.currentTarget;
-                                const originalHTML = btn.innerHTML;
-                                btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
+                          {isAudio ? (
+                            /* ── Audio Message: Show player UI ── */
+                            (() => {
+                              // BUG 1 FIX: prefer real loaded duration, fall back to stored, then 0
+                              const realDur = audioDurationMap[idx] ?? msg.audioDuration ?? 0;
+                              const progress = audioProgressMap[idx] ?? 0;
+                              // currentTime = progress% of realDur
+                              const currentSec = realDur > 0 ? (progress / 100) * realDur : 0;
 
-                                setTimeout(() => {
-                                  btn.innerHTML = originalHTML;
-                                }, 2000);
-                              }}
-                              style={{
-                                position: 'absolute',
-                                bottom: '4px',
-                                right: '4px',
-                                opacity: 0, // hidden by default on desktop
-                                transition: 'opacity 0.2s',
-                                background: (typeof window !== 'undefined' ? document.documentElement.getAttribute('data-theme') === 'dark' : (theme === 'dark')) ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.05)',
-                                border: 'none',
-                                borderRadius: '4px',
-                                color: (typeof window !== 'undefined' ? document.documentElement.getAttribute('data-theme') === 'dark' : (theme === 'dark')) ? '#d4af37' : '#5c4033',
-                                padding: '4px',
-                                cursor: 'pointer',
+                              const fmtSec = (s: number) => {
+                                const m = Math.floor(s / 60);
+                                const sec = Math.floor(s % 60);
+                                return `${m}:${sec.toString().padStart(2, "0")}`;
+                              };
+
+                              return (
+                                <div className="voice-message-container" style={{
+                                  fontSize: responsive.isMobile ? '12px' : responsive.isTablet ? '13px' : '14px',
+                                  display: 'flex',
+                                  gap: responsive.isMobile ? '8px' : '12px',
+                                  alignItems: 'center',
+                                  width: '100%',
+                                }}>
+                                  <button
+                                    className="voice-message-play-btn"
+                                    onClick={() => handleAudioPlayback(idx, msg.audioUrl, msg.audioDuration || 0)}
+                                    disabled={!isUser}
+                                  >
+                                    {audioPlayingIndex === idx ? <IconPlayerPause size={20} /> : <IconPlayerPlay size={20} />}
+                                  </button>
+                                  <div style={{ display: "flex", flexDirection: "column", flex: 1, gap: "6px" }}>
+                                    <div className="voice-message-progress-wrapper">
+                                      <div
+                                        className="voice-message-progress-bar"
+                                        style={{
+                                          width: `${progress}%`,
+                                          transition: "width 0.1s linear",   // smooth CSS transition
+                                        }}
+                                      />
+                                    </div>
+                                    {/* BUG 1 FIX: show real duration; if playing show currentTime / total */}
+                                    <div className="voice-message-duration" style={{
+                                      fontSize: responsive.isMobile ? '11px' : responsive.isTablet ? '12px' : '13px',
+                                    }}>
+                                      {audioPlayingIndex === idx
+                                        ? `${fmtSec(currentSec)} / ${fmtSec(realDur)}`
+                                        : fmtSec(realDur)
+                                      }
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })()
+                          ) : isUser || isError ? (
+                            /* ── User / Error: plain text ── */
+                            <>{(() => {
+                              if (isUser && msg.text.includes("[CALENDAR_PAYLOAD]")) {
+                                const match = msg.text.match(/start_time:\s*"([^"]+)",\s*end_time:\s*"([^"]+)"/);
+                                const prefix = msg.text.split("[CALENDAR_PAYLOAD]")[0].replace(/\|\s*$/, "").trim();
+                                if (match) {
+                                  return prefix ? `${prefix} | Book from ${match[1]} to ${match[2]}` : `Book from ${match[1]} to ${match[2]}`;
+                                }
+                                return prefix;
+                              }
+                              return msg.text;
+                            })()}</>
+
+                          ) : isStreaming ? (
+                            /* ── Streaming: Advance AI thinking OR standard streaming cursor ── */
+                            msg.isAdvanceStream ? (
+                              <AdvanceStreamMessage msg={msg} isDark={true} />
+                            ) : (
+                              <div className="ai-bubble streaming-text">
+                                <span dangerouslySetInnerHTML={{ __html: injectCalendarIcon(msg.text, idx) }} />
+                                <span className="stream-cursor" />
+                              </div>
+                            )
+
+                          ) : isGraphMsg && graphData ? (
+                            /* ── Graph: Render chart with per-message type switcher ── */
+                            (() => {
+                              const chartSize = getResponsivePieChartSize(responsive.screen);
+                              return (
+                                <div style={{
+                                  display: 'flex',
+                                  justifyContent: 'center',
+                                  alignItems: 'center',
+                                  width: '100%',
+                                  maxWidth: chartSize.containerMaxWidth,
+                                  marginTop: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
+                                  marginBottom: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
+                                  marginLeft: 'auto',
+                                  marginRight: 'auto',
+                                  overflow: responsive.isMobile ? 'visible' : 'visible',
+                                  paddingLeft: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
+                                  paddingRight: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
+                                  paddingTop: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
+                                  paddingBottom: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
+                                }}>
+                                  {(() => {
+                                    const msgChartType = msg.chartType || 'vertical-bar';
+
+                                    const handleChartTypeChange = (newType: ChartType) => {
+                                      setChartType(newType);
+                                      setMessages(prev => {
+                                        const updated = [...prev];
+                                        updated[idx] = { ...updated[idx], chartType: newType };
+                                        return updated;
+                                      });
+                                    };
+
+                                    if (msgChartType === 'horizontal-bar') {
+                                      return <HorizontalBarChartRenderer key={`hbar-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
+                                    } else if (msgChartType === 'pie') {
+                                      return <PieChartRenderer key={`pie-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
+                                    } else if (msgChartType === 'line') {
+                                      return <LineChartRenderer key={`line-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
+                                    } else {
+                                      return <BarChartRenderer key={`bar-${idx}`} graphData={graphData} currentChartType={msgChartType} onChartTypeChange={handleChartTypeChange} />;
+                                    }
+                                  })()}
+                                </div>
+                              );
+                            })()
+
+                          ) : msg.multipleDatasets && msg.multipleDatasets.length > 0 ? (
+                            /* ── Multiple Tables: render summary + one TableWithTile per dataset ── */
+                            <div style={{ width: '100%' }}>
+                              {msg.multiSummary && (
+                                <div style={{
+                                  marginBottom: '16px',
+                                  fontSize: responsive.isMobile ? '13px' : '14px',
+                                  lineHeight: 1.6,
+                                  color: 'var(--color-text)',
+                                  padding: '10px 14px',
+                                  background: 'var(--color-surface-2, rgba(255,255,255,0.05))',
+                                  borderRadius: '8px',
+                                  borderLeft: '3px solid var(--color-accent, #D4AF37)',
+                                }}>
+                                  <span dangerouslySetInnerHTML={{ __html: injectCalendarIcon(msg.multiSummary, idx) }} />
+                                </div>
+                              )}
+                              {msg.multipleDatasets.map((ds, dsIdx) => (
+                                <div key={dsIdx} style={{ marginBottom: dsIdx < msg.multipleDatasets!.length - 1 ? '24px' : 0 }}>
+                                  <TableWithTile
+                                    rows={ds.rows}
+                                    title={ds.name}
+                                    htmlTableContent={ds.html}
+                                    totalCount={ds.totalCount}
+                                    showOnlyTiles={msg.isSpaceBooking}
+                                    isSpaceBooking={msg.isSpaceBooking}
+                                    forceDisable={msg.isSpaceBooking ? idx !== latestTableIdx : false}
+                                    onTileClick={handleTileClickForSpaceBooking}
+                                  />
+                                </div>
+                              ))}
+                            </div>
+
+                          ) : msg.tableData && msg.tableData.length > 0 ? (
+                            /* ── Table: Render with TableWithTile component with toggle buttons for table/tile views ── */
+                            <TableWithTile
+                              rows={msg.tableData}
+                              title={msg.tableTitle || "Data"}
+                              htmlTableContent={msg.text}
+                              showOnlyTiles={msg.isSpaceBooking}
+                              isSpaceBooking={msg.isSpaceBooking}
+                              forceDisable={msg.isSpaceBooking ? idx !== latestTableIdx : false}
+                              onTileClick={handleTileClickForSpaceBooking}
+                            />
+
+                          ) : (
+                            /* ── Complete: Advance AI result OR standard formatted bubble ── */
+                            msg.isAdvanceStream ? (
+                              <AdvanceStreamMessage msg={msg} isDark={true} />
+                            ) : (
+                              <div className="ai-bubble" style={{
+                                fontSize: responsive.isMobile ? '13px' : responsive.isTablet ? '14px' : '15px',
+                                lineHeight: 1.5,
+                                maxWidth: responsive.isMobile ? '90%' : responsive.isTablet ? '85%' : '75%',
                                 display: 'flex',
-                                alignItems: 'center',
                                 justifyContent: 'center',
-                                zIndex: 10
-                              }}
-                              title="Copy text"
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                              </svg>
-                            </button>
-                            <style>{`
+                                alignItems: 'flex-start',
+                              }}>
+                                <div dangerouslySetInnerHTML={{ __html: injectCalendarIcon(msg.text, idx) }} style={{
+                                  width: '100%',
+                                  textAlign: 'left',
+                                }} />
+                              </div>
+                            )
+                          )}
+
+                          {/* Copy button for text bubbles only — not for advance AI messages */}
+                          {!isAudio && !isGraphMsg && !msg.isAdvanceStream && !(msg.tableData && msg.tableData.length > 0) && !(msg.multipleDatasets && msg.multipleDatasets.length > 0) && (
+                            <>
+                              <button
+                                className="copy-bubble-btn"
+                                onClick={(e) => {
+                                  // Extract plain text if it's HTML
+                                  const textToCopy = injectCalendarIcon(msg.text, idx).replace(new RegExp('<[^>]*>?', 'gm'), '');
+                                  navigator.clipboard.writeText(textToCopy);
+
+                                  // Change icon to tick
+                                  const btn = e.currentTarget;
+                                  const originalHTML = btn.innerHTML;
+                                  btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
+
+                                  setTimeout(() => {
+                                    btn.innerHTML = originalHTML;
+                                  }, 2000);
+                                }}
+                                style={{
+                                  position: 'absolute',
+                                  bottom: '4px',
+                                  right: '4px',
+                                  opacity: 0, // hidden by default on desktop
+                                  transition: 'opacity 0.2s',
+                                  background: (typeof window !== 'undefined' ? document.documentElement.getAttribute('data-theme') === 'dark' : (theme === 'dark')) ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.05)',
+                                  border: 'none',
+                                  borderRadius: '4px',
+                                  color: (typeof window !== 'undefined' ? document.documentElement.getAttribute('data-theme') === 'dark' : (theme === 'dark')) ? '#d4af37' : '#5c4033',
+                                  padding: '4px',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  zIndex: 10
+                                }}
+                                title="Copy text"
+                              >
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                                </svg>
+                              </button>
+                              <style>{`
                               @media (hover: hover) {
                                 .message-bubble:hover .copy-bubble-btn {
                                   opacity: 1 !important;
@@ -4967,114 +5357,114 @@ export default function Home() {
                                 }
                               }
                             `}</style>
-                          </>
-                        )}
+                            </>
+                          )}
 
-                        {/* Inline Booking Picker if active */}
-                        {activeBookingBubbleIndex === idx && (() => {
-                          const currentMessages = messages;
-                          let extractedSpotCode = "";
-                          
-                          // Helper: extract SpotCode from text using multiple patterns
-                          const extractSpotCodeFromText = (text: string): string => {
-                            // Pattern 1: "Spot Code: WRMF-SCR" or "SpotCode: WRMF-SCR"
-                            const m1 = text.match(/(?:Spot\s*Code|SpotCode):\s*([^\s,)|\)]+)/i);
-                            if (m1) return m1[1].trim();
-                            // Pattern 2: "(Spot Code: WRMF-SCR)" — label inside parens
-                            const m2 = text.match(/\((?:Spot\s*Code|SpotCode):\s*([^)]+)\)/i);
-                            if (m2) return m2[1].trim();
-                            // Pattern 3: bare SpotCode like WRMF-SCR or GPRF-KFC
-                            const m3 = text.match(/\b([A-Z]{2,6}-[A-Z0-9]{2,10})\b/);
-                            if (m3) return m3[1].trim();
-                            return "";
-                          };
+                          {/* Inline Booking Picker if active */}
+                          {activeBookingBubbleIndex === idx && (() => {
+                            const currentMessages = messages;
+                            let extractedSpotCode = "";
 
-                          // 1. Try to find in the assistant message itself (which is at idx)
-                          const aiMsg = currentMessages[idx];
-                          if (aiMsg && typeof aiMsg.text === "string") {
-                            extractedSpotCode = extractSpotCodeFromText(aiMsg.text);
-                            if (extractedSpotCode) {
-                              console.log("🔍 [Inline Calendar] Extracted SpotCode from assistant message:", extractedSpotCode);
-                            }
-                          }
-                          
-                          // 2. If not found, try to search backwards in user or AI messages
-                          if (!extractedSpotCode) {
-                            for (let mi = idx - 1; mi >= 0; mi--) {
-                              const m = currentMessages[mi];
-                              if (m && typeof m.text === "string") {
-                                const code = extractSpotCodeFromText(m.text);
-                                if (code) {
-                                  extractedSpotCode = code;
-                                  console.log("🔍 [Inline Calendar] Extracted SpotCode backwards from message:", mi, extractedSpotCode);
-                                  break;
-                                }
+                            // Helper: extract SpotCode from text using multiple patterns
+                            const extractSpotCodeFromText = (text: string): string => {
+                              // Pattern 1: "Spot Code: WRMF-SCR" or "SpotCode: WRMF-SCR"
+                              const m1 = text.match(/(?:Spot\s*Code|SpotCode):\s*([^\s,)|\)]+)/i);
+                              if (m1) return m1[1].trim();
+                              // Pattern 2: "(Spot Code: WRMF-SCR)" — label inside parens
+                              const m2 = text.match(/\((?:Spot\s*Code|SpotCode):\s*([^)]+)\)/i);
+                              if (m2) return m2[1].trim();
+                              // Pattern 3: bare SpotCode like WRMF-SCR or GPRF-KFC
+                              const m3 = text.match(/\b([A-Z]{2,6}-[A-Z0-9]{2,10})\b/);
+                              if (m3) return m3[1].trim();
+                              return "";
+                            };
+
+                            // 1. Try to find in the assistant message itself (which is at idx)
+                            const aiMsg = currentMessages[idx];
+                            if (aiMsg && typeof aiMsg.text === "string") {
+                              extractedSpotCode = extractSpotCodeFromText(aiMsg.text);
+                              if (extractedSpotCode) {
+                                console.log("🔍 [Inline Calendar] Extracted SpotCode from assistant message:", extractedSpotCode);
                               }
                             }
-                          }
-                          return (
-                            <SpaceBookingModal
-                              isInline={true}
-                              bookingFrom={`${bookingStartDate} ${bookingStartTime}`}
-                              bookingTo={`${bookingEndDate} ${bookingEndTime}`}
-                              spotCode={extractedSpotCode}
-                              onSave={(from, to) => {
-                                const [fromDate, fromTime] = from.split(" ");
-                                const [toDate, toTime] = to.split(" ");
-                                setBookingStartDate(fromDate || "");
-                                setBookingStartTime(fromTime || "");
-                                setBookingEndDate(toDate || "");
-                                setBookingEndTime(toTime || "");
 
-                                let bookingMsg = `${from} to ${to}`;
-                                if (from.includes(" ") && to.includes(" ")) {
-                                  const partsFrom = from.split(" ");
-                                  const partsTo = to.split(" ");
-                                  const startDate = partsFrom[0];
-                                  const startTime = partsFrom[1];
-                                  const endDate = partsTo[0];
-                                  const endTime = partsTo[1];
-                                  // ALWAYS use the full YYYY-MM-DD HH:MM:00 format.
-                                  // The backend LLM schema STRICTLY requires the end date to be present and parsable.
-                                  bookingMsg = `[CALENDAR_PAYLOAD] start_time: "${startDate} ${startTime}:00", end_time: "${endDate} ${endTime}:00"`;
-                                }
-
-                                // ── Prepend spot context so the backend has all booking info
-                                // even if the server restarted and sb_thread memory was cleared.
-                                // Search backwards through messages for the last SpotCode user message.
-                                const currentMessagesInner = messages;
-                                let spotContext = "";
-                                for (let mi = idx - 1; mi >= 0; mi--) {
-                                  const m = currentMessagesInner[mi];
-                                  if (m?.role === "user" && typeof m.text === "string" && m.text.includes("SpotCode:")) {
-                                    spotContext = m.text.trim();
+                            // 2. If not found, try to search backwards in user or AI messages
+                            if (!extractedSpotCode) {
+                              for (let mi = idx - 1; mi >= 0; mi--) {
+                                const m = currentMessages[mi];
+                                if (m && typeof m.text === "string") {
+                                  const code = extractSpotCodeFromText(m.text);
+                                  if (code) {
+                                    extractedSpotCode = code;
+                                    console.log("🔍 [Inline Calendar] Extracted SpotCode backwards from message:", mi, extractedSpotCode);
                                     break;
                                   }
                                 }
-                                if (spotContext) {
-                                  // Strip any previous " | Book from" additions so we don't chain them
-                                  const cleanContext = spotContext.split("| Book from")[0].trim();
-                                  bookingMsg = `${cleanContext} | Book from ${bookingMsg}`;
-                                }
+                              }
+                            }
+                            return (
+                              <SpaceBookingModal
+                                isInline={true}
+                                bookingFrom={`${bookingStartDate} ${bookingStartTime}`}
+                                bookingTo={`${bookingEndDate} ${bookingEndTime}`}
+                                spotCode={extractedSpotCode}
+                                onSave={(from, to) => {
+                                  const [fromDate, fromTime] = from.split(" ");
+                                  const [toDate, toTime] = to.split(" ");
+                                  setBookingStartDate(fromDate || "");
+                                  setBookingStartTime(fromTime || "");
+                                  setBookingEndDate(toDate || "");
+                                  setBookingEndTime(toTime || "");
 
-                                console.log("📅 [Telemetry] Inline saving booking times. Sending message:", bookingMsg);
-                                sendTextDirectly(bookingMsg);
+                                  let bookingMsg = `${from} to ${to}`;
+                                  if (from.includes(" ") && to.includes(" ")) {
+                                    const partsFrom = from.split(" ");
+                                    const partsTo = to.split(" ");
+                                    const startDate = partsFrom[0];
+                                    const startTime = partsFrom[1];
+                                    const endDate = partsTo[0];
+                                    const endTime = partsTo[1];
+                                    // ALWAYS use the full YYYY-MM-DD HH:MM:00 format.
+                                    // The backend LLM schema STRICTLY requires the end date to be present and parsable.
+                                    bookingMsg = `[CALENDAR_PAYLOAD] start_time: "${startDate} ${startTime}:00", end_time: "${endDate} ${endTime}:00"`;
+                                  }
 
-                                // Reset inline bubble index to close the inline picker
-                                setActiveBookingBubbleIndex(null);
-                              }}
-                              onClose={() => {
-                                setActiveBookingBubbleIndex(null);
-                              }}
-                            />
-                          );
-                        })()}
+                                  // ── Prepend spot context so the backend has all booking info
+                                  // even if the server restarted and sb_thread memory was cleared.
+                                  // Search backwards through messages for the last SpotCode user message.
+                                  const currentMessagesInner = messages;
+                                  let spotContext = "";
+                                  for (let mi = idx - 1; mi >= 0; mi--) {
+                                    const m = currentMessagesInner[mi];
+                                    if (m?.role === "user" && typeof m.text === "string" && m.text.includes("SpotCode:")) {
+                                      spotContext = m.text.trim();
+                                      break;
+                                    }
+                                  }
+                                  if (spotContext) {
+                                    // Strip any previous " | Book from" additions so we don't chain them
+                                    const cleanContext = spotContext.split("| Book from")[0].trim();
+                                    bookingMsg = `${cleanContext} | Book from ${bookingMsg}`;
+                                  }
 
+                                  console.log("📅 [Telemetry] Inline saving booking times. Sending message:", bookingMsg);
+                                  sendTextDirectly(bookingMsg);
+
+                                  // Reset inline bubble index to close the inline picker
+                                  setActiveBookingBubbleIndex(null);
+                                }}
+                                onClose={() => {
+                                  setActiveBookingBubbleIndex(null);
+                                }}
+                              />
+                            );
+                          })()}
+
+                        </div>
                       </div>
-                    </div>
-                  );
-                });
-              })()}
+                    );
+                  });
+                })()}
 
                 {isLoading && !(messages[messages.length - 1]?.role === "ai" && messages[messages.length - 1]?.streaming) && (() => {
                   const isDarkTheme = typeof window !== 'undefined' ? document.documentElement.getAttribute('data-theme') === 'dark' : (theme === 'dark');

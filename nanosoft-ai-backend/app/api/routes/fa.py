@@ -16,10 +16,6 @@ router = APIRouter()
 
 logger = logging.getLogger("fa_route")
 logger.setLevel(logging.INFO)
-ch = logging.StreamHandler()
-ch.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
-if not logger.handlers:
-    logger.addHandler(ch)
 
 
 def format_response(data):

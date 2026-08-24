@@ -1,0 +1,66 @@
+"""
+Analysis Agent — Data Shapes
+
+This file holds ALL data structure definitions for the Analysis Agent.
+
+  AnalysisOutput → Pydantic model the LLM is structured to produce.
+                   Defines which modules to query, which fields to retrieve
+                   (filter_fields), and which values to filter on (filter_values).
+
+Used by:
+  agent.py → _structured_llm.with_structured_output(AnalysisOutput)
+"""
+from pydantic import BaseModel, Field
+
+
+# =============================================================================
+# LLM OUTPUT SCHEMA — what the Analysis Agent produces
+#
+# Fields:
+#   modules       → FM modules needed to answer the query
+#   filter_fields → per module: { FieldName: description } — columns to retrieve
+#   filter_values → per module: { FieldName: value } — conditions to filter rows
+#
+# Both filter_fields and filter_values are keyed by module name.
+# The retrieval layer reads these directly to load and slice the data.
+# =============================================================================
+class AnalysisOutput(BaseModel):
+    """Structured output from the Analysis Agent."""
+
+    limit: int | None = Field(
+        default=None,
+        description=(
+            "Maximum number of records to return if the user explicitly specifies a numeric limit "
+            "in the query (e.g. 'top 5', 'first 10', 'give me 5 assets'). Set to null if no specific quantity/count is requested."
+        )
+    )
+    filter_fields: dict[str, dict[str, str]] = Field(
+        default_factory=dict,
+        description=(
+            "Per-module field projection. "
+            "Maps module → { FieldName: short description of why this field is needed }. "
+            "Only include fields that exist in the module's metadata schema. "
+            "These are the columns that will be retrieved and passed to the execution agent."
+        )
+    )
+    filter_values: dict[str, dict[str, str | list[str]]] = Field(
+        default_factory=dict,
+        description=(
+            "Per-module pre-filter conditions. "
+            "Maps module → { FieldName: value to filter on }. "
+            "Can be a single string or a list of strings if multiple values are compared. "
+            "Only include values that are explicitly present in or directly implied by the query. "
+            "These conditions narrow the retrieved records before analysis begins."
+        )
+    )
+    thought: str = Field(
+        default="",
+        description="Your internal reasoning and step-by-step thinking process before generating the final output. Always provide your complete thought process here."
+    )
+    # NOTE: reasoning is intentionally last — the LLM writes fields in order.
+    # Keeping critical fields (filter_fields, filter_values) first ensures they
+    # are always fully written even if the output is truncated mid-reasoning.
+    reasoning: str = Field(
+        default="",
+        description="A concise explanation of why you chose these fields and filters based on the query."
+    )
