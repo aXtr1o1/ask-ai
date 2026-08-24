@@ -33,7 +33,8 @@ async def get_sessions_for_user(user_name: str) -> list:
                    COALESCE(is_pinned, FALSE)  AS is_pinned,
                    COALESCE(is_archived, FALSE) AS is_archived,
                    group_name,
-                   COALESCE(is_space_booking, FALSE) AS is_space_booking
+                   COALESCE(is_space_booking, FALSE) AS is_space_booking,
+                   COALESCE(is_advance, FALSE) AS is_advance
             FROM chat_sessions
             WHERE user_name = %s
             ORDER BY COALESCE(is_pinned, FALSE) DESC, updated_at DESC
@@ -56,6 +57,7 @@ async def get_sessions_for_user(user_name: str) -> list:
                 "is_archived": bool(row[cols.index("is_archived")]),
                 "group_name":  row[cols.index("group_name")],
                 "is_space_booking": bool(row[cols.index("is_space_booking")]),
+                "is_advance": bool(row[cols.index("is_advance")]),
             }
             for row in rows
         ]
@@ -110,10 +112,12 @@ async def get_chat_history_for_session(user_name: str, session_id: str) -> list:
         # ──          is_audio  → bool flag for frontend rendering
         filtered_history = [
             {
-                "query":     item.get("query",     ""),
+                "query": item.get("query", ""),
                 "assistant": item.get("assistant", ""),
-                "context":   item.get("context", ""),
-                "is_audio":  item.get("is_audio",  False)
+                "context": item.get("context", ""),
+                "is_audio": item.get("is_audio", False),
+                "is_advance": item.get("is_advance", False),
+                "advance_result": item.get("advance_result"),
             }
             for item in history
         ]
