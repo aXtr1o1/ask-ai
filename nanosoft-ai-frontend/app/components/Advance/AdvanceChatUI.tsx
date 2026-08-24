@@ -6,6 +6,7 @@ import {
   IconPlus,
 } from "@tabler/icons-react";
 import DynamicDashboard from "./DynamicDashboard";
+import { Loader } from "../ai-block/loader";
 
 
 interface AdvanceChatProps {
@@ -932,13 +933,7 @@ export function AdvanceStreamMessage({ msg, isDark = true }: { msg: any; isDark?
                 textAlign: "left", outline: "none", width: "fit-content"
               }}
             >
-              <svg 
-                className="thinking-icon" 
-                viewBox="0 0 24 24" 
-                style={{ width: "16px", height: "16px", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round", animation: "spin 2s linear infinite" }}
-              >
-                <path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/>
-              </svg>
+              <Loader variant="classic" size={16} />
               <span style={{ fontWeight: 500, letterSpacing: "0.3px" }}>Thinking...</span>
             </button>
           ) : (
@@ -947,9 +942,7 @@ export function AdvanceStreamMessage({ msg, isDark = true }: { msg: any; isDark?
               <div style={{ display: "flex", flexDirection: "column", gap: "6px", paddingLeft: "12px", borderLeft: "2px solid rgba(212,175,55,0.2)", marginLeft: "4px" }}>
                 {/* Stage Header */}
                 <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "11px", fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", color: "#D4AF37", padding: "2px 0" }}>
-                  <svg viewBox="0 0 24 24" style={{ width: "12px", height: "12px", stroke: "#D4AF37", fill: "none", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", animation: "spin 2s linear infinite" }}>
-                    <path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/>
-                  </svg>
+                  <Loader variant="classic" size={14} />
                   <span>{currentStageName}</span>
                 </div>
 
@@ -1013,8 +1006,8 @@ export function AdvanceStreamMessage({ msg, isDark = true }: { msg: any; isDark?
         // where the dashboard list is empty (e.g. old backend, error state).
         return (
           <div
-            className="ai-bubble"
-            style={{ width: "100%", display: "flex", flexDirection: "column", gap: "12px", padding: "12px" }}
+            className="message-bubble ai ai-bubble"
+            style={{ maxWidth: "100%", display: "flex", flexDirection: "column", gap: "12px", width: "fit-content" }}
             dangerouslySetInnerHTML={{
               __html: renderChatResponseHtml((() => {
                 if (fr) {
@@ -1084,7 +1077,7 @@ export function AdvanceStreamMessage({ msg, isDark = true }: { msg: any; isDark?
                   response_type:    "general",
                   layout:           "MARKDOWN",
                   explanation:      "",
-                  formatted_answer: res?.general_response || "",
+                  formatted_answer: res?.general_response || (typeof res === "string" ? res : ""),
                   header:           "AI Response",
                 };
               })())
@@ -1095,19 +1088,15 @@ export function AdvanceStreamMessage({ msg, isDark = true }: { msg: any; isDark?
 
       {/* Error / Text fallback */}
       {!msg.streaming && !msg.advanceResult && msg.text && (
-        <div style={{
-          fontSize: "14px",
-          color: msg.text.startsWith("Error:") ? "#EF4444" : "var(--color-text, #FFFFFF)",
-          fontFamily: msg.text.startsWith("Error:") ? "var(--font-mono, 'Fira Code', monospace)" : "inherit",
-          padding: "10px 12px",
-          background: msg.text.startsWith("Error:") ? "rgba(239, 68, 68, 0.05)" : "transparent",
-          border: msg.text.startsWith("Error:") ? "1px solid rgba(239, 68, 68, 0.2)" : "none",
-          borderRadius: "8px",
-          width: "100%",
-          whiteSpace: "pre-wrap"
-        }}>
-          {msg.text}
-        </div>
+        msg.text.startsWith("Error:") ? (
+          <div className="message-bubble ai error" style={{ width: "fit-content", maxWidth: "100%", whiteSpace: "pre-wrap" }}>
+            {msg.text}
+          </div>
+        ) : (
+          <div className="message-bubble ai ai-bubble" style={{ width: "fit-content", maxWidth: "100%", whiteSpace: "pre-wrap" }}>
+            {msg.text}
+          </div>
+        )
       )}
     </>
   );

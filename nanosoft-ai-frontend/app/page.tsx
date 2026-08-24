@@ -2827,7 +2827,7 @@ export default function Home() {
     }, 3000);
   };
 
-  const handleNewChat = async (initialMode?: 'space_booking' | 'complaints' | 'ask_ai' | 'asset_analytics') => {
+  const handleNewChat = async (initialMode?: 'space_booking' | 'complaints' | 'ask_ai' | 'asset_analytics' | 'advance_ask_ai') => {
     if (isLoading) {
       showWarningToast("Please wait, don't switch the chat!");
       console.log("⚠️ Chat creation blocked: Please wait, don't switch the chat!");
@@ -2844,6 +2844,7 @@ export default function Home() {
     setIsSpaceBooking(initialMode === 'space_booking'); // Reset space booking state when starting a new chat
     setIsComplaints(initialMode === 'complaints');
     setIsAssetAnalytics(initialMode === 'asset_analytics');
+    setIsAdvanceAskAI(initialMode === 'advance_ask_ai');
     setIsComplaintsModalOpen(false);
     setActiveBookingBubbleIndex(null);
 
@@ -2930,8 +2931,8 @@ export default function Home() {
     setTimeout(() => refetchSessions(), 400);
   };
 
-  const handleSwitchMode = (newMode: 'space_booking' | 'complaints' | 'ask_ai' | 'asset_analytics') => {
-    const currentMode = isSpaceBooking ? 'space_booking' : isComplaints ? 'complaints' : isAssetAnalytics ? 'asset_analytics' : 'ask_ai';
+  const handleSwitchMode = (newMode: 'space_booking' | 'complaints' | 'ask_ai' | 'asset_analytics' | 'advance_ask_ai') => {
+    const currentMode = isSpaceBooking ? 'space_booking' : isComplaints ? 'complaints' : isAssetAnalytics ? 'asset_analytics' : isAdvanceAskAI ? 'advance_ask_ai' : 'ask_ai';
     if (newMode === currentMode) {
       return;
     }
@@ -2947,6 +2948,7 @@ export default function Home() {
       setIsSpaceBooking(newMode === 'space_booking');
       setIsComplaints(newMode === 'complaints');
       setIsAssetAnalytics(newMode === 'asset_analytics');
+      setIsAdvanceAskAI(newMode === 'advance_ask_ai');
     }
   };
 
@@ -3167,6 +3169,7 @@ export default function Home() {
     setIsSpaceBooking(false); // Reset space booking state when switching session
     setIsComplaints(false);
     setIsAssetAnalytics(false);
+    setIsAdvanceAskAI(false);
     setIsComplaintsModalOpen(false);
     setActiveBookingBubbleIndex(null);
 
@@ -4148,29 +4151,31 @@ export default function Home() {
                   isGuestOnShared
                 }
               />
-              <button
-                onClick={() => setIsGraphMode((p) => !p)}
-                title={isGraphMode ? "Graph mode ON — click to turn off" : "Click for graph output"}
-                style={{
-                  background: isGraphMode
-                    ? "linear-gradient(135deg, #d4af37, #f5c249)"
-                    : "transparent",
-                  border: isGraphMode
-                    ? "1px solid #d4af37"
-                    : "1px solid rgba(255,255,255,0.15)",
-                  borderRadius: 8,
-                  padding: "6px 8px",
-                  cursor: "pointer",
-                  color: isGraphMode ? "#000" : "#9CA3AF",
-                  transition: "all 0.2s ease",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  flexShrink: 0,
-                }}
-              >
-                <IconChartBar size={18} stroke={1.5} />
-              </button>
+              {!isSpaceBooking && !isAdvanceAskAI && (
+                <button
+                  onClick={() => setIsGraphMode((p) => !p)}
+                  title={isGraphMode ? "Graph mode ON — click to turn off" : "Click for graph output"}
+                  style={{
+                    background: isGraphMode
+                      ? "linear-gradient(135deg, #d4af37, #f5c249)"
+                      : "transparent",
+                    border: isGraphMode
+                      ? "1px solid #d4af37"
+                      : "1px solid rgba(255,255,255,0.15)",
+                    borderRadius: 8,
+                    padding: "6px 8px",
+                    cursor: "pointer",
+                    color: isGraphMode ? "#000" : "#9CA3AF",
+                    transition: "all 0.2s ease",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                  }}
+                >
+                  <IconChartBar size={18} stroke={1.5} />
+                </button>
+              )}
               <button
                 className="send-btn"
                 onClick={sendMessage}
@@ -5006,16 +5011,20 @@ export default function Home() {
                   >
                     {isSpaceBooking
                       ? "Welcome to Space Booking"
-                      : selectedGroupName
-                        ? `📁 ${selectedGroupName}`
-                        : "Welcome to Ask AI"}
+                      : isAdvanceAskAI
+                        ? "Welcome to Advance Ask AI"
+                        : selectedGroupName
+                          ? `📁 ${selectedGroupName}`
+                          : "Welcome to Ask AI"}
                   </h1>
                   <p className="landing-subtitle">
                     {isSpaceBooking
                       ? "Let's book your space buddy"
-                      : selectedGroupName
-                        ? `Start a new chat in ${selectedGroupName}`
-                        : "Let's work together buddy"}
+                      : isAdvanceAskAI
+                        ? "Let's explore advanced analytics buddy"
+                        : selectedGroupName
+                          ? `Start a new chat in ${selectedGroupName}`
+                          : "Let's work together buddy"}
                   </p>
                 </div>
               </div>
