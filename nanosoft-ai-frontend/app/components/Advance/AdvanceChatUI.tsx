@@ -524,50 +524,236 @@ export function renderMarkdownLayout(text: string) {
 
 function parseMarkdownBlocks(text: string) {
   if (!text) return "";
-  const blocks = text.split(/(```[\\s\\S]*?```)/g);
-  return blocks.map(block => {
-    if (block.startsWith("\`\`\`") && block.endsWith("\`\`\`")) {
-      const content = block.slice(3, -3);
-      const lines = content.split("\\n");
-      let lang = "";
-      let code = content;
-      if (lines.length > 0 && lines[0].trim() && lines[0].trim().length < 15) {
-        lang = lines[0].trim();
-        code = lines.slice(1).join("\\n");
-      }
-      return `
-        <div style="background: rgba(0,0,0,0.2); padding: 10px 14px; border-radius: 6px; margin: 8px 0; font-family: var(--font-mono); font-size: 12px; border-left: 3px solid #D4AF37; overflow-x: auto; color: #cbd5e1;">
-          ${lang ? `<div style="font-size: 10px; color: #ffd700; font-weight: 600; text-transform: uppercase; margin-bottom: 4px;">${lang}</div>` : ""}
-          <pre style="margin: 0; white-space: pre-wrap;">${escapeHtml(code)}</pre>
-        </div>
-      `;
-    }
 
-    const lines = block.split("\\n");
-    return lines.map((line, lIdx) => {
-      const trimmed = line.trim();
-      if (trimmed.startsWith("### ")) return `<h5 style="margin: 12px 0 6px 0; font-weight: 600; font-size: 14px; border-left: 3.5px solid #D4AF37; padding-left: 8px; color: #D4AF37;">${parseMarkdownTokens(trimmed.slice(4))}</h5>`;
-      if (trimmed.startsWith("## ")) return `<h4 style="margin: 16px 0 8px 0; font-weight: 700; font-size: 15px; border-left: 4px solid #D4AF37; padding-left: 8px; color: #D4AF37;">${parseMarkdownTokens(trimmed.slice(3))}</h4>`;
-      if (trimmed.startsWith("# ")) return `<h3 style="margin: 20px 0 10px 0; font-weight: 700; font-size: 16px; border-left: 5px solid #D4AF37; padding-left: 8px; color: #D4AF37;">${parseMarkdownTokens(trimmed.slice(2))}</h3>`;
-      if (/^[-*•]\\s+/.test(trimmed)) return `<div style="display: flex; align-items: flex-start; gap: 8px; margin: 4px 0 4px 12px;"><span style="color: #D4AF37; font-size: 12px; margin-top: 2px;">•</span><span style="flex: 1;">${parseMarkdownTokens(trimmed.replace(/^[-*•]\\s+/, ""))}</span></div>`;
-      if (/^\\d+[.)]\\s+/.test(trimmed)) {
-        const match = trimmed.match(/^(\\d+)[.)]\\s+/);
-        const num = match ? match[1] : "1";
-        return `<div style="display: flex; align-items: flex-start; gap: 8px; margin: 4px 0 4px 12px;"><span style="color: #D4AF37; font-weight: 600; font-size: 12px; margin-top: 2px;">${num}.</span><span style="flex: 1;">${parseMarkdownTokens(trimmed.replace(/^\\d+[.)]\\s+/, ""))}</span></div>`;
+  const blocks = text.split(/(```[\s\S]*?```)/g);
+
+  return blocks
+    .map((block) => {
+      // ── Code block ───────────────────────────────────────────────
+      if (block.startsWith("```") && block.endsWith("```")) {
+        const content = block.slice(3, -3);
+        const lines = content.split("\n");
+
+        let lang = "";
+        let code = content;
+
+        if (
+          lines.length > 0 &&
+          lines[0].trim() &&
+          lines[0].trim().length < 15
+        ) {
+          lang = lines[0].trim();
+          code = lines.slice(1).join("\n");
+        }
+
+        return `
+          <div style="background: rgba(0,0,0,0.2); padding: 10px 14px; border-radius: 6px; margin: 8px 0; font-family: var(--font-mono); font-size: 12px; border-left: 3px solid #D4AF37; overflow-x: auto; color: #cbd5e1;">
+            ${
+              lang
+                ? `<div style="font-size: 10px; color: #ffd700; font-weight: 600; text-transform: uppercase; margin-bottom: 4px;">${lang}</div>`
+                : ""
+            }
+            <pre style="margin: 0; white-space: pre-wrap;">${escapeHtml(
+              code
+            )}</pre>
+          </div>
+        `;
       }
-      return `<span>${parseMarkdownTokens(line)}${lIdx < lines.length - 1 ? "<br />" : ""}</span>`;
-    }).join("");
-  }).join("");
+
+      const lines = block.split("\n");
+      const output: string[] = [];
+
+      let i = 0;
+
+      while (i < lines.length) {
+        const line = lines[i];
+        const trimmed = line.trim();
+
+        // ── Markdown table ──────────────────────────────────────────
+        if (
+          trimmed.includes("|") &&
+          i + 1 < lines.length &&
+          /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|?\s*$/.test(lines[i + 1])
+        ) {
+          const headerCells = trimmed
+            .replace(/^\|/, "")
+            .replace(/\|$/, "")
+            .split("|")
+            .map((cell) => cell.trim());
+
+          i += 2;
+
+          const rows: string[][] = [];
+
+          while (i < lines.length && lines[i].trim().includes("|")) {
+            const row = lines[i]
+              .trim()
+              .replace(/^\|/, "")
+              .replace(/\|$/, "")
+              .split("|")
+              .map((cell) => cell.trim());
+
+            rows.push(row);
+            i++;
+          }
+
+          output.push(`
+            <div style="width: 100%; overflow-x: auto; margin: 12px 0;">
+              <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                <thead>
+                  <tr>
+                    ${headerCells
+                      .map(
+                        (cell) => `
+                          <th style="text-align: left; padding: 8px 10px; border-bottom: 2px solid #D4AF37; color: #D4AF37; font-weight: 700; white-space: nowrap;">
+                            ${parseMarkdownTokens(cell)}
+                          </th>
+                        `
+                      )
+                      .join("")}
+                  </tr>
+                </thead>
+                <tbody>
+                  ${rows
+                    .map(
+                      (row) => `
+                        <tr>
+                          ${headerCells
+                            .map(
+                              (_, index) => `
+                                <td style="padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,0.12); vertical-align: top;">
+                                  ${parseMarkdownTokens(row[index] ?? "")}
+                                </td>
+                              `
+                            )
+                            .join("")}
+                        </tr>
+                      `
+                    )
+                    .join("")}
+                </tbody>
+              </table>
+            </div>
+          `);
+
+          continue;
+        }
+
+        // ── Headings ────────────────────────────────────────────────
+        if (trimmed.startsWith("### ")) {
+          output.push(
+            `<h5 style="margin: 12px 0 6px 0; font-weight: 600; font-size: 14px; border-left: 3.5px solid #D4AF37; padding-left: 8px; color: #D4AF37;">${parseMarkdownTokens(
+              trimmed.slice(4)
+            )}</h5>`
+          );
+          i++;
+          continue;
+        }
+
+        if (trimmed.startsWith("## ")) {
+          output.push(
+            `<h4 style="margin: 16px 0 8px 0; font-weight: 700; font-size: 15px; border-left: 4px solid #D4AF37; padding-left: 8px; color: #D4AF37;">${parseMarkdownTokens(
+              trimmed.slice(3)
+            )}</h4>`
+          );
+          i++;
+          continue;
+        }
+
+        if (trimmed.startsWith("# ")) {
+          output.push(
+            `<h3 style="margin: 20px 0 10px 0; font-weight: 700; font-size: 16px; border-left: 5px solid #D4AF37; padding-left: 8px; color: #D4AF37;">${parseMarkdownTokens(
+              trimmed.slice(2)
+            )}</h3>`
+          );
+          i++;
+          continue;
+        }
+
+        // ── Bullet list ─────────────────────────────────────────────
+        if (/^[-*•]\s+/.test(trimmed)) {
+          output.push(
+            `<div style="display: flex; align-items: flex-start; gap: 8px; margin: 4px 0 4px 12px;">
+              <span style="color: #D4AF37; font-size: 12px; margin-top: 2px;">•</span>
+              <span style="flex: 1;">${parseMarkdownTokens(
+                trimmed.replace(/^[-*•]\s+/, "")
+              )}</span>
+            </div>`
+          );
+          i++;
+          continue;
+        }
+
+        // ── Numbered list ──────────────────────────────────────────
+        if (/^\d+[.)]\s+/.test(trimmed)) {
+          const match = trimmed.match(/^(\d+)[.)]\s+/);
+          const num = match ? match[1] : "1";
+
+          output.push(
+            `<div style="display: flex; align-items: flex-start; gap: 8px; margin: 4px 0 4px 12px;">
+              <span style="color: #D4AF37; font-weight: 600; font-size: 12px; margin-top: 2px;">${num}.</span>
+              <span style="flex: 1;">${parseMarkdownTokens(
+                trimmed.replace(/^\d+[.)]\s+/, "")
+              )}</span>
+            </div>`
+          );
+
+          i++;
+          continue;
+        }
+
+        // ── Blank line ─────────────────────────────────────────────
+        if (!trimmed) {
+          output.push(`<div style="height: 6px;"></div>`);
+          i++;
+          continue;
+        }
+
+        // ── Normal text ─────────────────────────────────────────────
+        output.push(
+          `<span>${parseMarkdownTokens(line)}${
+            i < lines.length - 1 ? "<br />" : ""
+          }</span>`
+        );
+
+        i++;
+      }
+
+      return output.join("");
+    })
+    .join("");
 }
 
 function parseMarkdownTokens(text: string) {
-  text = text.replace(/\\$\\$/g, '').replace(/\\\\text\\{([^}]+)\\}/g, '$1');
-  const parts = text.split(/(\\*\\*.*?\\*\\*|\`.*?\`)/g);
-  return parts.map(part => {
-    if (part.startsWith("**") && part.endsWith("**")) return `<strong style="font-weight: 600;">${part.slice(2, -2)}</strong>`;
-    if (part.startsWith("\`") && part.endsWith("\`")) return `<code style="font-family: var(--font-mono); background: rgba(212, 175, 55, 0.12); color: #ffd700; padding: 2px 5px; border-radius: 4px; font-size: 90%; margin: 0 2px; border: 1px solid rgba(212, 175, 55, 0.2);">${part.slice(1, -1)}</code>`;
-    return escapeHtml(part);
-  }).join("");
+  if (!text) return "";
+
+  // Escape HTML first so model-generated text cannot inject markup.
+  const escaped = escapeHtml(text);
+
+  // Split into bold and inline-code segments.
+  const parts = escaped.split(/(\*\*.*?\*\*|`.*?`)/g);
+
+  return parts
+    .map((part) => {
+      // Bold: **text**
+      if (part.startsWith("**") && part.endsWith("**")) {
+        return `<strong style="font-weight: 600;">${part.slice(
+          2,
+          -2
+        )}</strong>`;
+      }
+
+      // Inline code: `text`
+      if (part.startsWith("`") && part.endsWith("`")) {
+        return `<code style="font-family: var(--font-mono); background: rgba(212, 175, 55, 0.12); color: #ffd700; padding: 2px 5px; border-radius: 4px; font-size: 90%; margin: 0 2px; border: 1px solid rgba(212, 175, 55, 0.2);">${part.slice(
+          1,
+          -1
+        )}</code>`;
+      }
+
+      return part;
+    })
+    .join("");
 }
 
 function escapeHtml(unsafe: string) {

@@ -37,6 +37,7 @@ _FORMAT_TO_RESPONSE_TYPE = {
     "TABLE":      "table-response",
     "GRAPH":      "graph-response",
     "PLAIN_TEXT": "plain-response",
+    "WEB_SEARCH": "web-response",
 }
 
 

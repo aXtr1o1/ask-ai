@@ -2009,7 +2009,6 @@ const getAdvanceHistoryText = (m: Message): string => {
               : (m.originalText || stripHtml(m.text))
           )
         : m.text,
-
     isAudio: m.isAudio ?? false,
 
     // Preserve the complete Advanced response
@@ -2026,7 +2025,7 @@ const getAdvanceHistoryText = (m: Message): string => {
       console.warn("Failed to save chat history:", err);
     }
   };
-
+  
   const saveChatHistoryRef = useRef(saveChatHistory);
   useEffect(() => { saveChatHistoryRef.current = saveChatHistory; });
 
