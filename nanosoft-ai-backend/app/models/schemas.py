@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field, validator
 from typing import Optional, List
 import re
 from app.models.column_validation import AllColumns
+from typing import Optional
 # ==========================================
 # ✅ LANGCHAIN TOOL INPUT SCHEMAS
 # ==========================================
@@ -389,6 +390,8 @@ class FrontendChatMessage(BaseModel):
     role: str
     text: str
     isAudio: bool = False
+    isAdvance: bool = False
+    advance_result: Optional[dict] = None
 
 
 class SessionRequest(BaseModel):
@@ -404,6 +407,7 @@ class SessionRequest(BaseModel):
     historyOnClick: bool = False
     group_name: Optional[str] = None
     isSpaceBooking: Optional[bool] = False
+    isAdvanceAskAI: Optional[bool] = False
 
 class ClientInsertionRequest(BaseModel):
     """Request schema for client insertion"""

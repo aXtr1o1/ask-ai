@@ -115,7 +115,10 @@ function sem(label: string, idx: number): string {
 }
 
 function humanKey(k: string): string {
-  const s = k.replace(/([a-z])([A-Z])/g,"$1 $2").replace(/_/g," ").replace(/-/g," ");
+  const s = k
+    .replace(/([A-Z]+)([A-Z][a-z])/g,"$1 $2")
+    .replace(/([a-z0-9])([A-Z])/g,"$1 $2")
+    .replace(/[_-]/g," ");
   return s.split(" ").map(w=>w.charAt(0).toUpperCase()+w.slice(1).toLowerCase()).join(" ");
 }
 
@@ -850,8 +853,7 @@ function DynTable({comp, activeFilter, toggleFilter}:{comp:TabC; activeFilter: {
         {comp.note&&<span style={{fontSize:10,color:G.textFaint,fontStyle:"italic"}}>{comp.note}</span>}
       </div>
       <div style={{overflowX:"auto",borderRadius:10,border:`1px solid ${G.goldBorder}`,boxShadow:`0 0 24px rgba(0,0,0,.3)`}}>
-        {/* BUG 6.3 FIX — tableLayout:fixed prevents single long cell from stretching table */}
-        <table style={{width:"100%",tableLayout:"fixed",borderCollapse:"collapse",fontSize:12,textAlign:"left"}}>
+        <table style={{width:"100%",minWidth:"max-content",borderCollapse:"collapse",fontSize:12,textAlign:"left"}}>
           <thead>
             <tr style={{background:`linear-gradient(90deg,rgba(212,175,55,.12),rgba(212,175,55,.04))`,borderBottom:`1.5px solid ${G.goldBorder}`}}>
               {comp.columns.map((c, ci)=>(
@@ -865,7 +867,7 @@ function DynTable({comp, activeFilter, toggleFilter}:{comp:TabC; activeFilter: {
                   textTransform:"uppercase",
                   textAlign: parsedCols[ci].isNumeric ? "right" : "left"
                 }}>
-                  {c}
+                  {humanKey(c)}
                 </th>
               ))}
             </tr>

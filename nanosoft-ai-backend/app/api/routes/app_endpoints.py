@@ -25,27 +25,42 @@ async def sessions_endpoint(request: SessionRequest):
     
     # ── Case 1: chatHistory present → save session to PostgreSQL ──
     if incoming_history:
-        logger.info(f"💾 Saving chat history | user_name={user_name} | session_id={session_id} | messages={len(incoming_history)}")
+        logger.info(
+            f"💾 Saving chat history | user_name={user_name} | "
+            f"session_id={session_id} | messages={len(incoming_history)}"
+        )
 
         # Convert flat message list [{role,user/ai,text}] → [{query, assistant}] pairs
         history_pairs = []
         pending_query = None
-
         pending_is_audio = False
+
         for msg in incoming_history:
             role = (msg.role or "").lower()
+
             if role == "user":
                 pending_query = msg.text or ""
                 pending_is_audio = getattr(msg, "isAudio", False)
+
             elif role == "ai":
                 if pending_query is not None:
-                    history_pairs.append({
-                        "query":     pending_query,
+                    history_entry = {
+                        "query": pending_query,
                         "assistant": msg.text or "",
-                        "is_audio":  pending_is_audio,
-                        "context":   msg.text or ""
-                    })
-                    pending_query    = None
+                        "is_audio": pending_is_audio,
+                        "context": msg.text or ""
+                    }
+
+                    # Preserve Advanced Ask-AI response data
+                    if getattr(msg, "isAdvance", False):
+                        history_entry["is_advance"] = True
+                        history_entry["advance_result"] = getattr(
+                            msg, "advance_result", None
+                        )
+
+                    history_pairs.append(history_entry)
+
+                    pending_query = None
                     pending_is_audio = False
 
         # If conversation ended with a user message but no assistant reply,
@@ -57,22 +72,27 @@ async def sessions_endpoint(request: SessionRequest):
             })
 
         await save_session_to_postgres_service(
-            session_id = session_id,
-            user_name  = user_name,
-            history    = history_pairs,
-            group_name = request.group_name,
-            is_space_booking = request.isSpaceBooking or False
+            session_id=session_id,
+            user_name=user_name,
+            history=history_pairs,
+            group_name=request.group_name,
+            is_space_booking=request.isSpaceBooking or False,
+            is_advance=request.isAdvanceAskAI or False
         )
-        #Mark this session as saved by frontend
+
+        # Mark this session as saved by frontend
         # So WebSocketDisconnect will NOT save it again
         frontend_saved_sessions.add(session_id)
-        logger.info(f"🏷️ Marked session as frontend-saved | session={session_id}")
+
+        logger.info(
+            f"🏷️ Marked session as frontend-saved | session={session_id}"
+        )
 
         return {
-            "user_name":  user_name,
+            "user_name": user_name,
             "session_id": session_id,
-            "type":       "saved",
-            "messages":   len(history_pairs)
+            "type": "saved",
+            "messages": len(history_pairs)
         }
 
     # ── Case 2: session_id is empty → return all sessions for user ──

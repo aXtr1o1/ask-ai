@@ -113,85 +113,212 @@ async def generate_session_title(history: list) -> str:
 
 
 # ── Save session to PostgreSQL ──────────────────────────────────────────────
-async def save_session_to_postgres_service(session_id: str, user_name: str, history: list, group_name: str = None, is_space_booking: bool = False):
+async def save_session_to_postgres_service(
+    session_id: str,
+    user_name: str,
+    history: list,
+    group_name: str = None,
+    is_space_booking: bool = False,
+    is_advance: bool = False,
+) -> None:
     """
     Saves chat session history + generated title to PostgreSQL (chat_sessions).
+
     Uses upsert on session_id (insert or update).
     """
+
     logger.info("trying to store the data in the db")
+
     if not history:
-        logger.info(f"⚠️ Empty history for session_id: {session_id} — skipping save")
+        logger.info(
+            f"⚠️ Empty history for session_id: {session_id} — skipping save"
+        )
         return
 
     # Auto-detect space booking if not explicitly set
     if not is_space_booking and history:
         for msg in history:
-            assistant_text = msg.get("assistant") or msg.get("context") or ""
-            if isinstance(assistant_text, str) and ("SPOTIDPK" in assistant_text.upper() or "SPOTCODE" in assistant_text.upper()):
+            assistant_text = (
+                msg.get("assistant")
+                or msg.get("context")
+                or ""
+            )
+
+            if (
+                isinstance(assistant_text, str)
+                and (
+                    "SPOTIDPK" in assistant_text.upper()
+                    or "SPOTCODE" in assistant_text.upper()
+                )
+            ):
                 is_space_booking = True
                 break
 
+    conn = None
+
     try:
-        title        = await generate_session_title(history)
-        conn         = get_pool()
+        title = await generate_session_title(history)
+
+        conn = get_pool()
         conn.rollback()
+
         history_json = json.dumps(history)
 
         with conn.cursor() as cur:
             try:
                 cur.execute(
                     """
-                    INSERT INTO chat_sessions (session_id, user_name, chat_history, title, updated_at, group_name, is_space_booking)
-                    VALUES (%s, %s, %s::jsonb, %s, NOW(), %s, %s)
+                    INSERT INTO chat_sessions (
+                        session_id,
+                        user_name,
+                        chat_history,
+                        title,
+                        updated_at,
+                        group_name,
+                        is_space_booking,
+                        is_advance
+                    )
+                    VALUES (
+                        %s,
+                        %s,
+                        %s::jsonb,
+                        %s,
+                        NOW(),
+                        %s,
+                        %s,
+                        %s
+                    )
                     ON CONFLICT (session_id) DO UPDATE SET
-                        user_name    = EXCLUDED.user_name,
+                        user_name = EXCLUDED.user_name,
                         chat_history = EXCLUDED.chat_history,
-                        title        = EXCLUDED.title,
-                        updated_at   = NOW(),
-                        group_name   = EXCLUDED.group_name,
-                        is_space_booking = COALESCE(chat_sessions.is_space_booking, FALSE) OR EXCLUDED.is_space_booking
+                        title = EXCLUDED.title,
+                        updated_at = NOW(),
+                        group_name = EXCLUDED.group_name,
+                        is_space_booking =
+                            COALESCE(
+                                chat_sessions.is_space_booking,
+                                FALSE
+                            )
+                            OR EXCLUDED.is_space_booking,
+                        is_advance = EXCLUDED.is_advance
                     """,
-                    (session_id, user_name, history_json, title, group_name, is_space_booking),
+                    (
+                        session_id,
+                        user_name,
+                        history_json,
+                        title,
+                        group_name,
+                        is_space_booking,
+                        is_advance,
+                    ),
                 )
+
             except Exception as conflict_err:
-                if "unique or exclusion constraint" in str(conflict_err).lower() or "on_conflict" in str(conflict_err).lower():
+                error_text = str(conflict_err).lower()
+
+                if (
+                    "unique or exclusion constraint" in error_text
+                    or "on_conflict" in error_text
+                ):
                     cur.execute(
-                        "SELECT 1 FROM chat_sessions WHERE session_id = %s",
+                        """
+                        SELECT 1
+                        FROM chat_sessions
+                        WHERE session_id = %s
+                        """,
                         (session_id,),
                     )
+
                     row = cur.fetchone()
+
                     if row:
                         cur.execute(
                             """
                             UPDATE chat_sessions
-                            SET user_name = %s, chat_history = %s::jsonb, title = %s, updated_at = NOW(), group_name = %s, is_space_booking = COALESCE(is_space_booking, FALSE) OR %s
+                            SET
+                                user_name = %s,
+                                chat_history = %s::jsonb,
+                                title = %s,
+                                updated_at = NOW(),
+                                group_name = %s,
+                                is_space_booking =
+                                    COALESCE(is_space_booking, FALSE)
+                                    OR %s,
+                                is_advance = %s
                             WHERE session_id = %s
                             """,
-                            (user_name, history_json, title, group_name, is_space_booking, session_id),
+                            (
+                                user_name,
+                                history_json,
+                                title,
+                                group_name,
+                                is_space_booking,
+                                is_advance,
+                                session_id,
+                            ),
                         )
                     else:
                         cur.execute(
                             """
-                            INSERT INTO chat_sessions (session_id, user_name, chat_history, title, updated_at, group_name, is_space_booking)
-                            VALUES (%s, %s, %s::jsonb, %s, NOW(), %s, %s)
+                            INSERT INTO chat_sessions (
+                                session_id,
+                                user_name,
+                                chat_history,
+                                title,
+                                updated_at,
+                                group_name,
+                                is_space_booking,
+                                is_advance
+                            )
+                            VALUES (
+                                %s,
+                                %s,
+                                %s::jsonb,
+                                %s,
+                                NOW(),
+                                %s,
+                                %s,
+                                %s
+                            )
                             """,
-                            (session_id, user_name, history_json, title, group_name, is_space_booking),
+                            (
+                                session_id,
+                                user_name,
+                                history_json,
+                                title,
+                                group_name,
+                                is_space_booking,
+                                is_advance,
+                            ),
                         )
                 else:
                     raise
+
             conn.commit()
 
-        logger.info(f"✅ PostgreSQL save successful | session_id={session_id} | title='{title}' | messages={len(history)} | is_space_booking={is_space_booking}")
+        logger.info(
+            f"✅ PostgreSQL save successful | "
+            f"session_id={session_id} | "
+            f"title='{title}' | "
+            f"messages={len(history)} | "
+            f"is_space_booking={is_space_booking} | "
+            f"is_advance={is_advance}"
+        )
 
     except Exception as e:
-        logger.error(f"❌ PostgreSQL save failed | session_id={session_id} | error={e}", exc_info=True)
+        logger.error(
+            f"❌ PostgreSQL save failed | "
+            f"session_id={session_id} | "
+            f"error={e}",
+            exc_info=True,
+        )
+
         try:
-            conn = get_pool()
             if conn and not conn.closed:
                 conn.rollback()
         except Exception:
             pass
-
+        
 # added by sudharshan for updating the session title when the user renames the session
 async def update_session_title(session_id: str, user_name: str, title: str) -> bool:
     """Update the title for an existing session. Returns True on success."""

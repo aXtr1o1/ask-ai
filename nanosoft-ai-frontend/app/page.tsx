@@ -71,7 +71,7 @@ interface Message {
   isRetrieving?: boolean;
 }
 
-interface ChatSession { id: string; title: string; createdAt: number; updatedAt?: number; isPinned?: boolean; isArchived?: boolean; group_name?: string; isSpaceBooking?: boolean; }
+interface ChatSession { id: string; title: string; createdAt: number; updatedAt?: number; isPinned?: boolean; isArchived?: boolean; group_name?: string; isSpaceBooking?: boolean; isAdvanceAskAI?: boolean; }
 interface Group {
   id: string;
   name: string;
@@ -1931,6 +1931,45 @@ export default function Home() {
     }
   };
 
+const getAdvanceHistoryText = (m: Message): string => {
+  const result = m.advanceResult;
+
+  if (!result) {
+    return m.text || "";
+  }
+
+  if (typeof result === "string") {
+    return result;
+  }
+
+  // Actual Advanced formatter response
+  if (typeof result.explanation === "string" && result.explanation.trim()) {
+    return result.explanation;
+  }
+
+  // Other possible response shapes
+  if (typeof result.general_response === "string") {
+    return result.general_response;
+  }
+
+  if (typeof result.response === "string") {
+    return result.response;
+  }
+
+  if (typeof result.content === "string") {
+    return result.content;
+  }
+
+  if (typeof result.text === "string") {
+    return result.text;
+  }
+
+  if (typeof result.reply === "string") {
+    return result.reply;
+  }
+
+  return m.text || "";
+};
   // ── Save chat history to backend (PostgreSQL) ───────────────────────────────
   const saveChatHistory = async (sid: string, msgs: Message[]) => {
     const valid = msgs.filter(m => m.role !== "error");
@@ -1940,26 +1979,53 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          userName: userIdFromUrl ?? loggedInUser,
-          sessionId: sid,
-          group_name: selectedGroupName,
-          isSpaceBooking: (sid === sessionId ? isSpaceBooking : (chatSessions.find(s => s.id === sid)?.isSpaceBooking || false)) || valid.some(m => m.isSpaceBooking),
-          chatHistory: valid.map(m => ({
-            role: m.role,
-            text: m.isAudio
-              ? (m.audioUrl || m.text)
-              : m.role === "ai"
-                ? (m.originalText || stripHtml(m.text))  // ← Use original raw response if available, fallback to stripHtml
-                : m.text,
-            isAudio: m.isAudio ?? false,
-          })),
-        }),
+  userName: userIdFromUrl ?? loggedInUser,
+
+  sessionId: sid,
+
+  group_name: selectedGroupName,
+
+  isSpaceBooking:
+    (sid === sessionId
+      ? isSpaceBooking
+      : (chatSessions.find((s) => s.id === sid)?.isSpaceBooking || false)) ||
+    valid.some((m) => m.isSpaceBooking),
+
+  // Store whether this session uses Advanced Ask-AI
+  isAdvanceAskAI:
+    sid === sessionId
+      ? isAdvanceAskAI
+      : (chatSessions.find((s) => s.id === sid)?.isAdvanceAskAI ?? false),
+
+  chatHistory: valid.map((m) => ({
+    role: m.role,
+
+    text: m.isAudio
+      ? (m.audioUrl || m.text)
+      : m.role === "ai"
+        ? (
+            m.isAdvanceStream
+              ? getAdvanceHistoryText(m)
+              : (m.originalText || stripHtml(m.text))
+          )
+        : m.text,
+    isAudio: m.isAudio ?? false,
+
+    // Preserve the complete Advanced response
+    ...(m.isAdvanceStream && m.advanceResult
+      ? {
+          isAdvance: true,
+          advance_result: m.advanceResult,
+        }
+      : {}),
+  })),
+}),
       });
     } catch (err) {
       console.warn("Failed to save chat history:", err);
     }
   };
-
+  
   const saveChatHistoryRef = useRef(saveChatHistory);
   useEffect(() => { saveChatHistoryRef.current = saveChatHistory; });
 
@@ -2323,10 +2389,21 @@ export default function Home() {
 
         try {
           console.log("[Import] Refreshing session list...");
-          await fetchSessions();
+
+          const fetchedSessions = await fetchSessions();
 
           console.log(`[Import] Selecting new session: ${data.newSessionId}`);
+
+          const importedSession = fetchedSessions.find(
+            (s) => s.id === data.newSessionId
+          );
+
+          if (importedSession) {
+            setIsAdvanceAskAI(importedSession.isAdvanceAskAI ?? false);
+          }
+
           switchSession(data.newSessionId);
+
           console.log("[Import] Session selection triggered.");
         } catch (innerError: any) {
           console.error("[Import] Error during list refresh/selection:", innerError);
@@ -2707,39 +2784,80 @@ export default function Home() {
 
   // Fetch chat sessions list for sidebar (new at top, old at bottom)
   /* changes done by megnathan: Moved fetchSessions outside to make it accessible */
-  const fetchSessions = async () => {
-    if (!authChecked || !loggedInUser) return;
-    try {
-      const res = await fetch(`${baseUrl}/api/session`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userName: userIdFromUrl ?? loggedInUser, historyOnClick: false }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      setChatSessions(prev => {
-        const fetched: ChatSession[] = (data?.sessions ?? []).map(
-          (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; is_pinned?: boolean; is_archived?: boolean; group_name?: string; is_space_booking?: boolean }) => {
-            const existing = prev.find(p => p.id === s.session_id);
-            return {
-              id: s.session_id,
-              title: s.title || "Chat",
-              createdAt: parseDateSafe(s.created_at, existing?.createdAt || Date.now()),
-              updatedAt: parseDateSafe(s.updated_at, existing?.updatedAt || Date.now()),
-              isPinned: s.is_pinned || false,
-              isArchived: s.is_archived || false,
-              group_name: s.group_name,
-              isSpaceBooking: s.is_space_booking || false,
-            };
-          }
-        );
-        const unsavedNewChats = prev.filter(s => s.title === "New Chat" && !fetched.some(f => f.id === s.id));
-        return sortSessionsStable([...unsavedNewChats, ...fetched]);
-      });
-    } catch (err) {
-      console.warn("Failed to fetch chat sessions:", err);
+  const fetchSessions = async (): Promise<ChatSession[]> => {
+  if (!authChecked || !loggedInUser) return [];
+
+  try {
+    const res = await fetch(`${baseUrl}/api/session`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        userName: userIdFromUrl ?? loggedInUser,
+        historyOnClick: false,
+      }),
+    });
+
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
     }
-  };
+
+    const data = await res.json();
+
+    let fetched: ChatSession[] = [];
+
+    setChatSessions((prev) => {
+      fetched = (data?.sessions ?? []).map(
+        (s: {
+          session_id: string;
+          title?: string;
+          created_at?: string;
+          updated_at?: string;
+          is_pinned?: boolean;
+          is_archived?: boolean;
+          group_name?: string;
+          is_space_booking?: boolean;
+          is_advance?: boolean;
+        }) => {
+          const existing = prev.find((p) => p.id === s.session_id);
+
+          return {
+            id: s.session_id,
+            title: s.title || "Chat",
+            createdAt: parseDateSafe(
+              s.created_at,
+              existing?.createdAt || Date.now()
+            ),
+            updatedAt: parseDateSafe(
+              s.updated_at,
+              existing?.updatedAt || Date.now()
+            ),
+            isPinned: s.is_pinned || false,
+            isArchived: s.is_archived || false,
+            group_name: s.group_name,
+            isSpaceBooking: s.is_space_booking || false,
+            isAdvanceAskAI: s.is_advance || false,
+          };
+        }
+      );
+
+      const unsavedNewChats = prev.filter(
+        (s) =>
+          s.title === "New Chat" &&
+          !fetched.some((f) => f.id === s.id)
+      );
+
+      return sortSessionsStable([
+        ...unsavedNewChats,
+        ...fetched,
+      ]);
+    });
+
+    return fetched;
+  } catch (err) {
+    console.warn("Failed to fetch chat sessions:", err);
+    return [];
+  }
+};
 
   const fetchFolders = async () => {
     if (!authChecked || !loggedInUser) return;
@@ -2827,7 +2945,7 @@ export default function Home() {
     }, 3000);
   };
 
-  const handleNewChat = async (initialMode?: 'space_booking' | 'complaints' | 'ask_ai' | 'asset_analytics') => {
+  const handleNewChat = async (initialMode?: 'space_booking' | 'complaints' | 'ask_ai' | 'asset_analytics' | 'advance_ask_ai') => {
     if (isLoading) {
       showWarningToast("Please wait, don't switch the chat!");
       console.log("⚠️ Chat creation blocked: Please wait, don't switch the chat!");
@@ -2844,6 +2962,7 @@ export default function Home() {
     setIsSpaceBooking(initialMode === 'space_booking'); // Reset space booking state when starting a new chat
     setIsComplaints(initialMode === 'complaints');
     setIsAssetAnalytics(initialMode === 'asset_analytics');
+    setIsAdvanceAskAI(initialMode === 'advance_ask_ai');
     setIsComplaintsModalOpen(false);
     setActiveBookingBubbleIndex(null);
 
@@ -2885,7 +3004,7 @@ export default function Home() {
         const data = await res.json();
         const currentSessions = chatSessions;
         const fetched: ChatSession[] = (data?.sessions ?? []).map(
-          (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; is_pinned?: boolean; is_archived?: boolean; group_name?: string; is_space_booking?: boolean }) => {
+          (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; is_pinned?: boolean; is_archived?: boolean; group_name?: string; is_space_booking?: boolean; is_advance?: boolean }) => {
             const existing = currentSessions.find(p => p.id === s.session_id);
             return {
               id: s.session_id,
@@ -2896,6 +3015,7 @@ export default function Home() {
               isArchived: s.is_archived || false,
               group_name: s.group_name,
               isSpaceBooking: s.is_space_booking || false,
+              isAdvanceAskAI: s.is_advance || false,
             };
           }
         );
@@ -2930,8 +3050,8 @@ export default function Home() {
     setTimeout(() => refetchSessions(), 400);
   };
 
-  const handleSwitchMode = (newMode: 'space_booking' | 'complaints' | 'ask_ai' | 'asset_analytics') => {
-    const currentMode = isSpaceBooking ? 'space_booking' : isComplaints ? 'complaints' : isAssetAnalytics ? 'asset_analytics' : 'ask_ai';
+  const handleSwitchMode = (newMode: 'space_booking' | 'complaints' | 'ask_ai' | 'asset_analytics' | 'advance_ask_ai') => {
+    const currentMode = isSpaceBooking ? 'space_booking' : isComplaints ? 'complaints' : isAssetAnalytics ? 'asset_analytics' : isAdvanceAskAI ? 'advance_ask_ai' : 'ask_ai';
     if (newMode === currentMode) {
       return;
     }
@@ -2947,6 +3067,7 @@ export default function Home() {
       setIsSpaceBooking(newMode === 'space_booking');
       setIsComplaints(newMode === 'complaints');
       setIsAssetAnalytics(newMode === 'asset_analytics');
+      setIsAdvanceAskAI(newMode === 'advance_ask_ai');
     }
   };
 
@@ -3151,146 +3272,257 @@ export default function Home() {
   };
 
   // ── Switch to an existing session ─────────────────────────────────────────
-  const switchSession = async (targetSid: string) => {
-    if (targetSid === sessionId) return; // already active
-    if (isLoading) {
-      showWarningToast("Please wait, don't switch the chat!");
-      console.log("⚠️ Chat switch blocked: Please wait, don't switch the chat!");
-      return;
-    }
+  
+const switchSession = async (targetSid: string) => {
+  if (targetSid === sessionId) return; // already active
 
-    // Auto-close sidebar on mobile
-    if (responsive.isMobile) {
-      setSidebarOpen(false);
-    }
+  if (isLoading) {
+    showWarningToast("Please wait, don't switch the chat!");
+    console.log("⚠️ Chat switch blocked: Please wait, don't switch the chat!");
+    return;
+  }
 
     setIsSpaceBooking(false); // Reset space booking state when switching session
     setIsComplaints(false);
     setIsAssetAnalytics(false);
+    setIsAdvanceAskAI(false);
     setIsComplaintsModalOpen(false);
     setActiveBookingBubbleIndex(null);
+  // Auto-close sidebar on mobile
+  if (responsive.isMobile) {
+    setSidebarOpen(false);
+  }
 
-    // Capture the currently active session ID
-    const currentSid = sessionIdRef.current;
+  setIsSpaceBooking(false);
+  setIsComplaints(false);
+  setIsAssetAnalytics(false);
+  setIsComplaintsModalOpen(false);
+  setActiveBookingBubbleIndex(null);
 
-    // Save current messages
-    sessionMessagesRef.current.set(currentSid, messages);
+  // Capture the currently active session ID
+  const currentSid = sessionIdRef.current;
 
-    // Update selected group name based on the target session
-    const targetSession = chatSessions.find(s => s.id === targetSid);
-    if (targetSession && targetSession.group_name) {
-      setSelectedGroupName(targetSession.group_name);
-    } else {
-      setSelectedGroupName(null);
-    }
+  // Save current messages
+  sessionMessagesRef.current.set(currentSid, messages);
 
-    // Refresh from backend to get latest titles; do not move clicked chat to top (just highlight)
-    const refreshSessions = async () => {
-      if (!loggedInUser) return;
-      try {
-        const res = await fetch(`${baseUrl}/api/session`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userName: userIdFromUrl ?? loggedInUser, historyOnClick: false }),
-        });
-        if (!res.ok) return;
-        const data = await res.json();
-        setChatSessions(prev => {
-          const fetched: ChatSession[] = (data?.sessions ?? []).map(
-            (s: { session_id: string; title?: string; created_at?: string; updated_at?: string; group_name?: string; is_pinned?: boolean; is_archived?: boolean; is_space_booking?: boolean }) => {
-              const existing = prev.find(p => p.id === s.session_id);
-              return {
-                id: s.session_id,
-                title: s.title || "Chat",
-                createdAt: parseDateSafe(s.created_at, existing?.createdAt || Date.now()),
-                updatedAt: parseDateSafe(s.updated_at, existing?.updatedAt || Date.now()),
-                isPinned: s.is_pinned || false,
-                isArchived: s.is_archived || false,
-                group_name: s.group_name,
-                isSpaceBooking: s.is_space_booking || false,
-              };
-            }
-          );
-          const onlyInPrev = prev.filter(s => !fetched.some(f => f.id === s.id));
-          return sortSessionsStable([...onlyInPrev, ...fetched]);
-        });
-      } catch (err) {
-        console.warn("Failed to refresh sessions:", err);
-      }
-    };
-    refreshSessions();
+  // Find target session
+  const targetSession = chatSessions.find((s) => s.id === targetSid);
 
-    // Switch session ID immediately
-    setSessionId(targetSid);
-    sessionIdRef.current = targetSid;
-    accRef.current = "";
-    setIsLoading(false);
+  // Restore Advanced Ask-AI mode for this session
+  setIsAdvanceAskAI(targetSession?.isAdvanceAskAI ?? false);
 
-    // Check local cache first
-    const cached = sessionMessagesRef.current.get(targetSid);
-    if (cached && cached.length > 0) {
-      const isBookingSession = targetSession?.isSpaceBooking || false;
-      const processed = processLoadedMessages(cached, isBookingSession);
-      setMessages(processed);
-      const finalIsBooking = isBookingSession || processed.some(m => m.isSpaceBooking);
-      setIsSpaceBooking(finalIsBooking);
-      autoOpenCalendarIfApplicable(processed);
-    } else {
-      // Fetch from backend
-      setHistoryLoading(true);
-      setMessages([]);
-      try {
-        const res = await fetch(`${baseUrl}/api/session`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userName: userIdFromUrl ?? loggedInUser, sessionId: targetSid, historyOnClick: true }),
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        const history: Message[] = [];
-        //handles is_audio from backend
-        for (const entry of (data?.chat_history ?? [])) {
-          if (entry.query) {
-            if (entry.is_audio) {
-              // query is base64 audio string from DB
-              history.push({
-                role: "user",
-                text: "Voice message",
-                isAudio: true,
-                audioUrl: entry.query,   // base64 → audio player
-                audioDuration: 0         // duration not stored in DB
-              });
-            } else {
-              history.push({ role: "user", text: entry.query });
-            }
+  // Update selected group name based on the target session
+  if (targetSession && targetSession.group_name) {
+    setSelectedGroupName(targetSession.group_name);
+  } else {
+    setSelectedGroupName(null);
+  }
+
+  // Refresh from backend to get latest titles; do not move clicked chat to top
+  const refreshSessions = async () => {
+    if (!loggedInUser) return;
+
+    try {
+      const res = await fetch(`${baseUrl}/api/session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userName: userIdFromUrl ?? loggedInUser,
+          historyOnClick: false,
+        }),
+      });
+
+      if (!res.ok) return;
+
+      const data = await res.json();
+
+      setChatSessions((prev) => {
+        const fetched: ChatSession[] = (data?.sessions ?? []).map(
+          (s: {
+            session_id: string;
+            title?: string;
+            created_at?: string;
+            updated_at?: string;
+            group_name?: string;
+            is_pinned?: boolean;
+            is_archived?: boolean;
+            is_space_booking?: boolean;
+            is_advance?: boolean;
+          }) => {
+            const existing = prev.find(
+              (p) => p.id === s.session_id
+            );
+
+            return {
+              id: s.session_id,
+              title: s.title || "Chat",
+              createdAt: parseDateSafe(
+                s.created_at,
+                existing?.createdAt || Date.now()
+              ),
+              updatedAt: parseDateSafe(
+                s.updated_at,
+                existing?.updatedAt || Date.now()
+              ),
+              isPinned: s.is_pinned || false,
+              isArchived: s.is_archived || false,
+              group_name: s.group_name,
+              isSpaceBooking: s.is_space_booking || false,
+              isAdvanceAskAI: s.is_advance || false,
+            };
           }
-          if (entry.assistant) {
-            history.push({ role: "ai", text: entry.assistant });
-          }
-        }
-        const isBookingSession = targetSession?.isSpaceBooking || false;
-        const processed = processLoadedMessages(history, isBookingSession);
-        sessionMessagesRef.current.set(targetSid, processed);
-        setMessages(processed);
-        const finalIsBooking = isBookingSession || processed.some(m => m.isSpaceBooking);
-        setIsSpaceBooking(finalIsBooking);
-        autoOpenCalendarIfApplicable(processed);
-      } catch (err) {
-        console.warn("Failed to fetch session history:", err);
-        setMessages([]);
-      } finally {
-        setHistoryLoading(false);
-      }
-    }
+        );
 
-    // Ensure WebSocket connection is available for the target session
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      connectWS();
-    } else {
-      startPing();
+        const onlyInPrev = prev.filter(
+          (s) => !fetched.some((f) => f.id === s.id)
+        );
+
+        return sortSessionsStable([
+          ...onlyInPrev,
+          ...fetched,
+        ]);
+      });
+    } catch (err) {
+      console.warn("Failed to refresh sessions:", err);
     }
   };
 
+  refreshSessions();
+
+  // Switch session ID immediately
+  setSessionId(targetSid);
+  sessionIdRef.current = targetSid;
+  accRef.current = "";
+  setIsLoading(false);
+
+  // Check local cache first
+  const cached = sessionMessagesRef.current.get(targetSid);
+
+  if (cached && cached.length > 0) {
+    const isBookingSession =
+      targetSession?.isSpaceBooking || false;
+
+    const processed = processLoadedMessages(
+      cached,
+      isBookingSession
+    );
+
+    setMessages(processed);
+
+    const finalIsBooking =
+      isBookingSession ||
+      processed.some((m) => m.isSpaceBooking);
+
+    setIsSpaceBooking(finalIsBooking);
+
+    autoOpenCalendarIfApplicable(processed);
+  } else {
+    // Fetch from backend
+    setHistoryLoading(true);
+    setMessages([]);
+
+    try {
+      const res = await fetch(`${baseUrl}/api/session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userName: userIdFromUrl ?? loggedInUser,
+          sessionId: targetSid,
+          historyOnClick: true,
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+
+      const data = await res.json();
+
+      const history: Message[] = [];
+
+      // Reconstruct messages from backend history
+      for (const entry of data?.chat_history ?? []) {
+        // Restore user message
+        if (entry.query) {
+          if (entry.is_audio) {
+            history.push({
+              role: "user",
+              text: "Voice message",
+              isAudio: true,
+              audioUrl: entry.query,
+              audioDuration: 0,
+            });
+          } else {
+            history.push({
+              role: "user",
+              text: entry.query,
+            });
+          }
+        }
+
+        // Restore AI message
+        // Advanced messages may have advance_result even if assistant text is empty
+        if (entry.assistant || entry.advance_result) {
+          history.push({
+            role: "ai",
+            text: entry.assistant || "",
+            originalText: entry.assistant || "",
+
+            // Restore Advanced Ask-AI state
+            isAdvanceStream: entry.is_advance ?? false,
+            advanceResult: entry.advance_result ?? undefined,
+
+            streaming: false,
+            agentStatus: entry.is_advance
+              ? "done"
+              : undefined,
+          });
+        }
+      }
+
+      const isBookingSession =
+        targetSession?.isSpaceBooking || false;
+
+      const processed = processLoadedMessages(
+        history,
+        isBookingSession
+      );
+
+      sessionMessagesRef.current.set(
+        targetSid,
+        processed
+      );
+
+      setMessages(processed);
+
+      const finalIsBooking =
+        isBookingSession ||
+        processed.some((m) => m.isSpaceBooking);
+
+      setIsSpaceBooking(finalIsBooking);
+
+      autoOpenCalendarIfApplicable(processed);
+    } catch (err) {
+      console.warn(
+        "Failed to fetch session history:",
+        err
+      );
+      setMessages([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+
+  // Ensure WebSocket connection is available for the target session
+  if (
+    !wsRef.current ||
+    wsRef.current.readyState !== WebSocket.OPEN
+  ) {
+    connectWS();
+  } else {
+    startPing();
+  }
+};
   // Pre-fetch history for expanded groups to make loading instant
   useEffect(() => {
     if (!authChecked || !loggedInUser) return;
@@ -3691,23 +3923,35 @@ export default function Home() {
         if (sc) sc.innerHTML = "";
       },
       (data) => {
-        // Complete — drain queue and clear terminal immediately, then show final result.
+        // Complete — finalize the Advanced response and persist the session.
         charQueue.length = 0;
         isFlushing = false;
+
         const sc = document.getElementById("active-stream-container");
         if (sc) sc.innerHTML = "";
 
-        setMessages(prev => {
-          const updated = [...prev];
-          const last = updated[updated.length - 1];
-          if (last && last.role === "ai") {
-            last.streaming = false;
-            last.agentStatus = "done";
-            if (data) last.advanceResult = data;
+        const currentMessages = sessionMessagesRef.current.get(sessionId) || [];
+        const updated = [...currentMessages];
+        const last = updated[updated.length - 1];
+
+        if (last && last.role === "ai") {
+          last.streaming = false;
+          last.agentStatus = "done";
+
+          if (data) {
+            last.advanceResult = data;
           }
-          sessionMessagesRef.current.set(sessionId, updated);
-          return updated;
-        });
+        }
+
+        // Keep the per-session frontend store in sync.
+        sessionMessagesRef.current.set(sessionId, updated);
+
+        // Update the visible UI.
+        setMessages(updated);
+
+        // Persist the completed Advanced chat to PostgreSQL.
+        void saveChatHistory(sessionId, updated);
+
         setIsLoading(false);
       },
       (error) => {
@@ -4148,29 +4392,31 @@ export default function Home() {
                   isGuestOnShared
                 }
               />
-              <button
-                onClick={() => setIsGraphMode((p) => !p)}
-                title={isGraphMode ? "Graph mode ON — click to turn off" : "Click for graph output"}
-                style={{
-                  background: isGraphMode
-                    ? "linear-gradient(135deg, #d4af37, #f5c249)"
-                    : "transparent",
-                  border: isGraphMode
-                    ? "1px solid #d4af37"
-                    : "1px solid rgba(255,255,255,0.15)",
-                  borderRadius: 8,
-                  padding: "6px 8px",
-                  cursor: "pointer",
-                  color: isGraphMode ? "#000" : "#9CA3AF",
-                  transition: "all 0.2s ease",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  flexShrink: 0,
-                }}
-              >
-                <IconChartBar size={18} stroke={1.5} />
-              </button>
+              {!isSpaceBooking && !isAdvanceAskAI && (
+                <button
+                  onClick={() => setIsGraphMode((p) => !p)}
+                  title={isGraphMode ? "Graph mode ON — click to turn off" : "Click for graph output"}
+                  style={{
+                    background: isGraphMode
+                      ? "linear-gradient(135deg, #d4af37, #f5c249)"
+                      : "transparent",
+                    border: isGraphMode
+                      ? "1px solid #d4af37"
+                      : "1px solid rgba(255,255,255,0.15)",
+                    borderRadius: 8,
+                    padding: "6px 8px",
+                    cursor: "pointer",
+                    color: isGraphMode ? "#000" : "#9CA3AF",
+                    transition: "all 0.2s ease",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                  }}
+                >
+                  <IconChartBar size={18} stroke={1.5} />
+                </button>
+              )}
               <button
                 className="send-btn"
                 onClick={sendMessage}
@@ -5006,16 +5252,20 @@ export default function Home() {
                   >
                     {isSpaceBooking
                       ? "Welcome to Space Booking"
-                      : selectedGroupName
-                        ? `📁 ${selectedGroupName}`
-                        : "Welcome to Ask AI"}
+                      : isAdvanceAskAI
+                        ? "Welcome to Advance Ask AI"
+                        : selectedGroupName
+                          ? `📁 ${selectedGroupName}`
+                          : "Welcome to Ask AI"}
                   </h1>
                   <p className="landing-subtitle">
                     {isSpaceBooking
                       ? "Let's book your space buddy"
-                      : selectedGroupName
-                        ? `Start a new chat in ${selectedGroupName}`
-                        : "Let's work together buddy"}
+                      : isAdvanceAskAI
+                        ? "Let's explore advanced analytics buddy"
+                        : selectedGroupName
+                          ? `Start a new chat in ${selectedGroupName}`
+                          : "Let's work together buddy"}
                   </p>
                 </div>
               </div>

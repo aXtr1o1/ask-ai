@@ -170,10 +170,47 @@ def _run_streaming_pipeline(query: str, session_id: str, user_name: str, user_id
             stream_queue.put({"status": "running_end", "stage": "Formatting Agent"})
 
         else:
-            execution_result   = {}
+            execution_result = {}
             formatting_context = {}
-            formatted_result   = {}
+            formatted_result = {}
 
+            if intent == "web_search":
+                web_summary = understanding.get("web_search_summary") or ""
+
+                stream_queue.put({
+                    "status": "running_start",
+                    "stage": "Formatting Agent"
+                })
+
+                formatting_context = {
+                    "response_format": "WEB_SEARCH",
+                    "planned_steps": [
+                        {
+                            "step": "web_search",
+                            "description": "Live web search results retrieved by the Understanding Agent"
+                        }
+                    ],
+                    "shape_descriptor": {
+                        "shape": "web_search_result",
+                        "reason": "External web search result"
+                    },
+                    "final_answer": web_summary,
+                    "dashboard": [],
+                }
+
+        formatted_result = format_response(
+            formatting_context=formatting_context,
+            query_summary=query_summary or query,
+            thought_callback=lambda chunk: stream_queue.put({
+                "status": "running_chunk",
+                "word": chunk
+            }),
+        )
+
+        stream_queue.put({
+            "status": "running_end",
+            "stage": "Formatting Agent"
+        })
         _store_conversation_turn(
             session_id  = session_id,
             query       = query,
@@ -192,7 +229,7 @@ def _run_streaming_pipeline(query: str, session_id: str, user_name: str, user_id
         if intent == "db_query":
             result_payload = {"formatted_result": formatted_result}
         elif intent == "web_search":
-            result_payload = {"web_search_summary": understanding.get("web_search_summary")}
+            result_payload = {"formatted_result": formatted_result}
         else:  # general
             result_payload = {"general_response": understanding.get("general_response")}
 
