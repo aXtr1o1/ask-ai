@@ -6,7 +6,7 @@ import {
   IconPlus,
 } from "@tabler/icons-react";
 import DynamicDashboard from "./DynamicDashboard";
-import { Loader } from "../ai-block/loader";
+import { Loader } from "../ai-animation/loader";
 
 
 interface AdvanceChatProps {
