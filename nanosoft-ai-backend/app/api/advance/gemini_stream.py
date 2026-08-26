@@ -74,6 +74,7 @@ def stream_with_thoughts(
             usage = {
                 "input_tokens":  getattr(um, "prompt_token_count",     0) or 0,
                 "output_tokens": getattr(um, "candidates_token_count", 0) or 0,
+                "thought_tokens": getattr(um, "thought_token_count",    0) or 0,
                 "total_tokens":  getattr(um, "total_token_count",      0) or 0,
             }
 

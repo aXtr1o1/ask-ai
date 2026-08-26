@@ -268,8 +268,8 @@ def analyze_query(
         logger.error("[Analysis Agent] schema validation failed: %s\nRaw: %.300s", exc, json_text)
         raise ValueError(f"Analysis Agent returned unparseable JSON: {exc}") from exc
 
-    logger.info("[Analysis Agent] tokens  : input=%d output=%d total=%d",
-                usage.get("input_tokens", 0), usage.get("output_tokens", 0), usage.get("total_tokens", 0))
+    logger.info("[Analysis Agent] tokens  : input=%d output=%d thought=%d total=%d",
+                usage.get("input_tokens", 0), usage.get("output_tokens", 0), usage.get("thought_tokens", 0), usage.get("total_tokens", 0))
     logger.info("[Analysis Agent] latency : llm=%.2fs", llm_time)
 
     # ── Validate — strip hallucinated modules / fields ────────────────────────
@@ -407,5 +407,11 @@ def analyze_query(
         "latency": {
             "llm_time":   round(llm_time,   2),
             "total_time": round(total_time, 2),
+        },
+        "token_usage": {
+            "input_tokens":   usage.get("input_tokens", 0),
+            "output_tokens":  usage.get("output_tokens", 0),
+            "thought_tokens": usage.get("thought_tokens", 0),
+            "total_tokens":   usage.get("total_tokens", 0),
         },
     }

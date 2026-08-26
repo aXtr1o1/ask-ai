@@ -7,7 +7,7 @@ import base64
 from langchain_core.messages import HumanMessage, AIMessage
 from app.config import settings
 from app.services.langchain_service import langchain_service
-from app.services.user_profile_service import update_usage_if_exists, get_credits_remaining, consume_audio_seconds_if_available, get_graph_count_and_limit, get_user_usage_stats, update_daily_history
+from app.services.user_profile_service import update_usage_if_exists, get_credits_remaining, consume_audio_seconds_if_available, get_graph_count_and_limit, get_user_usage_stats, update_daily_history, calculate_credits
 from app.services.postgres_service import save_session_to_postgres_service
 from app.services.audio_service import convert_audio_to_text, get_audio_duration_seconds
 from app.services.quota_service import quota_fallback_service
@@ -1054,44 +1054,76 @@ async def ws_chat_endpoint(websocket: WebSocket):
 
             # ── Update user_profile usage counters after each response ───────
             try:
-                tokens_delta = int(getattr(langchain_service, "_total_tokens", 0) or 0)
+                tokens_delta = int(
+                    getattr(langchain_service, "_total_tokens", 0) or 0
+                )
+
                 is_graph_response = False
                 graph_delta = 0
+
                 # Graph responses are JSON with {"type":"graph", ...}
                 if bool(is_graph) and isinstance(final_response_text, str):
                     try:
                         payload = json.loads(final_response_text)
-                        is_graph_response = isinstance(payload, dict) and payload.get("type") == "graph"
+                        is_graph_response = (
+                            isinstance(payload, dict)
+                            and payload.get("type") == "graph"
+                        )
                     except Exception:
                         is_graph_response = False
+
                 if is_graph_response:
                     graph_delta = 1
+                    
+                logger.info(
+                    " 💳 Credit calculation input | user=%s | tokens=%s | credits=%s",
+                    sub_user_name,
+                    tokens_delta,
+                    credits_delta,
+                )
+                # ── Token-based credit calculation ──────────────────────────────
+                credits_delta = calculate_credits(tokens_delta)
                 
+                logger.info(
+                    " 💳 Credit usage | user=%s | tokens=%s | credits=%s",
+                    sub_user_name,
+                    tokens_delta,
+                    credits_delta,
+                )
+
+
                 await asyncio.to_thread(
                     update_usage_if_exists,
-                    name=sub_user_name,  # TODO: swap to real external user id from auth
+                    name=sub_user_name,
                     tokens_used_delta=tokens_delta,
                     request_delta=1,
                     graph_delta=graph_delta,
-                    credits_per_request=1,
+                    credits_delta=credits_delta,
                     audio_seconds_delta=audio_seconds_effective,
                 )
-            except Exception as e:
-                logger.warning("⚠️ user_profile update failed: %s", str(e)[:200])
-             # ── Update daily history for trend charts ─────────────
+
+            except Exception:
+                logger.exception(
+                    "Failed to update token/credit usage | user=%s",
+                    sub_user_name,
+                )
+                        # ── Update daily history for trend charts ─────────────
             try:
                 await asyncio.to_thread(
                     update_daily_history,
                     external_user_id=user_name,
                     name=sub_user_name,
-                    credits_delta=1,
+                    credits_delta=credits_delta,
                     audio_seconds_delta=audio_seconds_effective,
                     graph_delta=graph_delta,
                     request_delta=1,
                     tokens_delta=tokens_delta,
                 )
             except Exception as e:
-                logger.warning("⚠️ update_daily_history failed: %s", str(e)[:200])
+                logger.warning(
+                    "⚠️ update_daily_history failed: %s",
+                    str(e)[:200],
+                )
                 
 
             # Convert final_response_text and context_summary to string if they are lists/dicts (defensive parsing)

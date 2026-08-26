@@ -86,6 +86,8 @@ def test_advance_ask_ai_audio():
         yield "data: {\"status\": \"complete\", \"result\": \"mocked\"}\n\n"
 
     with patch("app.api.advance.routes.router.get_audio_duration_seconds", return_value=5), \
+         patch("app.api.advance.routes.router.get_profile_name_by_external_user_id", return_value="test-profile"), \
+         patch("app.api.advance.routes.router.get_credits_remaining", return_value=10), \
          patch("app.api.advance.routes.router.consume_audio_seconds_if_available", return_value=True), \
          patch("app.api.advance.routes.router.update_daily_history", return_value=True), \
          patch("app.api.advance.routes.router.convert_audio_to_text", new_callable=AsyncMock, return_value=mock_transcription), \
@@ -112,7 +114,6 @@ def test_advance_ask_ai_audio():
     assert "text/event-stream" in response.headers["content-type"]
     assert "status" in response.text
 
-            
             
             
             

@@ -20,6 +20,22 @@ from app.config import settings
 logger = logging.getLogger("audio_service")
 logger.setLevel(logging.INFO)
 
+
+_AUDIO_MIME_DETAILS = {
+    "audio/ogg": (".ogg", "audio/ogg"),
+    "audio/webm": (".webm", "audio/webm"),
+    "audio/mp4": (".mp4", "audio/mp4"),
+    "audio/mpeg": (".mp3", "audio/mpeg"),
+    "audio/wav": (".wav", "audio/wav"),
+    "audio/x-wav": (".wav", "audio/wav"),
+}
+
+
+def _audio_mime_details(mime_type: str | None) -> tuple[str, str]:
+    """Return a safe filename suffix and MIME type for an uploaded audio blob."""
+    normalized = (mime_type or "").split(";", 1)[0].strip().lower()
+    return _AUDIO_MIME_DETAILS.get(normalized, (".ogg", "audio/ogg"))
+
 # ── Initialize Gemini Client ─────────────────────────────────────────────────
 client = genai.Client(api_key=settings.GOOGLE_API_KEY)
 
@@ -91,7 +107,11 @@ Return ONLY this exact JSON. No extra text, no markdown.
 """
 
 
-async def convert_audio_to_text(audio_bytes: bytes) -> dict:
+async def convert_audio_to_text(
+    audio_bytes: bytes,
+    *,
+    mime_type: str | None = None,
+) -> dict:
     """
     Transcribes audio AND classifies the query in ONE model call.
 
@@ -111,12 +131,13 @@ async def convert_audio_to_text(audio_bytes: bytes) -> dict:
         if needs_clarification=False (general knowledge):
             run process_query directly
     """
+    suffix, upload_mime_type = _audio_mime_details(mime_type)
     tmp_path      = None
     uploaded_file = None
 
     try:
         # ── 1. Write bytes to temp file ──────────────────────────────────────
-        with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
             tmp.write(audio_bytes)
             tmp_path = tmp.name
         logger.info(f"🎵 Audio file ready: {tmp_path}")
@@ -124,7 +145,7 @@ async def convert_audio_to_text(audio_bytes: bytes) -> dict:
         # ── 2. Upload to Gemini Files API ────────────────────────────────────
         uploaded_file = client.files.upload(
             file=tmp_path,
-            config={"mime_type": "audio/ogg"}
+            config={"mime_type": upload_mime_type}
         )
         logger.info(f"✅ Uploaded: {uploaded_file.name}")
 
@@ -202,14 +223,19 @@ async def convert_audio_to_text(audio_bytes: bytes) -> dict:
 # Changes done by sanjeevan
 
 
-def get_audio_duration_seconds(audio_bytes: bytes) -> int | None:
+def get_audio_duration_seconds(
+    audio_bytes: bytes,
+    *,
+    mime_type: str | None = None,
+) -> int | None:
     """
     Compute audio duration (seconds) by running `ffprobe` on the received bytes.
     Returns an integer number of seconds, or None if duration can't be determined.
     """
+    suffix, _ = _audio_mime_details(mime_type)
     tmp_path = None
     try:
-        with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
             tmp.write(audio_bytes)
             tmp_path = tmp.name
 

@@ -3978,7 +3978,14 @@ const switchSession = async (targetSid: string) => {
     const blob = voiceRecorder.recordedAudioBlob;
     if (!blob) return;
 
-    const audioUrl = URL.createObjectURL(blob);
+    // A blob: URL only exists for the current page. Advance history is saved
+    // and reloaded from PostgreSQL, so persist a replayable data URL instead.
+    const audioUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(new Error("Unable to prepare audio for history."));
+      reader.readAsDataURL(blob);
+    });
     let actualDuration = voiceRecorder.audioDuration > 0 ? voiceRecorder.audioDuration : voiceRecorder.recordingTime;
 
     if (actualDuration === 0) {
