@@ -4,6 +4,9 @@ Execution Agent — Internal Helpers
   _is_unresolved_ref        — guard against unresolved $step_N strings in tool args
   _strip_markdown           — clean markdown code fences from LLM JSON responses
   _err                      — shorthand for a consistent error return dict
+  _insufficient             — shorthand for a "not enough usable data" return dict — distinct
+                               from _err so shape_resolver can tell "the data itself was
+                               insufficient" apart from "a real bug / bad argument"
   load_records_as_dataframe — load one module's preprocessed records into a DataFrame
   resolve_column            — case-insensitive column name lookup in a DataFrame
   get_numeric_column        — get a column as a clean numeric Series
@@ -11,6 +14,8 @@ Execution Agent — Internal Helpers
   _safe_apply               — apply filters, catching ValueError and returning _err dict
   _clean_records            — convert NaN/NaT/inf values to None in a list of record dicts (keys kept)
   _nan_to_none              — convert NaN/NaT scalar to None for JSON serialization
+  _sparsity_note            — build a data-quality caveat when a field is too sparse/blank
+                               to trust (a key identifier field, or an aggregated metric)
 """
 import math
 import re
@@ -79,6 +84,19 @@ def load_records_as_dataframe(state_or_data, module: str) -> pd.DataFrame:
         preprocessed_data = state_or_data["filtered_records"]
     else:
         preprocessed_data = state_or_data
+
+    # A malformed plan can put a list/dict where a single module name string
+    # belongs (e.g. a hallucinated or mis-resolved $step_N reference). dict.get()
+    # requires a hashable key, so an unvalidated list here fails deep inside
+    # pandas/dict internals with "unhashable type: 'list'" — meaningless to
+    # whoever reads the log or the eventual user-facing message. Every tool that
+    # loads a module goes through this one function, so catching it here with a
+    # clear, specific message covers all of them at the source instead of each
+    # tool needing its own guard.
+    if not isinstance(module, str):
+        raise ValueError(
+            f"Module name must be a single string, got {type(module).__name__}: {module!r}."
+        )
 
     module_data = preprocessed_data.get(module, {})
     records = module_data.get("p_list", [])
@@ -157,15 +175,36 @@ def _apply_conditions(df: pd.DataFrame, conditions: list) -> pd.DataFrame:
     Raises:
         ValueError: if a field name is not found in df.columns.
     """
+    # Field names some intelligence tools add to their OWN output records
+    # (e.g. add_duration_to_date's "days_remaining"/"expected_end_date") — these
+    # are never real module columns, so a filter on one here always means the
+    # plan re-fetched the module instead of chaining from that step's own list.
+    _KNOWN_COMPUTED_ONLY_FIELDS = {"days_remaining", "expected_end_date"}
+
     for cond in conditions:
+        if not isinstance(cond, dict):
+            # A hallucinated plan can put a bare string/number in the
+            # conditions list instead of a {"field", "value"} dict — that's a
+            # malformed plan, not a system crash, so it becomes the same
+            # controlled ValueError (→ _err via _safe_apply) as every other
+            # bad-filter case here, not an uncaught AttributeError.
+            raise ValueError(
+                f"Filter condition must be a {{'field': str, 'value': str}} object, got {cond!r}."
+            )
         field = cond.get("field", "")
         value = str(cond.get("value", ""))
 
         actual = resolve_column(df, field)
         if actual is None:
+            hint = (
+                f" '{field}' is a value computed by a prior step, not a database column — "
+                f"chain from that step's own output list (e.g. flag_by_threshold or "
+                f"sort_and_limit with data=$step_N.records) instead of filtering here."
+                if field.strip().lower() in _KNOWN_COMPUTED_ONLY_FIELDS else ""
+            )
             raise ValueError(
                 f"Filter field '{field}' not found. "
-                f"Available columns: {sorted(df.columns.tolist())}"
+                f"Available columns: {sorted(df.columns.tolist())}.{hint}"
             )
 
         # Collapse internal whitespace on both sides so "Mail  Building" (DB) matches
@@ -217,6 +256,68 @@ def _safe_apply(df: pd.DataFrame, filters: list) -> tuple:
 def _err(msg: str) -> dict:
     """Return a consistent error dict. Used by all tools to signal failure."""
     return {"_result_type": "error", "error": msg}
+
+
+# =============================================================================
+# _insufficient
+# =============================================================================
+
+def _insufficient(msg: str) -> dict:
+    """
+    Return a consistent "insufficient data" dict — used instead of _err() when
+    the tool ran correctly but the underlying data has nothing usable to compute
+    from (e.g. a numeric field is entirely null/unparseable after filtering).
+
+    This is deliberately a different _result_type from _err(): a bad argument
+    or a real bug (unknown field, invalid operator) is a defect to fix, while
+    "the field genuinely has no usable values" is a fact about the data. Keeping
+    them distinct lets shape_resolver route this to a calm "the data available
+    isn't enough to answer this" explanation instead of a generic error, and
+    lets run_queue's dependency-failure chain still short-circuit downstream
+    steps (both share the "error" key so _step_failed() still catches them).
+    """
+    return {"_result_type": "insufficient_data", "error": msg}
+
+
+# =============================================================================
+# _sparsity_note
+# =============================================================================
+
+def _sparsity_note(df: pd.DataFrame, column: str, label: str, threshold: float = 0.2) -> "str | None":
+    """
+    Return a plain-language data-quality caveat when a field is populated in
+    fewer than `threshold` (default 20%) of the rows it's being read from —
+    None when the field is populated well enough to trust.
+
+    Use for two situations:
+      - A key identifier field used to name/group results (e.g. AssetTagNo) is
+        mostly blank — the grouping/labels are technically correct but mostly
+        unidentifiable.
+      - A numeric field being aggregated (e.g. YearOfManuf) has so few real
+        values that the aggregate is computed from a small, unrepresentative
+        sample of the rows it appears to summarize.
+
+    Args:
+        df:        DataFrame the field was read from (row count = denominator)
+        column:    Actual resolved column name in df
+        label:     Human-readable field name to mention in the caveat
+        threshold: Minimum acceptable non-blank ratio (0.0-1.0)
+    """
+    if df.empty or column not in df.columns:
+        return None
+    total = len(df)
+    non_blank = df[column].apply(
+        lambda v: v is not None and not (isinstance(v, float) and math.isnan(v)) and str(v).strip() != ""
+    ).sum()
+    ratio = non_blank / total if total else 0.0
+    if ratio >= threshold:
+        return None
+    pct = round(ratio * 100, 1)
+    return (
+        f"Only {int(non_blank)} of {total} records ({pct}%) have a usable value for "
+        f"'{label}' — treat results involving this field as based on a small, "
+        f"possibly unrepresentative subset of the data."
+    )
 
 
 # =============================================================================

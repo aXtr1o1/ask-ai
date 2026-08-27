@@ -141,7 +141,7 @@ OPTIONAL_ARGS: dict[str, list[str]] = {
     "sum_values":                ["filters"],
     "get_average":               ["filters"],
     "group_by_and_count":        ["filters"],
-    "group_by_and_aggregate":    ["filters"],
+    "group_by_and_aggregate":    ["filters", "data"],
     "join_and_aggregate":        ["filters_a", "filters_b"],
     "get_record_fields":         ["fields", "filters", "limit"],
     "filter_by_prior_results":   ["fields", "limit", "filters"],
@@ -275,6 +275,10 @@ BASIC TOOLS — output state
   Only the group_fields columns and "value" are available downstream.
   Valid operations: SUM | AVG | MIN | MAX | COUNT | COUNT_DISTINCT.
   Never invent operations or use custom aggregation codes.
+  By default reads directly from module. When group_fields or agg_field name a
+  field that only exists on a prior step's own output (not on the original
+  module), pass that step's list through the optional data argument instead —
+  module is still required alongside it.
   Reference as $step_N.groups.
 
 • join_and_aggregate:
@@ -429,4 +433,58 @@ INTELLIGENCE TOOLS — output state
 • operation must be one of the exact strings listed in the tool description.
   Never invent custom operation codes or attempt aggregation functions that
   are not explicitly supported by the respective tool's description.
+
+─────────────────────────────────────────────
+6. A STEP'S ARGUMENTS ARE EXACTLY WHAT ITS TOOL LISTS
+─────────────────────────────────────────────
+Each tool's Required and Optional lines in the Tool API Reference above are the
+complete set of arguments that tool accepts — not a subset, not a starting
+point. Two failure directions follow from this, and both are equally fatal to
+the step:
+  - Missing one of the Required arguments — checked whether or not the value
+    seems implied by an earlier step, a filter, or data already passed through
+    another arg.
+  - Including an argument that isn't in that tool's own Required or Optional
+    list at all — an argument that belongs to a different tool, even one used
+    elsewhere in the same plan for a related purpose, is not recognized here
+    just because the two tools appear together.
+A step that fails either way is rejected before the queue runs at all — that
+step never executes, and neither does anything after it.
+
+─────────────────────────────────────────────
+7. COMPUTED FIELDS EXIST ONLY WHERE THEY WERE COMPUTED
+─────────────────────────────────────────────
+Some tools add new fields to their own output records that were never part of
+the original module — e.g. add_duration_to_date adds "days_remaining" and
+"expected_end_date". A field like this exists only in the "records" (or
+similar list key) of the step that produced it, never in the original module
+data. Reading a module directly cannot see it there, so filtering, grouping,
+or aggregating on it that way fails with "field not found" — check the
+specific tool's own Optional list in the Tool API Reference above for a
+"data" argument: where one exists, passing that step's own output list
+through it is what keeps a computed field reachable once the step that
+created it has run. Not every tool has this argument — go by what that
+tool's own Required/Optional lists actually contain, not by what a similar
+tool elsewhere in the reference accepts.
+
+─────────────────────────────────────────────
+8. THE PLAN IS PRODUCED ONCE
+─────────────────────────────────────────────
+You are called exactly once per question. Once the queue leaves you, execution
+runs on its own with no further reasoning from you in the loop — nothing left
+out of the plan gets added afterward, and nothing noticed partway through
+execution gets corrected. A question can ask for more than one distinct thing
+at once: a raw figure together with a rate, percentage, or share derived from
+it; a value together with a comparison against something else; a result
+together with a further calculation built on it. Each of those is a separate
+thing the plan has to produce — not one thing with several ways of phrasing it.
+
+─────────────────────────────────────────────
+9. EACH STEP'S SCOPE IS ITS OWN
+─────────────────────────────────────────────
+A step reads directly from the original module data and applies only the
+filters/group_fields/conditions given in that step. There is no shared,
+running scope carried across the plan — a filter applied in one step has no
+effect on what a later step sees when that later step reads from the same
+module.
 """

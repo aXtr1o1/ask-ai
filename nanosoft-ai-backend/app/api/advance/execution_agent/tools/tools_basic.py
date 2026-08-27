@@ -27,7 +27,9 @@ from app.api.advance.execution_agent.tools.tool_helpers import (
     _clean_records,
     _is_unresolved_ref,
     _err,
+    _insufficient,
     _safe_apply,
+    _sparsity_note,
 )
 
 # =============================================================================
@@ -146,9 +148,9 @@ def sum_values(
 
     numbers = get_numeric_column(df, actual_field)
     if numbers.empty:
-        return _err(f"Field '{field}' in '{module}' contains no usable numeric values.")
+        return _insufficient(f"Field '{field}' in '{module}' contains no usable numeric values.")
 
-    return {
+    result = {
         "_result_type": "single_number",
         "module":       module,
         "field":        field,
@@ -156,6 +158,10 @@ def sum_values(
         "total_sum":    round(float(numbers.sum()), 4),
         "records_used": int(numbers.count()),
     }
+    note = _sparsity_note(df, actual_field, field)
+    if note:
+        result["_data_quality_note"] = note
+    return result
 
 
 # =============================================================================
@@ -199,9 +205,9 @@ def get_average(
 
     numbers = get_numeric_column(df, actual_field)
     if numbers.empty:
-        return _err(f"Field '{field}' in '{module}' contains no usable numeric values after filtering.")
+        return _insufficient(f"Field '{field}' in '{module}' contains no usable numeric values after filtering.")
 
-    return {
+    result = {
         "_result_type": "single_number",
         "module":       module,
         "field":        field,
@@ -209,6 +215,10 @@ def get_average(
         "average":      round(float(numbers.mean()), 4),
         "records_used": int(numbers.count()),
     }
+    note = _sparsity_note(df, actual_field, field)
+    if note:
+        result["_data_quality_note"] = note
+    return result
 
 
 # =============================================================================
@@ -269,7 +279,7 @@ def group_by_and_count(
     if rename_map:
         grouped = grouped.rename(columns=rename_map)
 
-    return {
+    result = {
         "_result_type":  "grouped_data",
         "module":        module,
         "group_fields":  group_fields,
@@ -279,6 +289,14 @@ def group_by_and_count(
         "unique_groups": len(grouped),
         "groups":        _clean_records(grouped.to_dict(orient="records")),
     }
+    # A group_fields column that's mostly blank produces a technically-correct
+    # but practically useless leaderboard (e.g. grouping breakdowns by AssetTagNo
+    # when most work orders were never linked to an asset at data-entry time).
+    notes = [n for n in (_sparsity_note(df, col, requested)
+                         for col, requested in zip(actual_cols, group_fields)) if n]
+    if notes:
+        result["_data_quality_note"] = " ".join(notes)
+    return result
 
 
 # =============================================================================
@@ -292,11 +310,17 @@ def group_by_and_aggregate(
     operation: str,
     state: Annotated[dict, InjectedState()],
     filters: list | None = None,
+    data: list | None = None,
 ) -> dict:
     """
     Group records by one or more fields and compute SUM | AVG | MIN | MAX of a
     numeric field per group. Results sorted highest value first.
     Optionally filter rows before grouping using multi-condition AND logic.
+
+    By default reads directly from module. Pass data (a prior step's own
+    output list, e.g. $step_N.records) instead when the field being grouped
+    or aggregated only exists on that step's output and not on the original
+    module — data takes priority over module when both are given.
 
     Args:
         module:       Data module name
@@ -305,8 +329,21 @@ def group_by_and_aggregate(
         agg_field:    Numeric column to aggregate
         operation:    SUM | AVG | MIN | MAX
         filters:      Optional list of {"field": str, "value": str} dicts for AND pre-filtering
+        data:         Optional list of record dicts from a prior step (e.g. $step_N.records)
     """
-    df = load_records_as_dataframe(state, module)
+    # An LLM occasionally resolves a $step_N reference into `module` itself
+    # instead of `data` — treat a list landing in `module` the same way
+    # flag_by_threshold does, rather than failing on a type mismatch.
+    if isinstance(module, list):
+        data, module = module, ""
+
+    if data is not None and isinstance(data, list) and data:
+        df = pd.DataFrame(data)
+    else:
+        df = load_records_as_dataframe(state, module)
+
+    module_label = module or "the prior step's data"
+
     if df.empty:
         return {
             "_result_type": "grouped_data",
@@ -327,7 +364,7 @@ def group_by_and_aggregate(
     actual_group_cols = [r for r in resolved_groups if r is not None]
     if not actual_group_cols:
         return _err(
-            f"None of group_fields {group_fields} found in '{module}'. "
+            f"None of group_fields {group_fields} found in '{module_label}'. "
             f"Available: {sorted(df.columns.tolist())}"
         )
 
@@ -349,7 +386,7 @@ def group_by_and_aggregate(
         actual_agg = resolve_column(df, agg_field)
         if actual_agg is None:
             return _err(
-                f"agg_field '{agg_field}' not found in '{module}'. "
+                f"agg_field '{agg_field}' not found in '{module_label}'. "
                 f"Available: {sorted(df.columns.tolist())}"
             )
         df[actual_agg] = df[actual_agg].fillna("").astype(str).str.strip()
@@ -365,14 +402,14 @@ def group_by_and_aggregate(
         actual_agg = resolve_column(df, agg_field)
         if actual_agg is None:
             return _err(
-                f"agg_field '{agg_field}' not found in '{module}'. "
+                f"agg_field '{agg_field}' not found in '{module_label}'. "
                 f"Available: {sorted(df.columns.tolist())}"
             )
         df[actual_agg] = pd.to_numeric(df[actual_agg], errors="coerce")
         valid_count = int(df[actual_agg].notna().sum())
         if valid_count == 0:
-            return _err(
-                f"agg_field '{agg_field}' in '{module}' contains no usable numeric values. "
+            return _insufficient(
+                f"agg_field '{agg_field}' in '{module_label}' contains no usable numeric values. "
                 f"Cannot compute {op}."
             )
         agg_fn_map = {"SUM": "sum", "AVG": "mean", "MIN": "min", "MAX": "max"}
@@ -390,7 +427,7 @@ def group_by_and_aggregate(
     if rename_map:
         grouped = grouped.rename(columns=rename_map)
 
-    return {
+    result = {
         "_result_type":  "grouped_data",
         "module":        module,
         "group_fields":  group_fields,
@@ -402,6 +439,15 @@ def group_by_and_aggregate(
         "unique_groups": len(grouped),
         "groups":        _clean_records(grouped.to_dict(orient="records")),
     }
+    # Sparsity caveat only applies to real aggregates over a numeric field —
+    # COUNT/COUNT_DISTINCT measure presence itself, so sparsity is the answer, not a caveat.
+    if op not in ("COUNT", "COUNT_DISTINCT") and agg_field:
+        actual_agg_col = resolve_column(df, agg_field)
+        if actual_agg_col:
+            note = _sparsity_note(df, actual_agg_col, agg_field)
+            if note:
+                result["_data_quality_note"] = note
+    return result
 
 
 # =============================================================================
@@ -579,7 +625,7 @@ def join_and_aggregate(
             )
         merged[actual_agg] = pd.to_numeric(merged[actual_agg], errors="coerce")
         if merged[actual_agg].notna().sum() == 0:
-            return _err(
+            return _insufficient(
                 f"agg_field '{agg_field}' in the joined result contains no usable numeric values."
             )
         agg_fn_map = {"SUM": "sum", "AVG": "mean", "MIN": "min", "MAX": "max"}
@@ -598,7 +644,7 @@ def join_and_aggregate(
     if rename_map:
         grouped = grouped.rename(columns=rename_map)
 
-    return {
+    result = {
         "_result_type":  "grouped_data",
         "module_a":      module_a,
         "module_b":      module_b,
@@ -611,6 +657,13 @@ def join_and_aggregate(
         "total_records": len(merged),
         "groups":        _clean_records(grouped.to_dict(orient="records")),
     }
+    if op not in ("COUNT", "COUNT_DISTINCT") and agg_field:
+        actual_agg_col = resolve_column(merged, agg_field)
+        if actual_agg_col:
+            note = _sparsity_note(merged, actual_agg_col, agg_field)
+            if note:
+                result["_data_quality_note"] = note
+    return result
 
 
 # =============================================================================
@@ -674,6 +727,7 @@ def get_record_fields(
     if isinstance(fields, str):
         fields = [f.strip() for f in fields.split(",") if f.strip()]
 
+    data_quality_notes: list[str] = []
     if fields:
         # Strict: reject any requested fields that cannot be resolved
         resolved_map = {f: resolve_column(df, f) for f in fields}
@@ -683,6 +737,13 @@ def get_record_fields(
                 f"Requested field(s) {invalid_fields} not found in '{module}'. "
                 f"Available: {sorted(df.columns.tolist())}"
             )
+        # Flag any explicitly requested field that's mostly blank in the matched
+        # rows — the records are still returned as-is, but the caller (and the
+        # final answer) should not treat that field as a reliable identifier.
+        for requested_name, actual_col in resolved_map.items():
+            note = _sparsity_note(df, actual_col, requested_name)
+            if note:
+                data_quality_notes.append(note)
         df = df[[col for col in resolved_map.values()]]
 
     internal_fields = ["user_id", "user_name", "created_at", "updated_at", "_matched_fields"]
@@ -697,7 +758,7 @@ def get_record_fields(
     if limit > 0:
         df = df.head(limit)
 
-    return {
+    result = {
         "_result_type":    "record_set",
         "module":          module,
         "filters":         filters or [],
@@ -705,6 +766,9 @@ def get_record_fields(
         "fields_returned": list(df.columns),
         "records":         _clean_records(df.to_dict(orient="records")),
     }
+    if data_quality_notes:
+        result["_data_quality_note"] = " ".join(data_quality_notes)
+    return result
 
 
 # =============================================================================

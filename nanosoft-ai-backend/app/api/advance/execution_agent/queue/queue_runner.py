@@ -139,9 +139,12 @@ def run_queue(queue: list[dict], filtered_records: dict, progress_callback: call
             resolved_args = _resolve_args(raw_args, step_results)
 
         except _DependencyError as exc:
-            # An upstream step that this step depends on already failed
+            # An upstream step that this step depends on already failed.
+            # Carry its _result_type forward so shape_resolver can still tell
+            # "insufficient data" apart from a real bug after arbitrarily many
+            # steps of cascading — see _DependencyError's docstring.
             logger.warning("[Queue Runner] Step %d (%s) — skipped: dependency failed. %s", step_idx, tool_name, exc)
-            step_results[step_key] = {"_dep_failed": str(exc)}
+            step_results[step_key] = {"_dep_failed": str(exc), "_result_type": exc.result_type}
             tools_called += 1
             error_count  += 1
             log_step(step_idx, tool_name, step_results[step_key])

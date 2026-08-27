@@ -64,12 +64,18 @@ def log_step(step_idx: int, tool_name: str, result: dict) -> None:
         logger.info("│  [STEP %s] %-28s result=%s", step_idx, tool_name, result)
         return
 
-    # Error / dependency failure
+    # Error / dependency failure — result_type tells apart a real defect (bad
+    # arg, unknown field, exception) from the tool running correctly but the
+    # data itself having nothing usable to compute from (see tool_helpers.
+    # _insufficient / _err). Label the log line accordingly so this is visible
+    # per-step, not only in the final Shape Resolver line.
     if "error" in result:
-        logger.warning("│  [STEP %s] %-28s ERROR: %s", step_idx, tool_name, str(result["error"])[:120])
+        label = "INSUFFICIENT-DATA" if result.get("_result_type") == "insufficient_data" else "ERROR"
+        logger.warning("│  [STEP %s] %-28s %s: %s", step_idx, tool_name, label, str(result["error"])[:120])
         return
     if "_dep_failed" in result:
-        logger.warning("│  [STEP %s] %-28s DEP-FAILED: %s", step_idx, tool_name, str(result["_dep_failed"])[:120])
+        label = "DEP-FAILED (insufficient-data)" if result.get("_result_type") == "insufficient_data" else "DEP-FAILED"
+        logger.warning("│  [STEP %s] %-28s %s: %s", step_idx, tool_name, label, str(result["_dep_failed"])[:120])
         return
     if "_safe_skip" in result:
         logger.info("│  [STEP %s] %-28s SAFE-SKIP: %s", step_idx, tool_name, result["_safe_skip"])

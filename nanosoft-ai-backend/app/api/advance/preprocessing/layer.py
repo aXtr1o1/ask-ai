@@ -7,6 +7,7 @@ Purpose:
     malformed dates, and other data-quality issues from the database.
 """
 import logging
+import re
 import time
 from typing import Any
 from datetime import datetime, date as _date
@@ -89,6 +90,20 @@ def _clean_float(v: Any) -> "float | None":
     try:
         return float(s)
     except (ValueError, TypeError):
+        pass
+    # for negatives. Strip that before giving up, so e.g. "25,000.00" or
+    stripped = re.sub(r"[,\s]", "", s)
+    stripped = re.sub(r"^[A-Za-z]+|[A-Za-z]+$", "", stripped)  # leading/trailing currency code
+    stripped = stripped.strip("$€£₹")
+    is_paren_negative = stripped.startswith("(") and stripped.endswith(")")
+    if is_paren_negative:
+        stripped = stripped[1:-1]
+    if not stripped:
+        return None
+    try:
+        result = float(stripped)
+        return -result if is_paren_negative else result
+    except (ValueError, TypeError):
         return None
 
 
@@ -163,6 +178,17 @@ def _preprocess_record(record: dict, module: str, counters: dict) -> dict:
                 cleaned[field] = None
             else:
                 counters[type_tag] = counters.get(type_tag, 0) + 1
+                if (
+                    type_tag in ("int", "bigint", "float", "numeric_str")
+                    and value is None
+                    and raw_value is not None
+                    and str(raw_value).strip() != ""
+                ):
+                    counters["numeric_parse_failures"] = counters.get("numeric_parse_failures", 0) + 1
+                    logger.debug(
+                        "  %-8s  %-30s  unparseable %s: %r  → None",
+                        module, field, type_tag, raw_value,
+                    )
                 cleaned[field] = value
         else:
             if raw_value is None or isinstance(raw_value, (int, float, bool)):
@@ -228,9 +254,15 @@ def preprocess_records(filtered_records: dict[str, dict]) -> dict[str, dict]:
                 tag_summary_parts.append(f"{tag}={n}")
         tag_summary = "  ".join(tag_summary_parts) if tag_summary_parts else "text only"
 
-        date_failures  = counters["date_failures"]
-        total_warnings += date_failures
-        failure_note   = f"  | {date_failures} bad date(s)→None" if date_failures else ""
+        date_failures    = counters["date_failures"]
+        numeric_failures = counters.get("numeric_parse_failures", 0)
+        total_warnings  += date_failures + numeric_failures
+        failure_parts = []
+        if date_failures:
+            failure_parts.append(f"{date_failures} bad date(s)→None")
+        if numeric_failures:
+            failure_parts.append(f"{numeric_failures} unparseable number(s)→None")
+        failure_note = f"  | {'; '.join(failure_parts)}" if failure_parts else ""
 
         logger.info(
             "  %-8s : %4d records | %s%s",

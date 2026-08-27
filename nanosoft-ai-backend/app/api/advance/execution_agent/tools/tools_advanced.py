@@ -1173,15 +1173,26 @@ def add_duration_to_date(
             return None
         dur = float(row["_duration"])
         dt  = row["_start_dt"]
-        if unit == "years":
-            try:
-                return dt.replace(year=dt.year + int(dur))
-            except ValueError:
-                return dt + pd.DateOffset(years=int(dur))
-        elif unit == "months":
-            return dt + pd.DateOffset(months=int(dur))
-        else:  # days
-            return dt + pd.Timedelta(days=dur)
+        # A garbage or oversized duration value (e.g. LifeInYear entered as
+        # 9999 instead of 99) pushes the computed date outside pandas'
+        # Timestamp range (~year 1677-2262) or Python's own datetime range —
+        # every arithmetic path below can raise (ValueError, OverflowError,
+        # or pandas' own OutOfBoundsDatetime) for a single bad record. That
+        # must not take down the whole tool call — treat it the same as any
+        # other unusable value: this record's expected_end_date/days_remaining
+        # come back None instead of crashing.
+        try:
+            if unit == "years":
+                try:
+                    return dt.replace(year=dt.year + int(dur))
+                except ValueError:
+                    return dt + pd.DateOffset(years=int(dur))
+            elif unit == "months":
+                return dt + pd.DateOffset(months=int(dur))
+            else:  # days
+                return dt + pd.Timedelta(days=dur)
+        except (ValueError, OverflowError, pd.errors.OutOfBoundsDatetime):
+            return None
 
     df["_end_dt"]        = df.apply(_compute_end, axis=1)
     df["_days_remaining"] = df["_end_dt"].apply(

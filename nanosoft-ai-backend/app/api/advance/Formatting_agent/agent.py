@@ -156,6 +156,18 @@ def format_response(
         logger.error("[Formatting Agent] LLM failed: %s", exc)
         explanation = ""
 
+    # For an error / insufficient_data result, DashboardComposer's single "text"
+    # component exists only as a fallback for when this explanation itself
+    # couldn't be written — it carries the same reason this explanation was
+    # just built from. Once a real explanation exists, keep that component out
+    # of the response: the user gets one clear statement of what happened
+    # instead of the same thing said twice in two different ways. If the LLM
+    # call above failed and explanation is empty, leave the fallback in place
+    # so the user still gets a meaningful answer instead of a blank response.
+    shape = (shape_descriptor or {}).get("shape", "")
+    if explanation and shape in ("error", "insufficient_data"):
+        dashboard = [c for c in dashboard if not (isinstance(c, dict) and c.get("type") == "text")]
+
     return {
         "response_type": _FORMAT_TO_RESPONSE_TYPE.get(
             response_format,

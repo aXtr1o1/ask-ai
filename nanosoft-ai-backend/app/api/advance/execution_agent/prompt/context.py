@@ -84,4 +84,20 @@ is essential for interpreting data correctly across multiple modules.
 ── CONTRACT CAPABILITY FLAGS (on contracts module) ───────────────────────────
   contracts.IsPPM = true  → This contract covers Planned Preventive Maintenance.
   contracts.IsBDM = true  → This contract covers Breakdown Maintenance.
+
+── MODULE SELECTION COMPLETENESS ───────────────────────────────────────────
+  A question can ask for multiple distinct attributes of the same specific
+  thing at once — an identity together with a metric about it, for instance.
+  Whichever module is chosen has to carry all of those attributes together in
+  the same record, not just some of them — a module missing one of the needed
+  fields cannot connect the pieces on its own, regardless of how relevant its
+  other fields look. The field list given per module is what determines this.
+
+── CHAINED LOOKUPS AND NARROWED SCOPE ──────────────────────────────────────
+  A question can narrow its scope in stages — identifying something from one
+  signal, then using that as the basis for a further lookup. The narrowing
+  came from whatever specific signal produced it, not just from the broader
+  thing it landed on — carrying only the broader result forward into the next
+  step, while dropping the signal that produced it, answers a broader question
+  than the one actually being narrowed down to.
 """

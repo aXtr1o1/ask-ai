@@ -65,6 +65,25 @@ def build_formatting_context(
     )
     resolved_format = shape_result["resolved_format"]
 
+    # A step's data-quality caveat (tool_helpers._sparsity_note) lives on that
+    # step's OWN result dict — but final_answer_tool's result_ref commonly
+    # references a specific key inside it (e.g. "$step_0.groups"), so the note
+    # sitting alongside that key doesn't travel with the extracted value.
+    # shape_resolver only sees final_answer and can't recover it. Scan every
+    # step's raw result here (context_builder has step_results in scope) and
+    # fold any caveats into the reason the Formatting Agent reads — this is the
+    # one channel guaranteed to reach it for every presentation format.
+    quality_notes = [
+        result["_data_quality_note"]
+        for result in step_results.values()
+        if isinstance(result, dict) and result.get("_data_quality_note")
+    ]
+    if quality_notes:
+        combined_notes = " ".join(dict.fromkeys(quality_notes))  # de-dupe, keep order
+        shape_result["shape_descriptor"]["reason"] = (
+            f"{shape_result['shape_descriptor']['reason']} Data quality caveat: {combined_notes}"
+        )
+
     # Strip intermediate outputs — only keep the plan itself
     planned_steps = [
         {
