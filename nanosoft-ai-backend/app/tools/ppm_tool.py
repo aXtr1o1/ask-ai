@@ -1,77 +1,13 @@
-from langchain.tools import tool
 import json
 import logging
 from fastapi import HTTPException
 from app.api.models.schemas import *
-from app.models.schemas import *
-from app.tools.tool_utils import resolveDate, getTime, logger
-from datetime import date, timedelta
+from app.tools.tool_utils import getTime, logger
 from app.api.routes.ppm import get_ppm
 
-# ✅ TOOL 2: PPM
-# =====================================================
-@tool(
-    description="""
-Use this tool specifically for Planned / Preventive Maintenance (PPM) records and schedules.
-
-ROUTING RULE: Trigger this tool only if the user explicitly mentions maintenance schedules,
-preventive tasks, PPM, or maintenance SLA compliance. Do not use for generic equipment lists.
-
-MAPPING DIRECTIVES:
-- division: Map if user mentions "Division", "Division Name", or "DivisionName".
-- discipline: Map if user mentions "Discipline", "Discipline Name", or "DisciplineName".
-- status: Map if user mentions "Status" or "Status Name".
-- spot_name: Map if user mentions "Spot", "Spot Name", or "Location Spot".
-- keyword: General text search when a value does not map cleanly to another field.
-
-FULL PARAMETER CAPABILITIES:
-- user_name: Required for user isolation and ownership.
-- work_order, asset_tag_no: Filter by specific work order or asset.
-- status, stage: Filter by maintenance workflow or execution state.
-- frequency: Filter by schedule intervals (e.g., daily, weekly, monthly).
-- division, discipline: Filter by organizational structure.
-- locality, building, floor, spot_name: Filter by location hierarchy.
-- contract, tech, equipment: Filter by service provider, technician, or equipment.
-- keyword: General search for maintenance tasks or asset types. DO NOT include conversational stop-words, prepositions, articles, or time/date references as keywords.
-- date_from, date_to: Filter by timestamps. Supports relative keywords: 'today', 'yesterday', 'this week', 'last week', 'this month', 'last month', 'this year', 'last year', or 'X days ago' (e.g., '3 days ago').
-- comp_from, comp_to: Filter by maintenance completion date ranges.
-- sla_min, sla_max: Filter by SLA duration (in minutes).
-- limit, offset: Control data pagination.
-
-AGGREGATE / GROUP BY GUIDANCE:
-
-When the user asks questions like:
-- "how many PPM tasks per division?"
-- "breakdown of PPM by frequency?"
-- "summarize PPM by status?"
-- "how many planned tasks per building?"
-- "group PPM by discipline and stage?"
-
-→ Set is_aggregate = True
-→ Fill group_by_columns with the columns the user mentioned
-→ Set aggregate_function based on what user wants
-   COUNT for how many, SUM for total, AVG for average
-
-COLUMN VALUE BREAKDOWN: "how many [ColumnName]?" → is_aggregate=True,
-group_by_columns=[column], do NOT set the filter parameter.
-
-IMPORTANT: Only set is_aggregate=True when user mentions a grouping column
-like "per division", "by frequency", "each stage". If user asks "how many total"
-or "how many PPM tasks exist" with NO grouping column → set is_aggregate=False
-
-For all normal filter and list queries:
-→ is_aggregate = False (default — do not set)
-→ group_by_columns = None
-→ aggregate_function = None
-
-Columns you can use in group_by_columns for PPM:
-DivisionName, DisciplineName, BuildingName, FloorName,
-LocalityName, LocalityCode, FrequencyName, PPMStatus, PPMStageName,
-ContractName, SpotName
-
-""",
-    args_schema=PPMInput
-)
+# PPM — planned / preventive maintenance records and schedules.
+# Called directly with a pre-built payload (see langchain_service._run_module);
+# no LLM tool-selection or args_schema involved.
 def PPM(
     user_name=None,
     user_id=None,

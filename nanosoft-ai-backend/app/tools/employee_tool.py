@@ -1,41 +1,13 @@
-from langchain.tools import tool
 import json
 import logging
 from fastapi import HTTPException
 from app.api.models.schemas import *
-from app.models.schemas import *
-from app.tools.tool_utils import resolveDate, getTime, logger
-from datetime import date, timedelta
+from app.tools.tool_utils import getTime, logger
 from app.api.routes.employee import get_employees
 
-# EMPLOYEE TOOL
-# =====================================================
-@tool(
-    description="""
-Use this tool to query employee master records, staff profiles
-in the facility management system.
-
-The input schema carries the full field-level knowledge for filtering. When generating the payload:
-
-- For filtering or listing employees by a specific attribute (department, designation, nationality,
-  shift, gender, employment type, boolean flags such as is_active, is_attendance_enable, etc.) —
-  populate the relevant fields and keep is_aggregate as False.
-
-- For a grouped count or distribution across a workforce dimension (how many employees per
-  department, by nationality, by shift, by designation, by gender, by organisation, or any other
-  category) — set is_aggregate to True, set group_by_columns to the column the user wants to
-  group by, and set aggregate_function to COUNT, SUM, or AVG depending on what the user needs.
-
-Valid values for group_by_columns:
-OrganisationName, DepartmentName, DesignationName, ClassificationName, Branch,
-NatureOfWorkName, EmployeeTypeName, EmploymentTypeName, ShiftName, EmpGenderName,
-NationalityName, CountryName, IsActive, IsAttendanceEnable, EmployeeGroupName,
-EmpGradeName, EmpTitleName
-
-Do NOT use this tool for work orders, asset equipment, or contract records.
-""",
-    args_schema=EmployeeInput
-)
+# EMPLOYEE — employee master records and staff profiles.
+# Called directly with a pre-built payload (see langchain_service._run_module);
+# no LLM tool-selection or args_schema involved.
 def EMPLOYEE(
     user_name=None,
     user_id=None,

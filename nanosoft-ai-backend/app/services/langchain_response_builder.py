@@ -1,14 +1,10 @@
 import json
 import logging
-import re
-from app.services.langchain_helpers import _append_explicit_today
-from app.services.keyword_match_context import search_context_prompt_block
 
 logger = logging.getLogger('chatbot_app')
 
 class LangChainResponseBuilderMixin:
-    def build_graph_response(self,context_summary: str, records: list) -> str:
-        
+    def build_graph_response(self, context_summary: str, records: list) -> str:
         # Auto-detect label_key (string/text column → X axis)
         # and value_key (numeric column → Y axis) from first record
         label_key = "label"
@@ -48,20 +44,16 @@ class LangChainResponseBuilderMixin:
                 user_query: str,
                 display_count: int,
                 p_list_for_model: list,
-                search_context: dict | None = None,
             ) -> str:
                 """
-                Build the prompt for final model call.
+                Build the prompt for the final summary call.
                 - count  → one sentence answer, no table in text
                 - aggregate/list → context/summary ONLY (UI shows tables when applicable)
                 """
                 if is_count_query:
-                    match_hint = search_context_prompt_block(search_context)
                     return (
                         "Use the above tool results. Reply in one crisp, friendly sentence using total_count. "
-                        "Do not render a table. "
-                        "Do NOT ask if the user wants details, a breakdown, or to see a table — the app shows tables automatically."
-                        + (match_hint if match_hint else "")
+                        "Do not render a table."
                     )
 
                 elif is_aggregate_query:
@@ -78,7 +70,7 @@ class LangChainResponseBuilderMixin:
                         "1. Do NOT get distracted by unrelated data (such as unassigned, null, or other categories) if the user's query targets specific items.\n"
                         "2. Do NOT mention internal database IDs or technical tool names.\n"
                         "3. Do NOT render any table natively.\n"
-                        "4. You MUST ask the user: 'Would you like to view this data as a markdown table for better understanding?'\n"
+                        "4. End with a brief, naturally-worded offer to show this as a table if the user wants more detail — phrase it yourself, don't reuse the same sentence every time.\n"
                     )
 
                 else:
@@ -87,12 +79,10 @@ class LangChainResponseBuilderMixin:
                         f"TOTAL RECORDS: {display_count}\n"
                         f"DISPLAYED RECORDS: {len(p_list_for_model)}\n"
                         f"DATA PREVIEW: {p_list_for_model}\n"
-                        f"{search_context_prompt_block(search_context)}"
                         "TASK:\n"
                         "Act as a technical building analyst. Summarize the findings in 2-3 friendly, grammatically professional sentences.\n"
                         "PRIMARY GOAL: You MUST directly and specifically answer the user's query or specific comparison/question using the DATA PREVIEW. If the user asks for specific items, locations, or statuses, focus your summary directly on those items first.\n"
                         "IMPORTANT: If the user asks for 'highest', 'lowest', 'top', or 'bottom', you MUST explicitly name the specific item(s) and their count in your summary. If there is a massive tie (e.g. 20 items with 1 count), just name 1 or 2 examples.\n"
-                        "If MATCH CONTEXT is provided, add one short sentence with field names and counts only (same style as summary_line).\n"
                         "SECONDARY GOAL: Focus on synthesizing patterns—like shared locations, identical statuses, or equipment types—rather than listing items one by one.\n"
                         "STRICT RULES:\n"
                         "1. Do NOT start with 'Here are' or 'Here is'.\n"
@@ -101,6 +91,5 @@ class LangChainResponseBuilderMixin:
                         "4. Do NOT include a table natively.\n"
                         "5. Use clear, active-voice grammar.\n"
                         "6. If the displayed records are fewer than the total found, explicitly mention that this is a partial view of the total data.\n"
-                        "7. You MUST ask the user: 'Would you like to view this data as a markdown table for better understanding?'\n"
+                        "7. End with a brief, naturally-worded offer to show this as a table if the user wants more detail — phrase it yourself, don't reuse the same sentence every time.\n"
                     )
-

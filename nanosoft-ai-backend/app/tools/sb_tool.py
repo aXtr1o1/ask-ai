@@ -1,85 +1,13 @@
-from langchain.tools import tool
 import json
 import logging
 from fastapi import HTTPException
 from app.api.models.schemas import *
-from app.models.schemas import *
-from app.tools.tool_utils import resolveDate, getTime, logger
-from datetime import date, timedelta
+from app.tools.tool_utils import getTime, logger
 from app.api.routes.sb import get_sb
 
-# ✅ TOOL 5: SB — Schedule Based
-# =====================================================
-@tool(
-    description="""
-Use this tool ONLY for Schedule Based (SB) maintenance work orders — system-generated scheduled service work orders.
- 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STRICT ROUTING RULE — WHEN TO USE THIS TOOL:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-USE this tool when user mentions ANY of these:
-  - "SB", "schedule based", "schedule-based work orders"
-  - "SB work orders", "scheduled work orders"
-  - work order numbers like "AA-1-2026" (format: code-number-year)
-  - "environmental services work orders", "landscaping work orders"
-  - "staff yet to be allocated" (SB stage name)
-  - "how many SB", "show SB", "list SB work orders"
-  - "service type" work orders (Environmental Services, Landscaping)
- 
-  NEVER use this tool when user mentions:
-  - "PPM", "preventive maintenance", "planned maintenance", "chiller inspection"
-  - "breakdown", "complaint", "heater", "equipment failure"
-  - "FA", "facility audit", "pest control audit", "rodent activity"
-  - "BDM", "corrective maintenance"
-  - "asset", "equipment tag", "barcode"
- 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-KEY DIFFERENTIATORS vs PPM:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  SB = Schedule-based work orders | Has ServiceTypeName | Has DisciplineName
-       Work order format: AA-1-2026 | No asset tag linked
-  PPM = Preventive maintenance | Has AssetTagNo | Has equipment name
-        Work order format: AMC-2023-0002-RAE-19366-2025
- 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# AMBIGUOUS QUERIES — DO NOT ASK QUESTIONS:
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# If user asks a generic maintenance query with NO SB/PPM keyword:
-#   e.g. "how many scheduled tasks?" or "show maintenance work orders"
-# → DO NOT call this tool. DO NOT ask the user any question.
-#   The upstream routing system handles all clarification automatically.
-#   Simply do NOT invoke any tool — return no tool call.
- 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-PARAMETERS:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-- user_name: Always required (from authenticated session)
-- work_order: Work order number e.g. "AA-1-2026"
-- asset_tag_no: Asset tag number if linked to an asset
-- status: SB work order status e.g. "Completed", "Pending"
-- stage: Workflow stage e.g. "Staff Yet to be Allocated"
-- frequency: Schedule frequency e.g. "MONTHLY"
-- division: e.g. "Environmental Services"
-- discipline: e.g. "Landscaping"
-- locality, building, floor, spot_name: Location filters
-- contract: Contract name
-- tech: Technician name
-- equipment: Equipment name
-- sla_min, sla_max: SLA duration range in minutes
-- keyword: General search. DO NOT include conversational stop-words, prepositions, articles, or time/date references as keywords.
-- date_from, date_to: Filter by timestamps. Supports relative keywords: 'today', 'yesterday', 'this week', 'last week', 'this month', 'last month', 'this year', 'last year', or 'X days ago' (e.g., '3 days ago').
-- comp_from, comp_to: Completion date range
-- limit, offset: Pagination
- 
-AGGREGATE / GROUP BY:
-- is_aggregate=True for "how many SB per division", "breakdown by frequency"
-- group_by_columns: DivisionName, DisciplineName, BuildingName, FloorName,
-                    LocalityName, LocalityCode, PPMStageName, FrequencyName, ContractName, SpotName
-- aggregate_function: COUNT / SUM / AVG
-- COLUMN VALUE BREAKDOWN: "how many [columnName]?" → is_aggregate=True, group_by_columns=[column], do NOT set filter
-""",
-    args_schema=SBInput
-)
+# SB — schedule-based maintenance work orders (system-generated scheduled service work orders).
+# Called directly with a pre-built payload (see langchain_service._run_module);
+# no LLM tool-selection or args_schema involved.
 def SB(
     user_name=None,
     user_id=None,

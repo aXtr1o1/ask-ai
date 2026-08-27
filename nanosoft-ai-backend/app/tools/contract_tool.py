@@ -1,40 +1,13 @@
-from langchain.tools import tool
 import json
 import logging
 from fastapi import HTTPException
 from app.api.models.schemas import *
-from app.models.schemas import *
-from app.tools.tool_utils import resolveDate, getTime, logger
-from datetime import date, timedelta
+from app.tools.tool_utils import getTime, logger
 from app.api.routes.contract import get_contracts
 
-# CONTRACT TOOL
-# =====================================================
-@tool(
-    description="""
-Use this tool to query service contracts, maintenance agreements, and client contract records
-in the facility management system.
-
-The input schema carries the full field-level knowledge for filtering. When generating the payload:
-
-- For filtering or listing contracts by a specific attribute (status, customer, type, date range,
-  boolean flags such as is_active, is_renewal, is_ppm, etc.) — populate the relevant fields
-  and keep is_aggregate as False.
-
-- For a grouped count or distribution across a contract dimension (how many contracts fall under
-  each type, status, customer, organisation, or any other category) — set is_aggregate to True,
-  set group_by_columns to the column the user wants to group by, and set aggregate_function
-  to COUNT, SUM, or AVG depending on what the user is asking for.
-
-Valid values for group_by_columns:
-ContractTypeName, ContractCategName, ContractGroupName, OrganisationName, CustomerName,
-ContStStatus, ContStTypes, IsActive, IsDraft, IsRenewal, IsExtended, IsTerminate,
-IsPPM, IsBDM, IsDSM, IsIncident, IsCase, IsNonContract, Period, TaxName, ConPaymentTermsName
-
-Do NOT use this tool for work orders, asset equipment, or employee records.
-""",
-    args_schema=ContractInput
-)
+# CONTRACT — service contracts, maintenance agreements, and client contract records.
+# Called directly with a pre-built payload (see langchain_service._run_module);
+# no LLM tool-selection or args_schema involved.
 def CONTRACT(
     user_name=None,
     user_id=None,
