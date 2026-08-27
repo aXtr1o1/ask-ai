@@ -1197,7 +1197,7 @@ def add_duration_to_date(
         clean["expected_end_date"] = (
             end_dt.strftime("%Y-%m-%d") if end_dt is not None and pd.notna(end_dt) else None
         )
-        clean["days_remaining"] = int(days) if days is not None else None
+        clean["days_remaining"] = int(days) if pd.notna(days) else None
         output_records.append(clean)
 
     expired_count = sum(
@@ -1550,4 +1550,4 @@ def calculate_date_difference_stats(
     else:
         result["groups"] = []
 
-    return result
+    return result

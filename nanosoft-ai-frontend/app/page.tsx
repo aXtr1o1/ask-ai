@@ -4431,6 +4431,7 @@ const switchSession = async (targetSid: string) => {
         )}
         {variant === "landing" && !isSpaceBooking && !isComplaints && (
           <LandingSuggestedQueries
+            isAdvanceAskAI={isAdvanceAskAI}
             onSelect={(q) => {
               if (inputDebounceRef.current) { clearTimeout(inputDebounceRef.current); inputDebounceRef.current = null; }
               if (inputRef.current) {
@@ -4439,6 +4440,12 @@ const switchSession = async (targetSid: string) => {
               rawInputRef.current = q;
               setInput(q);
               requestAnimationFrame(() => inputRef.current?.focus());
+              // Auto-submit the suggestion
+              setTimeout(() => {
+                if (typeof sendMessage === 'function') {
+                  sendMessage();
+                }
+              }, 50);
             }}
             disabled={
               isLoading ||

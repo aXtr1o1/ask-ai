@@ -1,4 +1,4 @@
-import { LANDING_SUGGESTED_QUERY_GROUPS } from "../components/LandingSuggestedQueries";
+import { LANDING_SUGGESTED_QUERY_GROUPS, ADVANCE_SUGGESTED_QUERY_GROUPS } from "../components/LandingSuggestedQueries";
 
 /** Minimal message shape used to build ghost completion candidates. */
 export type GhostCompletionMessage = {
@@ -9,7 +9,8 @@ export type GhostCompletionMessage = {
 
 function flattenLandingGhostQueries(): string[] {
   const out: string[] = [];
-  for (const g of LANDING_SUGGESTED_QUERY_GROUPS) {
+  const allGroups = [...LANDING_SUGGESTED_QUERY_GROUPS, ...ADVANCE_SUGGESTED_QUERY_GROUPS];
+  for (const g of allGroups) {
     for (const q of g.queries) {
       const t = q.trim();
       if (t.length >= 2) out.push(t);

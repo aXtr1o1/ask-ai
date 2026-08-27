@@ -244,8 +244,8 @@ FIELD_TYPE_MAP: dict[str, dict[str, str]] = {
         "RMResolutionTime":         "text",
         "RMFlowSeqNo":              "text",
         "RMTotalAmount":            "numeric_str", # monetary value stored as text → float
-        "RMManPower":               "text",
-        "RMManHours":               "text",
+        "RMManPower":               "float",
+        "RMManHours":               "float",
 
         # ── Technician ────────────────────────────────────────────────────────
         "RMTechName":               "text",
