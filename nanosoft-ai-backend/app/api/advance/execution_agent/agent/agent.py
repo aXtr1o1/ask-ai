@@ -40,7 +40,9 @@ from app.api.advance.execution_agent.tools.tool_helpers import _strip_markdown
 from app.api.advance.execution_agent.prompt.tool_meta import (
     TOOL_OUTPUT_KEYS,
     REQUIRED_ARGS,
+    OPTIONAL_ARGS,
 )
+from app.api.advance.execution_agent.queue.lineage import validate_field_lineage
 from app.api.advance.execution_agent.prompt.prompts import PLANNER_SYSTEM_PROMPT
 from app.api.advance.execution_agent.queue.queue_runner import run_queue
 from app.api.advance.execution_agent.agent.agent_logger import (
@@ -88,9 +90,18 @@ def _validate_queue(queue: list) -> None:
       - A step is missing 'step' or 'tool' keys.
       - Duplicate step indices are present.
       - A required argument for a known tool is missing.
+      - A step supplies an argument name that tool does not define at all —
+        i.e. not in REQUIRED_ARGS[tool] ∪ OPTIONAL_ARGS[tool]. An argument
+        valid on one tool (e.g. "data") is not implicitly valid on another
+        just because both tools sound similar or appear in the same plan.
       - A $step_N.key reference points to a step that does not exist yet.
       - A $step_N.key reference uses a key not in that tool's declared output keys.
       - The last step is not 'final_answer_tool'.
+      - A step's field-referencing args (group_fields, agg_field, sort_by, ...)
+        name a field that provably does not exist in the specific prior-step
+        output list it reads from via a "data"-style arg — see lineage.py.
+        A field existing on the original module is not enough; it must exist
+        in that exact list, which a transforming tool may have narrowed.
     """
 
     if not isinstance(queue, list) or len(queue) == 0:
@@ -138,6 +149,23 @@ def _validate_queue(queue: list) -> None:
                     f"(position {i}, tool={current_tool}): "
                     f"missing required argument '{req}'. "
                     f"Args provided: {list(args.keys())}"
+                )
+
+        # Reject any argument name this tool does not define at all. A tool's
+        # real accepted arguments are exactly REQUIRED_ARGS ∪ OPTIONAL_ARGS for
+        # it — nothing else, regardless of what a similarly-named argument on
+        # a different tool accepts. Only checked for known tools (present in
+        # REQUIRED_ARGS): an unrecognized tool name is a separate problem,
+        # caught later by the queue runner's own tool lookup.
+        if current_tool in REQUIRED_ARGS:
+            allowed = set(required) | set(OPTIONAL_ARGS.get(current_tool, []))
+            unknown = [a for a in args.keys() if a not in allowed]
+            if unknown:
+                raise ValueError(
+                    f"Step {current_idx}: {current_tool}\n"
+                    f"Invalid argument{'s' if len(unknown) > 1 else ''}: {', '.join(unknown)}\n\n"
+                    f"Allowed arguments:\n"
+                    f"{', '.join(sorted(allowed)) if allowed else '(none)'}"
                 )
 
         for arg_name, arg_val in args.items():
@@ -193,6 +221,11 @@ def _validate_queue(queue: list) -> None:
         raise ValueError(
             f"Last step must be 'final_answer_tool', got '{last_tool}'."
         )
+
+    # Field-lineage check — a field existing on the original module does not
+    # mean it exists in a prior step's own transformed output list. Only
+    # raises when this is statically provable from the plan's own args.
+    validate_field_lineage(queue)
 
 
 # =============================================================================
@@ -473,17 +506,44 @@ def run_execution(
                     list(dict(args).keys()),
                 )
 
-    _validate_queue(queue)
-    log_queue(queue)
-
-    # ── Phase 2: Execute the queue (no LLM) ────────────────────────────────
-    start_exec = time.perf_counter()
-
-    result = run_queue(
-        queue,
-        filtered_records,
-        progress_callback,
+    # Full, untruncated queue — logged unconditionally, before validation, so
+    # a rejected plan is still fully inspectable. log_queue() (below, only
+    # reached on success) collapses every list/dict arg to "[...]" for a
+    # compact one-line-per-step view; this is the complete JSON for when that
+    # isn't enough to see exactly what the Planner produced.
+    logger.info(
+        "[Execution Agent] RAW QUEUE (full JSON, pre-validation):\n%s",
+        json.dumps(queue, indent=2, default=str),
     )
+
+    start_exec = time.perf_counter()
+    try:
+        _validate_queue(queue)
+        log_queue(queue)
+
+        # ── Phase 2: Execute the queue (no LLM) ────────────────────────────
+        result = run_queue(
+            queue,
+            filtered_records,
+            progress_callback,
+        )
+
+    except ValueError as exc:
+        logger.error("[Execution Agent] Plan failed pre-execution validation: %s", exc)
+        if queue and isinstance(queue, list) and isinstance(queue[-1], dict) and "step" in queue[-1]:
+            safe_queue = queue
+        else:
+            safe_queue = [{"step": 0, "tool": "final_answer_tool", "args": {}}]
+        step_key = f"step_{safe_queue[-1]['step']}"
+        result = {
+            "queue":        safe_queue,
+            "step_results": {step_key: {"_result_type": "error", "error": str(exc)}},
+            "queue_total":  len(safe_queue),
+            "tools_called": 0,
+            "error_count":  1,
+            "status":       "FAILED",
+        }
+        queue = safe_queue
 
     execution_time = time.perf_counter() - start_exec
     total_time = time.perf_counter() - start_total

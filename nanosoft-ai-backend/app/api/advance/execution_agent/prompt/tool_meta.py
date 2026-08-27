@@ -94,6 +94,53 @@ TOOL_OUTPUT_KEYS: dict[str, set[str]] = {
 }
 
 
+# TOOL LIST OUTPUT SCHEMA
+TOOL_LIST_OUTPUT_SCHEMA: dict[str, dict[str, dict]] = {
+    "group_by_and_count":     {"groups": {"group_arg": "group_fields", "extra": ["count"]}},
+    "group_by_and_aggregate": {"groups": {"group_arg": "group_fields", "extra": ["value"]}},
+    "join_and_aggregate":     {"groups": {"group_arg": "group_fields", "extra": ["value"]}},
+    "calculate_age_from_now": {"groups": {"group_arg": "group_fields",
+                                          "extra": ["avg_age_days", "max_age_days", "record_count"]}},
+    "flag_by_threshold": {
+        "groups":          {"group_arg": "group_fields",
+                            "extra": ["flagged_count", "total", "flag_ratio"]},
+        "flagged_records": {"label_and_scalar": ("label_field", "field")},
+    },
+    "compare_date_fields": {
+        "groups":          {"group_arg": "group_fields",
+                            "extra": ["flagged_count", "total", "flag_ratio"]},
+        "flagged_records": {"module_arg": "module", "extra": ["day_diff"]},
+    },
+    "calculate_date_difference_stats": {
+        "groups": {"group_arg": "group_fields",
+                  "extra": ["records", "avg_diff_days", "max_diff_days", "min_diff_days"]},
+    },
+    "group_by_time_period": {
+        "periods": {"fixed": ["period_label", "count", "value"]},
+    },
+    "calculate_mtbf": {
+        "mtbf_by_asset": {"scalar_arg": "asset_field", "extra": ["failure_count", "mtbf_days"]},
+    },
+    "forecast_linear": {
+        "forecast": {"scalar_arg": "label_key", "default": "period_label", "extra": ["predicted_value"]},
+    },
+    "get_record_fields":       {"records": {"list_arg": "fields"}},
+    "filter_by_prior_results": {"records": {"list_arg": "fields"}},
+    "join_and_filter_by_date_diff": {
+        "matched_records": {"list_arg": "fields", "always": ["day_diff"]},
+    },
+    "add_duration_to_date": {
+        "records": {"module_arg": "module", "extra": ["expected_end_date", "days_remaining"]},
+    },
+    "sort_and_limit": {
+        "sorted_data": {"passthrough_arg": "data"},
+    },
+    "merge_and_score": {
+        "ranked": {"dynamic_merge_score": True},
+    },
+}
+
+
 # =============================================================================
 # REQUIRED ARGS
 # The minimum arguments each tool must receive for _validate_queue to pass.
@@ -202,6 +249,40 @@ def build_tool_api_block() -> str:
         "calculate_date_difference_stats",
     ]
 
+    def _describe_list_fields(spec: dict) -> str:
+        """Render, generically, which fields a list-valued output actually
+        carries — <argname> stands for "whatever value this step's own arg
+        of that name holds", never a hardcoded field name.
+        """
+        if "fixed" in spec:
+            return ", ".join(spec["fixed"])
+        if "group_arg" in spec:
+            base = f"<{spec['group_arg']}>"
+            extra = spec.get("extra", [])
+            return f"{base} + {', '.join(extra)}" if extra else base
+        if "scalar_arg" in spec:
+            base = f"<{spec['scalar_arg']}>"
+            extra = spec.get("extra", [])
+            return f"{base} + {', '.join(extra)}" if extra else base
+        if "list_arg" in spec:
+            base = f"exactly <{spec['list_arg']}>"
+            always = spec.get("always", [])
+            base = f"{base} + {', '.join(always)}" if always else base
+            return f"{base} (every column of the source when left empty — not enumerable in advance)"
+        if "module_arg" in spec:
+            base = f"every field of <{spec['module_arg']}>"
+            extra = spec.get("extra", [])
+            return f"{base} + {', '.join(extra)}" if extra else base
+        if "label_and_scalar" in spec:
+            label_arg, scalar_arg = spec["label_and_scalar"]
+            return (f"<{label_arg}>, <{scalar_arg}> when {label_arg} is given — "
+                    f"otherwise every field of the source (not enumerable in advance)")
+        if "passthrough_arg" in spec:
+            return f"exactly the fields already present on whatever <{spec['passthrough_arg']}> points to"
+        if spec.get("dynamic_merge_score"):
+            return "<group_key> + one '<dataset label>_score' field per dataset + composite_score"
+        return "(varies)"
+
     def _tool_block(name: str) -> list[str]:
         req = REQUIRED_ARGS.get(name, [])
         opt = OPTIONAL_ARGS.get(name, [])
@@ -213,6 +294,8 @@ def build_tool_api_block() -> str:
             block.append(f"  Optional : {', '.join(opt)}")
         if ret:
             block.append(f"  Returns  : {', '.join(ret)}")
+        for out_key, spec in TOOL_LIST_OUTPUT_SCHEMA.get(name, {}).items():
+            block.append(f"  {out_key} fields : {_describe_list_fields(spec)}")
         block.append("")
         return block
 
@@ -487,4 +570,30 @@ filters/group_fields/conditions given in that step. There is no shared,
 running scope carried across the plan — a filter applied in one step has no
 effect on what a later step sees when that later step reads from the same
 module.
+
+─────────────────────────────────────────────
+10. A STEP'S OWN OUTPUT LIST MAY CARRY FEWER FIELDS THAN ITS SOURCE
+─────────────────────────────────────────────
+A field on the module a step reads from is not automatically part of that
+step's own output — a narrowing tool's output is only its own group/key
+fields plus the metric it computed, nothing else the source had. The Tool
+API Reference above states exactly which fields each list output carries,
+derived from that step's own args. When a later step reads a prior step's
+list through a "data"-style argument, every field name it supplies must be
+one this specific list actually carries — not assumed from the original
+module. A field lost this way is still reachable: by matching records in a
+module against a list of values carried over from a prior step; see the
+tool described for that purpose above.
+
+─────────────────────────────────────────────
+11. THE SHORTEST VALID PLAN IS THE CORRECT ONE
+─────────────────────────────────────────────
+Once a step has produced a required metric or value, it stays available for
+the rest of the plan through its own $step_N reference. Recomputing it again
+— whether by rereading the original module or by any other path — does not
+make the plan more thorough; it only adds a chain that has to be gotten right
+a second time for no benefit. The correct plan is the shortest one that fully
+answers the question: every step in it exists because something later in the
+plan genuinely depends on it, not because a value could be produced again a
+different way.
 """
