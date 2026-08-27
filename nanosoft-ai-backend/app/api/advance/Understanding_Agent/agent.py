@@ -85,8 +85,8 @@ def classify_query(
         raise ValueError(f"Understanding Agent returned unparseable JSON: {exc}") from exc
 
     # ── Log ───────────────────────────────────────────────────────────────────
-    logger.info("[Understanding Agent] tokens   : input=%d output=%d total=%d",
-                usage.get("input_tokens", 0), usage.get("output_tokens", 0), usage.get("total_tokens", 0))
+    logger.info("[Understanding Agent] tokens   : input=%d output=%d thought=%d total=%d",
+                usage.get("input_tokens", 0), usage.get("output_tokens", 0), usage.get("thought_tokens", 0), usage.get("total_tokens", 0))
     logger.info("[Understanding Agent] latency  : llm=%.2fs", llm_time)
     logger.info("[Understanding Agent] intent   : %s", response.intent)
     logger.info("[Understanding Agent] summary  : %s", response.query_summary)
@@ -140,5 +140,11 @@ def classify_query(
             "llm_time":        round(llm_time,        2),
             "web_search_time": round(web_search_time, 2),
             "total_time":      round(total_time,       2),
+        },
+        "token_usage": {
+            "input_tokens":   usage.get("input_tokens", 0),
+            "output_tokens":  usage.get("output_tokens", 0),
+            "thought_tokens": usage.get("thought_tokens", 0),
+            "total_tokens":   usage.get("total_tokens", 0),
         },
     }

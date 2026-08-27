@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import math
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
@@ -8,7 +9,12 @@ from app.api.advance.schemas import AdvanceAskRequest
 from app.api.advance.service.service import stream_advance_pipeline
 from app.services.chat_websocket_handler import MAX_AUDIO_BYTES
 from app.services.audio_service import get_audio_duration_seconds, convert_audio_to_text
-from app.services.user_profile_service import consume_audio_seconds_if_available, update_daily_history
+from app.services.user_profile_service import (
+    consume_audio_seconds_if_available,
+    get_credits_remaining,
+    get_profile_name_by_external_user_id,
+    update_daily_history,
+)
 
 logger = logging.getLogger("advance.router")
 
@@ -71,15 +77,38 @@ async def advance_ask_ai_audio(
         if len(audio_bytes) > MAX_AUDIO_BYTES:
             raise HTTPException(status_code=400, detail="Voice query is too long. Please keep it brief and try again.")
 
-        # Determine sub_user_name for credit validation
-        sub_user_name = user_id if (user_id and user_id.strip()) else user_name
+        # Advance token billing resolves profiles by external user ID. Use that
+        # same profile row for the audio quota so one request cannot be billed
+        # against two identities (or bypass audio enforcement entirely).
+        profile_name = await asyncio.to_thread(
+            get_profile_name_by_external_user_id,
+            user_name,
+        )
+        if not profile_name:
+            raise HTTPException(
+                status_code=403,
+                detail="Unable to verify the billing profile for this audio request.",
+            )
+
+        credits_remaining = await asyncio.to_thread(
+            get_credits_remaining,
+            profile_name,
+        )
+        if credits_remaining is not None and credits_remaining <= 0:
+            raise HTTPException(
+                status_code=402,
+                detail="Credits exhausted. Please recharge/upgrade your plan to continue.",
+            )
 
         # Audio credit enforcement
-        computed_audio_seconds = get_audio_duration_seconds(audio_bytes)
+        computed_audio_seconds = get_audio_duration_seconds(
+            audio_bytes,
+            mime_type=file.content_type,
+        )
         audio_seconds_effective = (
             computed_audio_seconds
             if computed_audio_seconds is not None and computed_audio_seconds > 0
-            else (int(audio_seconds) if audio_seconds else 0)
+            else (math.ceil(audio_seconds) if audio_seconds else 0)
         )
 
         logger.info(
@@ -89,32 +118,46 @@ async def advance_ask_ai_audio(
             computed_audio_seconds,
         )
 
-        if audio_seconds_effective and audio_seconds_effective > 0:
-            consumed = await asyncio.to_thread(
-                consume_audio_seconds_if_available,
-                name=sub_user_name,
-                audio_seconds_delta=audio_seconds_effective,
+        if audio_seconds_effective <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Unable to determine audio duration. Please record the message again.",
             )
-            if consumed is False:
-                raise HTTPException(status_code=402, detail="Audio credits exhausted. Please recharge/upgrade your plan to continue.")
 
-            # Update daily history usage
-            try:
-                await asyncio.to_thread(
-                    update_daily_history,
-                    external_user_id=user_name,
-                    name=sub_user_name,
-                    credits_delta=0,
-                    audio_seconds_delta=int(audio_seconds_effective),
-                    graph_delta=0,
-                    request_delta=0,
-                )
-                logger.info("✅ usage_history audio saved for advance mode | audio=%s", audio_seconds_effective)
-            except Exception as e:
-                logger.warning("⚠️ update_daily_history audio failed for advance mode: %s", str(e)[:200])
+        consumed = await asyncio.to_thread(
+            consume_audio_seconds_if_available,
+            name=profile_name,
+            audio_seconds_delta=audio_seconds_effective,
+        )
+        if consumed is False:
+            raise HTTPException(status_code=402, detail="Audio credits exhausted. Please recharge/upgrade your plan to continue.")
+        if consumed is not True:
+            raise HTTPException(
+                status_code=503,
+                detail="Audio usage could not be verified. Please try again shortly.",
+            )
+
+        # Audio seconds are written here exactly once. The Advance pipeline
+        # later records only its token-derived credits and token totals.
+        try:
+            await asyncio.to_thread(
+                update_daily_history,
+                external_user_id=user_name,
+                name=profile_name,
+                credits_delta=0,
+                audio_seconds_delta=int(audio_seconds_effective),
+                graph_delta=0,
+                request_delta=0,
+            )
+            logger.info("✅ usage_history audio saved for advance mode | audio=%s", audio_seconds_effective)
+        except Exception as e:
+            logger.warning("⚠️ update_daily_history audio failed for advance mode: %s", str(e)[:200])
 
         # Transcribe audio using convert_audio_to_text
-        transcription_result = await convert_audio_to_text(audio_bytes)
+        transcription_result = await convert_audio_to_text(
+            audio_bytes,
+            mime_type=file.content_type,
+        )
         query = transcription_result.get("transcription", "").strip()
 
         if not query:
