@@ -435,8 +435,16 @@ async def startup_event():
             else:
                 logger.info("Column 'is_space_booking' already exists in 'chat_sessions'.")
 
+            logger.info("🔍 BEFORE share_code_expires_at ALTER TABLE")
+
             cur.execute("ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS share_code_expires_at TIMESTAMPTZ DEFAULT NULL")
+
+            logger.info("✅ AFTER share_code_expires_at ALTER TABLE")
+
+
             conn.commit()
+            
+            logger.info("✅ AFTER share_code_expires_at COMMIT")
     except Exception as e:
         logger.error(f"Failed to migrate database: {e}", exc_info=True)
         if conn:

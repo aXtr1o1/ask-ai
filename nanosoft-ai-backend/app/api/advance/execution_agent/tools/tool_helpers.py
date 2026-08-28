@@ -183,11 +183,6 @@ def _apply_conditions(df: pd.DataFrame, conditions: list) -> pd.DataFrame:
 
     for cond in conditions:
         if not isinstance(cond, dict):
-            # A hallucinated plan can put a bare string/number in the
-            # conditions list instead of a {"field", "value"} dict — that's a
-            # malformed plan, not a system crash, so it becomes the same
-            # controlled ValueError (→ _err via _safe_apply) as every other
-            # bad-filter case here, not an uncaught AttributeError.
             raise ValueError(
                 f"Filter condition must be a {{'field': str, 'value': str}} object, got {cond!r}."
             )
@@ -206,6 +201,16 @@ def _apply_conditions(df: pd.DataFrame, conditions: list) -> pd.DataFrame:
                 f"Filter field '{field}' not found. "
                 f"Available columns: {sorted(df.columns.tolist())}.{hint}"
             )
+
+        normalized_operator = value.strip().upper()
+
+        if normalized_operator == "IS NOT NULL":
+            df = df[df[actual].notna()]
+            continue
+
+        if normalized_operator == "IS NULL":
+            df = df[df[actual].isna()]
+            continue
 
         # Collapse internal whitespace on both sides so "Mail  Building" (DB) matches
         # a filter value of "Mail Building" — the SP's word-boundary regex is looser

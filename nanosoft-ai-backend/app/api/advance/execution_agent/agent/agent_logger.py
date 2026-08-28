@@ -93,6 +93,7 @@ def log_step(step_idx: int, tool_name: str, result: dict) -> None:
         "filter_by_prior_results":   ["matched", "total"],
         "intersect_record_sets":     ["count"],
         "do_math":                   ["result", "operation"],
+        "combine_grouped_values":    ["unique_groups", "operation"],
         "sort_and_limit":            ["total_in", "total_out"],
         "final_answer_tool":         ["final_value", "status"],
         "calculate_age_from_now":    ["avg_age_days", "total_records"],

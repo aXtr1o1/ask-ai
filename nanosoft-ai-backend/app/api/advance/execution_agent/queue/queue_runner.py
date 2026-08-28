@@ -33,6 +33,7 @@ from app.api.advance.execution_agent.tools.tools import (
     filter_by_prior_results,
     intersect_record_sets,
     do_math,
+    combine_grouped_values,
     sort_and_limit,
     final_answer_tool,
     # Intelligence Tools
@@ -43,7 +44,6 @@ from app.api.advance.execution_agent.tools.tools import (
     calculate_rate_of_change,
     calculate_percentile,
     forecast_linear,
-    compare_date_fields,
     compare_date_fields,
     merge_and_score,
     add_duration_to_date,
@@ -79,6 +79,7 @@ TOOL_REGISTRY: dict[str, Any] = {
     "filter_by_prior_results": filter_by_prior_results,
     "intersect_record_sets":   intersect_record_sets,
     "do_math":                 do_math,
+    "combine_grouped_values":  combine_grouped_values,
     "sort_and_limit":          sort_and_limit,
     "final_answer_tool":       final_answer_tool,
     # ── Intelligence Tools ───────────────────────────────────────────────────

@@ -588,6 +588,7 @@ def calculate_percentile(
     state: Annotated[dict, InjectedState()],
     percentiles: list | None = None,
     filters: list | None = None,
+    data: list | None = None,
 ) -> dict:
     """
     Compute percentile values (P50/P90/P95/P99) of a numeric field.
@@ -597,13 +598,29 @@ def calculate_percentile(
     percentiles is a list of integers e.g. [50, 90, 95, 99].
     If not provided, defaults to [50, 75, 90, 95, 99].
 
+    By default reads directly from module. Pass data (a prior step's own
+    output list, e.g. $step_N.groups) instead when the field only exists on
+    that step's output and not on the original module — data takes priority
+    over module when both are given. data is optional; module and field
+    remain required.
+
     Args:
         module:      Data module name
         field:       Numeric field to compute percentiles on
         percentiles: List of integer percentile values (1–99). Default: [50, 75, 90, 95, 99]
         filters:     Optional list of {"field": str, "value": str} dicts for AND pre-filtering
+        data:        Optional list of record dicts from a prior step (e.g. $step_N.groups)
     """
-    df = load_records_as_dataframe(state, module)
+    # An LLM occasionally resolves a $step_N reference into `module` itself
+    # instead of `data` — treat a list landing in `module` the same way
+    # group_by_and_aggregate does, rather than failing on a type mismatch.
+    if isinstance(module, list):
+        data, module = module, ""
+
+    if data is not None and isinstance(data, list):
+        df = pd.DataFrame(data)
+    else:
+        df = load_records_as_dataframe(state, module)
 
     if percentiles is None:
         percentiles = [50, 75, 90, 95, 99]

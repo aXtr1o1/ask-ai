@@ -52,6 +52,7 @@ TOOL_OUTPUT_KEYS: dict[str, set[str]] = {
                                 "fields_returned", "records"},
     "intersect_record_sets":  {"match_field", "matched_values", "count"},
     "do_math":                {"result", "operation", "a", "b"},
+    "combine_grouped_values": {"groups", "unique_groups", "operation", "group_key", "value_key"},
     "sort_and_limit":         {"sorted_data", "total_in", "total_out",
                                "sort_by", "order", "limit"},
     "final_answer_tool":      {"status", "final_value"},
@@ -98,6 +99,7 @@ TOOL_OUTPUT_KEYS: dict[str, set[str]] = {
 TOOL_LIST_OUTPUT_SCHEMA: dict[str, dict[str, dict]] = {
     "group_by_and_count":     {"groups": {"group_arg": "group_fields", "extra": ["count"]}},
     "group_by_and_aggregate": {"groups": {"group_arg": "group_fields", "extra": ["value"]}},
+    "combine_grouped_values": {"groups": {"group_arg": "group_key", "extra": ["value"]}},
     "join_and_aggregate":     {"groups": {"group_arg": "group_fields", "extra": ["value"]}},
     "calculate_age_from_now": {"groups": {"group_arg": "group_fields",
                                           "extra": ["avg_age_days", "max_age_days", "record_count"]}},
@@ -159,6 +161,7 @@ REQUIRED_ARGS: dict[str, list[str]] = {
     "intersect_record_sets":     ["datasets", "match_field"],
     "sort_and_limit":            ["data"],
     "do_math":                   ["operation", "a"],
+    "combine_grouped_values":     ["a", "b", "group_key", "operation"],
     "final_answer_tool":         ["result_ref"],
     # ── Intelligence Tools ───────────────────────────────────────────────────
     "calculate_age_from_now":    ["module", "date_field"],
@@ -194,6 +197,7 @@ OPTIONAL_ARGS: dict[str, list[str]] = {
     "filter_by_prior_results":   ["fields", "limit", "filters"],
     "intersect_record_sets":     [],
     "do_math":                   ["b"],
+    "combine_grouped_values":     ["value_key"],
     "sort_and_limit":            ["sort_by", "order", "limit"],
     "final_answer_tool":         [],
     # ── Intelligence Tools ───────────────────────────────────────────────────
@@ -202,7 +206,7 @@ OPTIONAL_ARGS: dict[str, list[str]] = {
     "calculate_mtbf":            ["filters"],
     "flag_by_threshold":         ["operator", "group_fields", "label_field", "filters", "data"],
     "calculate_rate_of_change":  [],
-    "calculate_percentile":      ["percentiles", "filters"],
+    "calculate_percentile":      ["percentiles", "filters", "data"],
     "forecast_linear":           ["periods_ahead", "value_key", "label_key"],
     "compare_date_fields":       ["group_fields", "filters"],
     "merge_and_score":           [],
@@ -239,7 +243,7 @@ def build_tool_api_block() -> str:
         "count_records", "sum_values", "get_average",
         "group_by_and_count", "group_by_and_aggregate", "join_and_aggregate",
         "get_record_fields", "filter_by_prior_results", "intersect_record_sets",
-        "do_math", "sort_and_limit", "final_answer_tool",
+        "do_math", "combine_grouped_values", "sort_and_limit", "final_answer_tool",
     ]
     intelligence = [
         "calculate_age_from_now", "group_by_time_period", "calculate_mtbf",
@@ -358,6 +362,7 @@ BASIC TOOLS — output state
   Only the group_fields columns and "value" are available downstream.
   Valid operations: SUM | AVG | MIN | MAX | COUNT | COUNT_DISTINCT.
   Never invent operations or use custom aggregation codes.
+  DIV / ADD / SUB / MUL of two group lists is combine_grouped_values, not this tool.
   By default reads directly from module. When group_fields or agg_field name a
   field that only exists on a prior step's own output (not on the original
   module), pass that step's list through the optional data argument instead —
@@ -391,7 +396,15 @@ BASIC TOOLS — output state
 • do_math:
   Returns a single number in key "result". Operations: ADD | SUB | MUL | DIV |
   MOD | POWER | SQRT | ABS. Never write raw math in result_ref — use do_math.
+  Inputs a and b must be scalars, not group lists.
   Reference as $step_N.result.
+
+• combine_grouped_values:
+  Aligns two prior-step group lists on group_key and computes ADD | SUB | MUL | DIV
+  per group. a is the left operand (numerator for DIV), b is the right (denominator).
+  Each of a and b must be a $step_N.groups list. Returns "groups" — group_key
+  field(s) plus "value". Then calculate_percentile / flag_by_threshold use field=value
+  and data=$step_N.groups. Reference as $step_N.groups.
 
 • sort_and_limit:
   Sorts and optionally limits a list from a prior step. Input "data" MUST be a
@@ -443,8 +456,14 @@ INTELLIGENCE TOOLS — output state
   Reference as $step_N.pct_change or $step_N.direction.
 
 • calculate_percentile:
-  Returns "percentile_values" (dict), "mean", "std_dev", "minimum", "maximum",
-  "records_used". Reference as $step_N.percentile_values or $step_N.mean.
+  By default reads the original module. When the numeric field only exists on
+  a prior step's output (e.g. "count" from group_by_and_count), pass that
+  list through the optional data argument (e.g. $step_N.groups). module and
+  field remain required alongside it.
+  Returns "percentile_values" (dict keyed p50/p75/…), "mean", "std_dev",
+  "minimum", "maximum", "records_used". A later step that needs a single
+  cutoff must reference one key, e.g. $step_N.percentile_values.p75 — not
+  the whole dict. Reference as $step_N.percentile_values.p75 or $step_N.mean.
 
 • forecast_linear:
   Input "data" MUST be a $step_N.periods reference from group_by_time_period.
@@ -516,6 +535,9 @@ INTELLIGENCE TOOLS — output state
 • operation must be one of the exact strings listed in the tool description.
   Never invent custom operation codes or attempt aggregation functions that
   are not explicitly supported by the respective tool's description.
+  group_by_and_aggregate has no DIV. A per-group rate (completed / total
+  per building) is combine_grouped_values with operation=DIV, a=numerator
+  groups, b=denominator groups. do_math is only for two scalar numbers.
 
 ─────────────────────────────────────────────
 6. A STEP'S ARGUMENTS ARE EXACTLY WHAT ITS TOOL LISTS

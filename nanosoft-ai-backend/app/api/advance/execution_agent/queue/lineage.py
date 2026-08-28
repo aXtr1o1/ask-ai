@@ -60,6 +60,9 @@ TOOL_FIELD_CONSUMERS: dict[str, dict] = {
     "flag_by_threshold": {
         "data_arg": "data", "field_args": ["field", "group_fields", "label_field"], "filters_arg": "filters",
     },
+    "calculate_percentile": {
+        "data_arg": "data", "field_args": ["field"], "filters_arg": "filters",
+    },
     "forecast_linear": {
         "data_arg": "data", "field_args": ["value_key", "label_key"],
     },

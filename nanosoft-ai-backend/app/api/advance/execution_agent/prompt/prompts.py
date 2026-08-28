@@ -89,9 +89,16 @@ intersect_record_sets
   Not for standard cross-module joining.
 
 do_math
-  Arithmetic on two numbers: ADD | SUB | MUL | DIV | MOD | POWER | SQRT | ABS.
-  ALWAYS use do_math for ratios, percentages, and products.
+  Arithmetic on TWO SCALAR numbers: ADD | SUB | MUL | DIV | MOD | POWER | SQRT | ABS.
+  Use for a single overall ratio or percentage. Never pass group lists.
   Never write raw math strings inside final_answer_tool.
+
+combine_grouped_values
+  Arithmetic on TWO GROUP LISTS from prior steps (e.g. $step_N.groups).
+  Operations: ADD | SUB | MUL | DIV. Use for per-group rates
+  (completed / total per building). a = numerator for DIV, b = denominator.
+  group_key is the shared grouping field. Returns groups with group_key + value.
+  NEVER put DIV on group_by_and_aggregate — that tool has no DIV.
 
 sort_and_limit
   Sort a list from a prior step. data must be a $step_N.key reference to a list.
@@ -146,6 +153,9 @@ calculate_rate_of_change
 
 calculate_percentile
   Percentile distribution of a numeric field. Also returns mean, std_dev, min, max.
+  By default reads the module. Pass optional data ($step_N.groups) when the
+  field (e.g. count) only exists on a prior step's output. module and field
+  remain required even when data is given.
 
 forecast_linear
   Linear regression forecast on time-series data from group_by_time_period.

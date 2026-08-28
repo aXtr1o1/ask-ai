@@ -9,6 +9,7 @@ Basic FM Analytics Tools (Tools 1–10)
   6.  join_and_aggregate     → inner-join two modules on shared key + aggregate per group
   7.  get_record_fields      → return actual record data — specific fields or all fields
   8.  do_math                → arithmetic: ADD | SUB | MUL | DIV | MOD | POWER | SQRT | ABS
+  8b. combine_grouped_values → per-group ADD | SUB | MUL | DIV of two group lists
   9.  sort_and_limit         → sort a list from a prior step and optionally keep top/bottom N
   10. final_answer_tool      → marks queue complete, MUST be the last step
 """
@@ -371,7 +372,11 @@ def group_by_and_aggregate(
     op = operation.upper()
     valid_ops = {"SUM", "AVG", "MIN", "MAX", "COUNT", "COUNT_DISTINCT"}
     if op not in valid_ops:
-        return _err(f"Unknown operation '{op}'. Valid: SUM | AVG | MIN | MAX | COUNT | COUNT_DISTINCT")
+        return _err(
+            f"Unknown operation '{op}'. Valid: SUM | AVG | MIN | MAX | COUNT | COUNT_DISTINCT. "
+            "Per-group DIV/ADD/SUB/MUL of two group lists (e.g. a completion rate) "
+            "is combine_grouped_values, not this tool."
+        )
 
     df = df.copy()
     if op == "COUNT" or not agg_field:
@@ -715,7 +720,7 @@ def get_record_fields(
                 if api_res and api_res.get(module):
                     df_live = pd.DataFrame(api_res[module])
                     df_retry, err_retry = _safe_apply(df_live, filters)
-                    if not err_retry:
+                    if not err_retry:  
                         df = df_retry
                         err = None
             except Exception as exc:
@@ -963,6 +968,10 @@ def intersect_record_sets(
     sets_to_intersect = []
     original_format = {}
     for d in datasets:
+        # Planner sometimes wraps each list as {"data": $step_N.flagged_records, ...}
+        # (merge_and_score style). Unwrap so the inner list is still usable.
+        if isinstance(d, dict) and "data" in d:
+            d = d.get("data")
         if not d or not isinstance(d, list):
             continue
         curr_set = set()
@@ -1139,6 +1148,181 @@ def do_math(
         "b":            b_val,
         "result":       round(result, 6) if isinstance(result, float) else result,
     }
+
+
+# =============================================================================
+# TOOL 8b: combine_grouped_values
+# =============================================================================
+def _group_key_value(row, group_key):
+    """Extract a comparable group-key value from a group-row dict."""
+    if not isinstance(row, dict):
+        return None
+    keys = group_key if isinstance(group_key, list) else [group_key]
+    vals = []
+    for k in keys:
+        if not k:
+            continue
+        found = None
+        if k in row:
+            found = row[k]
+        else:
+            target = str(k).split(".")[-1].strip().lower()
+            for rk, rv in row.items():
+                if str(rk).split(".")[-1].strip().lower() == target:
+                    found = rv
+                    break
+        if found is None or str(found).strip() == "":
+            return None
+        vals.append(found)
+    if not vals:
+        return None
+    return vals[0] if len(vals) == 1 else tuple(vals)
+
+
+def _group_metric(row, value_key: str):
+    """Numeric metric from a group row: value_key, then count, then value."""
+    if not isinstance(row, dict):
+        return None
+    candidates = []
+    if value_key:
+        candidates.append(value_key)
+    candidates.extend(["count", "value"])
+    seen = set()
+    for k in candidates:
+        if k in seen:
+            continue
+        seen.add(k)
+        raw = None
+        if k in row:
+            raw = row[k]
+        else:
+            target = str(k).split(".")[-1].strip().lower()
+            for rk, rv in row.items():
+                if str(rk).split(".")[-1].strip().lower() == target:
+                    raw = rv
+                    break
+        if raw is None:
+            continue
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+@tool
+def combine_grouped_values(
+    a: list,
+    b: list,
+    group_key: str,
+    operation: str,
+    value_key: str = "",
+) -> dict:
+    """
+    Arithmetic on TWO prior-step group lists, aligned by a shared group_key.
+
+    Use for per-group rates (e.g. completed PPM / total PPM per building).
+    do_math is for two scalar numbers only. group_by_and_aggregate cannot DIV.
+
+    a is the left operand (numerator for DIV). b is the right (denominator).
+    Each of a and b must be a $step_N.groups (or similar) list of dicts.
+
+    Operations: ADD | SUB | MUL | DIV.
+
+    Returns "groups" — each dict has the group_key field(s) plus "value".
+
+    Args:
+        a:          Left group list (numerator for DIV), e.g. $step_4.groups
+        b:          Right group list (denominator for DIV), e.g. $step_3.groups
+        group_key:  Shared grouping field, e.g. "BuildingName" or ["BuildingName"]
+        operation:  ADD | SUB | MUL | DIV
+        value_key:   Metric column on each row. Empty = try "count" then "value"
+    """
+    if _is_unresolved_ref(a) or (isinstance(a, str) and a.startswith("$step_")):
+        return _err(f"'a' is an unresolved reference: '{a}'.")
+    if _is_unresolved_ref(b) or (isinstance(b, str) and b.startswith("$step_")):
+        return _err(f"'b' is an unresolved reference: '{b}'.")
+    if isinstance(a, dict) and isinstance(a.get("groups"), list):
+        a = a["groups"]
+    if isinstance(b, dict) and isinstance(b.get("groups"), list):
+        b = b["groups"]
+    if not isinstance(a, list):
+        return _err(f"'a' must be a list of group dicts, got {type(a).__name__}.")
+    if not isinstance(b, list):
+        return _err(f"'b' must be a list of group dicts, got {type(b).__name__}.")
+    if not group_key:
+        return _err("group_key is required.")
+
+    op = str(operation).upper().strip()
+    valid_ops = {"ADD", "SUB", "MUL", "DIV"}
+    if op not in valid_ops:
+        return _err(f"Unknown operation '{operation}'. Valid: ADD | SUB | MUL | DIV.")
+
+    def _index(rows):
+        out = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            gk = _group_key_value(row, group_key)
+            if gk is None:
+                continue
+            metric = _group_metric(row, value_key)
+            if metric is None:
+                continue
+            out[gk] = metric
+        return out
+
+    a_map = _index(a)
+    b_map = _index(b)
+    all_keys = list(dict.fromkeys([*a_map.keys(), *b_map.keys()]))
+
+    key_names = group_key if isinstance(group_key, list) else [group_key]
+    groups = []
+    skipped_div_zero = 0
+    for gk in all_keys:
+        av = a_map.get(gk)
+        bv = b_map.get(gk)
+        if op == "DIV":
+            if bv is None:
+                continue
+            if av is None:
+                av = 0.0
+            if bv == 0:
+                skipped_div_zero += 1
+                continue
+            result = av / bv
+        else:
+            if av is None:
+                av = 0.0
+            if bv is None:
+                bv = 0.0
+            if op == "ADD":
+                result = av + bv
+            elif op == "SUB":
+                result = av - bv
+            else:
+                result = av * bv
+
+        row = {}
+        vals = gk if isinstance(gk, tuple) else (gk,)
+        for name, val in zip(key_names, vals):
+            row[name] = val
+        row["value"] = round(float(result), 4)
+        groups.append(row)
+
+    groups.sort(key=lambda r: r.get("value") if r.get("value") is not None else float("-inf"), reverse=True)
+
+    result = {
+        "_result_type":  "grouped_data",
+        "operation":    op,
+        "group_key":    group_key,
+        "value_key":    value_key or "count|value",
+        "unique_groups": len(groups),
+        "groups":        _clean_records(groups),
+    }
+    if skipped_div_zero:
+        result["_note"] = f"{skipped_div_zero} group(s) skipped (division by zero)."
+    return result
 
 
 # =============================================================================
