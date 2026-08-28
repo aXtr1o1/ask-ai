@@ -72,6 +72,8 @@ interface Message {
 }
 
 interface ChatSession { id: string; title: string; createdAt: number; updatedAt?: number; isPinned?: boolean; isArchived?: boolean; group_name?: string; isSpaceBooking?: boolean; isAdvanceAskAI?: boolean; }
+
+const ACTIVE_SESSION_STORAGE_KEY = "ask-ai-active-session";
 interface Group {
   id: string;
   name: string;
@@ -1278,7 +1280,16 @@ export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [activeMessageIdx, setActiveMessageIdx] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [sessionId, setSessionId] = useState<string>(() => generateSessionId());
+  const [sessionId, setSessionId] = useState<string>(() => {
+  if (typeof window !== "undefined") {
+    return (
+      localStorage.getItem(ACTIVE_SESSION_STORAGE_KEY) ??
+      generateSessionId()
+    );
+  }
+
+  return generateSessionId();
+});
   const [searchVal, setSearchVal] = useState("");
   const [isRecording, setIsRecording] = useState<boolean>(false);
   const [recordingTime, setRecordingTime] = useState(0);
@@ -1345,6 +1356,10 @@ export default function Home() {
   const sessionMenuRef = useRef<HTMLDivElement | null>(null);
   const [sessionMenuVisible, setSessionMenuVisible] = useState<boolean>(false);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [sessionsLoaded, setSessionsLoaded] = useState(false);
+  const [isInitialSessionRestorePending, setIsInitialSessionRestorePending] = useState(() =>
+    typeof window !== "undefined" && !!localStorage.getItem(ACTIVE_SESSION_STORAGE_KEY)
+  );
   const [audioPlayingIndex, setAudioPlayingIndex] = useState<number | null>(null);
 
   // Inline edit state for renaming sessions
@@ -1480,6 +1495,7 @@ export default function Home() {
   const menuRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const sessionIdRef = useRef<string>(sessionId);
+  const activeSessionRestoreAttemptedRef = useRef(false);
   const wsConnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectDelayRef = useRef(2000);
   const sessionMessagesRef = useRef<Map<string, Message[]>>(new Map());
@@ -1749,30 +1765,51 @@ export default function Home() {
     if (sharedSid) {
       const fetchShared = async () => {
         try {
-          const url = `${baseUrl}/api/share/history?sessionId=${sharedSid}${owner ? `&owner=${owner}` : ""}`;
+          const query = new URLSearchParams({ sessionId: sharedSid });
+          if (owner) query.set("owner", owner);
+          const url = `${baseUrl}/api/share/history?${query}`;
           const res = await fetch(url);
           const data = await res.json();
-          if (data.status === "ok") {
-            // Map DB fields (query/assistant) to UI fields (role/text)
-            const mappedHistory = (data.history || []).flatMap((m: any) => [
+          if (!res.ok || data.status !== "ok") {
+            throw new Error(data.detail || "Shared session not found or private");
+          }
+
+          // Map DB fields (query/assistant) to UI fields (role/text).
+          const mappedHistory: Message[] = (data.history || []).flatMap((m: any): Message[] => {
+            let assistantText = m.assistant || "";
+            if (typeof assistantText === "string" && assistantText.startsWith("{")) {
+              try {
+                assistantText = JSON.parse(assistantText).response || assistantText;
+              } catch {
+                // Keep malformed historical JSON as text rather than failing the shared chat.
+              }
+            }
+
+            return [
               { role: "user", text: m.query || "" },
               {
-                role: "ai", text: typeof m.assistant === "string" && m.assistant.startsWith("{")
-                  ? JSON.parse(m.assistant).response || m.assistant
-                  : m.assistant || ""
-              }
-            ]);
-            setSessionId(sharedSid);
-            const processed = processLoadedMessages(mappedHistory);
-            const isBooking = processed.some(m => m.isSpaceBooking);
-            const finalProcessed = isBooking ? processLoadedMessages(mappedHistory, true) : processed;
-            setMessages(finalProcessed);
-            setIsSpaceBooking(isBooking);
-            console.log("[share] shared chat loaded and mapped");
-            setAuthChecked(true);
-          }
+                role: "ai",
+                text: assistantText,
+                originalText: m.assistant || "",
+                isAdvanceStream: m.is_advance ?? false,
+                advanceResult: m.advance_result ?? undefined,
+                agentStatus: m.is_advance ? "done" : undefined,
+              },
+            ];
+          });
+          setSessionId(sharedSid);
+          setIsAdvanceAskAI(data.is_advance ?? false);
+          const isBooking = (data.is_space_booking ?? false) || mappedHistory.some(m => m.isSpaceBooking);
+          const finalProcessed = processLoadedMessages(mappedHistory, isBooking);
+          setMessages(finalProcessed);
+          setIsSpaceBooking(isBooking);
+          console.log("[share] shared chat loaded and mapped");
+          setAuthChecked(true);
         } catch (e) {
           console.error("Failed to load shared session:", e);
+          setSessionId(sharedSid);
+          setMessages([{ role: "error", text: "Unable to load this shared chat. It may be private or no longer available." }]);
+          setAuthChecked(true);
         }
       };
       fetchShared();
@@ -1803,8 +1840,14 @@ export default function Home() {
   // Keep sessionIdRef in sync with state
   useEffect(() => {
     sessionIdRef.current = sessionId;
-  }, [sessionId]);
 
+    if (typeof window !== "undefined" && sessionId) {
+      localStorage.setItem(
+        ACTIVE_SESSION_STORAGE_KEY,
+        sessionId
+      );
+    }
+  }, [sessionId]);
   // Auto-scroll
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -2301,7 +2344,7 @@ const getAdvanceHistoryText = (m: Message): string => {
     setIsSharing(true);      // Show loading inside modal
     try {
       // 1. Force save the current history to DB first
-      const currentMsgs = sessionMessagesRef.current.get(sid) || messages;
+      const currentMsgs = sessionMessagesRef.current.get(sid) ?? (sid === sessionId ? messages : []);
       if (currentMsgs.length > 0) {
         await saveChatHistory(sid, currentMsgs);
       }
@@ -2317,7 +2360,11 @@ const getAdvanceHistoryText = (m: Message): string => {
         }),
       });
       if (res.ok) {
-        const link = `${window.location.origin}${window.location.pathname}?sharedSessionId=${sid}&owner=${userIdFromUrl ?? loggedInUser}`;
+        const query = new URLSearchParams({
+          sharedSessionId: sid,
+          owner: userIdFromUrl ?? loggedInUser ?? "",
+        });
+        const link = `${window.location.origin}${window.location.pathname}?${query}`;
         setShareLink(link);
       }
     } catch (e) {
@@ -2334,7 +2381,7 @@ const getAdvanceHistoryText = (m: Message): string => {
     if (!sid) return;
     setIsGeneratingCode(true);
 
-    const actualUserName = userIdFromUrl ?? localStorage.getItem("userName") ?? loggedInUser;
+    const actualUserName = userIdFromUrl ?? loggedInUser ?? localStorage.getItem("userName");
 
     try {
       const res = await fetch(`${baseUrl}/api/sessions/generate-share-code`, {
@@ -2367,7 +2414,7 @@ const getAdvanceHistoryText = (m: Message): string => {
     }
     setIsImporting(true);
     setImportError(null);
-    const actualUserName = userIdFromUrl ?? localStorage.getItem("userName") ?? loggedInUser;
+    const actualUserName = userIdFromUrl ?? loggedInUser ?? localStorage.getItem("userName");
 
     console.log(`[Import] Starting import for code: ${inputShareCode} | User: ${actualUserName}`);
 
@@ -2383,32 +2430,18 @@ const getAdvanceHistoryText = (m: Message): string => {
       const data = await res.json();
 
       if (data.status === "ok") {
-        console.log(`[Import] Success! New Session ID: ${data.newSessionId}`);
-        setImportModalOpen(false);
-        setInputShareCode("");
-
-        try {
-          console.log("[Import] Refreshing session list...");
-
-          const fetchedSessions = await fetchSessions();
-
-          console.log(`[Import] Selecting new session: ${data.newSessionId}`);
-
-          const importedSession = fetchedSessions.find(
-            (s) => s.id === data.newSessionId
-          );
-
-          if (importedSession) {
-            setIsAdvanceAskAI(importedSession.isAdvanceAskAI ?? false);
+          const importedSessionId = data.sessionId ?? data.newSessionId;
+          if (!importedSessionId) {
+            throw new Error("Share code response did not include a session ID");
           }
+          console.log(`[Import] Success! Original Session ID: ${importedSessionId}`);
+          setImportModalOpen(false);
+          setInputShareCode("");
 
-          switchSession(data.newSessionId);
-
-          console.log("[Import] Session selection triggered.");
-        } catch (innerError: any) {
-          console.error("[Import] Error during list refresh/selection:", innerError);
-          setImportError("Import was successful, but failed to load the new chat automatically.");
-        }
+          // Reuse the public-session loader so code opens the original session,
+          // including its Advanced/Space Booking mode and complete history.
+          const sharedQuery = new URLSearchParams({ sharedSessionId: importedSessionId });
+          window.location.assign(`${window.location.origin}${window.location.pathname}?${sharedQuery}`);
       } else {
         console.warn("[Import] Server returned error:", data.detail);
         setImportError(data.detail || "Invalid code or import failed.");
@@ -2880,8 +2913,19 @@ const getAdvanceHistoryText = (m: Message): string => {
   };
 
   useEffect(() => {
-    fetchSessions();
-    fetchFolders();
+    if (!authChecked || !loggedInUser) return;
+
+    let cancelled = false;
+    setSessionsLoaded(false);
+
+    void fetchSessions().finally(() => {
+      if (!cancelled) setSessionsLoaded(true);
+    });
+    void fetchFolders();
+
+    return () => {
+      cancelled = true;
+    };
   }, [authChecked, loggedInUser]);
 
   const handleFeatureClick = (featureName: 'chat' | 'archived' | 'groups') => {
@@ -3273,8 +3317,8 @@ const getAdvanceHistoryText = (m: Message): string => {
 
   // ── Switch to an existing session ─────────────────────────────────────────
   
-const switchSession = async (targetSid: string) => {
-  if (targetSid === sessionId) return; // already active
+const switchSession = async (targetSid: string, reloadActive = false) => {
+  if (targetSid === sessionId && !reloadActive) return; // already active
 
   if (isLoading) {
     showWarningToast("Please wait, don't switch the chat!");
@@ -3523,6 +3567,36 @@ const switchSession = async (targetSid: string) => {
     startPing();
   }
 };
+
+  // Restore the active session after the authenticated session list is available.
+  // Shared-session URLs own their session selection and must not use local storage.
+  useEffect(() => {
+    if (!authChecked) return;
+
+    if (!loggedInUser || new URLSearchParams(window.location.search).has("sharedSessionId")) {
+      setIsInitialSessionRestorePending(false);
+      return;
+    }
+
+    if (
+      activeSessionRestoreAttemptedRef.current ||
+      !sessionsLoaded
+    ) {
+      return;
+    }
+
+    activeSessionRestoreAttemptedRef.current = true;
+
+    const persistedSid = localStorage.getItem(ACTIVE_SESSION_STORAGE_KEY);
+    if (persistedSid && chatSessions.some((session) => session.id === persistedSid)) {
+      void switchSession(persistedSid, true).finally(() => {
+        setIsInitialSessionRestorePending(false);
+      });
+    } else {
+      setIsInitialSessionRestorePending(false);
+    }
+  }, [authChecked, loggedInUser, sessionsLoaded, chatSessions, switchSession]);
+
   // Pre-fetch history for expanded groups to make loading instant
   useEffect(() => {
     if (!authChecked || !loggedInUser) return;
@@ -5245,7 +5319,7 @@ const switchSession = async (targetSid: string) => {
           )}
 
           {/* Landing — welcome shifted up; input vertically centered (only before first message) */}
-          {!historyLoading && isLanding && !isAssetAnalytics && (activeFeature === 'chat' || activeFeature === 'groups' || activeFeature === 'archived') && (
+          {!historyLoading && !isInitialSessionRestorePending && isLanding && !isAssetAnalytics && (activeFeature === 'chat' || activeFeature === 'groups' || activeFeature === 'archived') && (
             <div className="landing-start-column">
               <div className="landing-start-spacer-top" aria-hidden />
               <div className="landing-container landing-container--start">

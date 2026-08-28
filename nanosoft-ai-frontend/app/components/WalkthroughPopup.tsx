@@ -27,12 +27,23 @@ const WALKTHROUGH_SLIDES: WalkthroughSlide[] = [
   },
 ];
 
+const WALKTHROUGH_COMPLETED_STORAGE_KEY = "ask-ai-walkthrough-completed";
+
 export default function WalkthroughPopup() {
   const [currentSlide, setCurrentSlide] = useState(0);
-  const [isOpen, setIsOpen] = useState(true);
+  const [isOpen, setIsOpen] = useState(() =>
+    typeof window !== "undefined" && localStorage.getItem(WALKTHROUGH_COMPLETED_STORAGE_KEY) !== "true"
+  );
   const [visible, setVisible] = useState(false);  // drives enter animation
   const [closing, setClosing] = useState(false);   // drives exit animation
   const [slideKey, setSlideKey] = useState(0);     // forces slide re-animation
+
+  // A refresh must not replay the onboarding once it has been shown.
+  useEffect(() => {
+    if (isOpen) {
+      localStorage.setItem(WALKTHROUGH_COMPLETED_STORAGE_KEY, "true");
+    }
+  }, [isOpen]);
 
   // Inject keyframes once into <head>
   useEffect(() => {
@@ -115,6 +126,7 @@ export default function WalkthroughPopup() {
   };
 
   const handleClose = () => {
+    localStorage.setItem(WALKTHROUGH_COMPLETED_STORAGE_KEY, "true");
     setClosing(true);
     setTimeout(() => setIsOpen(false), 270);
   };
