@@ -68,10 +68,12 @@ def _log_output(
     latency_ms:      float,
     input_tokens:    int,
     output_tokens:   int,
+    thought_tokens:  int,
+    total_tokens:    int,
 ) -> None:
     """Log what the Formatting Agent returns after the LLM call."""
     logger.info("┌─ [Formatting Agent] OUTPUT")
     logger.info("│  format   : %s", response_format)
-    logger.info("│  latency  : %.0f ms | tokens: %d in / %d out", latency_ms, input_tokens, output_tokens)
+    logger.info("│  latency  : %.0f ms | tokens: %d in / %d out / %d thought / %d total", latency_ms, input_tokens, output_tokens, thought_tokens, total_tokens)
     logger.info("│  response : %s%s", explanation[:200], "…" if len(explanation) > 200 else "")
     logger.info("└─ %s", _SEP)

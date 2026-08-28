@@ -51,13 +51,16 @@ INTENT CLASSIFICATION
 ════════════════════════════════════════════════
 Classify the user's current intent into exactly one of:
 
-  general     — answerable without FM data: greetings, explanations, definitions,
-                system how-tos, capability questions, conversation recall, user name/preference.
+  general     — answerable without looking at any FM record: greetings, explaining a
+                term/concept/how the system works, capability questions, conversation
+                recall, user name/preference.
                 Set general_response to your complete helpful answer. Set query_summary to null.
                 Leave modules empty.
 
-  db_query    — requires data from the FM database: counts, statuses, lists,
-                performance metrics, maintenance records, assets, audits, bookings.
+  db_query    — the answer depends on looking at actual FM records: counts, statuses,
+                lists, performance metrics, maintenance records, assets, audits, bookings,
+                and equally any diagnosis, comparison, ranking, or recommendation whose
+                reasoning can only be grounded in those same records.
                 Set query_summary and modules. Set general_response to null.
 
   web_search  — requires external knowledge not in the FM database.

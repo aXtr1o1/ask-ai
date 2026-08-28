@@ -23,6 +23,7 @@ from app.api.advance.execution_agent.tools.tools_basic import (        # noqa: F
     filter_by_prior_results,
     intersect_record_sets,
     do_math,
+    combine_grouped_values,
     sort_and_limit,
     final_answer_tool,
 )

@@ -102,6 +102,19 @@ def _analyze(final_value) -> tuple[str, str, str]:
     if final_value is None:
         return "error", "Result is None — execution may have failed.", "PLAIN_TEXT"
 
+    if isinstance(final_value, dict) and final_value.get("_result_type") == "insufficient_data":
+        # Distinct from a generic "error": the queue ran correctly, but the data
+        # available genuinely wasn't enough to compute the requested answer
+        # (see tool_helpers._insufficient). Kept separate from shape "error" so
+        # the Formatting Agent can state this calmly as a data limitation rather
+        # than something that needs to sound like a system failure.
+        reason = (
+            final_value.get("error")
+            or final_value.get("_dep_failed")
+            or "The available data was not sufficient to compute this."
+        )
+        return "insufficient_data", str(reason), "PLAIN_TEXT"
+
     if isinstance(final_value, dict) and ("error" in final_value or "_dep_failed" in final_value):
         reason = (
             final_value.get("error")
@@ -193,6 +206,7 @@ _COMPATIBLE: dict[str, set[str]] = {
     "record_set":           {"TABLE", "PLAIN_TEXT"},
     "mixed_list":           {"TABLE", "PLAIN_TEXT"},
     "error":                {"PLAIN_TEXT"},
+    "insufficient_data":    {"PLAIN_TEXT"},
     "empty_list":           {"PLAIN_TEXT"},
 }
 
@@ -223,6 +237,15 @@ def resolve(
         }
     """
     shape, reason, best_format = _analyze(final_value)
+
+    # NOTE: a step's data-quality caveat (tool_helpers._sparsity_note) is
+    # folded into shape_descriptor["reason"] by context_builder.py, not here —
+    # this function only sees final_answer_tool's resolved final_value, but the
+    # note usually lives on an earlier step's own result dict (final_value is
+    # often just one extracted key of it, e.g. "$step_0.groups"). context_builder
+    # has the full step_results and can find it regardless of which key was
+    # referenced.
+
     suggested_upper = suggested_format.upper()
     compatible      = _COMPATIBLE.get(shape, {"PLAIN_TEXT"})
 

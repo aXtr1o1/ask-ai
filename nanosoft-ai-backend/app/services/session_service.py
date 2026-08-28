@@ -5,7 +5,7 @@ import logging
 import json
 import random
 import string
-import uuid
+from datetime import datetime, timedelta, timezone
 from app.api.database.postgres_client import get_pool
 
 logger = logging.getLogger("session_service")
@@ -14,6 +14,8 @@ ch = logging.StreamHandler()
 ch.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 if not logger.handlers:
     logger.addHandler(ch)
+
+SHARE_CODE_TTL = timedelta(hours=24)
 
 
 async def get_sessions_for_user(user_name: str) -> list:
@@ -137,7 +139,7 @@ async def get_chat_history_for_session(user_name: str, session_id: str) -> list:
 # changes done by megnathan: Added share code generation and session cloning logic */
 
 async def generate_share_code(session_id: str, user_name: str) -> str:
-    """Generates a unique 5-digit share code for a session and stores it."""
+    """Generate a 24-hour code for a session and make that session public."""
     conn = None
     try:
         conn = get_pool()
@@ -146,24 +148,36 @@ async def generate_share_code(session_id: str, user_name: str) -> str:
         # 1. Check if session already has a code
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT share_code FROM chat_sessions WHERE session_id = %s AND user_name = %s",
+                "SELECT share_code, share_code_expires_at, is_public FROM chat_sessions WHERE session_id = %s AND user_name = %s",
                 (session_id, user_name)
             )
             row = cur.fetchone()
-            if row and row[0]:
-                return row[0]
+            now = datetime.now(timezone.utc)
+            if row and row[0] and row[1]:
+                expires_at = row[1]
+                if expires_at.tzinfo is None:
+                    expires_at = expires_at.replace(tzinfo=timezone.utc)
+                if expires_at > now:
+                    if not row[2]:
+                        cur.execute(
+                            "UPDATE chat_sessions SET is_public = TRUE WHERE session_id = %s AND user_name = %s",
+                            (session_id, user_name),
+                        )
+                        conn.commit()
+                    return row[0]
 
             # 2. Generate unique code
             max_tries = 10
             for _ in range(max_tries):
                 new_code = ''.join(random.choices(string.digits, k=5))
+                expires_at = now + SHARE_CODE_TTL
                 # Check uniqueness
                 cur.execute("SELECT 1 FROM chat_sessions WHERE share_code = %s", (new_code,))
                 if not cur.fetchone():
                     # Store it
                     cur.execute(
-                        "UPDATE chat_sessions SET share_code = %s WHERE session_id = %s AND user_name = %s",
-                        (new_code, session_id, user_name)
+                        "UPDATE chat_sessions SET share_code = %s, share_code_expires_at = %s, is_public = TRUE WHERE session_id = %s AND user_name = %s",
+                        (new_code, expires_at, session_id, user_name)
                     )
                     
                     if cur.rowcount == 0:
@@ -172,10 +186,10 @@ async def generate_share_code(session_id: str, user_name: str) -> str:
                         logger.info(f"ℹ️ Session not found during share code generation. Creating new empty session | session_id={session_id}")
                         cur.execute(
                             """
-                            INSERT INTO chat_sessions (session_id, user_name, chat_history, title, updated_at, share_code)
-                            VALUES (%s, %s, %s::jsonb, %s, NOW(), %s)
+                            INSERT INTO chat_sessions (session_id, user_name, chat_history, title, updated_at, share_code, share_code_expires_at, is_public)
+                            VALUES (%s, %s, %s::jsonb, %s, NOW(), %s, %s, TRUE)
                             """,
-                            (session_id, user_name, json.dumps([]), "Shared Chat", new_code)
+                            (session_id, user_name, json.dumps([]), "Shared Chat", new_code, expires_at)
                         )
                         
                     conn.commit()
@@ -190,7 +204,7 @@ async def generate_share_code(session_id: str, user_name: str) -> str:
         return None
 
 async def import_session_by_code(share_code: str, current_user: str) -> str:
-    """Finds a session by share code and clones it for the current user."""
+    """Resolve a valid share code to its original session (no clone is created)."""
     conn = None
     logger.info(f"📥 [Import] Request received | code={share_code} | user={current_user}")
     try:
@@ -201,7 +215,7 @@ async def import_session_by_code(share_code: str, current_user: str) -> str:
             # 1. Find the source session
             logger.info(f"🔍 [Import] Searching for code '{share_code}' in database...")
             cur.execute(
-                "SELECT chat_history, title FROM chat_sessions WHERE share_code = %s",
+                "SELECT session_id FROM chat_sessions WHERE share_code = %s AND share_code_expires_at > NOW() AND is_public = TRUE",
                 (share_code,)
             )
             row = cur.fetchone()
@@ -209,22 +223,10 @@ async def import_session_by_code(share_code: str, current_user: str) -> str:
                 logger.warning(f"⚠️ [Import] INVALID CODE: No session found with share_code={share_code}")
                 return None
             
-            source_history, source_title = row
-            new_session_id = str(uuid.uuid4())
-            logger.info(f"✅ [Import] Source session found! Title: '{source_title}' | Messages: {len(source_history) if source_history else 0}")
-
-            # 2. Clone it for the current user
-            logger.info(f"💾 [Import] Cloning session for user '{current_user}' with new ID: {new_session_id}")
-            cur.execute(
-                """
-                INSERT INTO chat_sessions (session_id, user_name, chat_history, title, updated_at)
-                VALUES (%s, %s, %s::jsonb, %s, NOW())
-                """,
-                (new_session_id, current_user, json.dumps(source_history), source_title)
-            )
-            conn.commit()
-            logger.info(f"🎉 [Import] SUCCESS: Session cloned successfully for {current_user}")
-            return new_session_id
+            source_session_id = row[0]
+            conn.rollback()
+            logger.info(f"✅ [Import] Valid code resolved to original session {source_session_id} for {current_user}")
+            return source_session_id
 
     except Exception as e:
         logger.error(f"❌ [Import] FATAL ERROR during cloning | code={share_code} | error={e}", exc_info=True)

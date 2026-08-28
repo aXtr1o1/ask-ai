@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 import logging
 import asyncio
+import psycopg2
 from app.models.schemas import SessionRequest, ClientInsertionRequest
 from app.services.session_service import get_sessions_for_user, get_chat_history_for_session
 from app.services.postgres_service import save_session_to_postgres_service
@@ -213,8 +214,9 @@ async def import_by_code_endpoint(payload: dict):
     from app.services.session_service import import_session_by_code
     new_session_id = await import_session_by_code(share_code, current_user)
     if not new_session_id:
-        raise HTTPException(status_code=404, detail="Invalid share code or failed to import")
-    return {"status": "ok", "newSessionId": new_session_id}
+        raise HTTPException(status_code=404, detail="Invalid or Expired share code ")
+    # The code opens the original shared session; retain the old response key for compatibility.
+    return {"status": "ok", "sessionId": new_session_id, "newSessionId": new_session_id}
 
 
 @app_endpoints_router.post("/folder/create")
@@ -273,13 +275,13 @@ async def get_folders_endpoint(user_name: str):
     return {"status": "ok", "folders": folders}
 
 
-@app_endpoints_router.get("/api/share/history")
+@app_endpoints_router.get("/share/history")
 async def get_shared_history(sessionId: str, owner: str = None):
     from app.services.postgres_service import get_public_chat_history
-    history = await get_public_chat_history(sessionId, owner)
-    if history is None:
+    shared_session = await get_public_chat_history(sessionId, owner)
+    if shared_session is None:
         raise HTTPException(status_code=404, detail="Shared session not found or private")
-    return {"status": "ok", "history": history}
+    return {"status": "ok", **shared_session}
     
 @app_endpoints_router.post("/client_insertion")
 async def client_insertion(request: ClientInsertionRequest):
@@ -418,11 +420,31 @@ async def startup_event():
             """)
             if not cur.fetchone():
                 logger.info("Adding column 'is_space_booking' to 'chat_sessions' table...")
-                cur.execute("ALTER TABLE chat_sessions ADD COLUMN is_space_booking BOOLEAN DEFAULT FALSE")
-                conn.commit()
+
+
+                try:
+                    cur.execute("ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS is_space_booking BOOLEAN DEFAULT FALSE")
+                    conn.commit()
+                except psycopg2.errors.UndefinedTable:
+                    conn.rollback() # Required to clear the error state in Postgres
+                    print("⚠️ Skipping migration: 'chat_sessions' table does not exist yet.")
+                except Exception as e:
+                    conn.rollback()
+                    print(f"⚠️ Migration failed: {e}")
                 logger.info("Column 'is_space_booking' added successfully.")
             else:
                 logger.info("Column 'is_space_booking' already exists in 'chat_sessions'.")
+
+            logger.info("🔍 BEFORE share_code_expires_at ALTER TABLE")
+
+            cur.execute("ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS share_code_expires_at TIMESTAMPTZ DEFAULT NULL")
+
+            logger.info("✅ AFTER share_code_expires_at ALTER TABLE")
+
+
+            conn.commit()
+            
+            logger.info("✅ AFTER share_code_expires_at COMMIT")
     except Exception as e:
         logger.error(f"Failed to migrate database: {e}", exc_info=True)
         if conn:

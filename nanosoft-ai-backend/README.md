@@ -294,7 +294,7 @@ MAX_HISTORY=2
 ### Run the Server
 
 ```bash
-uvicorn app.main:chatbot_app --reload --port 8000
+uvicorn app.main:chatbot_app --reload --port 8001
 ```
 
 API documentation is available at **http://localhost:8000/docs**

@@ -124,6 +124,8 @@ def format_response(
     explanation   = ""
     input_tokens  = 0
     output_tokens = 0
+    thought_tokens  = 0
+    total_tokens    = 0
     latency_ms    = 0.0
 
     try:
@@ -137,6 +139,8 @@ def format_response(
         explanation   = raw_text.strip()
         input_tokens  = usage.get("input_tokens",  0)
         output_tokens = usage.get("output_tokens", 0)
+        thought_tokens = usage.get("thought_tokens", 0)
+        total_tokens = usage.get("total_tokens", 0)
 
         _log_output(
             response_format = response_format,
@@ -144,20 +148,41 @@ def format_response(
             latency_ms      = latency_ms,
             input_tokens    = input_tokens,
             output_tokens   = output_tokens,
+            thought_tokens  = thought_tokens,
+            total_tokens    = total_tokens,
         )
 
     except Exception as exc:
         logger.error("[Formatting Agent] LLM failed: %s", exc)
         explanation = ""
 
+    # For an error / insufficient_data result, DashboardComposer's single "text"
+    # component exists only as a fallback for when this explanation itself
+    # couldn't be written — it carries the same reason this explanation was
+    # just built from. Once a real explanation exists, keep that component out
+    # of the response: the user gets one clear statement of what happened
+    # instead of the same thing said twice in two different ways. If the LLM
+    # call above failed and explanation is empty, leave the fallback in place
+    # so the user still gets a meaningful answer instead of a blank response.
+    shape = (shape_descriptor or {}).get("shape", "")
+    if explanation and shape in ("error", "insufficient_data"):
+        dashboard = [c for c in dashboard if not (isinstance(c, dict) and c.get("type") == "text")]
+
     return {
-        "response_type": _FORMAT_TO_RESPONSE_TYPE.get(response_format, "plain-response"),
-        "layout":        response_format,
-        "explanation":   explanation,
-        "final_answer":  final_answer,   # Always the real computed value; is_data_heavy above only
-        # controls whether it's sent to the LLM prompt, not this return
-        # Typed presentation component list from DashboardComposer.
-        # Always present (may be empty list).  Frontend uses this for the
-        # dynamic dashboard renderer when the list is non-empty.
-        "dashboard":     dashboard,
+        "response_type": _FORMAT_TO_RESPONSE_TYPE.get(
+            response_format,
+            "plain-response",
+        ),
+        "layout": response_format,
+        "explanation": explanation,
+        "final_answer": final_answer,
+        "dashboard": dashboard,
+
+        # Token usage for this agent.
+        "token_usage": {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "thought_tokens": thought_tokens,
+            "total_tokens": total_tokens,
+        },
     }

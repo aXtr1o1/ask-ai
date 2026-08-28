@@ -13,25 +13,27 @@ from app.api.advance.Formatting_agent.agent import format_response
 
 logger = logging.getLogger("advance.pipeline")
 
-
-def understanding_node(state: AdvancePipelineState) -> dict:
+def understanding_node(*state: AdvancePipelineState) -> dict:
     result = classify_query(
-        query            = state["query"],
-        session_id       = state["session_id"],
-        thought_callback = None,
+        query=state["query"],
+        session_id=state["session_id"],
+        thought_callback=None,
     )
-    logger.info("[Pipeline] ✔ understanding_node | intent=%s | modules=%s",
-                result["intent"], result["modules"])
+    logger.info(
+        "[Pipeline] ✔ understanding_node | intent=%s | modules=%s",
+        result["intent"],
+        result["modules"],
+    )
     return {
-        "intent":                result["intent"],
-        "query_summary":         result["query_summary"],
-        "modules":               result["modules"],
-        "response_format":       result.get("response_format", "PLAIN_TEXT"),
+        "intent": result["intent"],
+        "query_summary": result["query_summary"],
+        "modules": result["modules"],
+        "response_format": result.get("response_format", "PLAIN_TEXT"),
         "user_specified_format": result.get("user_specified_format", False),
-        "general_response":      result.get("general_response"),
-        "web_search_summary":    result.get("web_search_summary"),
+        "general_response": result.get("general_response"),
+        "web_search_summary": result.get("web_search_summary"),
+        "ua_token_usage": result.get("token_usage", {}),
     }
-
 
 def analysis_node(state: AdvancePipelineState) -> dict:
     result = analyze_query(
@@ -45,7 +47,8 @@ def analysis_node(state: AdvancePipelineState) -> dict:
     return {
         "filter_fields": result["filter_fields"],
         "filter_values": result["filter_values"],
-        "limit":         result.get("limit"),
+        "limit": result.get("limit"),
+        "aa_token_usage": result.get("token_usage", {}),
     }
 
 
@@ -108,28 +111,61 @@ def execution_node(state: AdvancePipelineState) -> dict:
                 execution_result.get("status"), formatting_context.get("response_format"))
 
     return {
-        "execution_result":    execution_result,
-        "formatting_context":  formatting_context,
+        "execution_result": execution_result,
+        "formatting_context": formatting_context,
+        "ea_token_usage": execution_result.get("token_usage", {}),
     }
 
 
 
 def formatting_node(state: AdvancePipelineState) -> dict:
-    """Run the Formatting Agent: write the explanation for the response."""
     formatting_context = state.get("formatting_context") or {}
-    query_summary      = state.get("query_summary") or state.get("query", "")
+    query_summary = state.get("query_summary") or state.get("query", "")
 
-    logger.info("[Pipeline] → formatting_node | format=%s",
-                formatting_context.get("response_format", "?"))
-
-    formatted_result = format_response(
-        formatting_context = formatting_context,
-        query_summary      = query_summary,
+    logger.info(
+        "[Pipeline] → formatting_node | format=%s",
+        formatting_context.get("response_format", "?"),
     )
 
-    logger.info("[Pipeline] ✔ formatting_node | layout=%s", formatted_result.get("layout"))
-    return {"formatted_result": formatted_result}
+    formatted_result = format_response(
+        formatting_context=formatting_context,
+        query_summary=query_summary,
+    )
 
+    ua_tokens = int(
+        (state.get("ua_token_usage") or {}).get("total_tokens", 0)
+    )
+    aa_tokens = int(
+        (state.get("aa_token_usage") or {}).get("total_tokens", 0)
+    )
+    ea_tokens = int(
+        (state.get("ea_token_usage") or {}).get("total_tokens", 0)
+    )
+    fa_tokens = int(
+        (formatted_result.get("token_usage") or {}).get("total_tokens", 0)
+    )
+
+    total_tokens = (
+        ua_tokens
+        + aa_tokens
+        + ea_tokens
+        + fa_tokens
+    )
+
+    logger.info(
+        "[Pipeline] 📊 TOKEN USAGE | UA=%s AA=%s EA=%s FA=%s TT=%s",
+        ua_tokens,
+        aa_tokens,
+        ea_tokens,
+        fa_tokens,
+        total_tokens,
+    )
+
+    return {
+        "formatted_result": formatted_result,
+        "fa_token_usage": formatted_result.get("token_usage", {}),
+        "total_tokens": total_tokens,
+    }
 
 def route_after_understanding(state: AdvancePipelineState) -> str:
     intent = state.get("intent", "general")

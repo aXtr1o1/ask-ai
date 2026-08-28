@@ -853,13 +853,17 @@ def compose(
         final_answer:     The raw value produced by the Execution Agent's
                           final_answer_tool.  May be any Python type.
         shape_descriptor: Optional dict from ShapeResolver with keys
-                          {"shape": str, "reason": str}.  Used for logging
-                          only — all component decisions are made independently.
+                          {"shape": str, "reason": str}. Used for logging, and
+                          as the source of the real reason (and the error vs
+                          insufficient_data distinction) for the error/dep-failed
+                          fallback text component — every other component
+                          decision is made independently of it.
         resolved_format:  Optional resolved format string (e.g. TABLE | GRAPH)
                           to align layout components.
 
     Returns:
-        A list of typed component dicts.  The list is always non-empty.
+        A list of typed component dicts. Empty only for an error/dep-failed
+        final_answer with no reason to report — otherwise always non-empty.
         Possible types: "kpi", "dashboard_summary", "record_cards", "time_series_chart", "table", "text".
     """
     shape = (shape_descriptor or {}).get("shape", "unknown")
@@ -872,13 +876,25 @@ def compose(
 
     if isinstance(final_answer, dict):
         if "error" in final_answer or "_dep_failed" in final_answer:
-            # Deliberately generic and free of internal jargon (step numbers, $step_N
-            # refs, tool names) — this text is rendered directly to the user with no
-            # LLM rewriting step in between, unlike shape_descriptor.reason (built in
-            # shape_resolver.py), which DOES carry the raw message but only as internal
-            # context for the Formatting Agent's prompt, never shown to the user as-is.
-            logger.info("[DashboardComposer] → text (error dict, sanitized for direct display)")
-            return [_text("This result could not be computed because the required data was unavailable.")]
+            # The Formatting Agent's own explanation (built from this same
+            # shape_descriptor.reason) is what the frontend renders directly above
+            # the dashboard for this case — so this component only needs to exist
+            # as a fallback for when that explanation isn't available (e.g. the
+            # Formatting Agent's LLM call itself failed). format_response() drops
+            # this component whenever a real explanation was produced, so it is
+            # never shown twice.
+            #
+            # shape here (from shape_descriptor, resolved upstream) already tells
+            # apart "the data genuinely wasn't enough to compute this" from "a real
+            # execution defect" — carry that distinction through instead of folding
+            # both into one identical, unlabeled sentence, and use the actual reason
+            # rather than a fixed generic line so this fallback means something on
+            # its own if it is ever the only thing shown.
+            reason = (shape_descriptor or {}).get("reason") or (
+                final_answer.get("error") or final_answer.get("_dep_failed")
+            )
+            logger.info("[DashboardComposer] → text (%s, fallback only)", shape)
+            return [_text(str(reason))] if reason else []
 
     # ── Scalar ───────────────────────────────────────────────────────────────
     if not isinstance(final_answer, (dict, list)):

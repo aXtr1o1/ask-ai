@@ -463,33 +463,37 @@ async def toggle_session_public(session_id: str, user_name: str, is_public: bool
         logger.error(f"❌ Failed to update public status | session_id={session_id} | error={e}", exc_info=True)
         return False
 
-async def get_public_chat_history(session_id: str, owner: str = None) -> list:
-    """Fetch history for a shared session if it is public."""
+async def get_public_chat_history(session_id: str, owner: str = None) -> dict | None:
+    """Fetch a public session's history and display-mode metadata."""
     try:
         conn = get_pool()
         conn.rollback()
         with conn.cursor() as cur:
             if owner:
                 cur.execute(
-                    "SELECT chat_history, is_public FROM chat_sessions WHERE session_id = %s AND LOWER(user_name) = LOWER(%s)",
+                    "SELECT chat_history, is_public, COALESCE(is_advance, FALSE), COALESCE(is_space_booking, FALSE) FROM chat_sessions WHERE session_id = %s AND LOWER(user_name) = LOWER(%s)",
                     (session_id, owner)
                 )
             else:
                 cur.execute(
-                    "SELECT chat_history, is_public FROM chat_sessions WHERE session_id = %s",
+                    "SELECT chat_history, is_public, COALESCE(is_advance, FALSE), COALESCE(is_space_booking, FALSE) FROM chat_sessions WHERE session_id = %s",
                     (session_id,)
                 )
             row = cur.fetchone()
             conn.rollback()
             if not row: return None
             
-            history, is_public = row
+            history, is_public, is_advance, is_space_booking = row
             if not is_public:
                 logger.warning(f"🔒 Attempt to access private session | session_id={session_id}")
                 return None
             
             import json
-            return history if isinstance(history, list) else json.loads(history)
+            return {
+                "history": history if isinstance(history, list) else json.loads(history),
+                "is_advance": bool(is_advance),
+                "is_space_booking": bool(is_space_booking),
+            }
     except Exception as e:
         logger.error(f"❌ Failed to fetch public history | error={e}")
         return None

@@ -33,6 +33,7 @@ from app.api.advance.execution_agent.tools.tools import (
     filter_by_prior_results,
     intersect_record_sets,
     do_math,
+    combine_grouped_values,
     sort_and_limit,
     final_answer_tool,
     # Intelligence Tools
@@ -43,7 +44,6 @@ from app.api.advance.execution_agent.tools.tools import (
     calculate_rate_of_change,
     calculate_percentile,
     forecast_linear,
-    compare_date_fields,
     compare_date_fields,
     merge_and_score,
     add_duration_to_date,
@@ -79,6 +79,7 @@ TOOL_REGISTRY: dict[str, Any] = {
     "filter_by_prior_results": filter_by_prior_results,
     "intersect_record_sets":   intersect_record_sets,
     "do_math":                 do_math,
+    "combine_grouped_values":  combine_grouped_values,
     "sort_and_limit":          sort_and_limit,
     "final_answer_tool":       final_answer_tool,
     # ── Intelligence Tools ───────────────────────────────────────────────────
@@ -139,9 +140,12 @@ def run_queue(queue: list[dict], filtered_records: dict, progress_callback: call
             resolved_args = _resolve_args(raw_args, step_results)
 
         except _DependencyError as exc:
-            # An upstream step that this step depends on already failed
+            # An upstream step that this step depends on already failed.
+            # Carry its _result_type forward so shape_resolver can still tell
+            # "insufficient data" apart from a real bug after arbitrarily many
+            # steps of cascading — see _DependencyError's docstring.
             logger.warning("[Queue Runner] Step %d (%s) — skipped: dependency failed. %s", step_idx, tool_name, exc)
-            step_results[step_key] = {"_dep_failed": str(exc)}
+            step_results[step_key] = {"_dep_failed": str(exc), "_result_type": exc.result_type}
             tools_called += 1
             error_count  += 1
             log_step(step_idx, tool_name, step_results[step_key])

@@ -62,7 +62,16 @@ class _DependencyError(Exception):
 
     Used by _resolve_ref() to stop error cascades before a tool is called
     with garbage data from a broken upstream step.
+
+    Carries the upstream step's _result_type (defaulting to "error") so the
+    distinction between "a real bug/bad argument" and "the data itself was
+    insufficient" (see tool_helpers._insufficient) survives arbitrarily long
+    dependency chains, all the way to final_answer_tool's own failure record —
+    shape_resolver reads this to decide how to explain the failure.
     """
+    def __init__(self, message: str, result_type: str = "error"):
+        super().__init__(message)
+        self.result_type = result_type
 
 
 # =============================================================================
@@ -350,9 +359,11 @@ def _resolve_ref(val: Any, step_results: dict) -> Any:
             or step_result.get("_dep_failed")
             or "upstream step failed"
         )
+        upstream_type = step_result.get("_result_type", "error")
         raise _DependencyError(
             f"Step '{step_key}' previously failed — cannot resolve '{val}'. "
-            f"Upstream error: {upstream_error}"
+            f"Upstream error: {upstream_error}",
+            result_type=upstream_type,
         )
 
     if len(parts) == 1:

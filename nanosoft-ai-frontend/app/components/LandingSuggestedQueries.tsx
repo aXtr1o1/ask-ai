@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { IconNumbers, IconTable, IconFileDescription } from "@tabler/icons-react";
+import { IconNumbers, IconTable, IconFileDescription, IconChartBar, IconLayoutGrid, IconBulb } from "@tabler/icons-react";
 
 export type SuggestedQueryGroup = {
   id: string;
@@ -55,24 +55,79 @@ export const LANDING_SUGGESTED_QUERY_GROUPS: SuggestedQueryGroup[] = [
   },
 ];
 
+export const ADVANCE_SUGGESTED_QUERY_GROUPS: SuggestedQueryGroup[] = [
+  {
+    id: "business-analysis",
+    label: "BUSINESS ANALYSIS",
+    icon: <IconChartBar size={16} stroke={1.5} />,
+    queries: [
+      "Top five localities by total asset count",
+      "Top five equipment types by asset count",
+      "BDM complaint types by occurrence and percentage",
+      "Monthly maintenance workload trends for BDM and PPM",
+      "Asset priority distribution by count and percentage",
+    ],
+  },
+  {
+    id: "employee-details",
+    label: "EMPLOYEE DETAILS",
+    icon: <IconTable size={16} stroke={1.5} />,
+    queries: [
+      "Which employees handle the highest number of work orders?",
+      "Across buildings, which employees have the widest assignment coverage?",
+      "By maintenance type, which employees handle the most work?",
+      "Among open orders, which employees have the largest backlog?",
+      "Based on completed orders, which employees have the highest volume?",
+    ],
+  },
+  {
+    id: "building-information",
+    label: "BUILDING INFORMATION",
+    icon: <IconLayoutGrid size={16} stroke={1.5} />,
+    queries: [
+      "Which buildings contain the highest number of assets?",
+      "Across maintenance activities, which buildings have the highest workload?",
+      "By complaint frequency, which buildings experience the most recurring issues?",
+      "Among aging assets, which buildings have the greatest concentration?",
+      "Based on overall risk, which buildings require the highest priority?",
+    ],
+  },
+  {
+    id: "technician-analysis",
+    label: "TECHNICIAN ANALYSIS",
+    icon: <IconBulb size={16} stroke={1.5} />,
+    queries: [
+      "Which technicians handle the highest overall maintenance workload?",
+      "Across equipment types, which technicians have the strongest experience?",
+      "By complaint category, which technicians handle the most cases?",
+      "Among repeat repairs, which technicians receive the most assignments?",
+      "Based on maintenance tasks, which technicians show the strongest specialization?",
+    ],
+  },
+];
+
 type LandingSuggestedQueriesProps = {
   onSelect: (text: string) => void;
   disabled?: boolean;
+  isAdvanceAskAI?: boolean;
 };
 
 export default function LandingSuggestedQueries({
   onSelect,
   disabled = false,
+  isAdvanceAskAI = false,
 }: LandingSuggestedQueriesProps) {
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
+
+  const activeGroups = isAdvanceAskAI ? ADVANCE_SUGGESTED_QUERY_GROUPS : LANDING_SUGGESTED_QUERY_GROUPS;
 
   const activeGroup = useMemo(
     () =>
       activeGroupId
-        ? LANDING_SUGGESTED_QUERY_GROUPS.find((g) => g.id === activeGroupId) ??
+        ? activeGroups.find((g) => g.id === activeGroupId) ??
         null
         : null,
-    [activeGroupId]
+    [activeGroupId, activeGroups]
   );
 
   const isPanelOpen = !!activeGroup;
@@ -80,7 +135,7 @@ export default function LandingSuggestedQueries({
   return (
     <div className="landing-suggested-queries" aria-label="Suggested questions">
       <div className="landing-suggested-row">
-        {LANDING_SUGGESTED_QUERY_GROUPS.map((group) => {
+        {activeGroups.map((group) => {
           const isActive = activeGroupId === group.id;
 
           return (
