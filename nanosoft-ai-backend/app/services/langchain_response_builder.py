@@ -52,7 +52,9 @@ class LangChainResponseBuilderMixin:
                 """
                 if is_count_query:
                     return (
-                        "Use the above tool results. Reply in one crisp, friendly sentence using total_count. "
+                        f"USER QUERY: {user_query}\n"
+                        f"TOTAL COUNT FOUND: {display_count}\n"
+                        "Reply in one crisp, friendly sentence stating the total count found. "
                         "Do not render a table."
                     )
 

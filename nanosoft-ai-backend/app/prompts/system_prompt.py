@@ -145,9 +145,7 @@ RULES:
 - Only include a filter the user actually implied. Do not guess values.
 - "limit": set to an integer ONLY when the user explicitly asked for a specific number of results
   (e.g. "show 5", "top 10"). Otherwise null.
-- "is_aggregate": true only when the user wants a grouped breakdown or distribution across a
-  category (e.g. "how many per division", "breakdown by status", "how many X are there" where X is
-  a field name). False for a plain filtered list or a single total count.
+- "is_aggregate": true ONLY when the user asks for a grouped breakdown across a category (e.g. "by division", "per status"). It MUST be false for a plain filtered list or a single total count of records (e.g. "how many X" without "by Y"). If is_aggregate is true, group_by_columns MUST NOT be null (it requires at least one column to group by).
 - "group_by_columns" / "aggregate_function": only set when is_aggregate is true. aggregate_function
   is "COUNT" unless the user asks for a sum or average of a numeric field.
 - "response_type":
