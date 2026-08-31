@@ -1,23 +1,9 @@
 """
-LangChain Tools for Facility Management
+Shared date-resolution helpers for the facility management module functions.
 """
-from langchain.tools import tool
-import json
 import logging
-
-from app.models.schemas import AssetsInput, PPMInput, BDMInput
-from fastapi import HTTPException
-from app.api.models.schemas import AssetRequest, PPMRequest, BDMRequest
-from app.models.schemas import FAInput, SBInput
-from app.api.routes.assets import get_assets
-from app.api.routes.ppm import get_ppm
-from app.api.routes.bdm import get_bdm
-from app.api.models.schemas import FARequest, SBRequest
-from app.api.routes.fa import get_fa
-from app.api.routes.sb import get_sb
-from datetime import date, timedelta
-
-
+import re
+from datetime import date, datetime, timedelta
 
 logger = logging.getLogger("facility_tools")
 logger.setLevel(logging.INFO)
@@ -89,31 +75,35 @@ def resolveDate(date_value, fallback, is_end_date=False):
         logger.info("📅 Relative keyword '%s' → resolved to %s", date_value, resolved)
         return resolved
 
+    if val in ("last year", "lastyear"):
+        if is_end_date:
+            resolved = today.replace(month=1, day=1).isoformat()
+        else:
+            resolved = today.replace(year=today.year - 1, month=1, day=1).isoformat()
+        logger.info("📅 Relative keyword '%s' → resolved to %s", date_value, resolved)
+        return resolved
+
     # ── Dynamic pattern: X days/weeks/months/years ago/before ──
-    import re
     match = re.search(r"(\d+)\s*(day|week|month|year)s?\s*(ago|before)", val)
     if match:
         num = int(match.group(1))
         unit = match.group(2)
-        
+
         if unit == "day":
             delta = timedelta(days=num)
         elif unit == "week":
             delta = timedelta(weeks=num)
         elif unit == "month":
             delta = timedelta(days=num * 30)
-        elif unit == "year":
+        else:  # year
             delta = timedelta(days=num * 365)
-        else:
-            delta = timedelta(days=num)
-            
+
         resolved = (today - delta).isoformat()
         logger.info("📅 Relative pattern '%s' → resolved to %s", date_value, resolved)
         return resolved
 
     # ── Validate actual date string ──
     try:
-        from datetime import datetime
         datetime.strptime(date_value, "%Y-%m-%d").date()
         logger.info("📅 Date '%s' validated successfully", date_value)
         return date_value
@@ -123,32 +113,8 @@ def resolveDate(date_value, fallback, is_end_date=False):
 
 
 def getTime(date_from, date_to):
-    # today = date.today()
-    # today_str = today.isoformat()
-    # default_from = (today - timedelta(days=6)).isoformat()
-
-    # ── Resolve relative keywords first ──
-    # ✅ fallback=None means no default 7-day filter is applied
+    """Resolve relative date keywords on both ends. No default date range is applied."""
     date_from = resolveDate(date_from, fallback=None, is_end_date=False)
     date_to   = resolveDate(date_to,   fallback=None, is_end_date=True)
-
-    # # Case 1: both dates missing → last 7 days (HASHED BY USER REQUEST)
-    # if date_from is None and date_to is None:
-    #     logger.info("📅 No dates provided → defaulting to last 7 days: %s to %s", default_from, today_str)
-    #     return default_from, today_str
-
-    # # Case 2: only from date missing
-    # elif date_from is None:
-    #     logger.info("📅 date_from missing → defaulting to 7 days before date_to: %s to %s", default_from, date_to)
-    #     return default_from, date_to
-
-    # # Case 3: only to date missing
-    # elif date_to is None:
-    #     logger.info("📅 date_to missing → defaulting to today: %s to %s", date_from, today_str)
-    #     return date_from, today_str
-
-    # Case 4: Return resolved values
-    logger.info("📅 Date Resolution (No Default) | from: %s -> %s | to: %s -> %s", date_from, date_from, date_to, date_to)
+    logger.info("📅 Date resolution | from: %s | to: %s", date_from, date_to)
     return date_from, date_to
-
-

@@ -1,3 +1,6 @@
+"""
+Facility Management module functions — re-exported for langchain_service.
+"""
 from app.tools.assets_tool import ASSETS
 from app.tools.ppm_tool import PPM
 from app.tools.bdm_tool import BDM

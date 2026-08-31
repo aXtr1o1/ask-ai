@@ -84,6 +84,8 @@ Module domains for orientation:
   contracts  →  maintenance contracts and service agreements, contract values, billing periods, contract status, renewal and extension tracking
   employees  →  workforce register, staff details, designations, departments, shifts, attendance configuration
 
+STRICT: Your ONLY output for module selection is the module name (e.g. "bdm"). Do NOT mention any field names, column names, or try to map user values to specific fields in your query_summary. Field assignment is done by the next agent — not you.
+
 ════════════════════════════════════════════════
 QUERY SUMMARY  (db_query / web_search ONLY)
 ════════════════════════════════════════════════
@@ -96,6 +98,7 @@ understand exactly what data is needed and what the user wants to know from it.
   — Resolve any references to prior turns; do not carry over ambiguity.
   — Preserve exact values stated by the user (names, locations, statuses, dates).
   — Correct spelling and expand FM abbreviations into full English terms.
+  — Do NOT guess or assign which database column a value belongs to (e.g. do NOT say "where the complaint header is X"). Just state the values clearly in plain English.
   — Do not add assumptions or interpret beyond what the user expressed.
 
 ════════════════════════════════════════════════
