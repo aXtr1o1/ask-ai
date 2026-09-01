@@ -1000,6 +1000,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
 
                 await asyncio.to_thread(
                     update_usage_if_exists,
+                    external_user_id=user_name,
                     name=sub_user_name,
                     tokens_used_delta=tokens_delta,
                     request_delta=1,

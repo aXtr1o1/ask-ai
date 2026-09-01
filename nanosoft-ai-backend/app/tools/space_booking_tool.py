@@ -329,29 +329,30 @@ async def fetch_spots_api(user_name: str, search_term: Optional[str] = None) -> 
             json_resp = response.json()
             p_list = json_resp.get("Output", {}).get("data", [])
             
-            #  async fetching to eliminate latency
-            # 🔄 Batch by batch fetching to get ALL spots sequentially
+            # Fetch all remaining pages concurrently in controlled batches to minimize latency
             total_count = p_list[0].get("TotalCount", 0) if p_list else 0
             if total_count > len(p_list):
                 page_size = max(len(p_list), 1)
                 total_pages = (total_count + page_size - 1) // page_size
-                logger.info(f"🔄 Fetching {total_pages - 1} more pages sequentially to get all {total_count} spots...")
+                logger.info(f"Fetching {total_pages - 1} additional pages in batches of 10.")
                 
-                for page_idx in range(2, total_pages + 1):
-                    batch_payload = dict(payload)
-                    batch_payload["PageIndex"] = page_idx
+                async def _fetch(p):
                     try:
-                        p_resp = await asyncio.to_thread(
-                            requests.post, api_url, headers=headers, json=batch_payload, timeout=15
-                        )
-                        if p_resp.status_code == 200:
-                            p_out = p_resp.json()
-                            p_list.extend(p_out.get("Output", {}).get("data", []))
+                        batch_payload = dict(payload)
+                        batch_payload["PageIndex"] = p
+                        r = await asyncio.to_thread(requests.post, api_url, headers=headers, json=batch_payload, timeout=15)
+                        return r.json().get("Output", {}).get("data", []) if r.status_code == 200 else []
                     except Exception as e:
-                        logger.error(f"❌ Error fetching page {page_idx}: {str(e)}")
-                        break
+                        logger.error(f"Error fetching page {p}: {str(e)}")
+                        return []
+
+                # Execute concurrent requests in chunks of 10 to manage server load
+                for chunk_start in range(2, total_pages + 1, 10):
+                    tasks = [_fetch(p) for p in range(chunk_start, min(chunk_start + 10, total_pages + 1))]
+                    for res in await asyncio.gather(*tasks):
+                        p_list.extend(res)
                         
-                logger.info(f"✅ Total fetched spots: {len(p_list)}")
+                logger.info(f"Successfully fetched all {len(p_list)} spots.")
 
             # ── Dynamic search term normalization ────────────────────────────────────────
             # GUARD: Skip expansion if the term looks like a SpotCode
@@ -403,12 +404,11 @@ async def fetch_spots_api(user_name: str, search_term: Optional[str] = None) -> 
                         p_list = fallback_result
 
             total_count = len(p_list)
-            logger.info(f"✅ Spots fetched: {total_count}")
+            logger.info(f"Spots fetched: {total_count}")
             
-            # Slice to max 50 spots so the frontend renders batch by batch
-            return json.dumps({"TotalCount": total_count, "p_list": p_list[:50]})
+            return json.dumps({"TotalCount": total_count, "p_list": p_list})
         else:
-            logger.error(f"❌ API error: {response.text}")
+            logger.error(f"API error: {response.text}")
             return json.dumps({"error": f"Error fetching spots (HTTP {response.status_code})"})
 
     except Exception as e:

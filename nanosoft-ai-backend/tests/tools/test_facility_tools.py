@@ -1,5 +1,7 @@
 """
-test_facility_tools.py — Tests for ASSETS, PPM, BDM LangChain tools.
+test_facility_tools.py — Tests for ASSETS, PPM, BDM facility module functions.
+These are plain functions called directly with a pre-built payload (see
+langchain_service._run_module) — no LangChain @tool/.invoke() involved.
 These tests check payload building, date defaulting, and route calling.
 """
 import pytest
@@ -9,25 +11,25 @@ from datetime import date, timedelta
 from app.tools.facility_tools import ASSETS, PPM, BDM #, getTime
 
 
-# Test 1: Check ASSETS tool returns error string when user_name is missing
+# Test 1: Check ASSETS returns error string when user_name is missing
 def test_assets_missing_user_name():
     # Calling ASSETS without user_name should return an error string, not crash
-    result = ASSETS.invoke({"user_name": None})
+    result = ASSETS(user_name=None)
     assert "Error" in result
     assert "user_name is required" in result
 
 
-# Test 2: Check ASSETS tool builds correct payload and calls get_assets successfully
+# Test 2: Check ASSETS builds correct payload and calls get_assets successfully
 def test_assets_normal_call():
     # Fake get_assets returns empty result
     with patch("app.tools.assets_tool.get_assets") as mock_get_assets:
         mock_get_assets.return_value = {"p_list": [], "p_count": 0}
 
-        result = ASSETS.invoke({
-            "user_name": "testuser",
-            "status": "Active",
-            "building": "Block A"
-        })
+        result = ASSETS(
+            user_name="testuser",
+            status="Active",
+            building="Block A",
+        )
 
         # get_assets should be called once
         mock_get_assets.assert_called_once()
@@ -46,12 +48,12 @@ def test_assets_aggregate_mode():
             "p_count": 1
         }
 
-        ASSETS.invoke({
-            "user_name": "testuser",
-            "is_aggregate": True,
-            "group_by_columns": ["DivisionName"],
-            "aggregate_function": "COUNT"
-        })
+        ASSETS(
+            user_name="testuser",
+            is_aggregate=True,
+            group_by_columns=["DivisionName"],
+            aggregate_function="COUNT",
+        )
 
         # Check the AssetRequest passed to get_assets has is_aggregate=True
         call_args = mock_get_assets.call_args[0][0]
