@@ -11,10 +11,21 @@ from langchain_core.messages import HumanMessage
 @pytest.mark.asyncio
 async def test_process_query_with_tool_call():
     """Test that process_query handles tool calls correctly"""
-    
+
     # Import AFTER conftest has set up mocks
     from app.services.langchain_service import LangChainService
-    
+
+    classify_result = {
+        "intent": "db_query",
+        "query_summary": "list of active assets",
+        "modules": ["assets"],
+        "response_format": "PLAIN_TEXT",
+        "user_specified_format": False,
+        "general_response": None,
+        "web_search_summary": None,
+        "token_usage": {},
+    }
+
     with patch("app.services.langchain_service.ChatGoogleGenerativeAI") as mock_llm:
         # First call — model decides to use ASSETS tool
         first_ai_msg = MagicMock()
@@ -40,7 +51,11 @@ async def test_process_query_with_tool_call():
         mock_model_instance.bind_tools.return_value = mock_model_instance
         mock_llm.return_value = mock_model_instance
 
-        with patch("app.services.langchain_service.ASSETS") as mock_assets_tool:
+        with patch("app.services.langchain_service.ASSETS") as mock_assets_tool, \
+             patch(
+                 "app.services.langchain_service.classify_query",
+                 return_value=classify_result,
+             ):
             mock_assets_tool.invoke.return_value = json.dumps({
                 "p_list": [{"AssetTagNo": "A001", "StatusName": "Active"}],
                 "p_count": 1
@@ -184,9 +199,9 @@ async def test_process_query_no_tool_call():
 @pytest.mark.asyncio
 async def test_process_query_missing_user_name():
     """Test error handling when user_name is missing"""
-    
+
     from app.services.langchain_service import LangChainService
-    
+
     service = LangChainService()
     messages = [HumanMessage(content="show me assets")]
 
