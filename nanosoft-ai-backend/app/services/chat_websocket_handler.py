@@ -337,6 +337,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
                         if audio_seconds_effective and audio_seconds_effective > 0:
                             consumed = await asyncio.to_thread(
                                 consume_audio_seconds_if_available,
+                                external_user_id=user_name,
                                 name=sub_user_name,
                                 audio_seconds_delta=audio_seconds_effective,
                             )
@@ -511,6 +512,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
                     if audio_seconds_effective and audio_seconds_effective > 0:
                         consumed = await asyncio.to_thread(
                             consume_audio_seconds_if_available,
+                            external_user_id=user_name,
                             name=sub_user_name,
                             audio_seconds_delta=audio_seconds_effective,
                         )
@@ -846,7 +848,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
             try:
                 # ── Credits gate: if credits_remaining == 0, skip model ───────
                 try:
-                    credits_remaining = await asyncio.to_thread(get_credits_remaining, sub_user_name)  # TODO: swap to real external user id from auth
+                    credits_remaining = await asyncio.to_thread(get_credits_remaining, user_name, sub_user_name)  # TODO: swap to real external user id from auth
                 except Exception as e:
                     logger.warning("⚠️ credits check failed (continuing): %s", str(e)[:200])
                     credits_remaining = None
@@ -868,7 +870,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
                         # ── Graph gate: if graph_count > graph_limit, skip model ───
                         try:
                             if is_graph:
-                                graph_info = await asyncio.to_thread(get_graph_count_and_limit, sub_user_name)
+                                graph_info = await asyncio.to_thread(get_graph_count_and_limit, user_name, sub_user_name)
                             else:
                                 graph_info = None
                         except Exception as e:
