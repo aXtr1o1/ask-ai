@@ -327,7 +327,31 @@ async def fetch_spots_api(user_name: str, search_term: Optional[str] = None) -> 
         )
         if response.status_code == 200:
             json_resp = response.json()
-            p_list = json_resp.get("data", [])
+            p_list = json_resp.get("Output", {}).get("data", [])
+            
+            #  async fetching to eliminate latency
+            # 🔄 Batch by batch fetching to get ALL spots sequentially
+            total_count = p_list[0].get("TotalCount", 0) if p_list else 0
+            if total_count > len(p_list):
+                page_size = max(len(p_list), 1)
+                total_pages = (total_count + page_size - 1) // page_size
+                logger.info(f"🔄 Fetching {total_pages - 1} more pages sequentially to get all {total_count} spots...")
+                
+                for page_idx in range(2, total_pages + 1):
+                    batch_payload = dict(payload)
+                    batch_payload["PageIndex"] = page_idx
+                    try:
+                        p_resp = await asyncio.to_thread(
+                            requests.post, api_url, headers=headers, json=batch_payload, timeout=15
+                        )
+                        if p_resp.status_code == 200:
+                            p_out = p_resp.json()
+                            p_list.extend(p_out.get("Output", {}).get("data", []))
+                    except Exception as e:
+                        logger.error(f"❌ Error fetching page {page_idx}: {str(e)}")
+                        break
+                        
+                logger.info(f"✅ Total fetched spots: {len(p_list)}")
 
             # ── Dynamic search term normalization ────────────────────────────────────────
             # GUARD: Skip expansion if the term looks like a SpotCode
@@ -380,7 +404,9 @@ async def fetch_spots_api(user_name: str, search_term: Optional[str] = None) -> 
 
             total_count = len(p_list)
             logger.info(f"✅ Spots fetched: {total_count}")
-            return json.dumps({"TotalCount": total_count, "p_list": p_list})
+            
+            # Slice to max 50 spots so the frontend renders batch by batch
+            return json.dumps({"TotalCount": total_count, "p_list": p_list[:50]})
         else:
             logger.error(f"❌ API error: {response.text}")
             return json.dumps({"error": f"Error fetching spots (HTTP {response.status_code})"})

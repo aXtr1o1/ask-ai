@@ -979,12 +979,12 @@ async def ws_chat_endpoint(websocket: WebSocket):
                 if is_graph_response:
                     graph_delta = 1
                     
-                logger.info(
-                    " 💳 Credit calculation input | user=%s | tokens=%s | credits=%s",
-                    sub_user_name,
-                    tokens_delta,
-                    credits_delta,
-                )
+                # logger.info(
+                #     " 💳 Credit calculation input | user=%s | tokens=%s | credits=%s",
+                #     sub_user_name,
+                #     tokens_delta,
+                #     credits_delta,
+                # )
                 # ── Token-based credit calculation ──────────────────────────────
                 credits_delta = calculate_credits(tokens_delta)
                 
