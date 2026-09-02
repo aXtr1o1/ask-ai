@@ -848,16 +848,16 @@ export function PieChartRenderer({ graphData, currentChartType, onChartTypeChang
         className="graph-chart-container"
         style={{ position: 'relative', maxWidth: chartSize.containerMaxWidth, margin: '0 auto', border: 'none', boxShadow: 'none', overflow: 'hidden' }}
       >
-        <div style={{ width: chartSize.chartWidth, minWidth: chartSize.containerMinWidth, height: chartSize.height, display: 'flex', justifyContent: 'center', alignItems: 'center', border: 'none' }}>
-          <ResponsiveContainer width="100%" height={chartSize.chartHeight}>
-            <PieChart margin={{ top: 10, right: 80, bottom: 10, left: 80 }}>
+        <div style={{ width: "100%", minWidth: 0, height: responsive.isShort ? "260px" : chartSize.height, display: 'flex', justifyContent: 'center', alignItems: 'center', border: 'none' }}>
+          <ResponsiveContainer width="100%" height={responsive.isShort ? 260 : chartSize.chartHeight}>
+            <PieChart margin={{ top: 10, right: responsive.isMobile ? 10 : 40, bottom: 10, left: responsive.isMobile ? 10 : 40 }}>
               <Pie
                 data={pieData}
                 cx="50%"
                 cy="50%"
                 labelLine={false}
                 label={false}
-                outerRadius={responsive.isMobile ? 80 : responsive.isTablet ? 100 : 120}
+                outerRadius={responsive.width <= 360 ? 60 : responsive.isMobile ? 75 : responsive.isTablet ? 95 : 110}
                 fill="#8884d8"
                 dataKey="value"
                 onMouseEnter={(_, index) => setActiveIndex(index)}

@@ -1709,16 +1709,80 @@ export default function Home() {
     }
   }, [setLoggedInUser, setAuthChecked]);
 
-  // Mobile viewport height fix (handles dynamic browser chrome on iOS/Android)
+  // Viewport & container height fix (handles dynamic browser chrome and iframe flexing)
   useEffect(() => {
     const setVh = () => {
-      document.documentElement.style.setProperty("--vh", `${window.innerHeight * 0.01}px`);
+      const height = window.innerHeight || document.documentElement?.clientHeight || 768;
+      document.documentElement.style.setProperty("--vh", `${height * 0.01}px`);
     };
     if (typeof window !== "undefined") {
       setVh();
-      window.addEventListener("resize", setVh);
+      window.addEventListener("resize", setVh, { passive: true });
+      window.addEventListener("orientationchange", setVh, { passive: true });
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener("resize", setVh, { passive: true });
+      }
     }
-    return () => window.removeEventListener("resize", setVh);
+    return () => {
+      window.removeEventListener("resize", setVh);
+      window.removeEventListener("orientationchange", setVh);
+      if (window.visualViewport) {
+        window.visualViewport.removeEventListener("resize", setVh);
+      }
+    };
+  }, []);
+
+  // Iframe postMessage communication listener and ready notifier
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const handleIframeMessage = (event: MessageEvent) => {
+      try {
+        const data = event.data;
+        if (!data || typeof data !== "object") return;
+
+        // Host requests theme sync
+        if (data.type === "SET_THEME" && (data.theme === "dark" || data.theme === "light")) {
+          document.documentElement.setAttribute("data-theme", data.theme);
+          localStorage.setItem("theme", data.theme);
+        }
+
+        // Host requests input focus
+        if (data.type === "FOCUS_INPUT") {
+          inputRef.current?.focus();
+        }
+
+        // Host requests query execution
+        if (data.type === "SEND_PROMPT" && typeof data.prompt === "string" && data.prompt.trim()) {
+          if (inputRef.current) inputRef.current.value = data.prompt;
+          rawInputRef.current = data.prompt;
+          setInput(data.prompt);
+          setTimeout(() => sendMessage(), 50);
+        }
+      } catch {
+        // ignore cross-origin errors
+      }
+    };
+
+    window.addEventListener("message", handleIframeMessage);
+
+    // Notify parent window that Ask AI is mounted
+    if (window.self !== window.top) {
+      try {
+        window.parent.postMessage(
+          {
+            type: "ASK_AI_MOUNTED",
+            width: window.innerWidth,
+            height: window.innerHeight,
+          },
+          "*"
+        );
+      } catch {
+        // ignore
+      }
+    }
+
+    return () => window.removeEventListener("message", handleIframeMessage);
   }, []);
 
   useEffect(() => {
@@ -4344,8 +4408,8 @@ const switchSession = async (targetSid: string, reloadActive = false) => {
   const { theme } = useTheme();
   const isLanding = messages.length === 0;
 
-  // Mobile/tablet header is hidden while sidebar/menu is open, or when modals are active.
-  const isMobileHeaderVisible = responsive.isMobile && !sidebarOpen && !showUpgradePlan && !showManageAccount;
+  // Header with menu button is visible whenever sidebar is closed, and hidden when sidebar or modals are active.
+  const isMobileHeaderVisible = !sidebarOpen && !showUpgradePlan && !showManageAccount;
 
   /** Chat input + disclaimer; `landing` = centered column on empty state before first message */
   const renderChatInputFooter = (variant: "landing" | "default") => {
@@ -4545,7 +4609,9 @@ const switchSession = async (targetSid: string, reloadActive = false) => {
     return (
       <div
         style={{
-          minHeight: "100vh",
+          minHeight: "100%",
+          height: "100%",
+          width: "100%",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -5976,8 +6042,8 @@ const switchSession = async (targetSid: string, reloadActive = false) => {
                 left: 0,
                 right: 0,
                 bottom: 0,
-                width: "100vw",
-                height: "100vh",
+                width: "100%",
+                height: "100%",
                 background: "var(--color-bg)",
                 zIndex: 10000,
                 display: "flex",

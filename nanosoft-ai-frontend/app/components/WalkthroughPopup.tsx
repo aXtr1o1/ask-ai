@@ -231,9 +231,9 @@ export default function WalkthroughPopup() {
             flexDirection: "column",
             alignItems: "center",
             justifyContent: "center",
-            padding: "24px 16px",
+            padding: "16px 12px",
             backgroundColor: "var(--color-bg)",
-            minHeight: "380px",
+            minHeight: "min(340px, 45vh)",
             width: "100%",
             overflow: "hidden",
           }}
