@@ -5,7 +5,6 @@ from langchain_core.messages import HumanMessage, AIMessage
 
 from app.models.schemas import ChatRequest
 from app.services.langchain_service import langchain_service
-from app.services.scoped_memory_service import build_scoped_messages
 from app.state import memory_store, MAX_HISTORY, trim_session
 
 logger = logging.getLogger("chatbot_app")
@@ -37,12 +36,10 @@ async def http_chat_endpoint(request: ChatRequest):
             "pending_transcription": None,
         }
 
-    messages = build_scoped_messages(
-        user_name=user_name,
-        current_query=user_query,
-        session_data=memory_store[session_id],
-        max_previous_turns=MAX_HISTORY,
-    )
+    # Normal ASK-AI only needs the current query text here — real follow-up
+    # context comes from Advance's conversation_memory (session-based, written
+    # after each turn in process_query), not from a prebuilt memory prompt.
+    messages = [HumanMessage(content=user_query)]
 
     try:
         final_response_text, context_summary, _ = await langchain_service.process_query(

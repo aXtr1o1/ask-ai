@@ -20,43 +20,38 @@ chat_websocket_router = APIRouter()
 
 MAX_AUDIO_BYTES = 500 * 1024  # 500 KB
 
-YES_WORDS = {
-    "yes", "yeah", "yep", "yup", "ya", "y",
-    "correct", "right", "true", "exactly","give me",
-    "ok", "okay", "okey", "k", "kk","kkkk",
-    "sure", "surely", "of course",
-    "confirmed", "confirm", "confirmation",
-    "proceed", "go ahead", "continue",
-    "please proceed", "you can proceed",
-    "yes please", "go on", "carry on",
-    "that's right", "thats right",
-    "yes that's correct", "yes thats correct",
-    "sounds good", "looks good", "all good",
-    "fine", "works", "works for me",
-    "perfect", "great", "nice",
-    "yess", "yea", "yaah", "yup yup",
-    "indeed", "absolutely", "definitely",
-    "affirmative", "roger", "approved",
-    "do it", "let's go", "lets go"
-}
-
-_TABLE_OFFER_MARKERS = (
-    "would you like",
-    "see the details",
-    "see the full table",
-    "see the detailed",
-    "want to see",
-    "show you the",
-)
+async def _should_replay_previous_query(reply: str, prev_query: str, prev_assistant: str) -> bool:
+    """
+    Model-based judgment: given the previous question and answer, would this
+    affirmative reply most likely mean 'yes, show me that data / more detail'?
+    Replaces matching the previous answer against a fixed list of offer phrases
+    and matching the previous question against a fixed list of facility keywords.
+    """
+    prompt = (
+        "Below is the last question the user asked and the assistant's answer. "
+        f'The user just replied: "{reply}"\n\n'
+        f'Previous question: "{prev_query}"\n'
+        f'Previous answer: "{prev_assistant}"\n\n'
+        "Does that reply most naturally mean 'yes, show me that data / more detail'? "
+        'Respond with ONLY one word: "yes" or "no".'
+    )
+    try:
+        ai_msg = await asyncio.to_thread(langchain_service.model.invoke, [HumanMessage(content=prompt)])
+        answer = (ai_msg.content or "").strip().lower()
+    except Exception as e:
+        logger.error("❌ Replay-intent classification failed: %s", e)
+        return False
+    return answer.startswith("yes")
 
 
-def _expand_affirmative_from_history(user_query: str, session_data: dict) -> str:
+async def _expand_affirmative_from_history(user_query: str, session_data: dict) -> str:
     """
     When MAX_HISTORY=0 the model only sees the current message. If the user replies
-    'yes' after a data answer, replay the previous question as 'show me …'.
+    'yes' after a data answer (by text or by voice), replay the previous question as
+    'show me …'. Applied after transcription, so it works the same for audio replies.
     """
     reply = (user_query or "").strip().lower()
-    if reply not in YES_WORDS:
+    if not reply or await _classify_yes_no(reply) != "yes":
         return user_query
     history = session_data.get("history") or []
     if not history:
@@ -66,19 +61,9 @@ def _expand_affirmative_from_history(user_query: str, session_data: dict) -> str
     if not prev_query:
         return user_query
     prev_assistant = last.get("assistant") or last.get("context") or ""
-    prev_text = (
-        prev_assistant if isinstance(prev_assistant, str) else str(prev_assistant)
-    ).lower()
-    offered_more = any(m in prev_text for m in _TABLE_OFFER_MARKERS)
+    prev_assistant = prev_assistant if isinstance(prev_assistant, str) else str(prev_assistant)
     prev_lower = prev_query.lower()
-    was_facility_query = any(
-        w in prev_lower
-        for w in (
-            "bdm", "fa", "complaint", "ppm", "sb", "asset",
-            "how many", "show", "give", "list", "registered",
-        )
-    )
-    if offered_more or was_facility_query:
+    if await _should_replay_previous_query(reply, prev_query, prev_assistant):
         if not prev_lower.startswith(("show ", "give ", "list ", "display ")):
             expanded = f"show me {prev_query}"
             logger.info("🔁 Expanded '%s' → '%s' (from history; MAX_HISTORY may be 0)", user_query, expanded)
@@ -86,24 +71,35 @@ def _expand_affirmative_from_history(user_query: str, session_data: dict) -> str
     return user_query
 
 
-NO_WORDS = {
-    "no", "nope", "nah", "n",
-    "wrong", "incorrect", "not correct", "not right",
-    "that's wrong", "thats wrong",
-    "no that's wrong", "no thats wrong",
-    "not really", "not exactly",
-    "don't", "do not", "dont",
-    "stop", "hold on", "wait",
-    "cancel", "abort", "skip",
-    "no thanks", "no thank you",
-    "negative", "decline", "rejected",
-    "not good", "bad", "doesn't work", "doesnt work",
-    "not fine", "not okay", "not ok",
-    "change it", "modify", "edit this",
-    "try again", "redo", "recheck",
-    "nah bro", "no way", "never",
-    "i disagree", "disagree", "not agreed"
-}
+async def _classify_yes_no(reply_text: str) -> str:
+    """
+    Model-based replacement for keyword-set yes/no matching. Used to interpret a
+    reply to a yes/no confirmation (table offer, transcription confidence check)
+    instead of matching against a fixed word list.
+
+    Returns "yes", "no", or "other" (anything that isn't a clear answer — a
+    correction, a new question, etc.).
+    """
+    reply_text = (reply_text or "").strip()
+    if not reply_text:
+        return "other"
+    prompt = (
+        "The user was just asked a yes/no confirmation question. Classify their reply.\n"
+        f'Reply: "{reply_text}"\n\n'
+        'Respond with ONLY one word: "yes", "no", or "other" '
+        '("other" = neither a clear yes nor a clear no - e.g. a correction or a new question).'
+    )
+    try:
+        ai_msg = await asyncio.to_thread(langchain_service.model.invoke, [HumanMessage(content=prompt)])
+        answer = (ai_msg.content or "").strip().lower()
+    except Exception as e:
+        logger.error("❌ Yes/no classification failed: %s", e)
+        return "other"
+    if "yes" in answer:
+        return "yes"
+    if "no" in answer:
+        return "no"
+    return "other"
 
 
 def _has_date_keyword(text: str) -> bool:
@@ -119,83 +115,41 @@ def _has_date_keyword(text: str) -> bool:
     return bool(re.search(r"\b\d{4}-\d{2}-\d{2}\b", q))
 
 
-# ── Single words that signal "user chose a specific dataset" ──────────────────
-_DATASET_SIGNAL_WORDS: set = {
-    "assets", "asset", "ppm", "bdm", "fa", "sb",
-    "preventive", "breakdown", "breakdowns", "facility",
-    "schedule", "scheduled", "based", "maintenance",
-    "audit", "audits", "equipment", "equipments",
-    "device", "devices", "complaints", "complaint",
-    "work", "orders", "order",
-}
-
-# ── STRONG all-meaning words — always signal "give me ALL datasets" ───────────
-# These are unambiguous regardless of sentence length.
-_ALL_MEANING_STRONG: set = {
-    "all", "every", "everything", "each", "entire", "both",
-}
-
-# ── WEAK all-meaning words — only count when reply is SHORT (≤3 words) ────────
-# "many" / "full" / "complete" are common in NEW questions ("how many X are there")
-# so they only count as all-datasets when the user typed them as a SHORT reply.
-_ALL_MEANING_WEAK: set = {
-    "many", "complete", "full", "total",
-}
-
-# ── Multi-word phrases meaning "give me ALL datasets" ─────────────────────────
-_ALL_PHRASE_RE = re.compile(
-    r"all\s+of\s+(them|it|the)"
-    r"|all\s+(five|5|data|datasets?|records?)"
-    r"|(show|give|fetch|get|retrieve|want|need)\s+(me\s+)?all"
-    r"|i\s+want\s+all|entire\s+data|full\s+data|complete\s+data",
-    re.IGNORECASE,
-)
+_MODULE_KEYS = ("assets", "ppm", "bdm", "fa", "sb")
 
 
-def _is_all_datasets_reply(reply: str) -> bool:
+async def _classify_dataset_reply(reply: str, pending_question: str) -> str:
     """
-    True if user's reply means they want ALL datasets.
+    Model-based replacement for the dataset-signal-word/all-meaning-word/regex
+    cluster. The assistant asked "which dataset?" in response to
+    `pending_question`; classify what this reply means.
 
-    STRONG words (all/every/everything/each/entire/both) → always all-datasets.
-    WEAK words (many/full/complete/total) → only when reply is ≤3 words.
-      e.g. "many"          (1 word)  → all-datasets ✅
-           "how many X Y"  (5 words) → NOT all-datasets ✅ (new question)
+    Returns one of: "assets", "ppm", "bdm", "fa", "sb", "all", "new_question".
     """
-    words = re.findall(r"\b\w+\b", (reply or "").lower())
-    word_set = set(words)
-    if word_set & _ALL_MEANING_STRONG:
-        return True
-    if word_set & _ALL_MEANING_WEAK and len(words) <= 3:
-        return True
-    return bool(_ALL_PHRASE_RE.search(reply or ""))
-
-
-def _is_dataset_reply(reply: str) -> bool:
-    """
-    True if reply contains ANY dataset-selection signal
-    (specific dataset name OR all-meaning word/phrase).
-    Uses the same length-gating for weak all-meaning words.
-    """
-    words = re.findall(r"\b\w+\b", (reply or "").lower())
-    word_set = set(words)
-    if word_set & (_DATASET_SIGNAL_WORDS | _ALL_MEANING_STRONG):
-        return True
-    if word_set & _ALL_MEANING_WEAK and len(words) <= 3:
-        return True
-    return bool(_ALL_PHRASE_RE.search(reply or ""))
-
-
-def _should_break_pending(user_query: str) -> bool:
-    """
-    Return True  -> new question: forget the pending clarification.
-    Return False -> clarification answer: keep it (merge and process).
-    Uses positive detection with length-gating for weak all-meaning words.
-    """
-    if not user_query:
-        return False
-    if _is_dataset_reply(user_query):
-        return False
-    return True
+    reply = (reply or "").strip()
+    if not reply:
+        return "new_question"
+    prompt = (
+        "The assistant asked the user which dataset they meant, in reply to this question:\n"
+        f'"{pending_question}"\n\n'
+        f'The user just replied: "{reply}"\n\n'
+        "Datasets: assets, ppm, bdm, fa, sb.\n"
+        "Classify the reply as exactly ONE of: assets, ppm, bdm, fa, sb, all, new_question.\n"
+        '- Use "all" if they want every dataset.\n'
+        '- Use "new_question" if the reply does not answer which dataset at all — '
+        "it is an unrelated new question.\n"
+        "Respond with ONLY that one word."
+    )
+    try:
+        ai_msg = await asyncio.to_thread(langchain_service.model.invoke, [HumanMessage(content=prompt)])
+        answer = (ai_msg.content or "").strip().lower()
+    except Exception as e:
+        logger.error("❌ Dataset-reply classification failed: %s", e)
+        return "new_question"
+    for key in (*_MODULE_KEYS, "all"):
+        if key in answer:
+            return key
+    return "new_question"
 
 
 def _build_table_context(context_summary: str, user_query: str) -> str:
@@ -383,6 +337,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
                         if audio_seconds_effective and audio_seconds_effective > 0:
                             consumed = await asyncio.to_thread(
                                 consume_audio_seconds_if_available,
+                                external_user_id=user_name,
                                 name=sub_user_name,
                                 audio_seconds_delta=audio_seconds_effective,
                             )
@@ -409,10 +364,10 @@ async def ws_chat_endpoint(websocket: WebSocket):
 
                 # Clear pending immediately
                 memory_store[session_id]["pending_transcription"] = None
-                # ── Check if reply contains any yes/no word ──
-                reply_words = set(reply_text.split())
-                is_yes = reply_text in YES_WORDS or bool(reply_words & YES_WORDS)
-                is_no  = reply_text in NO_WORDS  or bool(reply_words & NO_WORDS)
+                # ── Classify the reply as yes / no / other (model-based) ──
+                _intent = await _classify_yes_no(reply_text)
+                is_yes = _intent == "yes"
+                is_no  = _intent == "no"
 
                 if is_yes:
                     user_query     = pending_transcription
@@ -474,7 +429,8 @@ async def ws_chat_endpoint(websocket: WebSocket):
                         reply_table       = re.sub(r'[^\w\s]', '', raw_reply_table).strip()
                         logger.info(f"🎙️ Audio table reply: '{reply_table}' (raw='{raw_reply_table}')")
 
-                        if reply_table in YES_WORDS:
+                        _table_intent = await _classify_yes_no(reply_table)
+                        if _table_intent == "yes":
                             pending_ctx = session_data_audio.get("pending_table_context") or _build_table_context("", pending_transcription)
                             pending_search_context = session_data_audio.get("pending_search_context")
                             table_response = json.dumps({
@@ -506,7 +462,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
                             print_memory(session_id)
                             continue
 
-                        elif reply_table in NO_WORDS:
+                        elif _table_intent == "no":
                             memory_store[session_id]["pending_table"] = None
                             memory_store[session_id]["pending_table_context"] = None
                             no_msg = "No problem! Let me know if you have any other questions."
@@ -556,6 +512,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
                     if audio_seconds_effective and audio_seconds_effective > 0:
                         consumed = await asyncio.to_thread(
                             consume_audio_seconds_if_available,
+                            external_user_id=user_name,
                             name=sub_user_name,
                             audio_seconds_delta=audio_seconds_effective,
                         )
@@ -690,36 +647,26 @@ async def ws_chat_endpoint(websocket: WebSocket):
                 session_data_check = memory_store.get(session_id, {})
                 pending_original_query = session_data_check.get("pending_original_query")
                 if pending_original_query:
-                    # If user's reply already contains a dataset keyword (sb/fa/assets/ppm/bdm)
-                    # it IS the answer to the clarification — merge so the service gets full context.
-                    # _should_break_pending returns True for unrelated new questions (words NOT in
-                    # the selection list), so we break only for those.
-                    if _should_break_pending(user_query):
-                        # User asked a completely new question — forget the old pending query
+                    # Model-based: which dataset does this reply mean, "all" of them,
+                    # or is it an unrelated new question (forget the pending clarification)?
+                    _dataset_choice = await _classify_dataset_reply(user_query, pending_original_query)
+                    if _dataset_choice == "new_question":
                         logger.info("🚫 Breaking pending clarification loop — user asked a new question")
+                    elif _dataset_choice == "all":
+                        user_query = f"all: {pending_original_query}".strip()
+                        logger.info(f"🌐 All-datasets clarification reply: '{user_query}'")
+                        memory_store[session_id]["is_after_clarification"] = True
+                        memory_store[session_id]["is_all_datasets"] = True
                     else:
-                        # Use set-based detection (immune to regex alternation-ordering bugs)
-                        # Catches: "all", "many", "every", "everything", "each", "entire",
-                        # "complete", "full", "give me all", "show everything", etc.
-                        if _is_all_datasets_reply(user_query):
-                            # User wants ALL datasets — reconstruct as "all: <original question>"
-                            user_query = f"all: {pending_original_query}".strip()
-                            logger.info(f"🌐 All-datasets clarification reply: '{user_query}'")
-                            memory_store[session_id]["is_after_clarification"] = True
-                            memory_store[session_id]["is_all_datasets"] = True
-                        else:
-                            # User replied with a specific dataset keyword
-                            user_query = f"{user_query}: {pending_original_query}".strip()
-                            logger.info(f"🔁 Reconstructed clarification reply: '{user_query}'")
-                            memory_store[session_id]["is_after_clarification"] = True
-                            memory_store[session_id]["is_all_datasets"] = False
+                        # User replied with a specific dataset
+                        user_query = f"{_dataset_choice}: {pending_original_query}".strip()
+                        logger.info(f"🔁 Reconstructed clarification reply: '{user_query}'")
+                        memory_store[session_id]["is_after_clarification"] = True
+                        memory_store[session_id]["is_all_datasets"] = False
                     # Always clear after one use — never carry it to a third turn
                     memory_store[session_id]["pending_original_query"] = None
 
                 session_data = memory_store.get(session_id, {})
-                # Do not expand before pending_table yes/no handling
-                if not session_data.get("pending_table"):
-                    user_query = _expand_affirmative_from_history(user_query, session_data)
                 query_to_store = user_query
 
                 # ✅ CHECK IF USER IS REPLYING TO QUOTA MENU
@@ -778,74 +725,17 @@ async def ws_chat_endpoint(websocket: WebSocket):
                     logger.info(f"✅ Quota fallback response sent | context: {context_summary}")
                     trim_session(memory_store[session_id], MAX_HISTORY)
                     print_memory(session_id)
-                    continue
-
-                # ✅ CHECK IF USER IS REPLYING TO QUOTA MENU
-                waiting_for_choice = session_data.get("waiting_for_table_choice", False)
-                
-                # ── QUOTA FALLBACK: user is choosing which table to query ──
-                if waiting_for_choice:
-                    logger.info(f"🔄 User replying to quota menu | reply: '{user_query}'")
-                    
-                    # Clear the flag immediately
-                    memory_store[session_id]["waiting_for_table_choice"] = False
-                    
-                    # Handle the user's table choice
-                    final_response_text, context_summary = quota_fallback_service.handle_user_table_choice(
-                        user_reply=user_query,
-                        user_name=user_name
-                    )
-                    
-                    if final_response_text is None:
-                        # Could not parse table type — ask again
-                        error_msg = (
-                            "I couldn't determine which table you want. "
-                            "Please reply with one of: **assets**, **ppm**, **bdm**, **fa**, or **sb**."
-                        )
-                        await websocket.send_text(json.dumps({
-                            "session_id": session_id,
-                            "response": error_msg
-                        }))
-                        await websocket.send_text("[DONE]")
-                        
-                        memory_store[session_id]["history"].append({
-                            "query": query_to_store,
-                            "assistant": error_msg,
-                            "context": error_msg,
-                            "is_audio": is_audio
-                        })
-                        logger.info("⚠️ Could not parse table choice — asked user again")
-                        continue
-                    
-                    # Successfully retrieved data — send to user
-                    await websocket.send_text(json.dumps({
-                        "session_id": session_id,
-                        "response": final_response_text
-                    }))
-                    await websocket.send_text("[DONE]")
-                    
-                    memory_store[session_id]["lc_memory"].append(HumanMessage(content=user_query))
-                    memory_store[session_id]["lc_memory"].append(AIMessage(content=context_summary))
-                    memory_store[session_id]["history"].append({
-                        "query": query_to_store,
-                        "assistant": final_response_text,
-                        "context": context_summary,
-                        "is_audio": is_audio
-                    })
-                    
-                    logger.info(f"✅ Quota fallback response sent | context: {context_summary}")
-                    trim_session(memory_store[session_id], MAX_HISTORY)
-                    print_memory(session_id)
                     continue  # ← CRITICAL: Skip process_query completely
-                
+
                 # ── TWO-STEP TABLE: check if user is replying yes/no to table question
                 pending_table = session_data.get("pending_table")
 
                 if pending_table:
                     reply = user_query.strip().lower()
-                    logger.info(f"🔍 pending_table check | reply='{reply}' | in_YES_WORDS={reply in YES_WORDS} | in_NO_WORDS={reply in NO_WORDS}")
+                    _table_intent = await _classify_yes_no(reply)
+                    logger.info(f"🔍 pending_table check | reply='{reply}' | intent={_table_intent}")
 
-                    if reply in YES_WORDS:
+                    if _table_intent == "yes":
                         pending_ctx = session_data.get("pending_table_context") or _build_table_context("", user_query)
                         pending_search_context = session_data.get("pending_search_context")
                         table_response = json.dumps({
@@ -877,7 +767,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
                         print_memory(session_id)
                         continue
 
-                    elif reply in NO_WORDS:
+                    elif _table_intent == "no":
                         memory_store[session_id]["pending_table"] = None
                         memory_store[session_id]["pending_table_context"] = None
                         no_msg = "No problem! Let me know if you have any other questions."
@@ -931,18 +821,34 @@ async def ws_chat_endpoint(websocket: WebSocket):
                 if is_space_booking:
                     memory_store[session_id]["is_space_booking"] = True
 
-            messages = build_scoped_messages(
-                user_name=user_name,
-                current_query=user_query,
-                session_data=memory_store[session_id],
-                max_previous_turns=MAX_HISTORY,
-            )
+            # ── Expand a bare "yes" (text or transcribed voice) into a replay of the
+            # previous question. Applied here, after both paths converge, so it works
+            # the same regardless of how the reply arrived. Never runs while a
+            # pending_table yes/no is still open — that's resolved (or cleared) above.
+            user_query = await _expand_affirmative_from_history(user_query, memory_store[session_id])
+            query_to_store = user_query
+
+            if is_space_booking:
+                # Space Booking still resolves follow-ups (pronouns, bare affirmations)
+                # via the memory instructions baked into this prompt.
+                messages = build_scoped_messages(
+                    user_name=user_name,
+                    current_query=user_query,
+                    session_data=memory_store[session_id],
+                    max_previous_turns=MAX_HISTORY,
+                )
+            else:
+                # Normal ASK-AI only needs the current query text here — real
+                # follow-up context now comes from Advance's conversation_memory
+                # (session-based, written after each turn in process_query), not
+                # from pronoun-matching instructions baked into a memory prompt.
+                messages = [HumanMessage(content=user_query)]
 
 # Changes done by sanjeevan
             try:
                 # ── Credits gate: if credits_remaining == 0, skip model ───────
                 try:
-                    credits_remaining = await asyncio.to_thread(get_credits_remaining, sub_user_name)  # TODO: swap to real external user id from auth
+                    credits_remaining = await asyncio.to_thread(get_credits_remaining, user_name, sub_user_name)  # TODO: swap to real external user id from auth
                 except Exception as e:
                     logger.warning("⚠️ credits check failed (continuing): %s", str(e)[:200])
                     credits_remaining = None
@@ -964,7 +870,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
                         # ── Graph gate: if graph_count > graph_limit, skip model ───
                         try:
                             if is_graph:
-                                graph_info = await asyncio.to_thread(get_graph_count_and_limit, sub_user_name)
+                                graph_info = await asyncio.to_thread(get_graph_count_and_limit, user_name, sub_user_name)
                             else:
                                 graph_info = None
                         except Exception as e:
@@ -1075,12 +981,12 @@ async def ws_chat_endpoint(websocket: WebSocket):
                 if is_graph_response:
                     graph_delta = 1
                     
-                logger.info(
-                    " 💳 Credit calculation input | user=%s | tokens=%s | credits=%s",
-                    sub_user_name,
-                    tokens_delta,
-                    credits_delta,
-                )
+                # logger.info(
+                #     " 💳 Credit calculation input | user=%s | tokens=%s | credits=%s",
+                #     sub_user_name,
+                #     tokens_delta,
+                #     credits_delta,
+                # )
                 # ── Token-based credit calculation ──────────────────────────────
                 credits_delta = calculate_credits(tokens_delta)
                 
@@ -1094,6 +1000,7 @@ async def ws_chat_endpoint(websocket: WebSocket):
 
                 await asyncio.to_thread(
                     update_usage_if_exists,
+                    external_user_id=user_name,
                     name=sub_user_name,
                     tokens_used_delta=tokens_delta,
                     request_delta=1,

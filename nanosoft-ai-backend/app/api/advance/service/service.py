@@ -428,6 +428,7 @@ def _run_streaming_pipeline(
         if profile_name:
             try:
                 update_usage_if_exists(
+                    external_user_id=user_name,
                     name=profile_name,
                     tokens_used_delta=total_tokens,
                     request_delta=1,

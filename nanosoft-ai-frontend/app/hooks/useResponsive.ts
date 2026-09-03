@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 
 export type ScreenType = 'mobile' | 'tablet' | 'desktop';
 
-interface ResponsiveInfo {
+export interface ResponsiveInfo {
   isMobile: boolean;      // width ≤ 640px — narrow phones, single column layout
   isTablet: boolean;      // 641px ≤ width ≤ 1024px — tablets, two-column layout
   isDesktop: boolean;     // width > 1024px — desktop/laptop, full layout
@@ -12,13 +12,30 @@ interface ResponsiveInfo {
   screen: ScreenType;     // Current screen type for conditional rendering
   isDesktopLayout?: boolean; // true for desktop-like layout (desktop + tablet)
   sizingScreen?: ScreenType; // screen used for sizing helpers (tablet -> mobile)
-  width: number;          // Actual window.innerWidth for custom calculations
-  height: number;         // Actual window.innerHeight for custom calculations
+  width: number;          // Actual container width for custom calculations
+  height: number;         // Actual container height for custom calculations
+  isCompact?: boolean;    // width ≤ 480px (compact embed / widget)
+  isNarrow?: boolean;     // width ≤ 360px (ultra-narrow iframe / drawer)
+  isShort?: boolean;      // height ≤ 500px (short bottom drawer / widget)
+  isUltraShort?: boolean; // height ≤ 380px (ultra-short iframe)
+  isIframe?: boolean;     // true if running inside an iframe
+  aspectRatio?: number;   // width / height ratio
 }
 
 // Map screen type directly (tablet uses tablet sizing now)
 export function normalizeSizing(screen: ScreenType): ScreenType {
   return screen;
+}
+
+// Detect if running inside an iframe
+export function detectIframe(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.self !== window.top;
+  } catch (e) {
+    // Cross-origin iframe will throw or return true
+    return true;
+  }
 }
 
 // Detect touch-capable devices. Uses multiple heuristics for robustness.
@@ -55,86 +72,128 @@ export function getHybridResponsiveState(width: number): {
   return { screen: 'desktop', isDesktopLayout: true, sizingScreen: 'desktop' };
 }
 
+function calculateResponsiveState(): ResponsiveInfo {
+  if (typeof window === 'undefined') {
+    const screen: ScreenType = 'desktop';
+    return {
+      isMobile: false,
+      isTablet: false,
+      isDesktop: true,
+      isTouch: false,
+      isDesktopLayout: true,
+      screen,
+      sizingScreen: normalizeSizing(screen),
+      width: 1024,
+      height: 768,
+      isCompact: false,
+      isNarrow: false,
+      isShort: false,
+      isUltraShort: false,
+      isIframe: false,
+      aspectRatio: 1024 / 768,
+    };
+  }
+
+  // Use documentElement client width/height if window inner size is 0 (or during iframe load)
+  const width = window.innerWidth || document.documentElement?.clientWidth || 1024;
+  const height = window.innerHeight || document.documentElement?.clientHeight || 768;
+  const hybrid = getHybridResponsiveState(width);
+  const isIframe = detectIframe();
+
+  return {
+    isMobile: hybrid.screen === 'mobile' && !hybrid.isDesktopLayout,
+    isTablet: hybrid.screen === 'tablet',
+    isDesktop: hybrid.screen === 'desktop',
+    isTouch: detectTouchDevice(),
+    isDesktopLayout: hybrid.isDesktopLayout,
+    screen: hybrid.screen,
+    sizingScreen: hybrid.sizingScreen,
+    width,
+    height,
+    isCompact: width <= 480,
+    isNarrow: width <= 360,
+    isShort: height <= 500,
+    isUltraShort: height <= 380,
+    isIframe,
+    aspectRatio: height > 0 ? width / height : 1,
+  };
+}
 
 export function useResponsive(): ResponsiveInfo {
-  // Calculate initial state based on actual window width
-  const getInitialState = (): ResponsiveInfo => {
-    if (typeof window === 'undefined') {
-      // SSR: default to desktop for initial render
-      const screen: ScreenType = 'desktop';
-      return {
-        isMobile: false,
-        isTablet: false,
-        isDesktop: true,
-        isTouch: false,
-        isDesktopLayout: true,
-        screen,
-        sizingScreen: normalizeSizing(screen),
-        width: 1024,
-        height: 768,
-      };
-    }
-
-    const width = window.innerWidth;
-    const height = window.innerHeight;
-    const hybrid = getHybridResponsiveState(width);
-
-    return {
-      isMobile: hybrid.screen === 'mobile' && !hybrid.isDesktopLayout,
-      isTablet: hybrid.screen === 'tablet',
-      isDesktop: hybrid.screen === 'desktop',
-      isTouch: detectTouchDevice(),
-      isDesktopLayout: hybrid.isDesktopLayout,
-      screen: hybrid.screen,
-      sizingScreen: hybrid.sizingScreen,
-      width,
-      height,
-    };
-  };
-
-  const [responsive, setResponsive] = useState<ResponsiveInfo>(getInitialState());
+  const [responsive, setResponsive] = useState<ResponsiveInfo>(calculateResponsiveState);
 
   useEffect(() => {
-    let debounceTimer: NodeJS.Timeout;
+    let rafId: number | null = null;
 
     const updateResponsive = () => {
-      const width = window.innerWidth;
-      const height = window.innerHeight;
-      const hybrid = getHybridResponsiveState(width);
-
-      setResponsive({
-        isMobile: hybrid.screen === 'mobile' && !hybrid.isDesktopLayout,
-        isTablet: hybrid.screen === 'tablet',
-        isDesktop: hybrid.screen === 'desktop',
-        isTouch: detectTouchDevice(),
-        isDesktopLayout: hybrid.isDesktopLayout,
-        screen: hybrid.screen,
-        sizingScreen: hybrid.sizingScreen,
-        width,
-        height,
+      const next = calculateResponsiveState();
+      setResponsive((prev) => {
+        if (
+          prev.width === next.width &&
+          prev.height === next.height &&
+          prev.screen === next.screen &&
+          prev.isTouch === next.isTouch &&
+          prev.isIframe === next.isIframe
+        ) {
+          return prev;
+        }
+        return next;
       });
     };
 
     const handleResize = () => {
-      // Debounce: wait 50ms after resize stops before updating
-      clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(updateResponsive, 20);
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+      }
+      rafId = requestAnimationFrame(updateResponsive);
     };
 
     // Set initial size immediately
     updateResponsive();
 
-    // Add resize listener
-    window.addEventListener('resize', handleResize);
-    
-    // Add orientationchange listener for mobile devices (Instant response)
-    window.addEventListener('orientationchange', updateResponsive);
+    // 1. ResizeObserver on documentElement: perfectly catches dynamic iframe flexing / drag resizing
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined' && document.documentElement) {
+      try {
+        resizeObserver = new ResizeObserver(() => {
+          handleResize();
+        });
+        resizeObserver.observe(document.documentElement);
+      } catch (e) {
+        // Fallback to window resize
+      }
+    }
+
+    // 2. Add window resize & visualViewport listeners
+    window.addEventListener('resize', handleResize, { passive: true });
+    window.addEventListener('orientationchange', handleResize, { passive: true });
+
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', handleResize, { passive: true });
+    }
+
+    // 3. PostMessage listener for parent iframe communication
+    const handleMessage = (e: MessageEvent) => {
+      try {
+        if (e.data && (e.data.type === 'RESIZE' || e.data.type === 'ASK_AI_RESIZE' || e.data.type === 'SET_DIMENSIONS')) {
+          handleResize();
+        }
+      } catch {
+        // ignore
+      }
+    };
+    window.addEventListener('message', handleMessage);
 
     // Cleanup
     return () => {
-      clearTimeout(debounceTimer);
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      if (resizeObserver) resizeObserver.disconnect();
       window.removeEventListener('resize', handleResize);
       window.removeEventListener('orientationchange', handleResize);
+      if (window.visualViewport) {
+        window.visualViewport.removeEventListener('resize', handleResize);
+      }
+      window.removeEventListener('message', handleMessage);
     };
   }, []);
 
@@ -378,13 +437,13 @@ export function getResponsiveContainer(screen: ScreenType): {
       };
     case 'tablet':
       return {
-        maxWidth: 'calc(100vw - 180px)',
+        maxWidth: '100%',
         padding: '16px',
         borderRadius: '12px',
       };
     case 'desktop':
       return {
-        maxWidth: 'calc(100vw - 260px)',
+        maxWidth: '100%',
         padding: '20px',
         borderRadius: '16px',
       };
@@ -628,16 +687,16 @@ export function getResponsivePieChartSize(screen: ScreenType): {
       };
     case 'tablet':
       return {
-        containerMaxWidth: '500px',
-        containerMinWidth: '500px',
+        containerMaxWidth: '100%',
+        containerMinWidth: '0px',
         height: '350px',
         chartWidth: '100%',
         chartHeight: 350,
       };
     case 'desktop':
       return {
-        containerMaxWidth: '600px',
-        containerMinWidth: '600px',
+        containerMaxWidth: '100%',
+        containerMinWidth: '0px',
         height: '400px',
         chartWidth: '100%',
         chartHeight: 400,
@@ -948,8 +1007,8 @@ export function getCenteredContentStyle(screen: ScreenType): React.CSSProperties
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: '100vh',
-    width: screen === 'mobile' ? '100vw' : screen === 'tablet' ? '100vw' : '100vw',
+    minHeight: '100%',
+    width: '100%',
     margin: 0,
     padding: 0,
   };

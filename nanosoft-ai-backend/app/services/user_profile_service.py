@@ -58,12 +58,17 @@ def calculate_credits(total_tokens: int) -> Decimal:
 # CREDIT BALANCE
 # =============================================================================
 
-def get_credits_remaining(name: str) -> Decimal | None:
+def get_credits_remaining(
+    external_user_id: str,
+    name: str,
+) -> Decimal | None:
     """
     Return credits_remaining for an existing user, else None.
+
+    The profile is identified by external_user_id + name.
     """
-    if not name:
-        raise ValueError("name is required")
+    if not external_user_id or not name:
+        raise ValueError("external_user_id and name are required")
 
     conn = get_pool()
     conn.rollback()
@@ -73,17 +78,21 @@ def get_credits_remaining(name: str) -> Decimal | None:
             """
             SELECT credits_remaining
             FROM public.user_profile
-            WHERE name = %s
+            WHERE external_user_id = %s
+              AND name = %s
+            LIMIT 1
             """,
-            (name,),
+            (external_user_id, name),
         )
 
         row = cur.fetchone()
 
         if not row:
             logger.warning(
-                "⚠️ user_profile missing for name=%s "
+                "⚠️ user_profile missing for "
+                "external_user_id=%s name=%s "
                 "(credits check skipped)",
+                external_user_id,
                 name,
             )
             return None
@@ -142,13 +151,16 @@ def get_profile_name_by_external_user_id(
 # =============================================================================
 
 def get_graph_count_and_limit(
+    external_user_id: str,
     name: str,
 ) -> tuple[int, int] | None:
     """
     Return (graph_count, graph_limit) for an existing user, else None.
+
+    The profile is identified by external_user_id + name.
     """
-    if not name:
-        raise ValueError("name is required")
+    if not external_user_id or not name:
+        raise ValueError("external_user_id and name are required")
 
     conn = get_pool()
     conn.rollback()
@@ -158,17 +170,21 @@ def get_graph_count_and_limit(
             """
             SELECT graph_count, graph_limit
             FROM public.user_profile
-            WHERE name = %s
+            WHERE external_user_id = %s
+              AND name = %s
+            LIMIT 1
             """,
-            (name,),
+            (external_user_id, name),
         )
 
         row = cur.fetchone()
 
         if not row:
             logger.warning(
-                "⚠️ user_profile missing for name=%s "
+                "⚠️ user_profile missing for "
+                "external_user_id=%s name=%s "
                 "(graph check skipped)",
+                external_user_id,
                 name,
             )
             return None
@@ -189,6 +205,7 @@ def get_graph_count_and_limit(
 
 def update_usage_if_exists(
     *,
+    external_user_id: str,
     name: str,
     tokens_used_delta: int = 0,
     request_delta: int = 1,
@@ -199,11 +216,11 @@ def update_usage_if_exists(
     """
     Atomic UPDATE of counters for an existing user_profile row.
 
-    If no row exists for `name`, we log and return.
+    If no row exists for the external_user_id + name pair, we log and return.
     """
 
-    if not name:
-        raise ValueError("name is required")
+    if not external_user_id or not name:
+        raise ValueError("external_user_id and name are required")
 
     tokens_used_delta = int(tokens_used_delta or 0)
     request_delta = int(request_delta or 0)
@@ -232,9 +249,11 @@ def update_usage_if_exists(
                 ),
                 last_request_at   = NOW(),
                 updated_at        = NOW()
-            WHERE name = %(name)s
+            WHERE external_user_id = %(external_user_id)s
+              AND name = %(name)s
             """,
             {
+                "external_user_id": external_user_id,
                 "name": name,
                 "tokens_used_delta": tokens_used_delta,
                 "request_delta": request_delta,
@@ -246,8 +265,10 @@ def update_usage_if_exists(
 
         if cur.rowcount == 0:
             logger.warning(
-                "⚠️ user_profile missing for name=%s "
+                "⚠️ user_profile missing for "
+                "external_user_id=%s name=%s "
                 "(no update applied)",
+                external_user_id,
                 name,
             )
             conn.rollback()
@@ -257,8 +278,9 @@ def update_usage_if_exists(
 
     logger.info(
         "✅ update_usage_if_exists | "
-        "name=%s | tokens=%s | credits=%s | "
+        "external_user_id=%s name=%s | tokens=%s | credits=%s | "
         "requests=%s | graphs=%s | audio=%s",
+        external_user_id,
         name,
         tokens_used_delta,
         credits_delta,
@@ -274,6 +296,7 @@ def update_usage_if_exists(
 
 def consume_audio_seconds_if_available(
     *,
+    external_user_id: str,
     name: str,
     audio_seconds_delta: int,
 ) -> bool | None:
@@ -286,8 +309,8 @@ def consume_audio_seconds_if_available(
       - If user missing (or audio columns unavailable) → None
     """
 
-    if not name:
-        raise ValueError("name is required")
+    if not external_user_id or not name:
+        raise ValueError("external_user_id and name are required")
 
     audio_seconds_delta = int(audio_seconds_delta or 0)
 
@@ -310,10 +333,12 @@ def consume_audio_seconds_if_available(
                 SET
                     audio_seconds = audio_seconds + %(delta)s,
                     updated_at = NOW()
-                WHERE name = %(name)s
+                WHERE external_user_id = %(external_user_id)s
+                  AND name = %(name)s
                   AND audio_seconds + %(delta)s <= audio_limit
                 """,
                 {
+                    "external_user_id": external_user_id,
                     "name": name,
                     "delta": audio_seconds_delta,
                 },
@@ -322,7 +347,8 @@ def consume_audio_seconds_if_available(
         except Exception as e:
             logger.warning(
                 "⚠️ audio credits consume failed "
-                "(missing columns?): name=%s err=%s",
+                "(missing columns?): external_user_id=%s name=%s err=%s",
+                external_user_id,
                 name,
                 str(e)[:200],
             )
@@ -350,8 +376,10 @@ def consume_audio_seconds_if_available(
 
         if not row:
             logger.warning(
-                "⚠️ user_profile missing for name=%s "
+                "⚠️ user_profile missing for "
+                "external_user_id=%s name=%s "
                 "(audio check skipped)",
+                external_user_id,
                 name,
             )
             conn.rollback()
@@ -366,7 +394,8 @@ def consume_audio_seconds_if_available(
         except Exception:
             logger.warning(
                 "⚠️ invalid audio_limit/audio_seconds values "
-                "for name=%s (audio check skipped)",
+                "for external_user_id=%s name=%s (audio check skipped)",
+                external_user_id,
                 name,
             )
             conn.rollback()
@@ -375,7 +404,8 @@ def consume_audio_seconds_if_available(
         if audio_seconds_used + audio_seconds_delta > audio_limit:
             logger.info(
                 "⛔ Audio credits exhausted | "
-                "name=%s used=%s delta=%s limit=%s",
+                "external_user_id=%s name=%s used=%s delta=%s limit=%s",
+                external_user_id,
                 name,
                 audio_seconds_used,
                 audio_seconds_delta,
@@ -387,7 +417,8 @@ def consume_audio_seconds_if_available(
         # Fallback: something else prevented update; allow.
         logger.warning(
             "⚠️ audio credits consume did not apply but "
-            "no exhaustion detected for name=%s",
+            "no exhaustion detected for external_user_id=%s name=%s",
+            external_user_id,
             name,
         )
 
