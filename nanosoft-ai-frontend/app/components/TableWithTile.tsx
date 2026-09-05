@@ -427,47 +427,61 @@ const TableWithTile = React.memo(function TableWithTile({
               <div className="data-view-panel is-active" style={{
                 animation: 'fadeIn 0.2s ease-in-out'
               }}>
-                {htmlTableContent ? (
-                  <div dangerouslySetInnerHTML={{ __html: htmlTableContent }} />
-                ) : (
-                  <div className="table-scroll" style={{
-                    fontSize: tableConfig.fontSize,
-                    overflowX: 'auto',
-                    overflowY: 'auto',
-                    maxHeight: '60vh',
+                {summaryContent && (
+                  <div
+                    dangerouslySetInnerHTML={{ __html: summaryContent }}
+                    style={{ marginBottom: '8px' }}
+                  />
+                )}
+                <div className="table-scroll" style={{
+                  fontSize: tableConfig.fontSize,
+                  overflowX: 'auto',
+                  overflowY: 'auto',
+                  maxHeight: '60vh',
+                }}>
+                  <table className="table-with-tile" style={{
+                    fontSize: responsive.isMobile ? '10px' : '11px',
+                    width: '100%',
+                    minWidth: `${Math.max(100, detectedColumns.length * (responsive.isMobile ? 82 : 100))}px`,
+                    tableLayout: 'auto',
                   }}>
-                    <table className="table-with-tile" style={{
-                      fontSize: tableConfig.fontSize,
-                      minWidth: responsive.isMobile ? '100%' : 'auto',
-                    }}>
-                      <thead>
-                        <tr>
-                          {detectedColumns.slice(0, tableConfig.columnsVisible).map((col) => (
-                            <th key={col} style={{
-                              padding: tableConfig.padding,
-                              fontSize: tableConfig.fontSize,
-                              fontWeight: 600,
-                            }}>{col}</th>
+                    <thead>
+                      <tr>
+                        {detectedColumns.map((col) => (
+                          <th key={col} style={{
+                            padding: responsive.isMobile ? '5px 8px' : '6px 10px',
+                            height: responsive.isMobile ? '25px' : '28px',
+                            fontSize: responsive.isMobile ? '9px' : '10px',
+                            fontWeight: 600,
+                            whiteSpace: 'nowrap',
+                            background: 'rgba(26, 22, 12, 0.95)',
+                            color: 'var(--color-primary-strong)',
+                          }}>{col}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pagedRows.map((row, rowIdx) => (
+                        <tr key={startIdx + rowIdx} style={{
+                          height: responsive.isMobile ? '25px' : '27px',
+                        }}>
+                          {detectedColumns.map((col) => (
+                            <td key={`${startIdx + rowIdx}-${col}`} style={{
+                              padding: responsive.isMobile ? '5px 8px' : '6px 10px',
+                              height: responsive.isMobile ? '25px' : '27px',
+                              fontSize: responsive.isMobile ? '10px' : '11px',
+                              color: '#F3F4F6',
+                              background: rowIdx % 2 === 1 ? 'var(--color-bg)' : 'transparent',
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                            }}>{formatCellValue(row[col])}</td>
                           ))}
                         </tr>
-                      </thead>
-                      <tbody>
-                        {pagedRows.map((row, rowIdx) => (
-                          <tr key={startIdx + rowIdx} style={{
-                            height: tableConfig.compactMode ? 'auto' : 'auto',
-                          }}>
-                            {detectedColumns.slice(0, tableConfig.columnsVisible).map((col) => (
-                              <td key={`${startIdx + rowIdx}-${col}`} style={{
-                                padding: tableConfig.padding,
-                                fontSize: tableConfig.fontSize,
-                              }}>{formatCellValue(row[col])}</td>
-                            ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
 
