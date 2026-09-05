@@ -629,10 +629,12 @@ const TableWithTile = React.memo(function TableWithTile({
                             <div style={{
                               flex: 1,
                               display: 'grid',
-                              gridTemplateColumns: responsive.isMobile
+                              gridTemplateColumns: responsive.width <= 360
+                                ? '1fr'
+                                : responsive.isMobile
                                 ? 'repeat(2, 1fr)'
-                                : 'repeat(5, 1fr)',
-                              gap: '16px 12px',
+                                : 'repeat(auto-fit, minmax(130px, 1fr))',
+                              gap: '12px 10px',
                               minWidth: 0,
                             }}>
                               {(responsive.isDesktop ? detectedColumns : tileCols).map((col) => (
