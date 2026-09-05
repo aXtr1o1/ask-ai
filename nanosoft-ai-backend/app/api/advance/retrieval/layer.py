@@ -1,7 +1,7 @@
 import logging
 import itertools
 
-from app.api.models.schemas import AssetRequest, BDMRequest, PPMRequest, FARequest, SBRequest, ContractRequest, EmployeeRequest
+from app.api.models.schemas import AssetRequest, BDMRequest, PPMRequest, FARequest, SBRequest, ContractRequest, EmployeeRequest, LocationRequest, BuildingRequest, FloorRequest, SpotRequest
 from app.api.routes.assets    import get_assets
 from app.api.routes.bdm       import get_bdm
 from app.api.routes.ppm       import get_ppm
@@ -9,6 +9,10 @@ from app.api.routes.fa        import get_fa
 from app.api.routes.sb        import get_sb
 from app.api.routes.contract  import get_contracts
 from app.api.routes.employee  import get_employees
+from app.api.routes.location  import get_location
+from app.api.routes.building  import get_building
+from app.api.routes.floor     import get_floor
+from app.api.routes.spot      import get_spot
 from app.api.advance.retrieval.mappings import ALL_MAPPINGS
 
 logger = logging.getLogger("advance.retrieval.layer")
@@ -22,6 +26,10 @@ MODULE_ROUTER_MAP = {
     "sb":        (SBRequest,       get_sb),
     "contracts": (ContractRequest, get_contracts),
     "employees": (EmployeeRequest, get_employees),
+    "location":  (LocationRequest, get_location),
+    "building":  (BuildingRequest, get_building),
+    "floor":     (FloorRequest,    get_floor),
+    "spot":      (SpotRequest,     get_spot),
 }
 
 

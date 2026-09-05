@@ -36,7 +36,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage
 
 from app.config import settings
-from app.tools.facility_tools import ASSETS, PPM, BDM, FA, SB, CONTRACT, EMPLOYEE
+from app.tools.facility_tools import ASSETS, PPM, BDM, FA, SB, CONTRACT, EMPLOYEE, LOCATION, BUILDING, FLOOR, SPOT
 from app.services.langchain_tool_paths import LangChainToolPathsMixin
 from app.services.langchain_response_builder import LangChainResponseBuilderMixin
 from app.prompts.system_prompt import get_level_check_prompt, get_payload_prompt
@@ -63,6 +63,10 @@ MODULE_TOOL_MAP = {
     "sb":        SB,
     "contracts": CONTRACT,
     "employees": EMPLOYEE,
+    "location":  LOCATION,
+    "building":  BUILDING,
+    "floor":     FLOOR,
+    "spot":      SPOT,
 }
 
 MODULE_FRIENDLY_NAMES = {
@@ -73,6 +77,10 @@ MODULE_FRIENDLY_NAMES = {
     "sb":        "Schedule Based Work Orders",
     "contracts": "Contracts",
     "employees": "Employees",
+    "location":  "Location",
+    "building":  "Building",
+    "floor":     "Floor",
+    "spot":      "Spot",
 }
 
 # ── Reply keywords for the "which dataset?" clarification prompt ──────────
@@ -83,6 +91,10 @@ _DATASET_REPLY_MAP = {
     "bdm":       "bdm",
     "fa":        "fa",
     "sb":        "sb",
+    "location":  "location",
+    "building":  "building",
+    "floor":     "floor",
+    "spot":      "spot",
 }
 
 
@@ -307,11 +319,14 @@ class LangChainService(LangChainToolPathsMixin, LangChainResponseBuilderMixin):
 
                 query_summary = result["query_summary"]
                 modules = [m for m in (result["modules"] or []) if m in MODULE_TOOL_MAP]
+                # Ensure parent nodes appear before child nodes in multi-dataset results
+                parent_order = {"location": 1, "building": 2, "floor": 3, "spot": 4}
+                modules.sort(key=lambda m: parent_order.get(m, 99))
 
             if not modules:
                 clarification = (
                     "Please clarify which kind of data you want to search?\n"
-                    "Assets, PPM, BDM, FA, or SB."
+                    "Assets, PPM, BDM, FA, SB, Contracts, Employees, Location, Building, Floor, or Spot."
                 )
                 conversation_memory.add_turn(
                     session_id, current_user_query, query_summary, intent="db_query", modules=[],

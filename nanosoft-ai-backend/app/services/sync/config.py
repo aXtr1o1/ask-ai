@@ -3,7 +3,10 @@ from app.config import settings
 
 log = logging.getLogger("sync_engine")
 
-ENDPOINTS = ["/getAssets", "/getPPM", "/getBDM", "/getFA", "/getSB", "/getContract", "/getEmployee"]
+ENDPOINTS = [
+    "/getAssets", "/getPPM", "/getBDM", "/getFA", "/getSB", "/getContract", "/getEmployee",
+    "/getLocation", "/getBuilding", "/getFloor", "/getSpot"
+]
 LOGIN_USERNAME = settings.LOGIN_USERNAME
 LOGIN_PASSWORD = settings.LOGIN_PASSWORD
 REQUEST_TIMEOUT = 120

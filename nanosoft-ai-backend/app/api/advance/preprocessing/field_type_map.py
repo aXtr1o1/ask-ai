@@ -488,4 +488,120 @@ FIELD_TYPE_MAP: dict[str, dict[str, str]] = {
         "CreatedTtm":           "datetime",
         "updated_at":           "datetime",
     },
+
+    # =========================================================================
+    # LOCATION  —  Locality Register
+    # Tracks broad geographic zones and regions.
+    # DB table: locality_master
+    # =========================================================================
+    "location": {
+        # ── Identifiers ───────────────────────────────────────────────────
+        "LocalityCode":          "text",
+        "LocalityName":          "text",
+        
+        # ── Geography / Details ──────────────────────────────────────────
+        "LocAddress1":           "text",
+        "LocAddress2":           "text",
+        "CityCode":              "text",
+        "CityName":              "text",
+        "LocalityGroupCode":     "text",
+        "LocalityGroupName":     "text",
+        "AdminLocalityTypeName": "text",
+        "Remarks":               "text",
+        
+        # ── Flags (boolean) ──────────────────────────────────────────────
+        "IsActive":              "bool",
+        "IsDraft":               "bool",
+        "IsPortalDisplay":       "bool",
+        "IsNonContract":         "bool",
+        "IsDefault":             "bool",
+        
+        # ── Dates ────────────────────────────────────────────────────────
+        "CreatedTtm":            "datetime",
+    },
+
+    # =========================================================================
+    # BUILDING  —  Building Register
+    # Tracks buildings associated with a specific locality.
+    # DB table: building_master
+    # =========================================================================
+    "building": {
+        # ── Identifiers ───────────────────────────────────────────────────
+        "BuildingCode":        "text",
+        "BuildingName":        "text",
+        "LocalityCode":        "text",
+        "LocalityName":        "text",
+        
+        # ── Descriptive ───────────────────────────────────────────────────
+        "AssBuildingTypeName": "text",
+        "Remarks":             "text",
+        
+        # ── Flags (boolean) ──────────────────────────────────────────────
+        "IsActive":            "bool",
+        "IsDraft":             "bool",
+        "IsNonContract":       "bool",
+        "IsDefault":           "bool",
+        
+        # ── Dates ────────────────────────────────────────────────────────
+        "CreatedTtm":          "datetime",
+    },
+
+    # =========================================================================
+    # FLOOR  —  Floor Register
+    # Tracks floors within buildings.
+    # DB table: floor_master
+    # =========================================================================
+    "floor": {
+        # ── Identifiers ───────────────────────────────────────────────────
+        "FloorCode":    "text",
+        "FloorName":    "text",
+        "BuildingCode": "text",
+        "BuildingName": "text",
+        "LocalityCode": "text",
+        "LocalityName": "text",
+        
+        # ── Descriptive ───────────────────────────────────────────────────
+        "Remarks":      "text",
+        
+        # ── Flags (boolean) ──────────────────────────────────────────────
+        "IsActive":     "bool",
+        "IsDraft":      "bool",
+        "IsNonContract":"bool",
+        "IsDefault":    "bool",
+        
+        # ── Dates ────────────────────────────────────────────────────────
+        "CreatedTtm":   "datetime",
+    },
+
+    # =========================================================================
+    # SPOT  —  Spot Register
+    # Tracks specific areas or parking spaces within a floor.
+    # DB table: spot_master
+    # =========================================================================
+    "spot": {
+        # ── Identifiers ───────────────────────────────────────────────────
+        "SpotCode":     "text",
+        "SpotName":     "text",
+        "BuildingCode": "text",
+        "BuildingName": "text",
+        "FloorCode":    "text",
+        "FloorName":    "text",
+        "LocalityCode": "text",
+        "LocalityName": "text",
+        
+        # ── Descriptive ───────────────────────────────────────────────────
+        "SpotTypeName": "text",
+        "Remarks":      "text",
+        
+        # ── Flags (boolean) ──────────────────────────────────────────────
+        "IsActive":     "bool",
+        "IsDraft":      "bool",
+        "IsOccupancy":  "bool",
+        "IsParking":    "bool",
+        "IsAllocated":  "bool",
+        "IsNonContract":"bool",
+        
+        # ── Dates ────────────────────────────────────────────────────────
+        "CreatedTtm":   "datetime",
+    },
 }

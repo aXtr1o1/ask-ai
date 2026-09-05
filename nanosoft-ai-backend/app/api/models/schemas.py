@@ -297,3 +297,83 @@ class EmployeeRequest(BaseModel):
     is_aggregate: Optional[bool] = Field(default=False)
     group_by_columns: Optional[List[str]] = Field(default=None)
     aggregate_function: Optional[str] = Field(default=None)
+
+class LocationRequest(BaseModel):
+    user_name: Optional[str] = None
+    user_id: Optional[int] = None
+    locality_code: Optional[str] = None
+    locality_name: Optional[str] = None
+    city: Optional[str] = None
+    city_code: Optional[str] = None
+    locality_group: Optional[str] = None
+    admin_locality_type: Optional[str] = None
+    is_active: Optional[bool] = None
+    is_draft: Optional[bool] = None
+    is_portal_display: Optional[bool] = None
+    is_non_contract: Optional[bool] = None
+    is_default: Optional[bool] = None
+    keyword: Optional[str] = None
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+    limit: Optional[int] = None
+    offset: int = Field(default=0, ge=0)
+
+class BuildingRequest(BaseModel):
+    user_name: Optional[str] = None
+    user_id: Optional[int] = None
+    building_code: Optional[str] = None
+    building_name: Optional[str] = None
+    locality: Optional[str] = None
+    locality_code: Optional[str] = None
+    ass_building_type: Optional[str] = None
+    is_active: Optional[bool] = None
+    is_draft: Optional[bool] = None
+    is_non_contract: Optional[bool] = None
+    is_default: Optional[bool] = None
+    keyword: Optional[str] = None
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+    limit: Optional[int] = None
+    offset: int = Field(default=0, ge=0)
+
+class FloorRequest(BaseModel):
+    user_name: Optional[str] = None
+    user_id: Optional[int] = None
+    floor_code: Optional[str] = None
+    floor_name: Optional[str] = None
+    building: Optional[str] = None
+    building_code: Optional[str] = None
+    locality: Optional[str] = None
+    locality_code: Optional[str] = None
+    is_active: Optional[bool] = None
+    is_draft: Optional[bool] = None
+    is_non_contract: Optional[bool] = None
+    is_default: Optional[bool] = None
+    keyword: Optional[str] = None
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+    limit: Optional[int] = None
+    offset: int = Field(default=0, ge=0)
+
+class SpotRequest(BaseModel):
+    user_name: Optional[str] = None
+    user_id: Optional[int] = None
+    spot_code: Optional[str] = None
+    spot_name: Optional[str] = None
+    building: Optional[str] = None
+    building_code: Optional[str] = None
+    floor: Optional[str] = None
+    locality: Optional[str] = None
+    locality_code: Optional[str] = None
+    spot_type: Optional[str] = None
+    is_active: Optional[bool] = None
+    is_draft: Optional[bool] = None
+    is_occupied: Optional[bool] = None
+    is_parking: Optional[bool] = None
+    is_allocated: Optional[bool] = None
+    is_non_contract: Optional[bool] = None
+    keyword: Optional[str] = None
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+    limit: Optional[int] = None
+    offset: int = Field(default=0, ge=0)

@@ -33,6 +33,10 @@ Field selection rationale per module:
                 location spine, division/discipline
     contracts → ContractCode (PK), ContractName (used as FK in all work modules)
     employees → EmployeeCode (PK), EmployeeFullName, DesignationName
+    location  → LocalityCode (PK), LocalityName
+    building  → BuildingCode (PK), BuildingName, plus parent Location codes/names
+    floor     → FloorCode (PK), FloorName, plus parent Building/Location codes/names
+    spot      → SpotCode (PK), SpotName, plus parent Floor/Building/Location codes/names
 """
 
 # =============================================================================
@@ -132,5 +136,45 @@ MANDATORY_FIELDS: dict[str, list[str]] = {
         "EmployeeFullName",     # FK target — matched against TechName fields
         "DesignationName",      # role (Technician, Supervisor, Engineer, etc.)
         "DepartmentName",       # which department this employee belongs to
+    ],
+
+    # Locality Register (Parent Node)
+    # PK + Name
+    "location": [
+        "LocalityCode",
+        "LocalityName",
+    ],
+
+    # Building Register (Parent Node)
+    # PK + Name + Parent Spine
+    "building": [
+        "BuildingCode",
+        "BuildingName",
+        "LocalityCode",
+        "LocalityName",
+    ],
+
+    # Floor Register (Parent Node)
+    # PK + Name + Parent Spine
+    "floor": [
+        "FloorCode",
+        "FloorName",
+        "BuildingCode",
+        "BuildingName",
+        "LocalityCode",
+        "LocalityName",
+    ],
+
+    # Spot Register (Parent Node)
+    # PK + Name + Parent Spine
+    "spot": [
+        "SpotCode",
+        "SpotName",
+        "FloorCode",
+        "FloorName",
+        "BuildingCode",
+        "BuildingName",
+        "LocalityCode",
+        "LocalityName",
     ],
 }

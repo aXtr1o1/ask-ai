@@ -181,6 +181,9 @@ def _apply_conditions(df: pd.DataFrame, conditions: list) -> pd.DataFrame:
     # plan re-fetched the module instead of chaining from that step's own list.
     _KNOWN_COMPUTED_ONLY_FIELDS = {"days_remaining", "expected_end_date"}
 
+    if df.empty and len(df.columns) == 0:
+        return df
+
     for cond in conditions:
         if not isinstance(cond, dict):
             raise ValueError(

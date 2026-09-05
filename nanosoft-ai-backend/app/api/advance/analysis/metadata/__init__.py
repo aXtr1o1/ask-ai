@@ -26,6 +26,10 @@ from app.api.advance.analysis.metadata.fa         import FA_SCHEMA
 from app.api.advance.analysis.metadata.sb         import SB_SCHEMA
 from app.api.advance.analysis.metadata.contracts  import CONTRACTS_SCHEMA
 from app.api.advance.analysis.metadata.employees  import EMPLOYEES_SCHEMA
+from app.api.advance.analysis.metadata.location   import LOCATION_SCHEMA
+from app.api.advance.analysis.metadata.building   import BUILDING_SCHEMA
+from app.api.advance.analysis.metadata.floor      import FLOOR_SCHEMA
+from app.api.advance.analysis.metadata.spot       import SPOT_SCHEMA
 
 # Registry — maps module name → its schema dict
 _REGISTRY: dict[str, dict[str, str]] = {
@@ -36,6 +40,10 @@ _REGISTRY: dict[str, dict[str, str]] = {
     "sb":        SB_SCHEMA,
     "contracts": CONTRACTS_SCHEMA,
     "employees": EMPLOYEES_SCHEMA,
+    "location":  LOCATION_SCHEMA,
+    "building":  BUILDING_SCHEMA,
+    "floor":     FLOOR_SCHEMA,
+    "spot":      SPOT_SCHEMA,
 }
 
 

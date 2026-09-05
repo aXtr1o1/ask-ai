@@ -13,6 +13,10 @@ from .upsert_fa import upsert_fa
 from .upsert_sb import upsert_sb
 from .upsert_contract import upsert_contract
 from .upsert_employee import upsert_employee
+from .upsert_location import upsert_location
+from .upsert_building import upsert_building
+from .upsert_floor import upsert_floor
+from .upsert_spot import upsert_spot
 
 
 # ─────────────────────────────────────────────────────────────
@@ -162,6 +166,14 @@ def run_sync() -> dict:
                     ins, upd, err = upsert_contract(cursor, all_records, user_id, user_name)
                 elif endpoint == "/getEmployee":
                     ins, upd, err = upsert_employee(cursor, all_records, user_id, user_name)
+                elif endpoint == "/getLocation":
+                    ins, upd, err = upsert_location(cursor, all_records, user_id, user_name)
+                elif endpoint == "/getBuilding":
+                    ins, upd, err = upsert_building(cursor, all_records, user_id, user_name)
+                elif endpoint == "/getFloor":
+                    ins, upd, err = upsert_floor(cursor, all_records, user_id, user_name)
+                elif endpoint == "/getSpot":
+                    ins, upd, err = upsert_spot(cursor, all_records, user_id, user_name)
                 else:
                     log.warning(f"  Unknown endpoint {endpoint} — skipping.")
                     del all_records

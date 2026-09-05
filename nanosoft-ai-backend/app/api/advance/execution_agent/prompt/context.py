@@ -3,7 +3,7 @@ Execution Agent — Module Relationship Context
 
 Purpose:
     Provides a ready-to-inject prompt block that describes the exact
-    relationships between the 7 FM modules.
+    relationships between the 11 FM modules.
 
     The Execution Agent uses this to understand how data from one module
     connects to data from another — so it can reason across modules,
@@ -24,10 +24,17 @@ MODULE_RELATIONSHIP_CONTEXT = """\
 ════════════════════════════════════════════════
 FM MODULE RELATIONSHIPS
 ════════════════════════════════════════════════
-The FM system has 7 modules. Understanding how they relate to each other
+The FM system has 11 modules. Understanding how they relate to each other
 is essential for interpreting data correctly across multiple modules.
 
 ── MODULES OVERVIEW ──────────────────────────────────────────────────────────
+  (Parent Nodes)
+  location  : Locality Register — regions and broad geographic zones.
+  building  : Building Register — buildings within a locality.
+  floor     : Floor Register — floors within a building.
+  spot      : Spot Register — specific areas or parking spaces within a floor.
+  
+  (Child Nodes)
   assets    : Physical Asset Register — every physical equipment in the facility.
   bdm       : Breakdown Maintenance — reactive work orders when equipment fails.
   ppm       : Planned Preventive Maintenance — scheduled routine maintenance tasks.
@@ -38,25 +45,41 @@ is essential for interpreting data correctly across multiple modules.
 
 ── CROSS-MODULE RELATIONSHIPS ─────────────────────────────────────────────────
 
-  [bdm → assets]
+  [location → building → floor → spot]
+    Link: spot.FloorCode = floor.FloorCode
+          spot.BuildingCode = floor.BuildingCode = building.BuildingCode
+          spot.LocalityCode = floor.LocalityCode = building.LocalityCode = location.LocalityCode
+
+  [assets / bdm / ppm / fa / sb → location / building / floor / spot]
+    Link: Operational modules link to the hierarchy via name matching:
+          (assets, bdm, ppm, fa, sb).LocalityName = location.LocalityName
+          (assets, bdm, ppm, fa, sb).BuildingName = building.BuildingName
+          (assets, bdm, ppm, fa, sb).FloorName = floor.FloorName
+          (assets, bdm, ppm, fa, sb).SpotName = spot.SpotName
+
+  [bdm → assets]                                    
     Link: bdm.AssetTagNo = assets.AssetTagNo
           bdm.AssetBarcode = assets.AssetBarcode
+    Condition: assets.EnableBDM = true
 
-  [ppm → assets]
+  [ppm → assets]                                    
     Link: ppm.AssetTagNo = assets.AssetTagNo
           ppm.EquipmentRefNo = assets.EquipmentRefNo
+    Condition: assets.EnablePPM = true
 
-  [bdm → contracts]
+  [bdm → contracts]                                 
     Link: bdm.ContractName = contracts.ContractName
+    Condition: contracts.IsBDM = true
 
-  [ppm → contracts]
+  [ppm → contracts]                                 
     Link: ppm.ContractName = contracts.ContractName
+    Condition: contracts.IsPPM = true
 
-  [fa → contracts]
+  [fa → contracts]                                  
     Link: fa.ContractName = contracts.ContractName
           fa.ContractCode = contracts.ContractCode
 
-  [sb → contracts]
+  [sb → contracts]                                  
     Link: sb.ContractName = contracts.ContractName
           sb.ContractCode = contracts.ContractCode
 
@@ -72,10 +95,6 @@ is essential for interpreting data correctly across multiple modules.
 
   [sb → employees]
     Link: sb.SBTechName ≈ employees.EmployeeFullName
-
-── LOCATION BACKBONE (shared across all 5 operational modules) ────────────────
-  assets, bdm, ppm, fa, and sb all share the same location hierarchy:
-    LocalityName → BuildingName → FloorName → SpotName
 
 ── ASSET CAPABILITY FLAGS (on assets module) ─────────────────────────────────
   assets.IsEnablePPM = true  → PPM work orders can be created for this asset.

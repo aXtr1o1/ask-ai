@@ -9,13 +9,15 @@ Used by:
     agent.py  →  build_system_prompt()
 """
 import json
-from app.api.advance.Understanding_Agent.module_fields import MODULE_FIELDS
+from app.api.advance.Understanding_Agent.module_fields import MODULE_FIELDS 
+from app.api.advance.Understanding_Agent.context import MODULE_RELATIONSHIP_CONTEXT
 
 
 # =============================================================================
 # PROMPT TEMPLATE
 # Placeholders:
 #   {module_fields_block}  →  JSON of MODULE_FIELDS injected at runtime
+#   {module_relationship_context}  →  Cross-module relationships
 # =============================================================================
 _PROMPT_TEMPLATE = """\
 Name:Nanosoft ASK AI
@@ -76,6 +78,13 @@ Available modules and their fields:
 {module_fields_block}
 
 Module domains for orientation:
+  (Parent Nodes)
+  location   →  locality and regional geographic configuration
+  building   →  building structures within localities
+  floor      →  floors within buildings
+  spot       →  individual spaces, parking spots, or specific areas within floors
+
+  (Child Nodes)
   assets     →  physical equipment register, asset status, condition, location
   bdm        →  reactive/breakdown complaints, work orders raised on failures
   ppm        →  planned preventive maintenance, scheduled tasks, technician assignments
@@ -84,7 +93,12 @@ Module domains for orientation:
   contracts  →  maintenance contracts and service agreements, contract values, billing periods, contract status, renewal and extension tracking
   employees  →  workforce register, staff details, designations, departments, shifts, attendance configuration
 
-STRICT: Your ONLY output for module selection is the module name (e.g. "bdm"). Do NOT mention any field names, column names, or try to map user values to specific fields in your query_summary. Field assignment is done by the next agent — not you.
+STRICT RULES FOR MODULE SELECTION:
+1. Your ONLY output for module selection is the module name (e.g. "bdm").
+2. Do NOT mention any field names, column names, or try to map user values to specific fields in your query_summary. Field assignment is done by the next agent — not you.
+3. If the user asks about a Parent Node (e.g., location, building, floor, spot) in relation to a Child Node (e.g., bdm, assets), you MUST select BOTH modules in your list, even if the Child Node contains a denormalized name column for the Parent. Do not skip selecting the Parent Node if the user asks for it.
+
+{module_relationship_context}
 
 ════════════════════════════════════════════════
 QUERY SUMMARY  (db_query / web_search ONLY)
@@ -142,4 +156,7 @@ Rules:
 def build_system_prompt() -> str:
     """Build and return the Understanding Agent system prompt with MODULE_FIELDS injected."""
     module_fields_block = json.dumps(MODULE_FIELDS, indent=2)
-    return _PROMPT_TEMPLATE.format(module_fields_block=module_fields_block)
+    return _PROMPT_TEMPLATE.format(
+        module_fields_block=module_fields_block,
+        module_relationship_context=MODULE_RELATIONSHIP_CONTEXT
+    )

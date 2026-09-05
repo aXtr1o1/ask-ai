@@ -257,6 +257,97 @@ EMPLOYEE_BOOL_MAPPINGS: dict[str, str] = {
 EMPLOYEE_NUMERIC_MAPPINGS: dict[str, str] = {}
 
 
+LOCATION_MAPPINGS: dict[str, str] = {
+    "LocalityCode":          "locality_code",
+    "LocalityName":          "locality_name",
+    "CityCode":              "city_code",
+    "CityName":              "city",
+    "LocalityGroupCode":     "locality_group",
+    "LocalityGroupName":     "locality_group",
+    "AdminLocalityTypeName": "admin_locality_type",
+    "Remarks":               "keyword",
+    "Keyword":               "keyword",
+    "date_from":             "date_from",
+    "date_to":               "date_to",
+}
+
+LOCATION_BOOL_MAPPINGS: dict[str, str] = {
+    "IsActive":        "is_active",
+    "IsDraft":         "is_draft",
+    "IsPortalDisplay": "is_portal_display",
+    "IsNonContract":   "is_non_contract",
+    "IsDefault":       "is_default",
+}
+
+LOCATION_NUMERIC_MAPPINGS: dict[str, str] = {}
+
+BUILDING_MAPPINGS: dict[str, str] = {
+    "BuildingCode":        "building_code",
+    "BuildingName":        "building_name",
+    "LocalityCode":        "locality_code",
+    "LocalityName":        "locality",
+    "AssBuildingTypeName": "ass_building_type",
+    "Keyword":             "keyword",
+    "date_from":           "date_from",
+    "date_to":             "date_to",
+}
+
+BUILDING_BOOL_MAPPINGS: dict[str, str] = {
+    "IsActive":        "is_active",
+    "IsDraft":         "is_draft",
+    "IsNonContract":   "is_non_contract",
+    "IsDefault":       "is_default",
+}
+
+BUILDING_NUMERIC_MAPPINGS: dict[str, str] = {}
+
+FLOOR_MAPPINGS: dict[str, str] = {
+    "FloorCode":    "floor_code",
+    "FloorName":    "floor_name",
+    "BuildingCode": "building_code",
+    "BuildingName": "building",
+    "LocalityCode": "locality_code",
+    "LocalityName": "locality",
+    "Keyword":      "keyword",
+    "date_from":    "date_from",
+    "date_to":      "date_to",
+}
+
+FLOOR_BOOL_MAPPINGS: dict[str, str] = {
+    "IsActive":        "is_active",
+    "IsDraft":         "is_draft",
+    "IsNonContract":   "is_non_contract",
+    "IsDefault":       "is_default",
+}
+
+FLOOR_NUMERIC_MAPPINGS: dict[str, str] = {}
+
+SPOT_MAPPINGS: dict[str, str] = {
+    "SpotCode":     "spot_code",
+    "SpotName":     "spot_name",
+    "BuildingCode": "building_code",
+    "BuildingName": "building",
+    "FloorCode":    "floor",
+    "FloorName":    "floor",
+    "LocalityCode": "locality_code",
+    "LocalityName": "locality",
+    "SpotTypeName": "spot_type",
+    "Keyword":      "keyword",
+    "date_from":    "date_from",
+    "date_to":      "date_to",
+}
+
+SPOT_BOOL_MAPPINGS: dict[str, str] = {
+    "IsActive":      "is_active",
+    "IsDraft":       "is_draft",
+    "IsOccupancy":   "is_occupied",
+    "IsParking":     "is_parking",
+    "IsAllocated":   "is_allocated",
+    "IsNonContract": "is_non_contract",
+}
+
+SPOT_NUMERIC_MAPPINGS: dict[str, str] = {}
+
 ALL_MAPPINGS: dict[str, tuple[dict, dict, dict]] = {
     "assets":    (ASSETS_MAPPINGS,    ASSETS_BOOL_MAPPINGS,    ASSETS_NUMERIC_MAPPINGS),
     "bdm":       (BDM_MAPPINGS,       BDM_BOOL_MAPPINGS,       BDM_NUMERIC_MAPPINGS),
@@ -265,4 +356,8 @@ ALL_MAPPINGS: dict[str, tuple[dict, dict, dict]] = {
     "sb":        (SB_MAPPINGS,        SB_BOOL_MAPPINGS,        SB_NUMERIC_MAPPINGS),
     "contracts": (CONTRACT_MAPPINGS,  CONTRACT_BOOL_MAPPINGS,  CONTRACT_NUMERIC_MAPPINGS),
     "employees": (EMPLOYEE_MAPPINGS,  EMPLOYEE_BOOL_MAPPINGS,  EMPLOYEE_NUMERIC_MAPPINGS),
+    "location":  (LOCATION_MAPPINGS,  LOCATION_BOOL_MAPPINGS,  LOCATION_NUMERIC_MAPPINGS),
+    "building":  (BUILDING_MAPPINGS,  BUILDING_BOOL_MAPPINGS,  BUILDING_NUMERIC_MAPPINGS),
+    "floor":     (FLOOR_MAPPINGS,     FLOOR_BOOL_MAPPINGS,     FLOOR_NUMERIC_MAPPINGS),
+    "spot":      (SPOT_MAPPINGS,      SPOT_BOOL_MAPPINGS,      SPOT_NUMERIC_MAPPINGS),
 }

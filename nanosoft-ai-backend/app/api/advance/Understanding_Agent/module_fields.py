@@ -166,4 +166,38 @@ MODULE_FIELDS: dict[str, list[str]] = {
         "IsActive", "IsAttendanceEnable", "IsSinglePunch",
         "Remarks",
     ],
+
+    # Location / Locality
+    # Tracks location data and locality regions
+    "location": [
+        "LocalityCode", "LocalityName", "LocAddress1", "LocAddress2",
+        "CityCode", "CityName", "LocalityGroupCode", "LocalityGroupName",
+        "AdminLocalityTypeName", "IsActive", "IsDraft", "IsPortalDisplay",
+        "IsNonContract", "IsDefault", "Remarks", "CreatedTtm",
+    ],
+
+    # Building
+    # Tracks building master data associated with a locality
+    "building": [
+        "BuildingCode", "BuildingName", "LocalityCode", "LocalityName",
+        "AssBuildingTypeName", "IsActive", "IsDraft", "IsNonContract",
+        "IsDefault", "Remarks", "CreatedTtm",
+    ],
+
+    # Floor
+    # Tracks floor master data within buildings
+    "floor": [
+        "FloorCode", "FloorName", "BuildingCode", "BuildingName",
+        "LocalityCode", "LocalityName", "IsActive", "IsDraft",
+        "IsNonContract", "IsDefault", "Remarks", "CreatedTtm",
+    ],
+
+    # Spot
+    # Tracks individual spaces/spots within floors
+    "spot": [
+        "SpotCode", "SpotName", "BuildingCode", "BuildingName",
+        "FloorCode", "FloorName", "LocalityCode", "LocalityName",
+        "SpotTypeName", "IsActive", "IsDraft", "IsOccupancy",
+        "IsParking", "IsAllocated", "IsNonContract", "Remarks", "CreatedTtm",
+    ],
 }
